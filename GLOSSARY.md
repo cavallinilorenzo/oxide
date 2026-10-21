@@ -61,6 +61,14 @@ A specific LLM a Provider offers, chosen per conversation (e.g. Opus 5.5).
 The reasoning-depth setting a Provider exposes for a Model (e.g. low, high).
 _Avoid_: Thinking level, reasoning mode
 
+**Permission mode**:
+How much a Thread's Provider may do without asking: Ask (every file edit and command asks), Auto-edit (file edits inside the Thread's folder go through, everything else asks) or Full access (nothing asks). Chosen per Thread, changeable between Turns; a mode a Provider can't honour is not offered for it.
+_Avoid_: Sandbox, approval policy, trust level
+
+**Approval**:
+A Provider's request, during a Turn, for the user to allow or deny one action (a command, a file change, a tool call). A pending Approval puts the Thread in needs input and waits until answered or the Turn ends.
+_Avoid_: Permission prompt, confirmation
+
 ## Layout
 
 **Surface**:

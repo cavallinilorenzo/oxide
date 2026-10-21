@@ -32,6 +32,10 @@ _Avoid_: Run, exchange, round
 One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, or a subagent.
 _Avoid_: Step, block, event (when meaning the unit)
 
+**Transcript**:
+Oxide's own record of a Thread's Turns and Items, the only thing a Thread is shown from. It outlives the Provider's session: when that session is gone the Thread stays readable, and can only be continued in a new Thread.
+_Avoid_: History, log, session (when meaning the record)
+
 **Checkpoint**:
 A snapshot of a Thread's files taken when a Turn starts and when it ends, so the Diff Surface can show what that Turn changed. Read-only: nothing is ever restored from a Checkpoint.
 _Avoid_: Snapshot, save point

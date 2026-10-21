@@ -32,6 +32,14 @@ _Avoid_: Run, exchange, round
 One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, or a subagent.
 _Avoid_: Step, block, event (when meaning the unit)
 
+**Checkpoint**:
+A snapshot of a Thread's files taken when a Turn starts and when it ends, so the Diff Surface can show what that Turn changed. Read-only: nothing is ever restored from a Checkpoint.
+_Avoid_: Snapshot, save point
+
+**Setup command**:
+An optional per-Project shell command run in every new worktree before its Thread's first Turn, to prepare what Git doesn't carry over (env files, dependencies).
+_Avoid_: Init script, bootstrap
+
 **Thread Board**:
 The per-Project view of all its Threads grouped by Thread status into needs input (including error and interrupted), working and completed, from which a task can be dispatched to a new background Thread.
 _Avoid_: Agent view, dashboard
@@ -52,5 +60,5 @@ _Avoid_: Thinking level, reasoning mode
 ## Layout
 
 **Surface**:
-A panel docked to the side or bottom of the window showing one tool for the current Project: Terminal, Files, Diff, Pull request.
+A panel docked to the side or bottom of the window showing one tool for the current Project: Terminal, Files, Diff, Pull request, Issues.
 _Avoid_: Tab, pane, widget

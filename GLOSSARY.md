@@ -13,8 +13,16 @@ _Avoid_: Workspace, repo (when meaning the Oxide concept)
 ## Threads
 
 **Thread**:
-One conversation with a Provider inside a Project, with its own Model, Effort and context. Model and Effort can change between Turns. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in history.
+One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in history.
 _Avoid_: Agent, session, chat
+
+**Thread status**:
+Where a Thread stands right now: working (a Turn is running), needs input (the Provider is waiting on an approval or answer), completed (the last Turn finished and it's the user's move), error (the Turn failed), or interrupted (the Turn was stopped by the user or by quitting Oxide).
+_Avoid_: State, phase
+
+**Archived Thread**:
+A Thread hidden from the Thread Board and sidebar but kept in history, still readable and resumable. Threads are archived, never deleted.
+_Avoid_: Closed, deleted
 
 **Turn**:
 One user prompt in a Thread and everything the Provider does in response, until it completes, is interrupted, or fails.
@@ -25,7 +33,7 @@ One unit of a Turn's output: an agent message, reasoning, a tool call, a file ch
 _Avoid_: Step, block, event (when meaning the unit)
 
 **Thread Board**:
-The per-Project view of all its Threads grouped by status (needs input, working, completed), from which a task can be dispatched to a new background Thread.
+The per-Project view of all its Threads grouped by Thread status into needs input (including error and interrupted), working and completed, from which a task can be dispatched to a new background Thread.
 _Avoid_: Agent view, dashboard
 
 ## Providers

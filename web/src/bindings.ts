@@ -17,6 +17,8 @@ export const commands = {
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
+	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
+	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
@@ -423,6 +425,7 @@ export type Thread_Deserialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title?: string | null,
 };
 
 export type Thread_Serialize = {
@@ -436,6 +439,7 @@ export type Thread_Serialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title: string | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

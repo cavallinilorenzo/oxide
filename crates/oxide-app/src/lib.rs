@@ -235,6 +235,7 @@ pub struct Thread {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -636,6 +637,27 @@ fn set_thread_permission_mode(
 
 #[tauri::command]
 #[specta::specta]
+fn set_thread_provider(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    provider: String,
+) -> Result<Thread, AppError> {
+    let summary = core.set_thread_provider(thread_id, &provider)?;
+    Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn rename_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    title: String,
+) -> Result<(), AppError> {
+    Ok(core.rename_thread(thread_id, &title)?)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn respond_to_approval(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
@@ -799,6 +821,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         save_settings,
         create_thread,
         set_thread_permission_mode,
+        set_thread_provider,
+        rename_thread,
         respond_to_approval,
         detect_provider,
         get_provider_capabilities,
@@ -892,6 +916,7 @@ mod tests {
                 archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
+                title: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

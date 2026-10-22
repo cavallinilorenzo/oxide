@@ -53,6 +53,7 @@ pub struct ThreadSummary {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,6 +217,20 @@ pub struct DebugSequencedThreadEvent {
     pub raw_payload: Option<String>,
 }
 
+pub fn truncate_title(prompt: &str) -> String {
+    let first_line = prompt
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    const MAX_LEN: usize = 60;
+    if first_line.chars().count() > MAX_LEN {
+        first_line.chars().take(MAX_LEN).collect()
+    } else {
+        first_line.to_string()
+    }
+}
+
 pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary> {
     let mode_str: String = r.get(5)?;
     let status_str: String = r.get(6)?;
@@ -231,5 +246,6 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         archived: r.get::<_, i64>(7)? != 0,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
+        title: r.get(10)?,
     })
 }

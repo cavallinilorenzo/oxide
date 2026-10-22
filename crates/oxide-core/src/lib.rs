@@ -246,14 +246,33 @@ impl Core {
         Ok(())
     }
 
-    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+    pub fn default_settings_for_provider(
+        &self,
+        provider: &str,
+    ) -> (Option<String>, Option<String>, PermissionMode) {
         let settings = self.settings().settings;
         match provider {
-            "claude" => settings.providers.claude.permission_mode,
-            "codex" => settings.providers.codex.permission_mode,
-            "agy" | "antigravity" => settings.providers.antigravity.permission_mode,
-            _ => PermissionMode::Ask,
+            "claude" => (
+                settings.providers.claude.model,
+                settings.providers.claude.effort,
+                settings.providers.claude.permission_mode,
+            ),
+            "codex" => (
+                settings.providers.codex.model,
+                settings.providers.codex.effort,
+                settings.providers.codex.permission_mode,
+            ),
+            "agy" | "antigravity" => (
+                settings.providers.antigravity.model,
+                settings.providers.antigravity.effort,
+                settings.providers.antigravity.permission_mode,
+            ),
+            _ => (None, None, PermissionMode::AutoEdit),
         }
+    }
+
+    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+        self.default_settings_for_provider(provider).2
     }
 
     pub fn create_thread(
@@ -264,9 +283,10 @@ impl Core {
         effort: Option<String>,
         permission_mode: impl Into<Option<PermissionMode>>,
     ) -> Result<ThreadSummary> {
-        let permission_mode = permission_mode
-            .into()
-            .unwrap_or_else(|| self.default_permission_mode_for(provider));
+        let (def_model, def_effort, def_perm) = self.default_settings_for_provider(provider);
+        let model = model.or(def_model);
+        let effort = effort.or(def_effort);
+        let permission_mode = permission_mode.into().unwrap_or(def_perm);
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mode_str = serde_json::to_string(&permission_mode)
             .unwrap_or_default()
@@ -278,6 +298,32 @@ impl Core {
         )?;
         let id = db.last_insert_rowid() as u32;
         self.get_thread_by_id(&db, id)
+    }
+
+    pub fn set_thread_provider(&self, thread_id: u32, provider: &str) -> Result<ThreadSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let (turn_count, status_str): (u32, String) = db.query_row(
+            "SELECT (SELECT COUNT(*) FROM turns WHERE thread_id = ?1), status FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if turn_count > 0 || status_str == "working" {
+            return Err(Error::Provider(
+                "cannot switch provider after the first turn has started".into(),
+            ));
+        }
+
+        let (def_model, def_effort, def_perm) = self.default_settings_for_provider(provider);
+        let mode_str = serde_json::to_string(&def_perm)
+            .unwrap_or_default()
+            .trim_matches('"')
+            .to_string();
+
+        db.execute(
+            "UPDATE threads SET provider = ?1, model = ?2, effort = ?3, permission_mode = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
+            rusqlite::params![provider, def_model, def_effort, mode_str, thread_id],
+        )?;
+        self.get_thread_by_id(&db, thread_id)
     }
 
     pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
@@ -364,7 +410,7 @@ impl Core {
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = db.prepare(
-            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
+            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, title
              FROM threads WHERE project_id = ?1 ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([project_id], thread::parse_thread_summary)?;
@@ -373,12 +419,21 @@ impl Core {
 
     fn get_thread_by_id(&self, db: &Connection, id: u32) -> Result<ThreadSummary> {
         db.query_row(
-            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
+            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, title
              FROM threads WHERE id = ?1",
             [id],
             thread::parse_thread_summary,
         )
         .map_err(Into::into)
+    }
+
+    pub fn rename_thread(&self, thread_id: u32, title: &str) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE threads SET title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+            rusqlite::params![title, thread_id],
+        )?;
+        Ok(())
     }
 
     pub fn register_fake_provider(&self, thread_id: u32, provider: impl ProviderTrait) {

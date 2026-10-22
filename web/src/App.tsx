@@ -4,7 +4,8 @@ import { commands, type AppError, type Project, type Thread, type ThreadStatus }
 import { GitHeader } from "./GitHeader";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
-import { toggleForKey } from "./shortcuts";
+import { isNewThreadShortcut, toggleForKey } from "./shortcuts";
+import { getDraft, setDraft } from "./threadDrafts";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -25,6 +26,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
   const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
     const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
@@ -62,8 +64,47 @@ export function App() {
     );
   }, []);
 
+  const onThreadTitleChange = useCallback((threadId: number, title: string) => {
+    setThreads(
+      (prev) => prev?.map((t) => (t.id === threadId ? { ...t, title } : t)) ?? null
+    );
+  }, []);
+
+  const onThreadUpdated = useCallback((updated: Thread) => {
+    setThreads(
+      (prev) => prev?.map((t) => (t.id === updated.id ? updated : t)) ?? null
+    );
+  }, []);
+
+  const startNewThread = useCallback(async () => {
+    if (!selected) return;
+    const settingsRes = await commands.getSettings();
+    const provider = settingsRes.settings.defaultProvider || "claude";
+    const provKey = provider as keyof typeof settingsRes.settings.providers;
+    const provSettings = settingsRes.settings.providers[provKey];
+    const created = await commands.createThread(
+      selected.id,
+      provider,
+      provSettings?.model ?? null,
+      provSettings?.effort ?? null,
+      provSettings?.permissionMode ?? null
+    );
+    if (created.status === "ok") {
+      setThreads((prev) => [created.data, ...(prev || [])]);
+      setSelectedThreadId(created.data.id);
+      rememberTerminalContext(selected.id, created.data.id);
+    }
+  }, [selected, rememberTerminalContext]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isNewThreadShortcut(e)) {
+        if (selected) {
+          e.preventDefault();
+          void startNewThread();
+        }
+        return;
+      }
       const toggle = toggleForKey(e);
       if (!toggle) return;
       e.preventDefault();
@@ -73,7 +114,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selected, startNewThread]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -166,8 +207,12 @@ export function App() {
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
           onNewThread={() => {
-            setSelectedThreadId(null);
-            if (selected) rememberTerminalContext(selected.id, null);
+            void startNewThread();
+          }}
+          onRenameThread={(threadId, newTitle) => {
+            setThreads((prev) =>
+              prev?.map((t) => (t.id === threadId ? { ...t, title: newTitle } : t)) ?? null
+            );
           }}
         />
         <div className="centre-column">
@@ -178,12 +223,21 @@ export function App() {
               <ThreadView
                 threadId={selectedThreadId}
                 projectId={selected.id}
+                draft={getDraft(drafts, selectedThreadId)}
+                onDraftChange={(text) =>
+                  setDrafts((prev) => setDraft(prev, selectedThreadId, text))
+                }
+                onClearThread={() => {
+                  void startNewThread();
+                }}
                 onThreadCreated={(newThread) => {
                   setThreads((prev) => [newThread, ...(prev || [])]);
                   setSelectedThreadId(newThread.id);
                   rememberTerminalContext(selected.id, newThread.id);
                 }}
+                onThreadUpdated={onThreadUpdated}
                 onStatusChange={onThreadStatusChange}
+                onThreadTitleChange={onThreadTitleChange}
               />
             </main>
           ) : (
@@ -238,6 +292,7 @@ interface SidebarProps {
   selectedThreadId: number | null;
   onSelectThread: (threadId: number) => void;
   onNewThread: () => void;
+  onRenameThread?: (threadId: number, newTitle: string) => void;
 }
 
 function Sidebar({
@@ -249,10 +304,21 @@ function Sidebar({
   selectedThreadId,
   onSelectThread,
   onNewThread,
+  onRenameThread,
 }: SidebarProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
+  const [editingThreadId, setEditingThreadId] = useState<number | null>(null);
+  const [renameText, setRenameText] = useState("");
+
+  const finishRename = async (threadId: number) => {
+    setEditingThreadId(null);
+    const trimmed = renameText.trim();
+    if (!trimmed) return;
+    await commands.renameThread(threadId, trimmed);
+    onRenameThread?.(threadId, trimmed);
+  };
 
   const apply = (r: Result<Project[], AppError>) => {
     if (r.status === "ok") {
@@ -350,19 +416,39 @@ function Sidebar({
           <ul aria-label="Thread list">
             {threads?.map((t) => (
               <li key={t.id}>
-                <button
-                  className="thread-item"
-                  aria-current={t.id === selectedThreadId}
-                  onClick={() => onSelectThread(t.id)}
-                  title={`Thread #${t.id} (${t.status})`}
-                >
-                  <span
-                    className={`status-dot ${t.status}`}
-                    aria-label={`Status: ${t.status}`}
-                    title={`Status: ${t.status}`}
+                {editingThreadId === t.id ? (
+                  <input
+                    className="thread-rename-input"
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.target.value)}
+                    onBlur={() => void finishRename(t.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void finishRename(t.id);
+                      if (e.key === "Escape") setEditingThreadId(null);
+                    }}
+                    autoFocus
+                    aria-label={`Rename thread ${t.title || `Thread #${t.id}`}`}
                   />
-                  <span>Thread #{t.id}</span>
-                </button>
+                ) : (
+                  <button
+                    className="thread-item"
+                    aria-current={t.id === selectedThreadId}
+                    onClick={() => onSelectThread(t.id)}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      setEditingThreadId(t.id);
+                      setRenameText(t.title || `Thread #${t.id}`);
+                    }}
+                    title={`${t.title || `Thread #${t.id}`} (${t.status})`}
+                  >
+                    <span
+                      className={`status-dot ${t.status}`}
+                      aria-label={`Status: ${t.status}`}
+                      title={`Status: ${t.status}`}
+                    />
+                    <span className="thread-item-title">{t.title || `Thread #${t.id}`}</span>
+                  </button>
+                )}
               </li>
             ))}
           </ul>

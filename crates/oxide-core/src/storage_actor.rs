@@ -343,10 +343,14 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
             } => {
                 let res = (|| -> Result<TurnStarted> {
                     let tx = conn.unchecked_transaction()?;
-                    let (model, effort): (Option<String>, Option<String>) = tx.query_row(
-                        "SELECT model, effort FROM threads WHERE id = ?1",
+                    let (model, effort, current_title): (
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                    ) = tx.query_row(
+                        "SELECT model, effort, title FROM threads WHERE id = ?1",
                         [thread_id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )?;
                     let attachments_json =
                         serde_json::to_string(&attachments).unwrap_or_else(|_| "[]".into());
@@ -355,10 +359,18 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         rusqlite::params![thread_id, turn_index, prompt, model, effort, attachments_json],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
-                    tx.execute(
-                        "UPDATE threads SET status = 'working', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-                        rusqlite::params![thread_id],
-                    )?;
+                    if turn_index == 0 && current_title.is_none() {
+                        let title = crate::thread::truncate_title(&prompt);
+                        tx.execute(
+                            "UPDATE threads SET status = 'working', title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+                            rusqlite::params![title, thread_id],
+                        )?;
+                    } else {
+                        tx.execute(
+                            "UPDATE threads SET status = 'working', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                            rusqlite::params![thread_id],
+                        )?;
+                    }
                     tx.commit()?;
                     Ok(TurnStarted {
                         id: turn_id,
@@ -583,7 +595,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
 
 pub fn query_snapshot(conn: &Connection, thread_id: u32, tail: u32) -> Result<ThreadSnapshot> {
     let thread: ThreadSummary = conn.query_row(
-        "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
+        "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, title
          FROM threads WHERE id = ?1",
         [thread_id],
         crate::thread::parse_thread_summary,

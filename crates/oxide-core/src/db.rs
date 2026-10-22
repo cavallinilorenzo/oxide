@@ -88,6 +88,9 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX turns_by_thread ON turns(thread_id, id);
     CREATE INDEX items_by_turn ON items(turn_id, item_index);
 ",
+    "
+    ALTER TABLE threads ADD COLUMN title TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

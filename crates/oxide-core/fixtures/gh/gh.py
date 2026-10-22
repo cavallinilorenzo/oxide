@@ -25,6 +25,11 @@ def flag(name):
     return args[args.index(name) + 1] if name in args else None
 
 
+def save():
+    with open(state_path, "w") as f:
+        json.dump(state, f)
+
+
 def branch():
     out = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
     return out.stdout.strip()
@@ -47,6 +52,77 @@ if args[:2] == ["pr", "view"]:
         sys.stderr.write('no pull requests found for branch "%s"\n' % branch())
         sys.exit(1)
     print(json.dumps(pr))
+    sys.exit(0)
+
+if args[:2] == ["issue", "create"]:
+    title = flag("--title")
+    body = flag("--body") or ""
+    num = state.get("next_number", 1)
+    state["next_number"] = num + 1
+    issue = {
+        "number": num,
+        "title": title,
+        "body": body,
+        "state": "OPEN",
+        "author": {"login": "me"},
+        "url": f"https://github.com/fake/repo/issues/{num}",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "comments": []
+    }
+    state.setdefault("issues", []).append(issue)
+    save()
+    print(issue["url"])
+    sys.exit(0)
+
+if args[:2] == ["issue", "comment"]:
+    num = args[2]
+    body = flag("--body") or ""
+    for issue in state.get("issues", []):
+        if str(issue.get("number")) == str(num):
+            issue.setdefault("comments", []).append({
+                "author": {"login": "me"},
+                "body": body,
+                "createdAt": "2026-01-01T00:00:00Z"
+            })
+            break
+    save()
+    sys.exit(0)
+
+if args[:2] == ["issue", "close"]:
+    num = args[2]
+    for issue in state.get("issues", []):
+        if str(issue.get("number")) == str(num):
+            issue["state"] = "CLOSED"
+            break
+    save()
+    sys.exit(0)
+
+if args[:2] == ["issue", "view"]:
+    n = args[2]
+    found = None
+    for issue in state.get("issues", []):
+        if str(issue.get("number")) == str(n):
+            found = issue
+            break
+    if found is None:
+        sys.stderr.write(f"issue {n} not found\n")
+        sys.exit(1)
+    print(json.dumps(found))
+    sys.exit(0)
+
+if args[:2] == ["issue", "list"]:
+    wanted_state = flag("--state")
+    if wanted_state == "all":
+        issues = list(state.get("issues", []))
+    elif wanted_state == "closed":
+        issues = [i for i in state.get("issues", []) if i.get("state") == "CLOSED"]
+    else:
+        issues = [i for i in state.get("issues", []) if i.get("state") == "OPEN"]
+    issues.sort(key=lambda i: i["number"])
+    query = flag("--search")
+    if query:
+        issues = [i for i in issues if query.lower() in i.get("title", "").lower() or query.lower() in i.get("body", "").lower()]
+    print(json.dumps(issues))
     sys.exit(0)
 
 if args[:2] == ["pr", "create"]:

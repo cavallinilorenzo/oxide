@@ -24,7 +24,8 @@ pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    GithubAvailability, PullRequest, PullRequestDraft, PullRequestInput, PullRequestState,
+    GithubAvailability, IssueComment, IssueDetail, IssueSummary, IssuesState, PullRequest,
+    PullRequestDraft, PullRequestInput, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -1049,7 +1050,43 @@ impl Core {
             .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, input))
     }
 
-    /// Opens the current branch's pull request in the browser.
+    /// Availability of GitHub CLI for issues, and guidance if missing/logged out.
+    pub fn issues_state(&self, project_id: u32) -> Result<IssuesState> {
+        github::issues_state(&self.gh, &self.main_checkout(project_id)?)
+    }
+
+    /// Open issues of the repository, optionally narrowed by a search query.
+    pub fn list_issues(&self, project_id: u32, search: &str) -> Result<Vec<IssueSummary>> {
+        github::list_issues(&self.gh, &self.main_checkout(project_id)?, search)
+    }
+
+    /// Detailed issue with its description, status and comments.
+    pub fn issue_detail(&self, project_id: u32, number: u32) -> Result<IssueDetail> {
+        github::issue_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Creates an issue with title and body.
+    pub fn create_issue(&self, project_id: u32, title: &str, body: &str) -> Result<IssueSummary> {
+        github::create_issue(&self.gh, &self.main_checkout(project_id)?, title, body)
+    }
+
+    /// Adds a comment to an issue.
+    pub fn comment_issue(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
+        github::comment_issue(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Closes an issue.
+    pub fn close_issue(&self, project_id: u32, number: u32) -> Result<()> {
+        github::close_issue(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Opens an issue in the system browser.
+    pub fn open_issue(&self, project_id: u32, number: u32) -> Result<()> {
+        let url = github::issue_url(&self.gh, &self.main_checkout(project_id)?, number)?;
+        self.activity.open_url(&url);
+        Ok(())
+    }
+
     pub fn open_pull_request(&self, project_id: u32) -> Result<()> {
         let url = github::pull_request_url(&self.gh, &self.main_checkout(project_id)?)?;
         self.activity.open_url(&url);

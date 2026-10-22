@@ -779,6 +779,46 @@ pub struct PullRequestState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub comments_count: u32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub number: u32,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub created_at: String,
+    pub comments: Vec<IssueComment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuesState {
+    pub availability: GithubAvailability,
+    pub guidance: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PullRequestDraft {
     pub title: String,
     pub body: String,
@@ -837,7 +877,91 @@ async fn create_pull_request(
     .map(|pr| convert(&pr))
 }
 
-/// Opens the branch's pull request on GitHub.
+/// Availability of GitHub CLI for issues, and guidance if missing/logged out.
+#[tauri::command]
+#[specta::specta]
+async fn issues_state(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<IssuesState, AppError> {
+    git_blocking(&core, move |core| core.issues_state(project_id))
+        .await
+        .map(|state| convert(&state))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn list_issues(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    search: String,
+) -> Result<Vec<IssueSummary>, AppError> {
+    git_blocking(&core, move |core| core.list_issues(project_id, &search))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn issue_detail(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<IssueDetail, AppError> {
+    git_blocking(&core, move |core| core.issue_detail(project_id, number))
+        .await
+        .map(|detail| convert(&detail))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn create_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    title: String,
+    body: String,
+) -> Result<IssueSummary, AppError> {
+    git_blocking(&core, move |core| {
+        core.create_issue(project_id, &title, &body)
+    })
+    .await
+    .map(|summary| convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn comment_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.comment_issue(project_id, number, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn close_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.close_issue(project_id, number)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn open_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.open_issue(project_id, number)).await
+}
+
 #[tauri::command]
 #[specta::specta]
 async fn open_pull_request(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
@@ -1252,6 +1376,13 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull_request_draft,
         create_pull_request,
         open_pull_request,
+        issues_state,
+        list_issues,
+        issue_detail,
+        create_issue,
+        comment_issue,
+        close_issue,
+        open_issue,
         last_selection,
         remember_selection,
         confirm_quit

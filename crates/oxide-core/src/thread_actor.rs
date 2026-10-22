@@ -195,8 +195,8 @@ struct CurrentTurn {
 
 struct ActorState {
     thread_id: u32,
-    /// Where Checkpoints are taken.
-    checkout: std::path::PathBuf,
+    /// The working tree this Thread's Checkpoints snapshot.
+    checkout: PathBuf,
     next_turn_index: u32,
     current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
@@ -228,6 +228,7 @@ struct PendingDelta {
 impl ActorState {
     fn new(
         thread_id: u32,
+        checkout: PathBuf,
         next_turn_index: u32,
         capabilities: ProviderCapabilities,
         clock: Arc<dyn Clock>,
@@ -241,7 +242,7 @@ impl ActorState {
             provider_exited: false,
             idle_since,
             thread_id,
-            checkout: std::path::PathBuf::new(),
+            checkout,
             next_turn_index,
             current_turn: None,
             pending_deltas: HashMap::new(),
@@ -599,8 +600,14 @@ fn run_thread_actor(
 
     // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
-    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock, activity);
-    state.checkout = working_dir.clone();
+    let mut state = ActorState::new(
+        thread_id,
+        working_dir.clone(),
+        next_turn_index,
+        caps.clone(),
+        clock,
+        activity,
+    );
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {

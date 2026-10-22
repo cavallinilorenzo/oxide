@@ -79,7 +79,7 @@ A panel docked to the side or bottom of the window showing one tool for the curr
 _Avoid_: Tab, pane, widget
 
 **Diff scope**:
-What the Diff Surface compares, always straight from Git: Uncommitted (staged, unstaged and untracked changes against HEAD) or Branch (commits since the merge-base with the base branch).
+What the Diff Surface compares, always computed by Git: Uncommitted (staged, unstaged and untracked changes against HEAD), Branch (commits since the merge-base with the base branch) or Turn (the files changed between a Turn's two Checkpoints; a chat Thread's Turn may include concurrent changes from other Threads in the shared checkout). The default is Turn for chat Threads and Branch for Board Threads.
 _Avoid_: Diff mode, diff type
 
 **Base branch**:

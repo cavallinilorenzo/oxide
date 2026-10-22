@@ -101,7 +101,11 @@ fn terminal_session_accepts_input_streams_output_and_shuts_down_its_process_grou
         .unwrap();
         conn.last_insert_rowid() as u32
     };
-    let terminal = core.start_terminal(project_id).unwrap();
+    let thread = core
+        .create_thread(project_id, "claude", None, None, None)
+        .unwrap();
+    let terminal = core.start_terminal(project_id, Some(thread.id)).unwrap();
+    assert_eq!(terminal.cwd, root.to_string_lossy());
     let rx = core.subscribe_terminal(terminal.id).unwrap();
     let pid = terminal.pid;
 

@@ -365,16 +365,21 @@ impl Core {
 
     /// Starts a shell PTY in the Project's checkout. A terminal actor owns the
     /// PTY process until it is explicitly closed or Core shuts down.
-    pub fn start_terminal(&self, project_id: u32) -> Result<TerminalSummary> {
-        let cwd: String = self
-            .db
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .query_row(
-                "SELECT path FROM projects WHERE id = ?1",
-                [project_id],
+    pub fn start_terminal(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<TerminalSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let cwd: String = match thread_id {
+            Some(thread_id) => db.query_row(
+                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
+                rusqlite::params![project_id, thread_id],
                 |r| r.get(0),
-            )?;
+            )?,
+            None => db.query_row("SELECT path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?,
+        };
+        drop(db);
         let id = next_id(&self.next_terminal_id);
         let session = Arc::new(TerminalSession::start(id, Path::new(&cwd))?);
         let summary = session.summary.clone();

@@ -8,11 +8,12 @@ import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
   projectId: number;
+  threadId: number | null;
   contextKey: string;
   visible: boolean;
 }
 
-export function TerminalPanel({ projectId, contextKey, visible }: TerminalPanelProps) {
+export function TerminalPanel({ projectId, threadId, contextKey, visible }: TerminalPanelProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -70,7 +71,7 @@ export function TerminalPanel({ projectId, contextKey, visible }: TerminalPanelP
     setError(null);
     void (async () => {
       try {
-        const result = await commands.startTerminal(projectId, channel);
+        const result = await commands.startTerminal(projectId, threadId, channel);
         if (result.status === "error") throw new Error(result.error.message);
         terminalId = result.data.id;
         if (!active) {
@@ -95,7 +96,7 @@ export function TerminalPanel({ projectId, contextKey, visible }: TerminalPanelP
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [projectId, contextKey]);
+  }, [projectId, threadId, contextKey]);
 
   useEffect(() => {
     if (visible && terminalRef.current) {

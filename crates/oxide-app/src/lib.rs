@@ -371,9 +371,10 @@ pub struct Terminal {
 fn start_terminal(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     on_output: tauri::ipc::Channel<Vec<u8>>,
 ) -> Result<Terminal, AppError> {
-    let terminal = core.start_terminal(project_id)?;
+    let terminal = core.start_terminal(project_id, thread_id)?;
     let rx = core.subscribe_terminal(terminal.id)?;
     std::thread::spawn(move || {
         while let Ok(chunk) = rx.recv() {

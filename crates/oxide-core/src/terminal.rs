@@ -1,9 +1,10 @@
 use crate::{Error, Result};
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::Path;
+#[cfg(unix)]
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -72,7 +73,7 @@ impl TerminalSession {
     }
 
     pub fn subscribe(&self) -> Receiver<Vec<u8>> {
-        let (tx, rx) = unbounded();
+        let (tx, rx) = bounded(128);
         self.subscribers
             .lock()
             .unwrap_or_else(|e| e.into_inner())

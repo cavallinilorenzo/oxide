@@ -298,11 +298,7 @@ fn current_branch(cwd: &Path) -> Result<String> {
 pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Result<PullRequest> {
     gh.require_ready(cwd)?;
     let status = git::status(cwd)?;
-    let Some(branch) = status.branch.clone() else {
-        return Err(Error::Github(
-            "HEAD is detached; switch to a branch first.".into(),
-        ));
-    };
+    let branch = current_branch(cwd)?;
     if status.protected {
         return Err(Error::Github(format!(
             "`{branch}` is a main branch; create a branch to open a pull request from."

@@ -98,7 +98,6 @@ function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelP
           <CreateForm
             projectId={projectId}
             git={git}
-            defaultBranch={pr.defaultBranch ?? null}
             onCreated={() => {
               onChanged();
               load();
@@ -119,11 +118,10 @@ function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelP
 interface CreateFormProps {
   projectId: number;
   git: GitStatus;
-  defaultBranch: string | null;
   onCreated: () => void;
 }
 
-function CreateForm({ projectId, git, defaultBranch, onCreated }: CreateFormProps) {
+function CreateForm({ projectId, git, onCreated }: CreateFormProps) {
   const blocked = createPrBlockedReason(git);
   const [form, setForm] = useState<Pick<PullRequestDraft, "title" | "body" | "base"> | null>(null);
   const [draft, setDraft] = useState(false);
@@ -153,7 +151,7 @@ function CreateForm({ projectId, git, defaultBranch, onCreated }: CreateFormProp
       projectId,
       current.title,
       current.body,
-      current.base || defaultBranch || "main",
+      current.base,
       draft,
     );
     setBusy(false);

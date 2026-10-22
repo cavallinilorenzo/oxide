@@ -1,6 +1,7 @@
 //! Oxide Core: all application logic, with no dependency on Tauri.
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
+mod clock;
 mod db;
 mod discovery;
 mod error;
@@ -11,6 +12,7 @@ pub mod thread;
 mod thread_actor;
 
 use oxide_provider::Provider as ProviderTrait;
+use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +27,7 @@ use thread_actor::ThreadActorHandle;
 use rusqlite::Connection;
 use serde::Serialize;
 
+pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
@@ -39,6 +42,7 @@ pub use thread::{
 };
 
 const DB_FILE: &str = "oxide.db";
+const PROCESSES_FILE: &str = "processes.json";
 static ATTACHMENT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// How many of a Thread's most recent Turns it opens on; older Turns are paged
@@ -66,6 +70,8 @@ pub struct Core {
     thread_actors: Mutex<HashMap<u32, ThreadActorHandle>>,
     fake_providers: Mutex<HashMap<u32, Box<dyn ProviderTrait>>>,
     real_time_ticker: AtomicBool,
+    clock: Mutex<Arc<dyn Clock>>,
+    processes: Arc<ProcessRegistry>,
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
 }
@@ -95,6 +101,10 @@ impl Core {
         })?;
         let db = db::open(&home.join(DB_FILE), migrations)?;
         let (settings, _settings_watcher) = SettingsStore::open(&home)?;
+        // A crashed run leaves its Provider and shell groups behind; its Threads were mid-flight.
+        let processes = Arc::new(ProcessRegistry::open(home.join(PROCESSES_FILE)));
+        processes.reap_stale();
+        mark_unfinished_work_interrupted(&db)?;
         let storage = StorageHandle::new(home.join(DB_FILE))?;
         Ok(Self {
             home,
@@ -108,6 +118,8 @@ impl Core {
             thread_actors: Mutex::new(HashMap::new()),
             fake_providers: Mutex::new(HashMap::new()),
             real_time_ticker: AtomicBool::new(true),
+            clock: Mutex::new(Arc::new(SystemClock)),
+            processes,
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
         })
@@ -115,6 +127,39 @@ impl Core {
 
     pub fn set_real_time_ticker(&self, enabled: bool) {
         self.real_time_ticker.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Replaces the clock idle reaping reads. Call before the first Thread is used.
+    pub fn set_clock(&self, clock: Arc<dyn Clock>) {
+        *self.clock.lock().unwrap_or_else(|e| e.into_inner()) = clock;
+    }
+
+    /// Shuts every Provider and terminal down, escalating SIGTERM to SIGKILL, and returns once
+    /// their processes are gone. Safe to call more than once; also runs when Core is dropped.
+    pub fn shutdown(&self) {
+        let actors: Vec<_> = self
+            .thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+            .map(|(_, actor)| actor)
+            .collect();
+        // Shut them down side by side: each may wait out the 2 s grace.
+        std::thread::scope(|scope| {
+            for actor in &actors {
+                scope.spawn(|| actor.shutdown());
+            }
+        });
+        let terminals: Vec<_> = self
+            .terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+            .map(|(_, session)| session)
+            .collect();
+        for session in terminals {
+            session.close();
+        }
     }
 
     pub fn home(&self) -> &Path {
@@ -348,7 +393,8 @@ impl Core {
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
             } else if snapshot.thread.provider == "claude" {
-                let claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                let mut claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                claude.set_registry(Arc::clone(&self.processes));
                 let detection = claude.detect().unwrap_or(oxide_provider::Detection {
                     available: false,
                     installed: false,
@@ -371,6 +417,7 @@ impl Core {
             provider,
             self.storage.clone(),
             real_time,
+            self.clock.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         )?;
 
         actors.insert(thread_id, actor.clone());
@@ -509,7 +556,11 @@ impl Core {
         };
         drop(db);
         let id = next_id(&self.next_terminal_id);
-        let session = Arc::new(TerminalSession::start(id, Path::new(&cwd))?);
+        let session = Arc::new(TerminalSession::start(
+            id,
+            Path::new(&cwd),
+            Arc::clone(&self.processes),
+        )?);
         let summary = session.summary.clone();
         self.terminals
             .lock()
@@ -584,4 +635,33 @@ impl Core {
             _ => PathBuf::from(root),
         }
     }
+}
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// Threads that were working or waiting for input when Oxide last went away show as
+/// interrupted, along with their running Turn and unanswered Approvals. Nothing restarts.
+fn mark_unfinished_work_interrupted(db: &Connection) -> Result<()> {
+    let has_threads: bool = db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'threads')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_threads {
+        return Ok(());
+    }
+    db.execute_batch(
+        "UPDATE approvals SET decision = 'deny', decided_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE decision IS NULL
+               AND turn_id IN (SELECT id FROM turns WHERE status = 'running');
+         UPDATE turns SET status = 'interrupted', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE status = 'running';
+         UPDATE threads SET status = 'interrupted', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE status IN ('working', 'needs-input', 'needs_input');",
+    )?;
+    Ok(())
 }

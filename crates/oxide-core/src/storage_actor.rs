@@ -85,6 +85,10 @@ pub enum StorageMsg {
         thread_id: u32,
         session_id: String,
     },
+    GetProviderSessionId {
+        thread_id: u32,
+        reply: mpsc::Sender<Option<String>>,
+    },
     WriteUnknownEvent {
         turn_id: u32,
         raw: String,
@@ -298,6 +302,16 @@ impl StorageHandle {
             thread_id,
             session_id,
         });
+    }
+
+    /// The Provider's own session id for the Thread, once the Provider has reported one.
+    pub fn get_provider_session_id(&self, thread_id: u32) -> Option<String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::GetProviderSessionId {
+            thread_id,
+            reply: reply_tx,
+        });
+        reply_rx.recv().ok().flatten()
     }
 
     pub fn write_unknown_event(&self, turn_id: u32, raw: String) -> Result<u32> {
@@ -536,6 +550,17 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     "UPDATE threads SET provider_session_id = ?1 WHERE id = ?2",
                     rusqlite::params![session_id, thread_id],
                 );
+            }
+            StorageMsg::GetProviderSessionId { thread_id, reply } => {
+                let session_id = conn
+                    .query_row(
+                        "SELECT provider_session_id FROM threads WHERE id = ?1",
+                        [thread_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                let _ = reply.send(session_id);
             }
             StorageMsg::WriteUnknownEvent {
                 turn_id,

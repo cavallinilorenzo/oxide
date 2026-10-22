@@ -636,6 +636,16 @@ fn provider_exiting_while_idle_is_silent() {
         .unwrap();
     core.register_fake_provider(thread.id, fake);
     let (_, rx) = core.subscribe_thread(thread.id).unwrap();
+    // The Provider starts with the first prompt; let that Turn finish so the Thread is idle.
+    core.send_prompt(thread.id, "hello").unwrap();
+    wait_for_status(&rx, ThreadStatus::Working);
+    sender
+        .send(ProviderEvent::TurnCompleted {
+            turn_index: 0,
+            status: TurnStatus::Completed,
+        })
+        .unwrap();
+    wait_for_status(&rx, ThreadStatus::Completed);
 
     sender
         .send(ProviderEvent::Exited {

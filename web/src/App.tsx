@@ -29,6 +29,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
   const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
     const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
@@ -68,6 +69,11 @@ export function App() {
     setDiffScope("uncommitted");
     setDiffFocus(hint ?? null);
   }, []);
+
+  // A recap is prefilled once, when its Thread opens.
+  useEffect(() => {
+    if (prefill && prefill.threadId !== selectedThreadId) setPrefill(null);
+  }, [prefill, selectedThreadId]);
 
   // Stable, since ThreadView resubscribes whenever it changes.
   const onThreadStatusChange = useCallback((threadId: number, status: ThreadStatus) => {
@@ -197,6 +203,20 @@ export function App() {
                     rememberTerminalContext(selected.id, newThread.id);
                   }}
                   onStatusChange={onThreadStatusChange}
+                  prefill={prefill}
+                  onOpenThread={(id) => {
+                    setSelectedThreadId(id);
+                    rememberTerminalContext(selected.id, id);
+                  }}
+                  onThreadContinued={(continued, from) => {
+                    setThreads((prev) => [
+                      continued.thread,
+                      ...(prev?.map((t) => (t.id === from ? { ...t, continuedIn: continued.thread.id } : t)) ?? []),
+                    ]);
+                    setPrefill({ threadId: continued.thread.id, text: continued.recap });
+                    setSelectedThreadId(continued.thread.id);
+                    rememberTerminalContext(selected.id, continued.thread.id);
+                  }}
                 />
               </DiffOpenContext.Provider>
             </main>

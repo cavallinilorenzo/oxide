@@ -16,6 +16,8 @@ export const commands = {
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	/**  Starts a new Thread that continues one whose Provider session is gone. */
+	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
@@ -99,6 +101,21 @@ export type ApprovalSnapshot_Serialize = {
 	decision: ApprovalDecision | null,
 	createdAt: string,
 	decidedAt: string | null,
+};
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Deserialize = {
+	thread: Thread_Deserialize,
+	recap: string,
+};
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Serialize = {
+	thread: Thread_Serialize,
+	recap: string,
 };
 
 export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
@@ -477,6 +494,9 @@ export type Thread_Deserialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	sessionLost: boolean,
+	continuedFrom?: number | null,
+	continuedIn?: number | null,
 };
 
 export type Thread_Serialize = {
@@ -490,6 +510,9 @@ export type Thread_Serialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	sessionLost: boolean,
+	continuedFrom: number | null,
+	continuedIn: number | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

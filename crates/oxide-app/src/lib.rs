@@ -235,6 +235,17 @@ pub struct Thread {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub session_lost: bool,
+    pub continued_from: Option<u32>,
+    pub continued_in: Option<u32>,
+}
+
+/// A new Thread continuing one whose Provider session is gone, and the recap to prefill.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuedThread {
+    pub thread: Thread,
+    pub recap: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -695,6 +706,16 @@ fn create_thread(
     Ok(convert(&summary))
 }
 
+/// Starts a new Thread that continues one whose Provider session is gone.
+#[tauri::command]
+#[specta::specta]
+fn continue_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<ContinuedThread, AppError> {
+    Ok(convert(&core.continue_thread(thread_id)?))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn set_thread_permission_mode(
@@ -870,6 +891,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_settings,
         save_settings,
         create_thread,
+        continue_thread,
         set_thread_permission_mode,
         respond_to_approval,
         detect_provider,
@@ -965,6 +987,9 @@ mod tests {
                 archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
+                session_lost: false,
+                continued_from: None,
+                continued_in: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

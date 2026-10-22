@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod clock;
+mod continuation;
 mod db;
 mod discovery;
 mod error;
@@ -14,6 +15,7 @@ mod terminal;
 pub mod thread;
 mod thread_actor;
 
+pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
@@ -269,14 +271,46 @@ impl Core {
         let permission_mode = permission_mode
             .into()
             .unwrap_or_else(|| self.default_permission_mode_for(provider));
+        self.insert_thread(project_id, provider, model, effort, permission_mode, None)
+    }
+
+    /// Starts a new Thread that continues one whose Provider session is gone: same Project,
+    /// Provider, Model, Effort and permission mode, linked both ways, with a recap of the old
+    /// Transcript for the composer to prefill.
+    pub fn continue_thread(&self, thread_id: u32) -> Result<ContinuedThread> {
+        let old = self.storage.get_snapshot(thread_id, u32::MAX)?;
+        let t = &old.thread;
+        let thread = self.insert_thread(
+            t.project_id,
+            &t.provider,
+            t.model.clone(),
+            t.effort.clone(),
+            t.permission_mode,
+            Some(thread_id),
+        )?;
+        Ok(ContinuedThread {
+            thread,
+            recap: continuation::build_recap(&old.turns),
+        })
+    }
+
+    fn insert_thread(
+        &self,
+        project_id: u32,
+        provider: &str,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: PermissionMode,
+        continued_from: Option<u32>,
+    ) -> Result<ThreadSummary> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mode_str = serde_json::to_string(&permission_mode)
             .unwrap_or_default()
             .trim_matches('"')
             .to_string();
         db.execute(
-            "INSERT INTO threads (project_id, provider, model, effort, permission_mode, status) VALUES (?1, ?2, ?3, ?4, ?5, 'completed')",
-            rusqlite::params![project_id, provider, model, effort, mode_str],
+            "INSERT INTO threads (project_id, provider, model, effort, permission_mode, status, continued_from) VALUES (?1, ?2, ?3, ?4, ?5, 'completed', ?6)",
+            rusqlite::params![project_id, provider, model, effort, mode_str, continued_from],
         )?;
         let id = db.last_insert_rowid() as u32;
         self.get_thread_by_id(&db, id)
@@ -366,18 +400,20 @@ impl Core {
 
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt = db.prepare(
-            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
-             FROM threads WHERE project_id = ?1 ORDER BY id DESC"
-        )?;
+        let mut stmt = db.prepare(&format!(
+            "SELECT {} FROM threads WHERE project_id = ?1 ORDER BY id DESC",
+            thread::THREAD_COLUMNS
+        ))?;
         let rows = stmt.query_map([project_id], thread::parse_thread_summary)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     fn get_thread_by_id(&self, db: &Connection, id: u32) -> Result<ThreadSummary> {
         db.query_row(
-            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
-             FROM threads WHERE id = ?1",
+            &format!(
+                "SELECT {} FROM threads WHERE id = ?1",
+                thread::THREAD_COLUMNS
+            ),
             [id],
             thread::parse_thread_summary,
         )

@@ -20,6 +20,9 @@ _Avoid_: Agent, session, chat
 Where a Thread stands right now: working (a Turn is running), needs input (the Provider is waiting on an approval or answer), completed (the last Turn finished and it's the user's move), error (the Turn failed), or interrupted (the Turn was stopped by the user or by quitting Oxide).
 _Avoid_: State, phase
 
+**Continue in new Thread**:
+What a Thread offers instead of its composer when resuming its Provider session fails because the session is gone. It creates a new Thread with the same Provider, Model, Effort and permission mode, whose first prompt is prefilled with a recap (user prompts and final agent messages, no tool output, cut to a fixed length). The two Threads link to each other.
+
 **Archived Thread**:
 A Thread hidden from the Thread Board and sidebar but kept in history, still readable and resumable. Threads are archived, never deleted.
 _Avoid_: Closed, deleted

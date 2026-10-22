@@ -518,3 +518,7 @@ button[aria-pressed="true"] { background: #8883; }
 .diff-line { display: block; padding: 0 8px; white-space: pre; }
 .diff-added { background: #2ea04326; }
 .diff-removed { background: #f8514926; }
+
+.composer-input { resize: none; }
+.thread-link { padding: 4px 16px; font-size: 12px; opacity: 0.8; }
+.thread-link button { background: none; border: 0; padding: 0; color: #0070f3; font: inherit; cursor: pointer; }

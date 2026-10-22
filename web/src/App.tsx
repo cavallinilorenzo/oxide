@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type AppError, type DiffScope, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { DiffOpenContext } from "./diffOpen";
+import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
@@ -24,7 +25,8 @@ export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
-  const [diffScope, setDiffScope] = useState<DiffScope>("uncommitted");
+  // The user's pick, for the Thread it was made in: elsewhere that Thread's default applies.
+  const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -49,6 +51,17 @@ export function App() {
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
+  // Board Threads (own worktree) don't exist yet: every Thread is a chat Thread.
+  const diffThread = { board: false };
+  const diffScope =
+    chosenDiffScope && chosenDiffScope.threadId === currentThreadId
+      ? chosenDiffScope.scope
+      : defaultDiffScope(diffThread);
+  // Read by the stable `openDiff`.
+  const currentThreadRef = useRef(currentThreadId);
+  useEffect(() => {
+    currentThreadRef.current = currentThreadId;
+  });
   const currentTerminalContext = useMemo<TerminalContext | null>(
     () => selected && threads !== null
       ? {
@@ -71,7 +84,7 @@ export function App() {
   const openDiff = useCallback((hint?: string) => {
     setShowTools(true);
     setActiveTool("Diff");
-    setDiffScope("uncommitted");
+    setChosenDiffScope({ threadId: currentThreadRef.current, scope: "uncommitted" });
     setDiffFocus(hint ?? null);
   }, []);
 
@@ -349,9 +362,11 @@ export function App() {
               <Suspense fallback={null}>
                 <DiffPanel
                   projectId={selected.id}
+                  threadId={currentThreadId}
+                  board={diffThread.board}
                   scope={diffScope}
                   onScopeChange={(scope) => {
-                    setDiffScope(scope);
+                    setChosenDiffScope({ threadId: currentThreadId, scope });
                     setDiffFocus(null);
                   }}
                   focus={diffFocus}

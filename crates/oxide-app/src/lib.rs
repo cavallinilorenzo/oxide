@@ -662,6 +662,15 @@ async fn git_diff(
         .map(|diff| convert(&diff))
 }
 
+/// What a Thread's latest Turn changed, from its two Checkpoints.
+#[tauri::command]
+#[specta::specta]
+async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.latest_turn_diff(thread_id))
+        .await
+        .map(|diff| convert(&diff))
+}
+
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
 #[tauri::command]
 #[specta::specta]
@@ -1054,6 +1063,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         git_status,
         list_branches,
         git_diff,
+        git_turn_diff,
         checkout_branch,
         create_branch,
         fetch_project,

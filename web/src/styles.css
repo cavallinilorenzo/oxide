@@ -1,0 +1,18 @@
+:root { color-scheme: light dark; font: 13px -apple-system, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.window { display: flex; flex-direction: column; height: 100vh; }
+.header { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px 0 80px; border-bottom: 1px solid #8884; -webkit-app-region: drag; }
+.header button { -webkit-app-region: no-drag; }
+.toggles { display: flex; gap: 4px; }
+button[aria-pressed="true"] { background: #8883; }
+.body { flex: 1; display: flex; min-height: 0; }
+.sidebar { width: 240px; border-right: 1px solid #8884; padding: 8px; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.centre-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.centre { flex: 1; }
+.terminal { height: 220px; border-top: 1px solid #8884; }
+.tools { width: 320px; border-left: 1px solid #8884; }
+.tool-tabs { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid #8884; }
+.empty { opacity: 0.6; }
+.error { color: #c33; }

@@ -1,0 +1,6 @@
+[package]
+name = "oxide-provider"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

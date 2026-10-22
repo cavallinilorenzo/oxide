@@ -7,7 +7,9 @@ use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
-use crate::thread::{SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus};
+use crate::thread::{
+    DebugSequencedThreadEvent, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus,
+};
 
 pub enum ThreadActorMsg {
     SendPrompt {
@@ -28,6 +30,9 @@ pub enum ThreadActorMsg {
     },
     Subscribe {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<SequencedThreadEvent>)>,
+    },
+    SubscribeDebug {
+        reply: mpsc::Sender<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)>,
     },
     Tick,
     Shutdown,
@@ -127,6 +132,20 @@ impl ThreadActorHandle {
         })
     }
 
+    pub fn subscribe_debug(&self) -> Result<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self
+            .sender
+            .send(ThreadActorMsg::SubscribeDebug { reply: reply_tx });
+        reply_rx.recv().map_err(|_| Error::Io {
+            path: std::path::PathBuf::from("subscribe-debug"),
+            source: std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "thread actor disconnected",
+            ),
+        })
+    }
+
     pub fn tick(&self) {
         let _ = self.sender.send(ThreadActorMsg::Tick);
     }
@@ -140,10 +159,17 @@ struct ActorState {
     thread_id: u32,
     current_turn_index: u32,
     current_turn_id: Option<u32>,
-    pending_deltas: HashMap<u32, String>,
+    pending_deltas: HashMap<u32, PendingDelta>,
     pending_approval_id: Option<String>,
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
+    debug_subscribers: Vec<Sender<DebugSequencedThreadEvent>>,
+}
+
+#[derive(Default)]
+struct PendingDelta {
+    text: String,
+    raw_payloads: Vec<String>,
 }
 
 impl ActorState {
@@ -156,19 +182,42 @@ impl ActorState {
             pending_approval_id: None,
             seq: 0,
             subscribers: Vec::new(),
+            debug_subscribers: Vec::new(),
+        }
+    }
+
+    fn has_any_subscriber(&self) -> bool {
+        !self.subscribers.is_empty() || !self.debug_subscribers.is_empty()
+    }
+
+    fn broadcast_with_raw(&mut self, event: ThreadEvent, raw_payload: Option<String>) {
+        if !self.has_any_subscriber() {
+            return;
+        }
+        self.seq += 1;
+        let seq = self.seq;
+
+        if !self.subscribers.is_empty() {
+            let seq_evt = SequencedThreadEvent {
+                seq,
+                event: event.clone(),
+            };
+            self.subscribers.retain(|s| s.send(seq_evt.clone()).is_ok());
+        }
+
+        if !self.debug_subscribers.is_empty() {
+            let dbg_evt = DebugSequencedThreadEvent {
+                seq,
+                event,
+                raw_payload,
+            };
+            self.debug_subscribers
+                .retain(|s| s.send(dbg_evt.clone()).is_ok());
         }
     }
 
     fn broadcast(&mut self, event: ThreadEvent) {
-        if self.subscribers.is_empty() {
-            return;
-        }
-        self.seq += 1;
-        let seq_evt = SequencedThreadEvent {
-            seq: self.seq,
-            event,
-        };
-        self.subscribers.retain(|s| s.send(seq_evt.clone()).is_ok());
+        self.broadcast_with_raw(event, None);
     }
 
     fn broadcast_status(&mut self, status: ThreadStatus) {
@@ -176,20 +225,37 @@ impl ActorState {
     }
 
     fn flush_pending_deltas(&mut self) {
-        if self.subscribers.is_empty() {
+        if !self.has_any_subscriber() {
             self.pending_deltas.clear();
             return;
         }
         let deltas = std::mem::take(&mut self.pending_deltas);
         for (item_index, delta) in deltas {
-            if !delta.is_empty() {
-                self.broadcast(ThreadEvent::ItemDeltaBatch { item_index, delta });
+            if !delta.text.is_empty() {
+                let raw_payload = if delta.raw_payloads.is_empty() {
+                    None
+                } else {
+                    serde_json::to_string(&delta.raw_payloads).ok()
+                };
+                self.broadcast_with_raw(
+                    ThreadEvent::ItemDeltaBatch {
+                        item_index,
+                        delta: delta.text,
+                    },
+                    raw_payload,
+                );
             }
         }
     }
 }
 
 fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &StorageHandle) {
+    let raw = if !state.debug_subscribers.is_empty() {
+        serde_json::to_string(&evt).ok()
+    } else {
+        None
+    };
+
     match evt {
         ProviderEvent::SessionInfo { session_id } => {
             storage.set_provider_session_id(state.thread_id, session_id);
@@ -202,18 +268,18 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 state.current_turn_id = Some(turn_id);
             }
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
-            state.broadcast(ThreadEvent::TurnStarted { turn_index, prompt });
+            state.broadcast_with_raw(ThreadEvent::TurnStarted { turn_index, prompt }, raw);
             state.broadcast_status(ThreadStatus::Working);
         }
         ProviderEvent::ItemStarted { item_index, kind } => {
-            state.broadcast(ThreadEvent::ItemStarted { item_index, kind });
+            state.broadcast_with_raw(ThreadEvent::ItemStarted { item_index, kind }, raw);
         }
         ProviderEvent::ItemDelta { item_index, delta } => {
-            state
-                .pending_deltas
-                .entry(item_index)
-                .or_default()
-                .push_str(&delta);
+            let pending = state.pending_deltas.entry(item_index).or_default();
+            pending.text.push_str(&delta);
+            if let Some(raw) = raw {
+                pending.raw_payloads.push(raw);
+            }
         }
         ProviderEvent::ItemCompleted {
             item_index,
@@ -224,11 +290,14 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             if let Some(turn_id) = state.current_turn_id {
                 let _ = storage.write_item_completed(turn_id, item_index, kind, content.clone());
             }
-            state.broadcast(ThreadEvent::ItemCompleted {
-                item_index,
-                kind,
-                content,
-            });
+            state.broadcast_with_raw(
+                ThreadEvent::ItemCompleted {
+                    item_index,
+                    kind,
+                    content,
+                },
+                raw,
+            );
         }
         ProviderEvent::TurnCompleted {
             turn_index: _,
@@ -246,10 +315,13 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 TurnStatus::Running => ThreadStatus::Working,
             };
             let _ = storage.update_thread_status(state.thread_id, final_thread_status);
-            state.broadcast(ThreadEvent::TurnCompleted {
-                turn_index: state.current_turn_index,
-                status,
-            });
+            state.broadcast_with_raw(
+                ThreadEvent::TurnCompleted {
+                    turn_index: state.current_turn_index,
+                    status,
+                },
+                raw,
+            );
             state.broadcast_status(final_thread_status);
             state.current_turn_index += 1;
         }
@@ -270,21 +342,37 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 );
             }
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::NeedsInput);
-            state.broadcast(ThreadEvent::ApprovalRequested {
-                id,
-                kind,
-                summary,
-                options,
-            });
+            state.broadcast_with_raw(
+                ThreadEvent::ApprovalRequested {
+                    id,
+                    kind,
+                    summary,
+                    options,
+                },
+                raw,
+            );
             state.broadcast_status(ThreadStatus::NeedsInput);
         }
         ProviderEvent::Error { message, code: _ } => {
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Error);
-            state.broadcast(ThreadEvent::Error { message });
+            state.broadcast_with_raw(
+                ThreadEvent::Error {
+                    message: message.clone(),
+                },
+                raw,
+            );
             state.broadcast_status(ThreadStatus::Error);
         }
-        ProviderEvent::Unknown { raw } => {
-            state.broadcast(ThreadEvent::Unknown { raw });
+        ProviderEvent::Unknown { raw: raw_str } => {
+            if let Some(turn_id) = state.current_turn_id {
+                let _ = storage.write_unknown_event(turn_id, raw_str.clone());
+            }
+            let debug_raw = if !state.debug_subscribers.is_empty() {
+                Some(raw_str.clone())
+            } else {
+                None
+            };
+            state.broadcast_with_raw(ThreadEvent::Unknown, debug_raw);
         }
     }
 }
@@ -402,8 +490,25 @@ fn run_thread_actor(
                             }
                         };
                         snapshot.last_seq = state.seq;
+                        for turn in &mut snapshot.turns {
+                            turn.unknown_events.clear();
+                        }
                         snapshot.supported_permission_modes = provider.capabilities().supported_permission_modes;
                         state.subscribers.push(sub_tx);
+                        let _ = reply.send((snapshot, sub_rx));
+                    }
+                    ThreadActorMsg::SubscribeDebug { reply } => {
+                        let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
+                        let mut snapshot = match storage.get_snapshot(thread_id) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("failed to get snapshot for thread {thread_id}: {e}");
+                                continue;
+                            }
+                        };
+                        snapshot.last_seq = state.seq;
+                        snapshot.supported_permission_modes = provider.capabilities().supported_permission_modes;
+                        state.debug_subscribers.push(sub_tx);
                         let _ = reply.send((snapshot, sub_rx));
                     }
                     ThreadActorMsg::Tick => {

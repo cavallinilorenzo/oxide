@@ -75,6 +75,13 @@ pub struct ApprovalSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnknownEventSnapshot {
+    pub id: u32,
+    pub raw: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
@@ -84,6 +91,7 @@ pub struct TurnSnapshot {
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
     pub approvals: Vec<ApprovalSnapshot>,
+    pub unknown_events: Vec<UnknownEventSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,15 +142,24 @@ pub enum ThreadEvent {
     Error {
         message: String,
     },
-    Unknown {
-        raw: String,
-    },
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequencedThreadEvent {
     pub seq: u32,
     pub event: ThreadEvent,
+}
+
+/// A sequenced event on the debug subscriber channel, paired with the raw
+/// Provider payload that produced it.  `raw_payload` is `None` only for
+/// synthesised events (e.g. `ThreadStatusChanged`) that have no backing
+/// Provider event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugSequencedThreadEvent {
+    pub seq: u32,
+    pub event: ThreadEvent,
+    pub raw_payload: Option<String>,
 }
 
 pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary> {

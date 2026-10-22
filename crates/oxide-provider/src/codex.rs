@@ -1,7 +1,7 @@
 //! Codex native provider adapter.
 
 use crate::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, PermissionMode, Provider,
+    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -773,6 +773,8 @@ impl CodexProvider {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: false,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             })),
         }
     }
@@ -1134,6 +1136,62 @@ impl Provider for CodexProvider {
     fn set_model(&mut self, model: &str) -> Result<(), ProviderError> {
         *self.active_model.lock().unwrap() = Some(model.to_string());
         Ok(())
+    }
+
+    fn set_effort(&mut self, effort: &str) -> Result<(), ProviderError> {
+        *self.active_effort.lock().unwrap() = Some(effort.to_string());
+        Ok(())
+    }
+
+    fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        let entries = self.app_server.models();
+        if entries.is_empty() {
+            let _ = self.app_server.fetch_model_catalog();
+        }
+        let entries = self.app_server.models();
+        if entries.is_empty() {
+            return Ok(vec![
+                ModelInfo {
+                    id: "gpt-5".into(),
+                    name: "GPT-5".into(),
+                    description: Some("Flagship reasoning model".into()),
+                    supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                    default_effort: Some("medium".into()),
+                    is_legacy: false,
+                },
+                ModelInfo {
+                    id: "o3-mini".into(),
+                    name: "o3-mini".into(),
+                    description: Some("Fast reasoning model".into()),
+                    supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                    default_effort: Some("medium".into()),
+                    is_legacy: false,
+                },
+                ModelInfo {
+                    id: "gpt-4o".into(),
+                    name: "GPT-4o".into(),
+                    description: None,
+                    supported_efforts: vec![],
+                    default_effort: None,
+                    is_legacy: true,
+                },
+            ]);
+        }
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                let is_legacy = (e.id.contains("gpt-4") && !e.id.contains("gpt-4.5")) || e.id.contains("gpt-3.5");
+                let default_effort = e.supported_reasoning_efforts.first().cloned();
+                ModelInfo {
+                    name: e.display_name.unwrap_or_else(|| e.id.clone()),
+                    id: e.id,
+                    description: None,
+                    supported_efforts: e.supported_reasoning_efforts,
+                    default_effort,
+                    is_legacy,
+                }
+            })
+            .collect())
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {

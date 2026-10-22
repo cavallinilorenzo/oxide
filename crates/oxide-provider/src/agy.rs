@@ -8,7 +8,7 @@
 use crate::claude::ClaudeCodeProvider;
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, Detection, ItemKind, PermissionMode, Provider, ProviderCapabilities,
+    ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider, ProviderCapabilities,
     ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -364,9 +364,10 @@ impl Provider for AgyProvider {
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
-        if let Some(pgid) = *self.group.lock().unwrap() {
+        if let Some(_pgid) = *self.group.lock().unwrap() {
             self.interrupted.store(true, Ordering::SeqCst);
-            unsafe { libc::kill(-pgid, libc::SIGINT) };
+            #[cfg(unix)]
+            unsafe { libc::kill(-_pgid, libc::SIGINT) };
         }
         Ok(())
     }
@@ -389,6 +390,69 @@ impl Provider for AgyProvider {
             .ok_or_else(|| ProviderError::CommandFailed("session not started".into()))?;
         context.model = Some(model.to_string());
         Ok(())
+    }
+
+    fn set_effort(&mut self, effort: &str) -> Result<(), ProviderError> {
+        let mut session = self.session.lock().unwrap();
+        let context = session
+            .context
+            .as_mut()
+            .ok_or_else(|| ProviderError::CommandFailed("session not started".into()))?;
+        context.effort = Some(effort.to_string());
+        Ok(())
+    }
+
+    fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        match self.list_models() {
+            Ok(models) if !models.is_empty() => Ok(models
+                .into_iter()
+                .map(|m| {
+                    let is_legacy = m.slug.contains("1.5") || m.slug.contains("legacy");
+                    ModelInfo {
+                        id: m.slug,
+                        name: m.label,
+                        description: None,
+                        supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                        default_effort: Some("medium".into()),
+                        is_legacy,
+                    }
+                })
+                .collect()),
+            _ => Ok(vec![
+                ModelInfo {
+                    id: "gemini-3.8-flash-high".into(),
+                    name: "Gemini 3.8 Flash (High)".into(),
+                    description: Some("Fast model with high reasoning".into()),
+                    supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                    default_effort: Some("high".into()),
+                    is_legacy: false,
+                },
+                ModelInfo {
+                    id: "gemini-3.8-flash-medium".into(),
+                    name: "Gemini 3.8 Flash (Medium)".into(),
+                    description: Some("Fast model with medium reasoning".into()),
+                    supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                    default_effort: Some("medium".into()),
+                    is_legacy: false,
+                },
+                ModelInfo {
+                    id: "claude-sonnet-4-6".into(),
+                    name: "Claude Sonnet 4.6 (Thinking)".into(),
+                    description: Some("Advanced reasoning model".into()),
+                    supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                    default_effort: Some("high".into()),
+                    is_legacy: false,
+                },
+                ModelInfo {
+                    id: "gemini-1.5-pro".into(),
+                    name: "Gemini 1.5 Pro".into(),
+                    description: None,
+                    supported_efforts: vec![],
+                    default_effort: None,
+                    is_legacy: true,
+                },
+            ]),
+        }
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {
@@ -419,6 +483,8 @@ impl Provider for AgyProvider {
             interactive_approvals: false,
             supports_reasoning: false,
             image_attachments: false,
+            mid_thread_model_switch: true,
+            slash_command_passthrough: false,
         }
     }
 }

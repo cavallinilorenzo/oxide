@@ -572,6 +572,8 @@ impl Core {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: false,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             },
         }
     }

@@ -71,6 +71,22 @@ pub struct Detection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub supported_efforts: Vec<String>,
+    #[serde(default)]
+    pub default_effort: Option<String>,
+    #[serde(default)]
+    pub is_legacy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
@@ -78,6 +94,10 @@ pub struct ProviderCapabilities {
     /// The Provider accepts image attachments with a prompt.
     #[serde(default)]
     pub image_attachments: bool,
+    #[serde(default)]
+    pub mid_thread_model_switch: bool,
+    #[serde(default)]
+    pub slash_command_passthrough: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +208,12 @@ pub trait Provider: Send + 'static {
         decision: ApprovalDecision,
     ) -> Result<(), ProviderError>;
     fn set_model(&mut self, model: &str) -> Result<(), ProviderError>;
+    fn set_effort(&mut self, _effort: &str) -> Result<(), ProviderError> {
+        Ok(())
+    }
+    fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        Ok(Vec::new())
+    }
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError>;
     fn shutdown(&mut self) -> Result<(), ProviderError>;
     fn capabilities(&self) -> ProviderCapabilities;
@@ -345,6 +371,8 @@ impl Default for FakeProvider {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: true,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             },
             detection: Detection {
                 available: true,

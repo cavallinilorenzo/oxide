@@ -2,7 +2,7 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, PermissionMode, Provider,
+    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -77,6 +77,8 @@ impl ClaudeCodeProvider {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: false,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             })),
             child_process: Arc::new(Mutex::new(None)),
             child_stdin: Arc::new(Mutex::new(None)),
@@ -533,6 +535,7 @@ impl Provider for ClaudeCodeProvider {
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
         // Send SIGINT to child process
+        #[cfg(unix)]
         if let Some(ref child) = *self.child_process.lock().unwrap() {
             let pid = child.id() as i32;
             unsafe {
@@ -574,6 +577,60 @@ impl Provider for ClaudeCodeProvider {
             "model": model
         });
         self.write_to_stdin(&payload)
+    }
+
+    fn set_effort(&mut self, effort: &str) -> Result<(), ProviderError> {
+        let payload = json!({
+            "type": "control",
+            "command": "set_effort",
+            "effort": effort
+        });
+        self.write_to_stdin(&payload)
+    }
+
+    fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        Ok(vec![
+            ModelInfo {
+                id: "opus".into(),
+                name: "Claude 3.7 Opus".into(),
+                description: Some("Most capable model for coding and complex reasoning".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
+                default_effort: Some("high".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "sonnet".into(),
+                name: "Claude 3.7 Sonnet".into(),
+                description: Some("Balanced speed and capability for daily coding".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
+                default_effort: Some("medium".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "haiku".into(),
+                name: "Claude 3.5 Haiku".into(),
+                description: Some("Fastest model for lightweight tasks".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                default_effort: Some("low".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "claude-3-opus".into(),
+                name: "Claude 3 Opus".into(),
+                description: None,
+                supported_efforts: vec![],
+                default_effort: None,
+                is_legacy: true,
+            },
+            ModelInfo {
+                id: "claude-3-sonnet".into(),
+                name: "Claude 3 Sonnet".into(),
+                description: None,
+                supported_efforts: vec![],
+                default_effort: None,
+                is_legacy: true,
+            },
+        ])
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {

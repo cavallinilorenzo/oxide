@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type AppError, type DiffScope, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { DiffOpenContext } from "./diffOpen";
 import { GitHeader } from "./GitHeader";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
@@ -13,6 +14,7 @@ type TerminalContext = { key: string; projectId: number; threadId: number | null
 const terminalContextKey = (projectId: number, threadId: number | null) =>
   `${projectId}:${threadId ?? "draft"}`;
 
+const DiffPanel = lazy(() => import("./DiffPanel").then((module) => ({ default: module.DiffPanel })));
 const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
@@ -20,6 +22,8 @@ export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
+  const [diffScope, setDiffScope] = useState<DiffScope>("uncommitted");
+  const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -53,6 +57,14 @@ export function App() {
       !terminalContexts.some((context) => context.key === currentTerminalContext.key)
     ? [...terminalContexts, currentTerminalContext]
     : terminalContexts;
+
+  // Stable: it reaches memoized TurnViews through context.
+  const openDiff = useCallback((hint?: string) => {
+    setShowTools(true);
+    setActiveTool("Diff");
+    setDiffScope("uncommitted");
+    setDiffFocus(hint ?? null);
+  }, []);
 
   // Stable, since ThreadView resubscribes whenever it changes.
   const onThreadStatusChange = useCallback((threadId: number, status: ThreadStatus) => {
@@ -134,10 +146,7 @@ export function App() {
           <GitHeader
             projectId={selected.id}
             threadsKey={threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? ""}
-            onOpenDiff={() => {
-              setShowTools(true);
-              setActiveTool("Diff");
-            }}
+            onOpenDiff={() => openDiff()}
           />
         )}
         <div className="toggles">
@@ -175,16 +184,18 @@ export function App() {
             <SettingsView onClose={() => setShowSettings(false)} />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
-              <ThreadView
-                threadId={selectedThreadId}
-                projectId={selected.id}
-                onThreadCreated={(newThread) => {
-                  setThreads((prev) => [newThread, ...(prev || [])]);
-                  setSelectedThreadId(newThread.id);
-                  rememberTerminalContext(selected.id, newThread.id);
-                }}
-                onStatusChange={onThreadStatusChange}
-              />
+              <DiffOpenContext.Provider value={openDiff}>
+                <ThreadView
+                  threadId={selectedThreadId}
+                  projectId={selected.id}
+                  onThreadCreated={(newThread) => {
+                    setThreads((prev) => [newThread, ...(prev || [])]);
+                    setSelectedThreadId(newThread.id);
+                    rememberTerminalContext(selected.id, newThread.id);
+                  }}
+                  onStatusChange={onThreadStatusChange}
+                />
+              </DiffOpenContext.Provider>
             </main>
           ) : (
             <main className="centre empty-thread" aria-label="Thread">
@@ -217,6 +228,20 @@ export function App() {
                 </button>
               ))}
             </nav>
+            {activeTool === "Diff" && selected && (
+              <Suspense fallback={null}>
+                <DiffPanel
+                  projectId={selected.id}
+                  scope={diffScope}
+                  onScopeChange={(scope) => {
+                    setDiffScope(scope);
+                    setDiffFocus(null);
+                  }}
+                  focus={diffFocus}
+                  refreshKey={threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? ""}
+                />
+              </Suspense>
+            )}
             {activeTool === "Files" && selected && (
               <Suspense fallback={null}>
                 <FilesPanel projectId={selected.id} threadId={currentThreadId} />

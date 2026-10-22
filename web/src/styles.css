@@ -500,3 +500,21 @@ button[aria-pressed="true"] { background: #8883; }
 .chip-removed { color: #cf222e; }
 .git-error { display: inline-flex; align-items: center; gap: 4px; max-width: 360px; color: #cf222e; }
 .git-error-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.diff { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.diff-scopes { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid #8883; }
+.diff-scopes button { font: inherit; padding: 2px 8px; border: 1px solid #8884; border-radius: 4px; background: none; color: inherit; cursor: pointer; }
+.diff-scopes button[aria-selected="true"] { background: #8883; font-weight: 600; }
+.diff-base { margin-left: auto; opacity: .7; }
+.diff-body { flex: 1; min-height: 0; overflow: auto; }
+.diff-file { border-bottom: 1px solid #8883; }
+.diff-file-focused { outline: 2px solid #4a90e2; outline-offset: -2px; }
+.diff-file-title { position: sticky; top: 0; display: flex; gap: 6px; align-items: center; padding: 4px 8px; background: Canvas; border-bottom: 1px solid #8883; }
+.diff-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.diff-status { font: 11px ui-monospace, Menlo, monospace; padding: 0 4px; border-radius: 3px; background: #8883; }
+.diff-hunk { margin: 0; overflow-x: auto; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.diff-hunk code { display: block; min-width: max-content; }
+.diff-hunk-header { display: block; padding: 2px 8px; opacity: .6; background: #8881; }
+.diff-line { display: block; padding: 0 8px; white-space: pre; }
+.diff-added { background: #2ea04326; }
+.diff-removed { background: #f8514926; }

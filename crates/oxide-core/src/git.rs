@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 pub const FETCH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Untracked files larger than this are not line-counted for the dirty chip.
-const MAX_COUNTED_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_COUNTED_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +98,7 @@ impl GitState {
     }
 }
 
-fn run(cwd: &Path, args: &[&str]) -> Result<String> {
+pub(crate) fn run(cwd: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -118,8 +118,20 @@ fn run(cwd: &Path, args: &[&str]) -> Result<String> {
     Err(Error::Git(message.trim().to_string()))
 }
 
-fn succeeds(cwd: &Path, args: &[&str]) -> bool {
+pub(crate) fn succeeds(cwd: &Path, args: &[&str]) -> bool {
     run(cwd, args).is_ok()
+}
+
+pub(crate) fn ref_exists(cwd: &Path, name: &str) -> bool {
+    succeeds(
+        cwd,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{name}^{{commit}}"),
+        ],
+    )
 }
 
 pub fn status(cwd: &Path) -> Result<GitStatus> {

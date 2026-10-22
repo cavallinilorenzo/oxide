@@ -99,6 +99,25 @@ fn thread_with_session(core: &Core, project_id: u32, dir: &Path) -> u32 {
     thread.id
 }
 
+fn lose_session(id: u32, dir: &Path) {
+    Connection::open(dir.join("oxide.db"))
+        .unwrap()
+        .execute("UPDATE threads SET session_lost = 1 WHERE id = ?1", [id])
+        .unwrap();
+}
+
+#[test]
+fn only_a_thread_with_a_lost_session_can_be_continued_once() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+    let id = thread_with_session(&core, project_id, dir.path());
+    assert!(core.continue_thread(id).is_err(), "its session is fine");
+
+    lose_session(id, dir.path());
+    core.continue_thread(id).unwrap();
+    assert!(core.continue_thread(id).is_err(), "already continued");
+}
+
 #[test]
 fn resuming_a_vanished_session_sends_the_thread_to_error() {
     let dir = tempdir().unwrap();
@@ -133,6 +152,7 @@ fn continuing_creates_a_linked_thread_with_a_recap_of_prompts_and_answers() {
     let dir = tempdir().unwrap();
     let (core, project_id) = open_core_with_project(dir.path());
     let id = thread_with_session(&core, project_id, dir.path());
+    lose_session(id, dir.path());
 
     let continued = core.continue_thread(id).unwrap();
     let new = &continued.thread;
@@ -175,6 +195,7 @@ fn the_recap_is_cut_to_the_length_cap_keeping_the_latest_exchange() {
     core.tick_thread(thread.id);
     wait_for(&rx, completed());
 
+    lose_session(thread.id, dir.path());
     let recap = core.continue_thread(thread.id).unwrap().recap;
     assert!(recap.chars().count() <= RECAP_MAX_CHARS, "{}", recap.len());
     assert!(recap.contains("latest question"));

@@ -280,6 +280,16 @@ impl Core {
     pub fn continue_thread(&self, thread_id: u32) -> Result<ContinuedThread> {
         let old = self.storage.get_snapshot(thread_id, u32::MAX)?;
         let t = &old.thread;
+        if !t.session_lost {
+            return Err(Error::Provider(
+                "only a Thread whose Provider session is gone can be continued".to_string(),
+            ));
+        }
+        if t.continued_in.is_some() {
+            return Err(Error::Provider(
+                "this Thread has already been continued".to_string(),
+            ));
+        }
         let thread = self.insert_thread(
             t.project_id,
             &t.provider,

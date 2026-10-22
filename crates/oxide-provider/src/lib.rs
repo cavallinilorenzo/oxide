@@ -414,14 +414,14 @@ impl FakeProvider {
     /// Keeps the prompt and approval handlers across a shutdown, so a later `start` or
     /// `resume` brings the same Fake back to life. Handlers must not capture a sender
     /// (use [`FakeProvider::scripted`]'s approach), or the old channel never closes.
-    /// Makes every `resume` fail as if the Provider had lost the session.
-    pub fn fail_resume_with_session_not_found(&mut self) {
-        self.session_not_found = true;
-    }
-
     pub fn reusable(mut self) -> Self {
         self.reusable = true;
         self
+    }
+
+    /// Makes every `resume` fail as if the Provider had lost the session.
+    pub fn fail_resume_with_session_not_found(&mut self) {
+        self.session_not_found = true;
     }
 
     pub fn set_capabilities(&mut self, capabilities: ProviderCapabilities) {

@@ -1116,6 +1116,16 @@ fn continue_thread(
 
 #[tauri::command]
 #[specta::specta]
+fn set_thread_archived(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    archived: bool,
+) -> Result<(), AppError> {
+    Ok(core.set_thread_archived(thread_id, archived)?)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn set_thread_permission_mode(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
@@ -1458,6 +1468,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         save_settings,
         create_thread,
         continue_thread,
+        set_thread_archived,
         set_thread_permission_mode,
         set_thread_provider,
         rename_thread,

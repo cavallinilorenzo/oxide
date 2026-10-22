@@ -501,6 +501,17 @@ impl Core {
         self.get_thread_by_id(&db, thread_id)
     }
 
+    /// Archives or unarchives a Thread. Threads are archived, never deleted:
+    /// an Archived Thread keeps its history and stays listed.
+    pub fn set_thread_archived(&self, thread_id: u32, archived: bool) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE threads SET archived = ?2 WHERE id = ?1",
+            (thread_id, archived),
+        )?;
+        Ok(())
+    }
+
     pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.set_permission_mode(mode)
@@ -804,6 +815,7 @@ impl Core {
             });
         }
         let actor = self.get_or_create_thread_actor(thread_id)?;
+        self.set_thread_archived(thread_id, false)?;
         actor.send_prompt(prompt.to_string(), attachments.to_vec())
     }
 

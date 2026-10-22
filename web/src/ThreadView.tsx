@@ -51,6 +51,8 @@ interface ThreadViewProps {
   onPrefillUsed: () => void;
   onOpenThread: (threadId: number) => void;
   onThreadContinued: (continued: ContinuedThread, from: number) => void;
+  /** A prompt reached the Thread; the Core unarchives it. */
+  onPromptSent: (threadId: number) => void;
 }
 
 
@@ -104,6 +106,7 @@ export function ThreadView({
   onPrefillUsed,
   onOpenThread,
   onThreadContinued,
+  onPromptSent,
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
@@ -575,7 +578,8 @@ export function ThreadView({
       pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
       setPendingImages([]);
 
-      await commands.sendPrompt(targetThreadId, prompt, attachments);
+      const sent = await commands.sendPrompt(targetThreadId, prompt, attachments);
+      if (sent.status === "ok") onPromptSent(targetThreadId);
     } finally {
       setSending(false);
     }

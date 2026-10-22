@@ -111,7 +111,7 @@ fn terminal_session_accepts_input_streams_output_and_shuts_down_its_process_grou
 
     core.write_terminal(
         terminal.id,
-        b"sleep 60 & echo CHILD=$!; echo READY$((6*7))\n",
+        b"sleep 60 & child=$(pgrep -P $$ sleep); echo CHILD=$child; echo READY$((6*7))\n",
     )
     .unwrap();
     let mut output = String::new();

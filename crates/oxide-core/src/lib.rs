@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod db;
+mod discovery;
 mod error;
 mod settings;
 
@@ -26,10 +27,15 @@ pub struct ProjectSummary {
     pub id: u32,
     pub name: String,
     pub path: String,
+    /// Hidden from the sidebar; stays hidden across rescans.
+    pub hidden: bool,
+    /// The folder no longer exists; the record and its data are kept.
+    pub missing: bool,
 }
 
 pub struct Core {
     home: PathBuf,
+    user_home: PathBuf,
     db: Mutex<Connection>,
     settings: Arc<SettingsStore>,
     _settings_watcher: notify::RecommendedWatcher,
@@ -39,6 +45,17 @@ impl Core {
     /// Opens Oxide's home directory (creating it if needed) and its database.
     pub fn open(home: impl Into<PathBuf>) -> Result<Self> {
         Self::open_with_migrations(home, MIGRATIONS)
+    }
+
+    /// Like [`Core::open`], with `~` in scan roots meaning `user_home`
+    /// instead of `$HOME`.
+    pub fn open_with_user_home(
+        home: impl Into<PathBuf>,
+        user_home: impl Into<PathBuf>,
+    ) -> Result<Self> {
+        let mut core = Self::open(home)?;
+        core.user_home = user_home.into();
+        Ok(core)
     }
 
     pub fn open_with_migrations(home: impl Into<PathBuf>, migrations: &[&str]) -> Result<Self> {
@@ -51,6 +68,9 @@ impl Core {
         let (settings, _settings_watcher) = SettingsStore::open(&home)?;
         Ok(Self {
             home,
+            user_home: std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
             db: Mutex::new(db),
             settings,
             _settings_watcher,
@@ -77,17 +97,69 @@ impl Core {
         self.settings.subscribe(Box::new(f));
     }
 
-    /// All Projects known to Oxide, most recently added first.
+    /// All Projects known to Oxide, hidden and missing ones included, most
+    /// recently added first.
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt = db.prepare("SELECT id, name, path FROM projects ORDER BY id DESC")?;
+        let mut stmt =
+            db.prepare("SELECT id, name, path, hidden FROM projects ORDER BY id DESC")?;
         let rows = stmt.query_map([], |r| {
+            let path: String = r.get(2)?;
             Ok(ProjectSummary {
                 id: r.get(0)?,
                 name: r.get(1)?,
-                path: r.get(2)?,
+                missing: !Path::new(&path).exists(),
+                path,
+                hidden: r.get(3)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Scans the configured scan roots for Git repositories, records new ones
+    /// as Projects (keyed by canonical path) and returns all Projects.
+    /// Existing records, hidden or missing, are left untouched.
+    pub fn rescan_projects(&self) -> Result<Vec<ProjectSummary>> {
+        let roots: Vec<PathBuf> = self
+            .settings()
+            .settings
+            .scan_roots
+            .iter()
+            .map(|r| self.expand_home(r))
+            .collect();
+        let found = discovery::find_repositories(&roots);
+        {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let tx = db.unchecked_transaction()?;
+            for path in &found {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                tx.execute(
+                    "INSERT OR IGNORE INTO projects (name, path) VALUES (?1, ?2)",
+                    (name, path.to_string_lossy()),
+                )?;
+            }
+            tx.commit()?;
+        }
+        self.list_projects()
+    }
+
+    pub fn set_project_hidden(&self, id: u32, hidden: bool) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE projects SET hidden = ?2 WHERE id = ?1",
+            (id, hidden),
+        )?;
+        Ok(())
+    }
+
+    fn expand_home(&self, root: &str) -> PathBuf {
+        match root.strip_prefix("~") {
+            Some("") => self.user_home.clone(),
+            Some(rest) if rest.starts_with('/') => self.user_home.join(&rest[1..]),
+            _ => PathBuf::from(root),
+        }
     }
 }

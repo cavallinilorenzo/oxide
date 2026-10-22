@@ -6,14 +6,19 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// Forward-only migrations. Index `i` upgrades `user_version` from `i` to `i + 1`.
-pub const MIGRATIONS: &[&str] = &["
+pub const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE projects (
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
-"];
+",
+    "
+    ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+",
+];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing
 /// `<path>.bak-<version>` first, where `<version>` is the version being migrated away from.

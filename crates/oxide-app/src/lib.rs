@@ -1,6 +1,8 @@
 //! The App shell: a thin Tauri layer that exposes [`oxide_core::Core`] to the webview.
 //! The webview talks only to the TypeScript bindings generated from here.
 
+use std::sync::Arc;
+
 use oxide_core::{Core, ProjectSummary};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -25,6 +27,8 @@ pub struct Project {
     id: u32,
     name: String,
     path: String,
+    hidden: bool,
+    missing: bool,
 }
 
 impl From<ProjectSummary> for Project {
@@ -33,18 +37,40 @@ impl From<ProjectSummary> for Project {
             id: p.id,
             name: p.name,
             path: p.path,
+            hidden: p.hidden,
+            missing: p.missing,
         }
     }
 }
 
 #[tauri::command]
 #[specta::specta]
-fn list_projects(core: State<'_, Core>) -> Result<Vec<Project>, AppError> {
+fn list_projects(core: State<'_, Arc<Core>>) -> Result<Vec<Project>, AppError> {
     Ok(core
         .list_projects()?
         .into_iter()
         .map(Project::from)
         .collect())
+}
+
+/// Scans the scan roots for new repositories, then lists all Projects.
+/// The walk runs on a blocking thread, off the main thread and the async runtime.
+#[tauri::command]
+#[specta::specta]
+async fn rescan_projects(core: State<'_, Arc<Core>>) -> Result<Vec<Project>, AppError> {
+    let core = Arc::clone(&core);
+    let projects = tauri::async_runtime::spawn_blocking(move || core.rescan_projects())
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })??;
+    Ok(projects.into_iter().map(Project::from).collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_project_hidden(core: State<'_, Arc<Core>>, id: u32, hidden: bool) -> Result<(), AppError> {
+    Ok(core.set_project_hidden(id, hidden)?)
 }
 
 // Settings cross the boundary as the same JSON shape as `settings.json`, so
@@ -131,19 +157,21 @@ pub const SETTINGS_CHANGED: &str = "settings-changed";
 
 #[tauri::command]
 #[specta::specta]
-fn get_settings(core: State<'_, Core>) -> SettingsState {
+fn get_settings(core: State<'_, Arc<Core>>) -> SettingsState {
     (&core.settings()).into()
 }
 
 #[tauri::command]
 #[specta::specta]
-fn save_settings(core: State<'_, Core>, settings: Settings) -> Result<(), AppError> {
+fn save_settings(core: State<'_, Arc<Core>>, settings: Settings) -> Result<(), AppError> {
     Ok(core.save_settings(&convert(&settings))?)
 }
 
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
+        rescan_projects,
+        set_project_hidden,
         get_settings,
         save_settings
     ])
@@ -180,7 +208,7 @@ pub fn run() {
             core.subscribe_settings(move |state| {
                 let _ = handle.emit(SETTINGS_CHANGED, SettingsState::from(state));
             });
-            app.manage(core);
+            app.manage(Arc::new(core));
             Ok(())
         })
         .run(tauri::generate_context!())

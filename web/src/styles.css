@@ -25,3 +25,16 @@ button[aria-pressed="true"] { background: #8883; }
 .settings .error { margin: 0; }
 .error-summary { border: 1px solid #c33; border-radius: 6px; padding: 8px 12px; color: #c33; }
 .error-summary p { margin: 0; }
+.title .path { opacity: 0.6; margin-left: 6px; }
+.badge { margin-left: 6px; padding: 0 5px; border: 1px solid #8886; border-radius: 4px; font-size: 11px; opacity: 0.7; }
+.sidebar { overflow: auto; }
+.sidebar-actions { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.sidebar li { display: flex; align-items: center; gap: 4px; }
+.sidebar li .project { flex: 1; text-align: left; background: none; border: 0; padding: 4px 6px; border-radius: 4px; color: inherit; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar li button.project:hover { background: #8882; }
+.sidebar li button.project[aria-current="true"] { background: #8884; }
+.sidebar li.missing .project { opacity: 0.55; }
+.sidebar .row-action { background: none; border: 0; color: inherit; opacity: 0; font: inherit; cursor: pointer; }
+.sidebar li:hover .row-action, .sidebar .row-action:focus-visible { opacity: 0.7; }
+.sidebar ul[aria-label="Hidden projects"] .row-action { opacity: 0.7; }
+.hidden-toggle { margin-top: 10px; background: none; border: 0; color: inherit; opacity: 0.7; font: inherit; padding: 4px 6px; cursor: pointer; }

@@ -262,3 +262,180 @@ mod settings {
         );
     }
 }
+
+mod discovery {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use oxide_core::{Core, ProjectSummary};
+
+    struct Fixture {
+        _tmp: tempfile::TempDir,
+        root: PathBuf,
+        core: Core,
+    }
+
+    fn fixture() -> Fixture {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("dev").canonicalize_or_create();
+        let core = Core::open(tmp.path().join("home")).unwrap();
+        let mut settings = core.settings().settings;
+        settings.scan_roots = vec![root.to_string_lossy().into_owned()];
+        core.save_settings(&settings).unwrap();
+        Fixture {
+            _tmp: tmp,
+            root,
+            core,
+        }
+    }
+
+    trait CanonicalizeOrCreate {
+        fn canonicalize_or_create(self) -> PathBuf;
+    }
+    impl CanonicalizeOrCreate for PathBuf {
+        fn canonicalize_or_create(self) -> PathBuf {
+            fs::create_dir_all(&self).unwrap();
+            self.canonicalize().unwrap()
+        }
+    }
+
+    fn repo(path: &Path) {
+        fs::create_dir_all(path.join(".git")).unwrap();
+    }
+
+    fn names(projects: &[ProjectSummary]) -> Vec<&str> {
+        let mut n: Vec<_> = projects.iter().map(|p| p.name.as_str()).collect();
+        n.sort();
+        n
+    }
+
+    #[test]
+    fn finds_repositories_within_the_depth_limit_without_descending_into_them() {
+        let f = fixture();
+        repo(&f.root.join("a"));
+        repo(&f.root.join("group/b"));
+        repo(&f.root.join("a/nested-in-repo"));
+        repo(&f.root.join("l1/l2/l3/deep"));
+        repo(&f.root.join("l1/l2/l3/l4/l5/too-deep"));
+        fs::create_dir_all(f.root.join("plain")).unwrap();
+
+        let found = f.core.rescan_projects().unwrap();
+
+        assert_eq!(names(&found), ["a", "b", "deep"]);
+        assert_eq!(names(&f.core.list_projects().unwrap()), ["a", "b", "deep"]);
+        assert!(found.iter().all(|p| !p.hidden && !p.missing));
+    }
+
+    #[test]
+    fn skips_dependency_build_and_hidden_folders() {
+        let f = fixture();
+        for dir in [
+            "node_modules",
+            "target",
+            "dist",
+            "vendor",
+            ".venv",
+            ".cache",
+        ] {
+            repo(&f.root.join(dir).join("pkg"));
+        }
+        repo(&f.root.join("ok"));
+
+        assert_eq!(names(&f.core.rescan_projects().unwrap()), ["ok"]);
+    }
+
+    #[test]
+    fn a_missing_scan_root_is_ignored_and_tilde_means_the_user_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_home = tmp.path().join("user").canonicalize_or_create();
+        repo(&user_home.join("Developer/mine"));
+        let core = Core::open_with_user_home(tmp.path().join("oxide"), &user_home).unwrap();
+        let mut settings = core.settings().settings;
+        settings.scan_roots = vec!["~/Developer".into(), "~/nope".into()];
+        core.save_settings(&settings).unwrap();
+
+        assert_eq!(names(&core.rescan_projects().unwrap()), ["mine"]);
+    }
+
+    #[test]
+    fn rescan_picks_up_a_new_repository_and_keeps_existing_records() {
+        let f = fixture();
+        repo(&f.root.join("first"));
+        let before = f.core.rescan_projects().unwrap();
+
+        repo(&f.root.join("second"));
+        let after = f.core.rescan_projects().unwrap();
+
+        assert_eq!(names(&after), ["first", "second"]);
+        let first = |ps: &[ProjectSummary]| ps.iter().find(|p| p.name == "first").unwrap().id;
+        assert_eq!(first(&before), first(&after));
+    }
+
+    #[test]
+    fn hidden_projects_stay_hidden_across_rescans_until_unhidden() {
+        let f = fixture();
+        repo(&f.root.join("keep"));
+        repo(&f.root.join("hide"));
+        let id = f
+            .core
+            .rescan_projects()
+            .unwrap()
+            .iter()
+            .find(|p| p.name == "hide")
+            .unwrap()
+            .id;
+
+        f.core.set_project_hidden(id, true).unwrap();
+        let after = f.core.rescan_projects().unwrap();
+        let hidden: Vec<_> = after.iter().filter(|p| p.hidden).map(|p| &p.name).collect();
+        assert_eq!(hidden, ["hide"]);
+
+        f.core.set_project_hidden(id, false).unwrap();
+        assert!(f.core.list_projects().unwrap().iter().all(|p| !p.hidden));
+    }
+
+    #[test]
+    fn a_deleted_folder_shows_as_missing_and_keeps_its_record() {
+        let f = fixture();
+        repo(&f.root.join("gone"));
+        let id = f.core.rescan_projects().unwrap()[0].id;
+
+        fs::remove_dir_all(f.root.join("gone")).unwrap();
+        let after = f.core.rescan_projects().unwrap();
+
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, id);
+        assert!(after[0].missing);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_paths_resolve_to_one_project() {
+        let f = fixture();
+        repo(&f.root.join("real"));
+        std::os::unix::fs::symlink(f.root.join("real"), f.root.join("alias")).unwrap();
+        let second_root = f._tmp.path().join("other-root");
+        std::os::unix::fs::symlink(&f.root, &second_root).unwrap();
+        let mut settings = f.core.settings().settings;
+        settings
+            .scan_roots
+            .push(second_root.to_string_lossy().into_owned());
+        f.core.save_settings(&settings).unwrap();
+
+        let found = f.core.rescan_projects().unwrap();
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].path, f.root.join("real").to_string_lossy());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_loops_do_not_hang_the_scan() {
+        let f = fixture();
+        fs::create_dir_all(f.root.join("a")).unwrap();
+        std::os::unix::fs::symlink(&f.root, f.root.join("a/back")).unwrap();
+        repo(&f.root.join("x"));
+
+        assert_eq!(names(&f.core.rescan_projects().unwrap()), ["x"]);
+    }
+}

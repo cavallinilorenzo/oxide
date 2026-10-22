@@ -29,10 +29,8 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   }
 
   useEffect(() => {
-    void commands.listDir(projectId, threadId, "").then((result) => {
-      const listing = result.status === "ok" ? result.data : { error: result.error.message };
-      setListings((prev) => ({ ...prev, "": listing }));
-    });
+    void load("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, threadId]);
 
   function toggle(path: string) {

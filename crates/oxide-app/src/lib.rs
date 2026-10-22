@@ -465,7 +465,8 @@ pub struct FileEntry {
 #[serde(rename_all = "camelCase")]
 pub struct FileContent {
     pub content: String,
-    pub size: f64,
+    /// Saturates at 4 GiB.
+    pub size: u32,
     pub truncated: bool,
     pub binary: bool,
 }
@@ -505,7 +506,12 @@ async fn read_file(
         .map_err(|e| AppError {
             message: e.to_string(),
         })?
-        .map(|file| convert(&file))
+        .map(|file| FileContent {
+            size: u32::try_from(file.size).unwrap_or(u32::MAX),
+            content: file.content,
+            truncated: file.truncated,
+            binary: file.binary,
+        })
         .map_err(AppError::from)
 }
 

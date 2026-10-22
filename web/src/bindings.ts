@@ -127,7 +127,8 @@ export type FieldError = {
 
 export type FileContent = {
 	content: string,
-	size: number | null,
+	/**  Saturates at 4 GiB. */
+	size: number,
 	truncated: boolean,
 	binary: boolean,
 };

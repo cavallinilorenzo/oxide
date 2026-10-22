@@ -509,7 +509,7 @@ fn interrupt_thread(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<(), Ap
 }
 
 /// Up to `limit` Turns of a Thread from position `offset`, for paging in
-/// history older than what `subscribe_thread` returned.
+/// Turns older than what `subscribe_thread` returned.
 #[tauri::command]
 #[specta::specta]
 async fn list_turns(

@@ -25,7 +25,7 @@ export const commands = {
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	/**
 	 *  Up to `limit` Turns of a Thread from position `offset`, for paging in
-	 *  history older than what `subscribe_thread` returned.
+	 *  Turns older than what `subscribe_thread` returned.
 	 */
 	listTurns: (threadId: number, offset: number, limit: number) => typedError<TurnPage_Serialize, AppError>(__TAURI_INVOKE("list_turns", { threadId, offset, limit })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),

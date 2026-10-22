@@ -1,15 +1,15 @@
 import type { TurnSnapshot } from "./bindings";
 import type { TranscriptState } from "./transcript";
 
-/** Turns per page of history. Page `n` holds positions `n * PAGE_SIZE` onward. */
+/** Turns per page of older Turns. Page `n` holds positions `n * PAGE_SIZE` onward. */
 export const PAGE_SIZE = 50;
 
-/** Loaded pages of history older than the live tail, by page number. */
-export type HistoryPages = ReadonlyMap<number, TurnSnapshot[]>;
+/** Loaded pages of Turns older than the live tail, by page number. */
+export type TranscriptPages = ReadonlyMap<number, TurnSnapshot[]>;
 
 /**
  * The pages covering positions `first..=last` that still need loading. Only
- * history before `turnOffset` is paged; the live tail is always present.
+ * Turns before `turnOffset` are paged; the live tail is always present.
  */
 export function pagesToLoad(
   first: number,
@@ -35,7 +35,7 @@ export function pageRequest(page: number, turnOffset: number): { offset: number;
 export function turnAt(
   position: number,
   transcript: TranscriptState,
-  pages: HistoryPages
+  pages: TranscriptPages
 ): TurnSnapshot | undefined {
   if (position >= transcript.turnOffset) {
     return transcript.turns[position - transcript.turnOffset];

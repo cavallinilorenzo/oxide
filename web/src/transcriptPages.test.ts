@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pageRequest, pagesToLoad, turnAt } from "./history";
+import { pageRequest, pagesToLoad, turnAt } from "./transcriptPages";
 import type { TurnSnapshot } from "./bindings";
 import { initialTranscriptState } from "./transcript";
 
@@ -17,7 +17,7 @@ function turn(position: number): TurnSnapshot {
   };
 }
 
-describe("history pages", () => {
+describe("transcript pages", () => {
   it("loads only the pages under the visible range when jumping far back", () => {
     expect(pagesToLoad(3, 20, 9950, () => false)).toEqual([0]);
     expect(pagesToLoad(5020, 5130, 9950, () => false)).toEqual([100, 101, 102]);

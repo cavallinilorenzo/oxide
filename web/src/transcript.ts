@@ -13,7 +13,7 @@ import type {
 /**
  * The live tail of a Thread: `turns` are the Turns at positions
  * `turnOffset..turnOffset + turns.length`, which always runs to the newest
- * Turn. Older Turns are paged in separately (see `history.ts`).
+ * Turn. Older Turns are paged in separately (see `transcriptPages.ts`).
  */
 export interface TranscriptState {
   thread: Thread | null;

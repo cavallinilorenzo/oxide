@@ -16,7 +16,7 @@ import {
 } from "./bindings";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
-import { pageRequest, pagesToLoad, turnAt, type HistoryPages } from "./history";
+import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { ItemContent } from "./ItemContent";
 import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
 
@@ -52,7 +52,7 @@ export function getOfferedPermissionModes(
 
 /** How close to the bottom (px) still counts as following the stream. */
 const STICK_TO_BOTTOM = 48;
-/** How long (ms) the visible range must hold still before paging history in. */
+/** How long (ms) the visible range must hold still before paging older Turns in. */
 const PAGE_LOAD_DELAY = 80;
 
 const ItemView = memo(function ItemView({ item }: { item: ItemSnapshot }) {
@@ -205,7 +205,7 @@ export function ThreadView({
   onStatusChange,
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
-  const [pages, setPages] = useState<HistoryPages>(new Map());
+  const [pages, setPages] = useState<TranscriptPages>(new Map());
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -322,7 +322,7 @@ export function ThreadView({
   const firstVisible = virtualRows[0]?.index ?? 0;
   const lastVisible = virtualRows[virtualRows.length - 1]?.index ?? -1;
 
-  // Page in older history under the visible rows, however far back the jump.
+  // Page in older Turns under the visible rows, however far back the jump.
   // Waits for the range to settle, so dragging the scrollbar across thousands
   // of Turns only loads where it stops.
   useEffect(() => {

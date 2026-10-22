@@ -1,6 +1,7 @@
 //! The Provider contract: the seam between Core and the agent CLI adapters
 //! (Claude Code, Codex, Antigravity CLI). Adapters implement it; Core depends only on it.
 
+pub mod claude;
 pub mod contract_suite;
 
 use crossbeam_channel::Receiver;
@@ -22,6 +23,17 @@ pub enum PermissionMode {
 pub enum ApprovalDecision {
     Allow,
     Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalKind {
+    Command,
+    #[serde(alias = "file_change")]
+    FileChange,
+    Tool,
+    #[default]
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -46,16 +58,22 @@ pub enum TurnStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Detection {
     pub available: bool,
+    #[serde(default)]
+    pub installed: bool,
     pub version: Option<String>,
+    #[serde(default)]
+    pub authenticated: bool,
+    #[serde(default)]
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
-    /// The Provider exposes its reasoning as text; when false, Reasoning Items are dropped.
-    pub reasoning_text: bool,
+    pub supports_reasoning: bool,
     /// The Provider accepts image attachments with a prompt.
+    #[serde(default)]
     pub image_attachments: bool,
 }
 
@@ -110,7 +128,12 @@ pub enum ProviderEvent {
     },
     ApprovalRequested {
         id: String,
-        description: String,
+        #[serde(default)]
+        kind: ApprovalKind,
+        #[serde(alias = "description")]
+        summary: String,
+        #[serde(default)]
+        options: Vec<String>,
     },
     Error {
         message: String,
@@ -246,6 +269,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
 }
 
 type PromptHandler = Box<dyn Fn(&str) + Send + Sync>;
+type ApprovalHandler = Box<dyn Fn(&str, ApprovalDecision) + Send + Sync>;
 
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
@@ -253,6 +277,8 @@ pub struct FakeProvider {
     event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
     event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
     prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
+    approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
+    current_permission_mode: Arc<Mutex<PermissionMode>>,
 }
 
 impl Default for FakeProvider {
@@ -266,16 +292,21 @@ impl Default for FakeProvider {
                     PermissionMode::FullAccess,
                 ],
                 interactive_approvals: true,
-                reasoning_text: true,
+                supports_reasoning: true,
                 image_attachments: true,
             },
             detection: Detection {
                 available: true,
+                installed: true,
                 version: Some("0.1.0-fake".to_string()),
+                authenticated: true,
+                warning: None,
             },
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            approval_handler: Arc::new(Mutex::new(None)),
+            current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
     }
 }
@@ -289,6 +320,8 @@ impl FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            approval_handler: Arc::new(Mutex::new(None)),
+            current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
     }
 
@@ -320,6 +353,14 @@ impl FakeProvider {
 
     pub fn on_prompt(&self, handler: impl Fn(&str) + Send + Sync + 'static) {
         *self.prompt_handler.lock().unwrap() = Some(Box::new(handler));
+    }
+
+    pub fn on_approval(&self, handler: impl Fn(&str, ApprovalDecision) + Send + Sync + 'static) {
+        *self.approval_handler.lock().unwrap() = Some(Box::new(handler));
+    }
+
+    pub fn current_permission_mode(&self) -> PermissionMode {
+        *self.current_permission_mode.lock().unwrap()
     }
 }
 
@@ -364,9 +405,12 @@ impl Provider for FakeProvider {
 
     fn respond_to_approval(
         &mut self,
-        _id: &str,
-        _decision: ApprovalDecision,
+        id: &str,
+        decision: ApprovalDecision,
     ) -> Result<(), ProviderError> {
+        if let Some(ref handler) = *self.approval_handler.lock().unwrap() {
+            handler(id, decision);
+        }
         Ok(())
     }
 
@@ -374,12 +418,14 @@ impl Provider for FakeProvider {
         Ok(())
     }
 
-    fn set_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), ProviderError> {
+    fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {
+        *self.current_permission_mode.lock().unwrap() = mode;
         Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), ProviderError> {
         *self.prompt_handler.lock().unwrap() = None;
+        *self.approval_handler.lock().unwrap() = None;
         self.event_sender.take();
         Ok(())
     }

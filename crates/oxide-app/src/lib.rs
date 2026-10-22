@@ -169,6 +169,32 @@ fn save_settings(core: State<'_, Arc<Core>>, settings: Settings) -> Result<(), A
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
+pub enum ApprovalDecision {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalKind {
+    Command,
+    #[serde(alias = "file_change")]
+    FileChange,
+    Tool,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCapabilities {
+    pub supported_permission_modes: Vec<PermissionMode>,
+    pub interactive_approvals: bool,
+    pub supports_reasoning: bool,
+    pub image_attachments: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
     Working,
     NeedsInput,
@@ -224,6 +250,20 @@ pub struct ItemSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ApprovalSnapshot {
+    pub id: u32,
+    pub turn_id: u32,
+    pub approval_id: String,
+    pub kind: ApprovalKind,
+    pub summary: String,
+    pub options: Vec<String>,
+    pub decision: Option<ApprovalDecision>,
+    pub created_at: String,
+    pub decided_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
@@ -235,6 +275,16 @@ pub struct TurnSnapshot {
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    pub approvals: Vec<ApprovalSnapshot>,
+    pub unknown_events: Vec<UnknownEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownEventSnapshot {
+    pub id: u32,
+    pub raw: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -251,6 +301,7 @@ pub struct ThreadSnapshot {
     pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub last_seq: u32,
+    pub supported_permission_modes: Vec<PermissionMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -287,20 +338,33 @@ pub enum ThreadEvent {
     },
     ApprovalRequested {
         id: String,
-        description: String,
+        kind: ApprovalKind,
+        summary: String,
+        options: Vec<String>,
+    },
+    ApprovalResponded {
+        id: String,
+        decision: ApprovalDecision,
+        decided_at: String,
     },
     Error {
         message: String,
     },
-    Unknown {
-        raw: String,
-    },
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SequencedThreadEvent {
     pub seq: u32,
     pub event: ThreadEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSequencedThreadEvent {
+    pub seq: u32,
+    pub event: ThreadEvent,
+    pub raw_payload: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -312,6 +376,61 @@ pub struct ThreadStatusChangedPayload {
 
 pub const THREAD_STATUS_CHANGED: &str = "thread-status-changed";
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Terminal {
+    pub id: u32,
+    pub pid: u32,
+    pub cwd: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn start_terminal(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    on_output: tauri::ipc::Channel<Vec<u8>>,
+) -> Result<Terminal, AppError> {
+    let terminal = core.start_terminal(project_id, thread_id)?;
+    let rx = core.subscribe_terminal(terminal.id)?;
+    std::thread::spawn(move || {
+        while let Ok(chunk) = rx.recv() {
+            if on_output.send(chunk).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&terminal))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn write_terminal(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    input: Vec<u8>,
+) -> Result<(), AppError> {
+    Ok(core.write_terminal(terminal_id, &input)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn resize_terminal(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    rows: u16,
+    cols: u16,
+) -> Result<(), AppError> {
+    Ok(core.resize_terminal(terminal_id, rows, cols)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn close_terminal(core: State<'_, Arc<Core>>, terminal_id: u32) -> Result<(), AppError> {
+    Ok(core.close_terminal(terminal_id)?)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -320,11 +439,61 @@ fn create_thread(
     provider: String,
     model: Option<String>,
     effort: Option<String>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
 ) -> Result<Thread, AppError> {
-    let mode: oxide_core::PermissionMode = convert(&permission_mode);
+    let mode: Option<oxide_core::PermissionMode> = permission_mode.map(|m| convert(&m));
     let summary = core.create_thread(project_id, &provider, model, effort, mode)?;
     Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_permission_mode(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    permission_mode: PermissionMode,
+) -> Result<(), AppError> {
+    let mode: oxide_core::PermissionMode = convert(&permission_mode);
+    Ok(core.set_thread_permission_mode(thread_id, mode)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn respond_to_approval(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    approval_id: String,
+    decision: ApprovalDecision,
+) -> Result<(), AppError> {
+    let dec: oxide_core::ApprovalDecision = convert(&decision);
+    Ok(core.respond_to_approval(thread_id, &approval_id, dec)?)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Detection {
+    pub available: bool,
+    pub installed: bool,
+    pub version: Option<String>,
+    pub authenticated: bool,
+    pub warning: Option<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn detect_provider(core: State<'_, Arc<Core>>, provider: String) -> Result<Detection, AppError> {
+    let det = core.detect_provider(&provider);
+    Ok(convert(&det))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_provider_capabilities(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+) -> Result<ProviderCapabilities, AppError> {
+    let caps = core.get_provider_capabilities(&provider);
+    Ok(convert(&caps))
 }
 
 #[tauri::command]
@@ -405,6 +574,25 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+#[tauri::command]
+#[specta::specta]
+fn subscribe_thread_debug(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    on_event: tauri::ipc::Channel<DebugSequencedThreadEvent>,
+) -> Result<ThreadSnapshot, AppError> {
+    let (snapshot, rx) = core.subscribe_thread_debug(thread_id)?;
+    std::thread::spawn(move || {
+        while let Ok(evt) = rx.recv() {
+            let app_evt: DebugSequencedThreadEvent = convert(&evt);
+            if on_event.send(app_evt).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&snapshot))
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
@@ -413,13 +601,22 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_settings,
         save_settings,
         create_thread,
+        set_thread_permission_mode,
+        respond_to_approval,
+        detect_provider,
+        get_provider_capabilities,
         list_threads,
         send_prompt,
         save_attachment,
         read_attachment,
         provider_capabilities,
         interrupt_thread,
-        subscribe_thread
+        subscribe_thread,
+        subscribe_thread_debug,
+        start_terminal,
+        write_terminal,
+        resize_terminal,
+        close_terminal
     ])
 }
 

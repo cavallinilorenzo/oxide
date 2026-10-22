@@ -1,5 +1,8 @@
 import type {
+  ApprovalDecision,
+  ApprovalSnapshot,
   ItemSnapshot,
+  PermissionMode,
   SequencedThreadEvent,
   Thread,
   ThreadCapabilities,
@@ -14,6 +17,7 @@ export interface TranscriptState {
   turns: TurnSnapshot[];
   capabilities: ThreadCapabilities;
   lastSeq: number;
+  supportedPermissionModes: PermissionMode[];
 }
 
 const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false, imageAttachments: false };
@@ -26,14 +30,16 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
       turns: [],
       capabilities: NO_CAPABILITIES,
       lastSeq: 0,
+      supportedPermissionModes: ["ask", "auto-edit", "full-access"],
     };
   }
   return {
     thread: snapshot.thread,
     status: snapshot.thread.status,
-    turns: snapshot.turns,
+    turns: snapshot.turns.map((t) => ({ ...t, approvals: t.approvals || [] })),
     capabilities: snapshot.capabilities,
     lastSeq: snapshot.lastSeq,
+    supportedPermissionModes: snapshot.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
   };
 }
 
@@ -85,6 +91,8 @@ export function applyThreadEvent(
         startedAt: new Date().toISOString(),
         completedAt: null,
         items: existing >= 0 ? turns[existing].items : [],
+        approvals: existing >= 0 ? turns[existing].approvals : [],
+        unknownEvents: existing >= 0 ? turns[existing].unknownEvents : [],
       };
       if (existing >= 0) turns[existing] = newTurn;
       else turns.push(newTurn);
@@ -130,10 +138,15 @@ export function applyThreadEvent(
     case "TurnCompleted": {
       const idx = turns.findIndex((t) => t.turnIndex === event.payload.turn_index);
       if (idx >= 0) {
+        const turn = { ...turns[idx] };
+        const approvals = (turn.approvals || []).map((app) =>
+          app.decision ? app : { ...app, decision: "deny" as ApprovalDecision, decidedAt: new Date().toISOString() }
+        );
         turns[idx] = {
-          ...turns[idx],
+          ...turn,
           status: event.payload.status,
           completedAt: new Date().toISOString(),
+          approvals,
         };
       }
       break;
@@ -146,6 +159,55 @@ export function applyThreadEvent(
 
     case "ApprovalRequested": {
       status = "needs-input";
+      if (turns.length > 0) {
+        const lastTurnIndex = turns.length - 1;
+        const turn = { ...turns[lastTurnIndex] };
+        const approvals = [...(turn.approvals || [])];
+        const newApproval: ApprovalSnapshot = {
+          id: 0,
+          turnId: turn.id,
+          approvalId: event.payload.id,
+          kind: event.payload.kind,
+          summary: event.payload.summary,
+          options: event.payload.options || [],
+          decision: null,
+          createdAt: new Date().toISOString(),
+          decidedAt: null,
+        };
+        approvals.push(newApproval);
+        turn.approvals = approvals;
+        turns[lastTurnIndex] = turn;
+      }
+      break;
+    }
+
+    case "ApprovalResponded": {
+      let hasPending = false;
+      for (let tIdx = turns.length - 1; tIdx >= 0; tIdx--) {
+        const turn = { ...turns[tIdx] };
+        let modified = false;
+        const approvals = (turn.approvals || []).map((app) => {
+          if (app.approvalId === event.payload.id) {
+            modified = true;
+            return {
+              ...app,
+              decision: event.payload.decision,
+              decidedAt: event.payload.decided_at,
+            };
+          }
+          if (!app.decision) {
+            hasPending = true;
+          }
+          return app;
+        });
+        if (modified) {
+          turn.approvals = approvals;
+          turns[tIdx] = turn;
+        }
+      }
+      if (!hasPending && status === "needs-input") {
+        status = "working";
+      }
       break;
     }
 
@@ -165,5 +227,6 @@ export function applyThreadEvent(
     turns,
     capabilities: state.capabilities,
     lastSeq: sequenced.seq,
+    supportedPermissionModes: state.supportedPermissionModes,
   };
 }

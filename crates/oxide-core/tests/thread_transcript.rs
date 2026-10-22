@@ -421,7 +421,7 @@ fn reasoning_items_are_dropped_when_provider_lacks_reasoning_text() {
         .unwrap();
     let mut fake = FakeProvider::scripted();
     fake.set_capabilities(oxide_provider::ProviderCapabilities {
-        reasoning_text: false,
+        supports_reasoning: false,
         ..fake.capabilities()
     });
     core.register_fake_provider(thread.id, fake);

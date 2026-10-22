@@ -15,7 +15,11 @@ export const commands = {
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
-	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
+	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
+	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
+	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
 	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
@@ -26,11 +30,82 @@ export const commands = {
 	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
+	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
+	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
+	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
+	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
+	closeTerminal: (terminalId: number) => typedError<null, AppError>(__TAURI_INVOKE("close_terminal", { terminalId })),
 };
 
 /* Types */
 export type AppError = {
 	message: string,
+};
+
+export type ApprovalDecision = "allow" | "deny";
+
+export type ApprovalKind = ApprovalKind_Serialize | ApprovalKind_Deserialize;
+
+export type ApprovalKind_Deserialize = "command" | "file-change" | "file_change" | "tool" | "other";
+
+export type ApprovalKind_Serialize = "command" | "file-change" | "tool" | "other";
+
+export type ApprovalSnapshot = ApprovalSnapshot_Serialize | ApprovalSnapshot_Deserialize;
+
+export type ApprovalSnapshot_Deserialize = {
+	id: number,
+	turnId: number,
+	approvalId: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+	decision?: ApprovalDecision | null,
+	createdAt: string,
+	decidedAt?: string | null,
+};
+
+export type ApprovalSnapshot_Serialize = {
+	id: number,
+	turnId: number,
+	approvalId: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
+	decision: ApprovalDecision | null,
+	createdAt: string,
+	decidedAt: string | null,
+};
+
+export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
+
+export type DebugSequencedThreadEvent_Deserialize = {
+	seq: number,
+	event: ThreadEvent_Deserialize,
+	rawPayload?: string | null,
+};
+
+export type DebugSequencedThreadEvent_Serialize = {
+	seq: number,
+	event: ThreadEvent_Serialize,
+	rawPayload: string | null,
+};
+
+export type Detection = Detection_Serialize | Detection_Deserialize;
+
+export type Detection_Deserialize = {
+	available: boolean,
+	installed: boolean,
+	version?: string | null,
+	authenticated: boolean,
+	warning?: string | null,
+};
+
+export type Detection_Serialize = {
+	available: boolean,
+	installed: boolean,
+	version: string | null,
+	authenticated: boolean,
+	warning: string | null,
 };
 
 export type FieldError = {
@@ -71,6 +146,13 @@ export type Project = {
 };
 
 export type Provider = "claude" | "codex" | "antigravity";
+
+export type ProviderCapabilities = {
+	supportedPermissionModes: PermissionMode[],
+	interactiveApprovals: boolean,
+	supportsReasoning: boolean,
+	imageAttachments: boolean,
+};
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;
 
@@ -142,6 +224,12 @@ export type Settings_Serialize = {
 	editor: string,
 };
 
+export type Terminal = {
+	id: number,
+	pid: number,
+	cwd: string,
+};
+
 export type Thread = Thread_Serialize | Thread_Deserialize;
 
 export type ThreadCapabilities = {
@@ -176,12 +264,16 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
-	description: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+} } | { type: "ApprovalResponded"; payload: {
+	id: string,
+	decision: ApprovalDecision,
+	decided_at: string,
 } } | { type: "Error"; payload: {
 	message: string,
-} } | { type: "Unknown"; payload: {
-	raw: string,
-} };
+} } | { type: "Unknown" };
 
 export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
@@ -208,12 +300,16 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
-	description: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
+} } | { type: "ApprovalResponded"; payload: {
+	id: string,
+	decision: ApprovalDecision,
+	decided_at: string,
 } } | { type: "Error"; payload: {
 	message: string,
-} } | { type: "Unknown"; payload: {
-	raw: string,
-} };
+} } | { type: "Unknown" };
 
 export type ThreadSnapshot = ThreadSnapshot_Serialize | ThreadSnapshot_Deserialize;
 
@@ -222,6 +318,7 @@ export type ThreadSnapshot_Deserialize = {
 	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Deserialize[],
 	lastSeq: number,
+	supportedPermissionModes: PermissionMode[],
 };
 
 export type ThreadSnapshot_Serialize = {
@@ -229,6 +326,7 @@ export type ThreadSnapshot_Serialize = {
 	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Serialize[],
 	lastSeq: number,
+	supportedPermissionModes: PermissionMode[],
 };
 
 export type ThreadStatus = "working" | "needs-input" | "completed" | "error" | "interrupted";
@@ -272,6 +370,8 @@ export type TurnSnapshot_Deserialize = {
 	startedAt: string,
 	completedAt?: string | null,
 	items: ItemSnapshot_Deserialize[],
+	approvals: ApprovalSnapshot_Deserialize[],
+	unknownEvents: UnknownEventSnapshot[],
 };
 
 export type TurnSnapshot_Serialize = {
@@ -285,9 +385,17 @@ export type TurnSnapshot_Serialize = {
 	startedAt: string,
 	completedAt: string | null,
 	items: ItemSnapshot_Serialize[],
+	approvals: ApprovalSnapshot_Serialize[],
+	unknownEvents: UnknownEventSnapshot[],
 };
 
 export type TurnStatus = "running" | "completed" | "interrupted" | "error";
+
+export type UnknownEventSnapshot = {
+	id: number,
+	raw: string,
+	createdAt: string,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

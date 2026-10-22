@@ -8,7 +8,13 @@ import {
   PersonIcon,
   ToolsIcon,
 } from "@primer/octicons-react";
-import { commands, type ItemSnapshot, type TurnSnapshot } from "./bindings";
+import {
+  commands,
+  type ApprovalDecision,
+  type ApprovalSnapshot,
+  type ItemSnapshot,
+  type TurnSnapshot,
+} from "./bindings";
 import { ProviderMark } from "./ProviderMark";
 import {
   formatTime,
@@ -144,14 +150,105 @@ function AttachmentImage({ path }: { path: string }) {
   return <img className="attachment" src={url} alt="Attached" />;
 }
 
+export const ApprovalView = memo(function ApprovalView({
+  approval,
+  onRespond,
+  disabled,
+}: {
+  approval: ApprovalSnapshot;
+  onRespond: (approvalId: string, decision: ApprovalDecision) => void;
+  disabled?: boolean;
+}) {
+  const isPending = !approval.decision;
+  const kindLabel =
+    approval.kind === "file-change" || approval.kind === "file_change"
+      ? "file change"
+      : approval.kind;
+
+  return (
+    <div
+      className={`approval-card ${isPending ? "pending" : "decided"}`}
+      aria-label="Approval"
+    >
+      <div className="approval-header">
+        <span className="approval-kind-badge">{kindLabel}</span>
+        <span className="approval-title">Approval request</span>
+        {approval.createdAt && (
+          <span className="approval-time">
+            {new Date(approval.createdAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        )}
+      </div>
+
+      <div className="approval-summary">{approval.summary}</div>
+
+      {isPending ? (
+        <div className="approval-actions">
+          <button
+            type="button"
+            className="approval-btn allow"
+            disabled={disabled}
+            onClick={() => onRespond(approval.approvalId, "allow")}
+          >
+            Allow
+          </button>
+          <button
+            type="button"
+            className="approval-btn deny"
+            disabled={disabled}
+            onClick={() => onRespond(approval.approvalId, "deny")}
+          >
+            Deny
+          </button>
+          {approval.options?.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="approval-btn option"
+              disabled={disabled}
+              onClick={() => onRespond(approval.approvalId, "allow")}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="approval-decision-bar">
+          <span className={`approval-decision ${approval.decision}`}>
+            {approval.decision === "allow" ? "Allowed" : "Denied"}
+          </span>
+          {approval.decidedAt && (
+            <span className="approval-decision-time">
+              at{" "}
+              {new Date(approval.decidedAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const TurnView = memo(function TurnView({
   turn,
   provider,
+  onRespond,
+  isWorking,
 }: {
   turn: TurnSnapshot;
   provider: string;
+  onRespond: (approvalId: string, decision: ApprovalDecision) => void;
+  isWorking: boolean;
 }) {
   const blocks = groupTurnItems(turn.items);
+  const approvals = turn.approvals ?? [];
   return (
     <section className="turn">
       <div className="user-message">
@@ -169,7 +266,7 @@ export const TurnView = memo(function TurnView({
           {turn.prompt}
         </div>
       </div>
-      {(blocks.length > 0 || turn.status === "running") && (
+      {(blocks.length > 0 || approvals.length > 0 || turn.status === "running") && (
         <div className="agent-turn">
           <div className="agent-header">
             <ProviderMark provider={provider} />
@@ -177,6 +274,14 @@ export const TurnView = memo(function TurnView({
           </div>
           {blocks.map((block, i) => (
             <BlockView key={i} block={block} />
+          ))}
+          {approvals.map((approval) => (
+            <ApprovalView
+              key={`${approval.id}-${approval.approvalId}`}
+              approval={approval}
+              onRespond={onRespond}
+              disabled={!isWorking && turn.status !== "running"}
+            />
           ))}
         </div>
       )}

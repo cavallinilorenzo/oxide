@@ -29,7 +29,22 @@ export function withProvider(form: DispatchForm, settings: Settings, provider: s
   return { ...next, prompt: form.prompt };
 }
 
-export function dispatchRequest(projectId: number, form: DispatchForm): DispatchRequest {
+/** The GitHub issue a task starts from. */
+export interface DispatchIssue {
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+}
+
+/** The form starting from an issue: its number, title, URL and body as an editable prompt. */
+export function issueDispatchForm(form: DispatchForm, issue: DispatchIssue): DispatchForm {
+  const head = `Issue #${issue.number}: ${issue.title}\n${issue.url}`;
+  const body = issue.body.trim();
+  return { ...form, prompt: body ? `${head}\n\n${body}` : head };
+}
+
+export function dispatchRequest(projectId: number, form: DispatchForm, issue?: DispatchIssue): DispatchRequest {
   const blankToNull = (text: string) => text.trim() || null;
   return {
     projectId,
@@ -39,6 +54,8 @@ export function dispatchRequest(projectId: number, form: DispatchForm): Dispatch
     effort: blankToNull(form.effort),
     permissionMode: form.permissionMode,
     baseBranch: blankToNull(form.baseBranch),
+    issueNumber: issue?.number ?? null,
+    issueTitle: issue?.title ?? null,
   };
 }
 

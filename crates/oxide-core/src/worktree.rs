@@ -20,9 +20,25 @@ pub struct DispatchRequest {
     pub effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub base_branch: Option<String>,
+    /// The GitHub issue the task comes from: the Thread remembers it and its branch is
+    /// `oxide/<issue-n>-<slug of the issue title>`.
+    pub issue_number: Option<u32>,
+    pub issue_title: Option<String>,
 }
 
-/// `Fix the login bug!` → `fix-the-login-bug`; never empty.
+/// `body` closing issue `n` when merged: unchanged if it already has a `Closes #n`.
+pub(crate) fn closing_issue(body: &str, n: u32) -> String {
+    let line = format!("Closes #{n}");
+    if body.to_lowercase().contains(&line.to_lowercase()) {
+        body.to_string()
+    } else if body.trim().is_empty() {
+        line
+    } else {
+        format!("{}\n\n{line}", body.trim_end())
+    }
+}
+
+/// `Fix the login bug!` →`fix-the-login-bug`; never empty.
 fn slugify(text: &str, fallback: &str) -> String {
     let mut slug = String::new();
     for c in text.chars() {
@@ -163,7 +179,16 @@ impl Core {
             .home
             .join("worktrees")
             .join(slugify(&project.name, "project"));
-        let slug = slugify(&crate::thread::truncate_title(prompt), "thread");
+        let slug = match request.issue_number {
+            Some(n) => {
+                let title = request.issue_title.as_deref().unwrap_or(prompt);
+                format!(
+                    "{n}-{}",
+                    slugify(&crate::thread::truncate_title(title), "thread")
+                )
+            }
+            None => slugify(&crate::thread::truncate_title(prompt), "thread"),
+        };
         let (branch, worktree) = self.git.mutate(&root, || {
             std::fs::create_dir_all(&parent).map_err(|source| Error::Io {
                 path: parent.clone(),
@@ -198,8 +223,13 @@ impl Core {
             None,
         )?;
         self.db.lock().unwrap_or_else(|e| e.into_inner()).execute(
-            "UPDATE threads SET branch = ?1, worktree_path = ?2 WHERE id = ?3",
-            rusqlite::params![branch, worktree.to_string_lossy(), thread.id],
+            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3 WHERE id = ?4",
+            rusqlite::params![
+                branch,
+                worktree.to_string_lossy(),
+                request.issue_number,
+                thread.id
+            ],
         )?;
 
         if let Some(command) = self.project_setup_command(project.id)? {
@@ -225,6 +255,23 @@ impl Core {
 
         self.send_prompt(thread.id, prompt)?;
         self.thread_summary(thread.id)
+    }
+
+    /// The issue a Board Thread of the Project was started from on `branch`, if any.
+    pub(crate) fn issue_of_branch(&self, project_id: u32, branch: &str) -> Result<Option<u32>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let found: Option<Option<u32>> = db
+            .query_row(
+                "SELECT issue_number FROM threads WHERE project_id = ?1 AND branch = ?2 AND issue_number IS NOT NULL ORDER BY id DESC LIMIT 1",
+                rusqlite::params![project_id, branch],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(e),
+            })?;
+        Ok(found.flatten())
     }
 
     fn thread_summary(&self, thread_id: u32) -> Result<ThreadSummary> {

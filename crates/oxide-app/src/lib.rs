@@ -364,6 +364,7 @@ pub struct Thread {
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
     pub setup_output: Option<String>,
+    pub issue_number: Option<u32>,
 }
 
 /// An Approval the Provider is still waiting on.
@@ -1248,6 +1249,8 @@ pub struct DispatchRequest {
     pub effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub base_branch: Option<String>,
+    pub issue_number: Option<u32>,
+    pub issue_title: Option<String>,
 }
 
 /// Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn.
@@ -1857,6 +1860,7 @@ mod tests {
                 branch: None,
                 worktree_path: None,
                 setup_output: None,
+                issue_number: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

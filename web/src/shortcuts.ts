@@ -36,3 +36,10 @@ export function isNewThreadShortcut(e: KeyPress): boolean {
 export function isClearCommand(input: string): boolean {
   return input.trim() === "/clear";
 }
+
+/** ⌘1..9 / Ctrl 1..9 picks visible model in picker. */
+export function isModelShortcut(e: KeyPress): number | null {
+  if ((!e.metaKey && !e.ctrlKey) || e.altKey || e.shiftKey) return null;
+  const match = /^[1-9]$/.exec(e.key);
+  return match ? parseInt(match[0], 10) : null;
+}

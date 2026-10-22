@@ -189,11 +189,24 @@ pub enum ApprovalKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub supported_efforts: Vec<String>,
+    pub default_effort: Option<String>,
+    pub is_legacy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
     pub image_attachments: bool,
+    pub mid_thread_model_switch: bool,
+    pub slash_command_passthrough: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1053,6 +1066,43 @@ fn get_provider_capabilities(
 
 #[tauri::command]
 #[specta::specta]
+fn get_model_catalog(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+    refresh: bool,
+) -> Result<Vec<ModelInfo>, AppError> {
+    let models = core.get_model_catalog(&provider, refresh)?;
+    Ok(convert(&models))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_favourite_models(core: State<'_, Arc<Core>>) -> Result<Vec<String>, AppError> {
+    Ok(core.get_favourite_models()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_favourite_models(
+    core: State<'_, Arc<Core>>,
+    favourites: Vec<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_favourite_models(&favourites)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_model_and_effort(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_thread_model_and_effort(thread_id, model, effort)?)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Thread>, AppError> {
     let list = core.list_threads(project_id)?;
     Ok(convert(&list))
@@ -1293,6 +1343,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         respond_to_approval,
         detect_provider,
         get_provider_capabilities,
+        get_model_catalog,
+        get_favourite_models,
+        set_favourite_models,
+        set_thread_model_and_effort,
         list_threads,
         send_prompt,
         save_attachment,
@@ -1408,8 +1462,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Oxide")
         .run(|app, event| match event {
-            #[cfg(target_os = "macos")]
             // The Dock icon was clicked while the window was hidden.
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => show_main_window(app),
             // ⌘Q: ask first when Threads are running.
             tauri::RunEvent::ExitRequested {

@@ -24,6 +24,10 @@ export const commands = {
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
+	getModelCatalog: (provider: string, refresh: boolean) => typedError<ModelInfo_Serialize[], AppError>(__TAURI_INVOKE("get_model_catalog", { provider, refresh })),
+	getFavouriteModels: () => typedError<string[], AppError>(__TAURI_INVOKE("get_favourite_models")),
+	setFavouriteModels: (favourites: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_favourite_models", { favourites })),
+	setThreadModelAndEffort: (threadId: number, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_model_and_effort", { threadId, model, effort })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
 	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
@@ -357,6 +361,26 @@ export type ItemSnapshot_Serialize = {
 	createdAt: string,
 };
 
+export type ModelInfo = ModelInfo_Serialize | ModelInfo_Deserialize;
+
+export type ModelInfo_Deserialize = {
+	id: string,
+	name: string,
+	description?: string | null,
+	supportedEfforts: string[],
+	defaultEffort?: string | null,
+	isLegacy: boolean,
+};
+
+export type ModelInfo_Serialize = {
+	id: string,
+	name: string,
+	description: string | null,
+	supportedEfforts: string[],
+	defaultEffort: string | null,
+	isLegacy: boolean,
+};
+
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
 
 export type Project = {
@@ -374,6 +398,8 @@ export type ProviderCapabilities = {
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
 	imageAttachments: boolean,
+	midThreadModelSwitch: boolean,
+	slashCommandPassthrough: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;

@@ -66,6 +66,12 @@ pub enum StorageMsg {
         permission_mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
+    UpdateThreadModelAndEffort {
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+        reply: mpsc::Sender<Result<()>>,
+    },
     UpdateThreadStatus {
         thread_id: u32,
         status: ThreadStatus,
@@ -260,6 +266,22 @@ impl StorageHandle {
         let _ = self.sender.send(StorageMsg::UpdateThreadPermissionMode {
             thread_id,
             permission_mode,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    pub fn update_thread_model_and_effort(
+        &self,
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::UpdateThreadModelAndEffort {
+            thread_id,
+            model,
+            effort,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -529,6 +551,21 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     conn.execute(
                         "UPDATE threads SET permission_mode = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
                         rusqlite::params![mode_str, thread_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::UpdateThreadModelAndEffort {
+                thread_id,
+                model,
+                effort,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    conn.execute(
+                        "UPDATE threads SET model = ?1, effort = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?3",
+                        rusqlite::params![model, effort, thread_id],
                     )?;
                     Ok(())
                 })();

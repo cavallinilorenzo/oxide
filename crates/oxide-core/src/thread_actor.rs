@@ -36,6 +36,11 @@ pub enum ThreadActorMsg {
         mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
+    SetModelAndEffort {
+        model: Option<String>,
+        effort: Option<String>,
+        reply: mpsc::Sender<Result<()>>,
+    },
     Subscribe {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<SequencedThreadEvent>)>,
     },
@@ -140,6 +145,22 @@ impl ThreadActorHandle {
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    pub fn set_model_and_effort(
+        &self,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(ThreadActorMsg::SetModelAndEffort {
+            model,
+            effort,
+            reply: reply_tx,
+        });
+        reply_rx
+            .recv()
+            .map_err(|_| Error::Provider("channel disconnected".into()))?
     }
 
     pub fn subscribe(&self) -> Result<(ThreadSnapshot, Receiver<SequencedThreadEvent>)> {
@@ -631,6 +652,73 @@ fn run_thread_actor(
                 };
                 match msg {
                     ThreadActorMsg::SendPrompt { prompt, attachments, reply } => {
+                        let trimmed = prompt.trim();
+                        if trimmed == "/model" {
+                            // Selector action - intercepted, never reaches provider
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+                        if let Some(arg) = trimmed.strip_prefix("/model ") {
+                            let model_name = arg.trim();
+                            if !model_name.is_empty() {
+                                let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                                let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+                                let current_effort = current_snapshot.as_ref().ok().and_then(|s| s.thread.effort.clone());
+
+                                if state.next_turn_index > 0
+                                    && !state.capabilities.mid_thread_model_switch
+                                    && Some(model_name.to_string()) != current_model
+                                {
+                                    let _ = reply.send(Err(Error::Provider(
+                                        "Provider does not support mid-thread model switch".into(),
+                                    )));
+                                    continue;
+                                }
+
+                                if state.provider_live && state.current_turn.is_none() {
+                                    let _ = provider.set_model(model_name);
+                                }
+                                let _ = storage.update_thread_model_and_effort(
+                                    state.thread_id,
+                                    Some(model_name.to_string()),
+                                    current_effort,
+                                );
+                            }
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+
+                        if trimmed == "/effort" {
+                            // Selector action - intercepted, never reaches provider
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+                        if let Some(arg) = trimmed.strip_prefix("/effort ") {
+                            let effort_val = arg.trim();
+                            if !effort_val.is_empty() {
+                                let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                                let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+
+                                if state.provider_live && state.current_turn.is_none() {
+                                    let _ = provider.set_effort(effort_val);
+                                }
+                                let _ = storage.update_thread_model_and_effort(
+                                    state.thread_id,
+                                    current_model,
+                                    Some(effort_val.to_string()),
+                                );
+                            }
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+
+                        if trimmed.starts_with('/') && !state.capabilities.slash_command_passthrough {
+                            let _ = reply.send(Err(Error::Provider(
+                                format!("Slash command '{}' is not supported by this provider", trimmed),
+                            )));
+                            continue;
+                        }
+
                         if !attachments.is_empty() && !state.capabilities.image_attachments {
                             let _ = reply.send(Err(Error::Io {
                                 path: PathBuf::from("attachments"),
@@ -711,6 +799,46 @@ fn run_thread_actor(
                             Ok(())
                         };
                         let s_res = storage.update_thread_permission_mode(state.thread_id, mode);
+                        let _ = reply.send(p_res.and(s_res));
+                    }
+                    ThreadActorMsg::SetModelAndEffort { model, effort, reply } => {
+                        let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                        let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+                        let current_effort = current_snapshot.as_ref().ok().and_then(|s| s.thread.effort.clone());
+
+                        if state.next_turn_index > 0
+                            && !state.capabilities.mid_thread_model_switch
+                            && model.is_some()
+                            && model != current_model
+                        {
+                            let _ = reply.send(Err(Error::Provider(
+                                "Provider does not support mid-thread model switch".into(),
+                            )));
+                            continue;
+                        }
+
+                        let p_res = if state.provider_live && state.current_turn.is_none() {
+                            let m_res = if let Some(m) = model.as_deref() {
+                                provider.set_model(m)
+                            } else {
+                                Ok(())
+                            };
+                            let e_res = if let Some(e) = effort.as_deref() {
+                                provider.set_effort(e)
+                            } else {
+                                Ok(())
+                            };
+                            m_res.and(e_res).map_err(|e| Error::Io {
+                                path: PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
+
+                        let new_model = model.or(current_model);
+                        let new_effort = effort.or(current_effort);
+                        let s_res = storage.update_thread_model_and_effort(state.thread_id, new_model, new_effort);
                         let _ = reply.send(p_res.and(s_res));
                     }
                     ThreadActorMsg::Subscribe { reply } => {
@@ -799,21 +927,22 @@ fn ensure_provider_started(
         let _ = provider.shutdown();
         state.provider_exited = false;
     }
-    let permission_mode = storage
+    let (permission_mode, model, effort) = storage
         .get_snapshot(state.thread_id, 0)
-        .map(|s| s.thread.permission_mode)
+        .map(|s| (s.thread.permission_mode, s.thread.model, s.thread.effort))
         .unwrap_or_else(|_| {
-            state
+            let perm = state
                 .capabilities
                 .supported_permission_modes
                 .first()
                 .copied()
-                .unwrap_or(PermissionMode::AutoEdit)
+                .unwrap_or(PermissionMode::AutoEdit);
+            (perm, None, None)
         });
     let context = StartContext {
         working_dir: working_dir.to_path_buf(),
-        model: None,
-        effort: None,
+        model,
+        effort,
         permission_mode,
     };
     let started = match storage.get_provider_session_id(state.thread_id) {

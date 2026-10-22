@@ -52,6 +52,19 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 ",
+    "
+    CREATE TABLE approvals (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL REFERENCES turns(id),
+        approval_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        options TEXT NOT NULL DEFAULT '[]',
+        decision TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        decided_at TEXT
+    );
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

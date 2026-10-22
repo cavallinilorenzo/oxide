@@ -1,5 +1,7 @@
 use crossbeam_channel::{Receiver, Sender};
-use oxide_provider::{Provider, ProviderEvent, StartContext, TurnStatus};
+use oxide_provider::{
+    ApprovalDecision, PermissionMode, Provider, ProviderEvent, StartContext, TurnStatus,
+};
 use std::collections::HashMap;
 use std::sync::mpsc;
 
@@ -13,6 +15,15 @@ pub enum ThreadActorMsg {
         reply: mpsc::Sender<Result<()>>,
     },
     Interrupt {
+        reply: mpsc::Sender<Result<()>>,
+    },
+    RespondToApproval {
+        approval_id: String,
+        decision: ApprovalDecision,
+        reply: mpsc::Sender<Result<()>>,
+    },
+    SetPermissionMode {
+        mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
     Subscribe {
@@ -79,6 +90,29 @@ impl ThreadActorHandle {
         reply_rx.recv().unwrap_or(Ok(()))
     }
 
+    pub fn respond_to_approval(
+        &self,
+        approval_id: String,
+        decision: ApprovalDecision,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(ThreadActorMsg::RespondToApproval {
+            approval_id,
+            decision,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    pub fn set_permission_mode(&self, mode: PermissionMode) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(ThreadActorMsg::SetPermissionMode {
+            mode,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
     pub fn subscribe(&self) -> Result<(ThreadSnapshot, Receiver<SequencedThreadEvent>)> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self
@@ -107,6 +141,7 @@ struct ActorState {
     current_turn_index: u32,
     current_turn_id: Option<u32>,
     pending_deltas: HashMap<u32, String>,
+    pending_approval_id: Option<String>,
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
 }
@@ -118,6 +153,7 @@ impl ActorState {
             current_turn_index: 0,
             current_turn_id: None,
             pending_deltas: HashMap::new(),
+            pending_approval_id: None,
             seq: 0,
             subscribers: Vec::new(),
         }
@@ -200,6 +236,13 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         } => {
             state.flush_pending_deltas();
             if let Some(turn_id) = state.current_turn_id.take() {
+                if state.pending_approval_id.take().is_some() {
+                    let _ = storage.resolve_pending_approvals(
+                        turn_id,
+                        ApprovalDecision::Deny,
+                        String::new(),
+                    );
+                }
                 let _ = storage.update_turn_completed(turn_id, status);
             }
             let final_thread_status = match status {
@@ -216,9 +259,29 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             state.broadcast_status(final_thread_status);
             state.current_turn_index += 1;
         }
-        ProviderEvent::ApprovalRequested { id, description } => {
+        ProviderEvent::ApprovalRequested {
+            id,
+            kind,
+            summary,
+            options,
+        } => {
+            state.pending_approval_id = Some(id.clone());
+            if let Some(turn_id) = state.current_turn_id {
+                let _ = storage.write_approval_requested(
+                    turn_id,
+                    id.clone(),
+                    kind,
+                    summary.clone(),
+                    options.clone(),
+                );
+            }
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::NeedsInput);
-            state.broadcast(ThreadEvent::ApprovalRequested { id, description });
+            state.broadcast(ThreadEvent::ApprovalRequested {
+                id,
+                kind,
+                summary,
+                options,
+            });
             state.broadcast_status(ThreadStatus::NeedsInput);
         }
         ProviderEvent::Error { message, code: _ } => {
@@ -278,8 +341,54 @@ fn run_thread_actor(
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
+                        if let Some(turn_id) = state.current_turn_id.take() {
+                            if state.pending_approval_id.take().is_some() {
+                                let _ = storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
+                            }
+                            let _ = storage.update_turn_completed(turn_id, TurnStatus::Interrupted);
+                        }
+                        let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Interrupted);
+                        state.broadcast(ThreadEvent::TurnCompleted {
+                            turn_index: state.current_turn_index,
+                            status: TurnStatus::Interrupted,
+                        });
+                        state.broadcast_status(ThreadStatus::Interrupted);
                         let _ = provider.interrupt();
                         let _ = reply.send(Ok(()));
+                    }
+                    ThreadActorMsg::RespondToApproval { approval_id, decision, reply } => {
+                        let p_res = provider.respond_to_approval(&approval_id, decision).map_err(|e| Error::Io {
+                            path: std::path::PathBuf::from("provider"),
+                            source: std::io::Error::other(e.to_string()),
+                        });
+                        if let Some(turn_id) = state.current_turn_id {
+                            let _ = storage.update_approval_decision(turn_id, approval_id.clone(), decision, String::new());
+                        }
+                        state.pending_approval_id = None;
+                        let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
+                        let decided_at = match storage.get_snapshot(thread_id) {
+                            Ok(s) => s.turns.iter()
+                                .flat_map(|t| &t.approvals)
+                                .find(|a| a.approval_id == approval_id)
+                                .and_then(|a| a.decided_at.clone())
+                                .unwrap_or_default(),
+                            Err(_) => String::new(),
+                        };
+                        state.broadcast(ThreadEvent::ApprovalResponded {
+                            id: approval_id,
+                            decision,
+                            decided_at,
+                        });
+                        state.broadcast_status(ThreadStatus::Working);
+                        let _ = reply.send(p_res);
+                    }
+                    ThreadActorMsg::SetPermissionMode { mode, reply } => {
+                        let p_res = provider.set_permission_mode(mode).map_err(|e| Error::Io {
+                            path: std::path::PathBuf::from("provider"),
+                            source: std::io::Error::other(e.to_string()),
+                        });
+                        let s_res = storage.update_thread_permission_mode(state.thread_id, mode);
+                        let _ = reply.send(p_res.and(s_res));
                     }
                     ThreadActorMsg::Subscribe { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
@@ -291,6 +400,7 @@ fn run_thread_actor(
                             }
                         };
                         snapshot.last_seq = state.seq;
+                        snapshot.supported_permission_modes = provider.capabilities().supported_permission_modes;
                         state.subscribers.push(sub_tx);
                         let _ = reply.send((snapshot, sub_rx));
                     }

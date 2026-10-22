@@ -62,3 +62,44 @@ fn fake_provider_passes_shared_contract_suite() {
         fake
     });
 }
+
+#[test]
+fn fake_provider_handles_approval_and_permission_mode() {
+    use oxide_provider::{ApprovalDecision, ApprovalKind};
+    use std::sync::{Arc, Mutex};
+
+    let mut provider = FakeProvider::default();
+    let handled = Arc::new(Mutex::new(Vec::new()));
+    let handled_clone = handled.clone();
+
+    provider.on_approval(move |id, decision| {
+        handled_clone
+            .lock()
+            .unwrap()
+            .push((id.to_string(), decision));
+    });
+
+    provider
+        .set_permission_mode(PermissionMode::FullAccess)
+        .unwrap();
+
+    let evt = ProviderEvent::ApprovalRequested {
+        id: "appr-1".into(),
+        kind: ApprovalKind::Command,
+        summary: "Execute cargo test".into(),
+        options: vec!["allow-once".into()],
+    };
+
+    let json = serde_json::to_string(&evt).unwrap();
+    let parsed: ProviderEvent = serde_json::from_str(&json).unwrap();
+    assert_eq!(evt, parsed);
+
+    provider
+        .respond_to_approval("appr-1", ApprovalDecision::Allow)
+        .unwrap();
+    let received = handled.lock().unwrap().clone();
+    assert_eq!(
+        received,
+        vec![("appr-1".to_string(), ApprovalDecision::Allow)]
+    );
+}

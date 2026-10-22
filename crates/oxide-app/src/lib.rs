@@ -169,6 +169,31 @@ fn save_settings(core: State<'_, Arc<Core>>, settings: Settings) -> Result<(), A
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
+pub enum ApprovalDecision {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalKind {
+    Command,
+    #[serde(alias = "file_change")]
+    FileChange,
+    Tool,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCapabilities {
+    pub supported_permission_modes: Vec<PermissionMode>,
+    pub interactive_approvals: bool,
+    pub supports_reasoning: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
     Working,
     NeedsInput,
@@ -223,6 +248,20 @@ pub struct ItemSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ApprovalSnapshot {
+    pub id: u32,
+    pub turn_id: u32,
+    pub approval_id: String,
+    pub kind: ApprovalKind,
+    pub summary: String,
+    pub options: Vec<String>,
+    pub decision: Option<ApprovalDecision>,
+    pub created_at: String,
+    pub decided_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
@@ -231,6 +270,7 @@ pub struct TurnSnapshot {
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    pub approvals: Vec<ApprovalSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -239,6 +279,7 @@ pub struct ThreadSnapshot {
     pub thread: Thread,
     pub turns: Vec<TurnSnapshot>,
     pub last_seq: u32,
+    pub supported_permission_modes: Vec<PermissionMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -270,7 +311,14 @@ pub enum ThreadEvent {
     },
     ApprovalRequested {
         id: String,
-        description: String,
+        kind: ApprovalKind,
+        summary: String,
+        options: Vec<String>,
+    },
+    ApprovalResponded {
+        id: String,
+        decision: ApprovalDecision,
+        decided_at: String,
     },
     Error {
         message: String,
@@ -303,11 +351,44 @@ fn create_thread(
     provider: String,
     model: Option<String>,
     effort: Option<String>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
 ) -> Result<Thread, AppError> {
-    let mode: oxide_core::PermissionMode = convert(&permission_mode);
+    let mode: Option<oxide_core::PermissionMode> = permission_mode.map(|m| convert(&m));
     let summary = core.create_thread(project_id, &provider, model, effort, mode)?;
     Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_permission_mode(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    permission_mode: PermissionMode,
+) -> Result<(), AppError> {
+    let mode: oxide_core::PermissionMode = convert(&permission_mode);
+    Ok(core.set_thread_permission_mode(thread_id, mode)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn respond_to_approval(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    approval_id: String,
+    decision: ApprovalDecision,
+) -> Result<(), AppError> {
+    let dec: oxide_core::ApprovalDecision = convert(&decision);
+    Ok(core.respond_to_approval(thread_id, &approval_id, dec)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_provider_capabilities(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+) -> Result<ProviderCapabilities, AppError> {
+    let caps = core.get_provider_capabilities(&provider);
+    Ok(convert(&caps))
 }
 
 #[tauri::command]
@@ -364,6 +445,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_settings,
         save_settings,
         create_thread,
+        set_thread_permission_mode,
+        respond_to_approval,
+        get_provider_capabilities,
         list_threads,
         send_prompt,
         interrupt_thread,

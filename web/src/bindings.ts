@@ -15,16 +15,53 @@ export const commands = {
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
-	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
+	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
+	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt })),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
-	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
+	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 };
 
 /* Types */
 export type AppError = {
 	message: string,
+};
+
+export type ApprovalDecision = "allow" | "deny";
+
+export type ApprovalKind = ApprovalKind_Serialize | ApprovalKind_Deserialize;
+
+export type ApprovalKind_Deserialize = "command" | "file-change" | "file_change" | "tool" | "other";
+
+export type ApprovalKind_Serialize = "command" | "file-change" | "tool" | "other";
+
+export type ApprovalSnapshot = ApprovalSnapshot_Serialize | ApprovalSnapshot_Deserialize;
+
+export type ApprovalSnapshot_Deserialize = {
+	id: number,
+	turnId: number,
+	approvalId: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+	decision?: ApprovalDecision | null,
+	createdAt: string,
+	decidedAt?: string | null,
+};
+
+export type ApprovalSnapshot_Serialize = {
+	id: number,
+	turnId: number,
+	approvalId: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
+	decision: ApprovalDecision | null,
+	createdAt: string,
+	decidedAt: string | null,
 };
 
 export type FieldError = {
@@ -54,6 +91,12 @@ export type Project = {
 
 export type Provider = "claude" | "codex" | "antigravity";
 
+export type ProviderCapabilities = {
+	supportedPermissionModes: PermissionMode[],
+	interactiveApprovals: boolean,
+	supportsReasoning: boolean,
+};
+
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;
 
 export type ProviderSettings_Deserialize = {
@@ -82,9 +125,16 @@ export type Providers_Serialize = {
 	antigravity: ProviderSettings_Serialize,
 };
 
-export type SequencedThreadEvent = {
+export type SequencedThreadEvent = SequencedThreadEvent_Serialize | SequencedThreadEvent_Deserialize;
+
+export type SequencedThreadEvent_Deserialize = {
 	seq: number,
-	event: ThreadEvent,
+	event: ThreadEvent_Deserialize,
+};
+
+export type SequencedThreadEvent_Serialize = {
+	seq: number,
+	event: ThreadEvent_Serialize,
 };
 
 export type Settings = Settings_Serialize | Settings_Deserialize;
@@ -119,7 +169,9 @@ export type Settings_Serialize = {
 
 export type Thread = Thread_Serialize | Thread_Deserialize;
 
-export type ThreadEvent = { type: "TurnStarted"; payload: {
+export type ThreadEvent = ThreadEvent_Serialize | ThreadEvent_Deserialize;
+
+export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
 	prompt: string,
 } } | { type: "ItemStarted"; payload: {
@@ -139,7 +191,46 @@ export type ThreadEvent = { type: "TurnStarted"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
-	description: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+} } | { type: "ApprovalResponded"; payload: {
+	id: string,
+	decision: ApprovalDecision,
+	decided_at: string,
+} } | { type: "Error"; payload: {
+	message: string,
+} } | { type: "Unknown"; payload: {
+	raw: string,
+} };
+
+export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
+	turn_index: number,
+	prompt: string,
+} } | { type: "ItemStarted"; payload: {
+	item_index: number,
+	kind: ItemKind,
+} } | { type: "ItemDeltaBatch"; payload: {
+	item_index: number,
+	delta: string,
+} } | { type: "ItemCompleted"; payload: {
+	item_index: number,
+	kind: ItemKind,
+	content: string,
+} } | { type: "TurnCompleted"; payload: {
+	turn_index: number,
+	status: TurnStatus,
+} } | { type: "ThreadStatusChanged"; payload: {
+	status: ThreadStatus,
+} } | { type: "ApprovalRequested"; payload: {
+	id: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
+} } | { type: "ApprovalResponded"; payload: {
+	id: string,
+	decision: ApprovalDecision,
+	decided_at: string,
 } } | { type: "Error"; payload: {
 	message: string,
 } } | { type: "Unknown"; payload: {
@@ -152,12 +243,14 @@ export type ThreadSnapshot_Deserialize = {
 	thread: Thread_Deserialize,
 	turns: TurnSnapshot_Deserialize[],
 	lastSeq: number,
+	supportedPermissionModes: PermissionMode[],
 };
 
 export type ThreadSnapshot_Serialize = {
 	thread: Thread_Serialize,
 	turns: TurnSnapshot_Serialize[],
 	lastSeq: number,
+	supportedPermissionModes: PermissionMode[],
 };
 
 export type ThreadStatus = "working" | "needs-input" | "completed" | "error" | "interrupted";
@@ -198,6 +291,7 @@ export type TurnSnapshot_Deserialize = {
 	startedAt: string,
 	completedAt?: string | null,
 	items: ItemSnapshot[],
+	approvals: ApprovalSnapshot_Deserialize[],
 };
 
 export type TurnSnapshot_Serialize = {
@@ -208,6 +302,7 @@ export type TurnSnapshot_Serialize = {
 	startedAt: string,
 	completedAt: string | null,
 	items: ItemSnapshot[],
+	approvals: ApprovalSnapshot_Serialize[],
 };
 
 export type TurnStatus = "running" | "completed" | "interrupted" | "error";

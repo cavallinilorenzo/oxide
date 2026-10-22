@@ -23,14 +23,14 @@ use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ItemKind, TurnStatus};
+pub use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, TurnStatus};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
 pub use thread::{
-    ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary,
-    TurnSnapshot,
+    ApprovalSnapshot, ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot,
+    ThreadStatus, ThreadSummary, TurnSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";
@@ -181,14 +181,27 @@ impl Core {
         Ok(())
     }
 
+    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+        let settings = self.settings().settings;
+        match provider {
+            "claude" => settings.providers.claude.permission_mode,
+            "codex" => settings.providers.codex.permission_mode,
+            "agy" | "antigravity" => settings.providers.antigravity.permission_mode,
+            _ => PermissionMode::Ask,
+        }
+    }
+
     pub fn create_thread(
         &self,
         project_id: u32,
         provider: &str,
         model: Option<String>,
         effort: Option<String>,
-        permission_mode: PermissionMode,
+        permission_mode: impl Into<Option<PermissionMode>>,
     ) -> Result<ThreadSummary> {
+        let permission_mode = permission_mode
+            .into()
+            .unwrap_or_else(|| self.default_permission_mode_for(provider));
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mode_str = serde_json::to_string(&permission_mode)
             .unwrap_or_default()
@@ -200,6 +213,46 @@ impl Core {
         )?;
         let id = db.last_insert_rowid() as u32;
         self.get_thread_by_id(&db, id)
+    }
+
+    pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.set_permission_mode(mode)
+    }
+
+    pub fn respond_to_approval(
+        &self,
+        thread_id: u32,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.respond_to_approval(approval_id.to_string(), decision)
+    }
+
+    pub fn get_provider_capabilities(
+        &self,
+        provider: &str,
+    ) -> oxide_provider::ProviderCapabilities {
+        match provider {
+            "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
+                supported_permission_modes: vec![
+                    PermissionMode::AutoEdit,
+                    PermissionMode::FullAccess,
+                ],
+                interactive_approvals: false,
+                supports_reasoning: false,
+            },
+            _ => oxide_provider::ProviderCapabilities {
+                supported_permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AutoEdit,
+                    PermissionMode::FullAccess,
+                ],
+                interactive_approvals: true,
+                supports_reasoning: true,
+            },
+        }
     }
 
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {

@@ -23,6 +23,17 @@ pub enum ApprovalDecision {
     Deny,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalKind {
+    Command,
+    #[serde(alias = "file_change")]
+    FileChange,
+    Tool,
+    #[default]
+    Other,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
@@ -101,7 +112,12 @@ pub enum ProviderEvent {
     },
     ApprovalRequested {
         id: String,
-        description: String,
+        #[serde(default)]
+        kind: ApprovalKind,
+        #[serde(alias = "description")]
+        summary: String,
+        #[serde(default)]
+        options: Vec<String>,
     },
     Error {
         message: String,
@@ -137,6 +153,7 @@ pub trait Provider: Send + 'static {
 }
 
 type PromptHandler = Box<dyn Fn(&str) + Send + Sync>;
+type ApprovalHandler = Box<dyn Fn(&str, ApprovalDecision) + Send + Sync>;
 
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
@@ -144,6 +161,8 @@ pub struct FakeProvider {
     event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
     event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
     prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
+    approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
+    current_permission_mode: Arc<Mutex<PermissionMode>>,
 }
 
 impl Default for FakeProvider {
@@ -166,6 +185,8 @@ impl Default for FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            approval_handler: Arc::new(Mutex::new(None)),
+            current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
     }
 }
@@ -179,6 +200,8 @@ impl FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            approval_handler: Arc::new(Mutex::new(None)),
+            current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
     }
 
@@ -191,6 +214,14 @@ impl FakeProvider {
 
     pub fn on_prompt(&self, handler: impl Fn(&str) + Send + Sync + 'static) {
         *self.prompt_handler.lock().unwrap() = Some(Box::new(handler));
+    }
+
+    pub fn on_approval(&self, handler: impl Fn(&str, ApprovalDecision) + Send + Sync + 'static) {
+        *self.approval_handler.lock().unwrap() = Some(Box::new(handler));
+    }
+
+    pub fn current_permission_mode(&self) -> PermissionMode {
+        *self.current_permission_mode.lock().unwrap()
     }
 }
 
@@ -235,9 +266,12 @@ impl Provider for FakeProvider {
 
     fn respond_to_approval(
         &mut self,
-        _id: &str,
-        _decision: ApprovalDecision,
+        id: &str,
+        decision: ApprovalDecision,
     ) -> Result<(), ProviderError> {
+        if let Some(ref handler) = *self.approval_handler.lock().unwrap() {
+            handler(id, decision);
+        }
         Ok(())
     }
 
@@ -245,12 +279,14 @@ impl Provider for FakeProvider {
         Ok(())
     }
 
-    fn set_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), ProviderError> {
+    fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {
+        *self.current_permission_mode.lock().unwrap() = mode;
         Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), ProviderError> {
         *self.prompt_handler.lock().unwrap() = None;
+        *self.approval_handler.lock().unwrap() = None;
         self.event_sender.take();
         Ok(())
     }

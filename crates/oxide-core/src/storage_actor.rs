@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::error::{Error, Result};
-use crate::thread::{ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot};
-use oxide_provider::{ItemKind, TurnStatus};
+use crate::thread::{
+    ApprovalSnapshot, ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot,
+};
+use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
 
 pub enum StorageMsg {
     WriteTurnStarted {
@@ -25,6 +27,32 @@ pub enum StorageMsg {
         kind: ItemKind,
         content: String,
         reply: mpsc::Sender<Result<u32>>,
+    },
+    WriteApprovalRequested {
+        turn_id: u32,
+        approval_id: String,
+        kind: ApprovalKind,
+        summary: String,
+        options: Vec<String>,
+        reply: mpsc::Sender<Result<u32>>,
+    },
+    UpdateApprovalDecision {
+        turn_id: u32,
+        approval_id: String,
+        decision: ApprovalDecision,
+        decided_at: String,
+        reply: mpsc::Sender<Result<()>>,
+    },
+    ResolvePendingApprovals {
+        turn_id: u32,
+        decision: ApprovalDecision,
+        decided_at: String,
+        reply: mpsc::Sender<Result<()>>,
+    },
+    UpdateThreadPermissionMode {
+        thread_id: u32,
+        permission_mode: PermissionMode,
+        reply: mpsc::Sender<Result<()>>,
     },
     UpdateThreadStatus {
         thread_id: u32,
@@ -120,6 +148,76 @@ impl StorageHandle {
         reply_rx
             .recv()
             .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+    }
+
+    pub fn write_approval_requested(
+        &self,
+        turn_id: u32,
+        approval_id: String,
+        kind: ApprovalKind,
+        summary: String,
+        options: Vec<String>,
+    ) -> Result<u32> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::WriteApprovalRequested {
+            turn_id,
+            approval_id,
+            kind,
+            summary,
+            options,
+            reply: reply_tx,
+        });
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+    }
+
+    pub fn update_approval_decision(
+        &self,
+        turn_id: u32,
+        approval_id: String,
+        decision: ApprovalDecision,
+        decided_at: String,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::UpdateApprovalDecision {
+            turn_id,
+            approval_id,
+            decision,
+            decided_at,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    pub fn resolve_pending_approvals(
+        &self,
+        turn_id: u32,
+        decision: ApprovalDecision,
+        decided_at: String,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::ResolvePendingApprovals {
+            turn_id,
+            decision,
+            decided_at,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    pub fn update_thread_permission_mode(
+        &self,
+        thread_id: u32,
+        permission_mode: PermissionMode,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::UpdateThreadPermissionMode {
+            thread_id,
+            permission_mode,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
     }
 
     pub fn update_thread_status(&self, thread_id: u32, status: ThreadStatus) -> Result<()> {
@@ -221,6 +319,87 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 })();
                 let _ = reply.send(res);
             }
+            StorageMsg::WriteApprovalRequested {
+                turn_id,
+                approval_id,
+                kind,
+                summary,
+                options,
+                reply,
+            } => {
+                let res = (|| -> Result<u32> {
+                    let kind_str = serde_json::to_string(&kind)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string();
+                    let options_str =
+                        serde_json::to_string(&options).unwrap_or_else(|_| "[]".into());
+                    conn.execute(
+                        "INSERT INTO approvals (turn_id, approval_id, kind, summary, options) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![turn_id, approval_id, kind_str, summary, options_str],
+                    )?;
+                    let id = conn.last_insert_rowid() as u32;
+                    Ok(id)
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::UpdateApprovalDecision {
+                turn_id,
+                approval_id,
+                decision,
+                decided_at,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    let dec_str = serde_json::to_string(&decision)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string();
+                    conn.execute(
+                        "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND approval_id = ?4",
+                        rusqlite::params![dec_str, decided_at, turn_id, approval_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::ResolvePendingApprovals {
+                turn_id,
+                decision,
+                decided_at,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    let dec_str = serde_json::to_string(&decision)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string();
+                    conn.execute(
+                        "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND decision IS NULL",
+                        rusqlite::params![dec_str, decided_at, turn_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::UpdateThreadPermissionMode {
+                thread_id,
+                permission_mode,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    let mode_str = serde_json::to_string(&permission_mode)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string();
+                    conn.execute(
+                        "UPDATE threads SET permission_mode = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+                        rusqlite::params![mode_str, thread_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
             StorageMsg::UpdateThreadStatus {
                 thread_id,
                 status,
@@ -289,6 +468,10 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
         "SELECT id, item_index, kind, content, created_at
          FROM items WHERE turn_id = ?1 ORDER BY item_index ASC",
     )?;
+    let mut approval_stmt = conn.prepare(
+        "SELECT id, approval_id, kind, summary, options, decision, created_at, decided_at
+         FROM approvals WHERE turn_id = ?1 ORDER BY id ASC",
+    )?;
 
     for t in turn_rows {
         let (t_id, t_idx, prompt, status, started_at, completed_at) = t?;
@@ -305,6 +488,30 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
             })
         })?;
         let items: Vec<ItemSnapshot> = item_rows.collect::<std::result::Result<_, _>>()?;
+
+        let app_rows = approval_stmt.query_map([t_id], |r| {
+            let kind_str: String = r.get(2)?;
+            let kind: ApprovalKind = serde_json::from_value(serde_json::Value::String(kind_str))
+                .unwrap_or(ApprovalKind::Other);
+            let options_str: String = r.get(4)?;
+            let options: Vec<String> = serde_json::from_str(&options_str).unwrap_or_default();
+            let decision_str: Option<String> = r.get(5)?;
+            let decision: Option<ApprovalDecision> = decision_str
+                .and_then(|d| serde_json::from_value(serde_json::Value::String(d)).ok());
+            Ok(ApprovalSnapshot {
+                id: r.get(0)?,
+                turn_id: t_id,
+                approval_id: r.get(1)?,
+                kind,
+                summary: r.get(3)?,
+                options,
+                decision,
+                created_at: r.get(6)?,
+                decided_at: r.get(7)?,
+            })
+        })?;
+        let approvals: Vec<ApprovalSnapshot> = app_rows.collect::<std::result::Result<_, _>>()?;
+
         turns.push(TurnSnapshot {
             id: t_id,
             turn_index: t_idx,
@@ -313,12 +520,23 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
             started_at,
             completed_at,
             items,
+            approvals,
         });
     }
+
+    let supported_permission_modes = match thread.provider.as_str() {
+        "agy" | "antigravity" => vec![PermissionMode::AutoEdit, PermissionMode::FullAccess],
+        _ => vec![
+            PermissionMode::Ask,
+            PermissionMode::AutoEdit,
+            PermissionMode::FullAccess,
+        ],
+    };
 
     Ok(ThreadSnapshot {
         thread,
         turns,
         last_seq: 0,
+        supported_permission_modes,
     })
 }

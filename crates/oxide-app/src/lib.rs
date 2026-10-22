@@ -326,6 +326,13 @@ pub enum ThreadStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArchiveOutcome {
+    Archived,
+    NeedsConfirmation,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
     AgentMessage,
@@ -1292,14 +1299,24 @@ fn continue_thread(
     Ok(convert(&core.continue_thread(thread_id)?))
 }
 
+/// Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
+/// changes that waits for `discard_changes`.
 #[tauri::command]
 #[specta::specta]
 fn set_thread_archived(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
     archived: bool,
-) -> Result<(), AppError> {
-    Ok(core.set_thread_archived(thread_id, archived)?)
+    discard_changes: bool,
+) -> Result<ArchiveOutcome, AppError> {
+    if !archived {
+        core.set_thread_archived(thread_id, false)?;
+        return Ok(ArchiveOutcome::Archived);
+    }
+    Ok(match core.archive_thread(thread_id, discard_changes)? {
+        oxide_core::ArchiveOutcome::Archived => ArchiveOutcome::Archived,
+        oxide_core::ArchiveOutcome::NeedsConfirmation => ArchiveOutcome::NeedsConfirmation,
+    })
 }
 
 #[tauri::command]
@@ -1413,6 +1430,8 @@ fn set_thread_model_and_effort(
 #[tauri::command]
 #[specta::specta]
 fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Thread>, AppError> {
+    // Listing a Project's Threads is what opening it does.
+    core.open_project(project_id)?;
     let list = core.list_threads(project_id)?;
     Ok(convert(&list))
 }

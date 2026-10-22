@@ -255,7 +255,14 @@ export function App() {
   }, []);
 
   const setThreadArchived = useCallback(async (threadId: number, archived: boolean) => {
-    const res = await commands.setThreadArchived(threadId, archived);
+    let res = await commands.setThreadArchived(threadId, archived, false);
+    if (res.status === "ok" && res.data === "needs-confirmation") {
+      const proceed = window.confirm(
+        "This Thread's worktree has uncommitted changes. Archiving removes the worktree and discards them; the branch is kept. Archive anyway?",
+      );
+      if (!proceed) return;
+      res = await commands.setThreadArchived(threadId, archived, true);
+    }
     if (res.status === "ok") {
       setThreads((prev) => prev?.map((t) => (t.id === threadId ? { ...t, archived } : t)) ?? null);
     }

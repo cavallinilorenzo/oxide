@@ -59,6 +59,15 @@ fn free_name(checkout: &Path, parent: &Path, slug: &str) -> String {
         .expect("an unbounded range has a free name")
 }
 
+/// What archiving a Thread did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArchiveOutcome {
+    Archived,
+    /// The Board Thread's worktree has uncommitted changes; nothing was changed.
+    NeedsConfirmation,
+}
+
 struct SetupRun {
     success: bool,
     output: String,
@@ -225,6 +234,85 @@ impl Core {
 
         self.send_prompt(thread.id, prompt)?;
         self.thread_summary(thread.id)
+    }
+
+    /// The Project's root and, for a Board Thread, its branch and worktree.
+    fn thread_checkouts(&self, thread_id: u32) -> Result<(PathBuf, Option<(String, PathBuf)>)> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(db.query_row(
+            "SELECT p.path, t.branch, t.worktree_path FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1",
+            [thread_id],
+            |r| {
+                let root = PathBuf::from(r.get::<_, String>(0)?);
+                let branch: Option<String> = r.get(1)?;
+                let worktree: Option<String> = r.get(2)?;
+                Ok((root, branch.zip(worktree.map(PathBuf::from))))
+            },
+        )?)
+    }
+
+    /// Archives a Thread. A Board Thread's worktree is removed with it and its branch kept, unless
+    /// the worktree has uncommitted changes: then nothing happens until the caller confirms with
+    /// `discard_changes`.
+    pub fn archive_thread(&self, thread_id: u32, discard_changes: bool) -> Result<ArchiveOutcome> {
+        let (root, board) = self.thread_checkouts(thread_id)?;
+        if let Some((_, worktree)) = board.filter(|(_, w)| w.exists()) {
+            let removed = self.git.mutate(&root, || {
+                let dirty = !git::run(&worktree, &["status", "--porcelain"])?
+                    .trim()
+                    .is_empty();
+                if dirty && !discard_changes {
+                    return Ok(false);
+                }
+                git::run(
+                    &root,
+                    &["worktree", "remove", "--force", &worktree.to_string_lossy()],
+                )?;
+                Ok(true)
+            })?;
+            if !removed {
+                return Ok(ArchiveOutcome::NeedsConfirmation);
+            }
+        }
+        self.set_thread_archived(thread_id, true)?;
+        Ok(ArchiveOutcome::Archived)
+    }
+
+    /// Recreates a Board Thread's worktree from its branch when it is gone (archived, or deleted
+    /// by hand). A chat Thread, or a worktree still there, is left alone.
+    pub(crate) fn ensure_worktree(&self, thread_id: u32) -> Result<()> {
+        let (root, board) = self.thread_checkouts(thread_id)?;
+        let Some((branch, worktree)) = board.filter(|(_, w)| !w.exists()) else {
+            return Ok(());
+        };
+        self.git.mutate(&root, || {
+            // Drop the stale registration, or `add` refuses the branch as checked out elsewhere.
+            git::run(&root, &["worktree", "prune"])?;
+            if let Some(parent) = worktree.parent() {
+                std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+            }
+            git::run(
+                &root,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    &worktree.to_string_lossy(),
+                    &branch,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Housekeeping when a Project opens: forgets worktrees whose folder was deleted by hand.
+    pub fn open_project(&self, project_id: u32) -> Result<()> {
+        let root = PathBuf::from(self.project(project_id)?.path);
+        self.git
+            .mutate(&root, || git::run(&root, &["worktree", "prune"]).map(drop))
     }
 
     fn thread_summary(&self, thread_id: u32) -> Result<ThreadSummary> {

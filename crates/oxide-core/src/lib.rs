@@ -47,7 +47,7 @@ use storage_actor::StorageHandle;
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
-pub use worktree::DispatchRequest;
+pub use worktree::{ArchiveOutcome, DispatchRequest};
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -930,6 +930,7 @@ impl Core {
                 source: std::io::Error::other("attachment is not stored under the Oxide home"),
             });
         }
+        self.ensure_worktree(thread_id)?;
         let actor = self.get_or_create_thread_actor(thread_id)?;
         self.set_thread_archived(thread_id, false)?;
         actor.send_prompt(prompt.to_string(), attachments.to_vec())

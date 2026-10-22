@@ -5,6 +5,7 @@ mod db;
 mod discovery;
 mod error;
 mod files;
+mod git;
 mod settings;
 mod storage_actor;
 mod terminal;
@@ -12,6 +13,7 @@ pub mod thread;
 mod thread_actor;
 
 pub use files::{FileContent, FileEntry};
+pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 use oxide_provider::Provider as ProviderTrait;
 use std::collections::HashMap;
 use std::fs;
@@ -70,6 +72,7 @@ pub struct Core {
     real_time_ticker: AtomicBool,
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
+    git: git::GitState,
 }
 
 impl Core {
@@ -112,6 +115,7 @@ impl Core {
             real_time_ticker: AtomicBool::new(true),
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
+            git: git::GitState::default(),
         })
     }
 
@@ -531,6 +535,74 @@ impl Core {
         path: &str,
     ) -> Result<FileContent> {
         files::read_file(Path::new(&self.checkout_path(project_id, thread_id)?), path)
+    }
+
+    /// Branch, ahead/behind and uncommitted-change counts of a Project's main checkout.
+    pub fn git_status(&self, project_id: u32) -> Result<GitStatus> {
+        let mut status = git::status(&self.main_checkout(project_id)?)?;
+        status.picker_disabled_reason = self.checkout_blocked_reason(project_id)?;
+        Ok(status)
+    }
+
+    /// Local and remote branches of a Project's main checkout.
+    pub fn list_branches(&self, project_id: u32) -> Result<Vec<GitBranch>> {
+        git::list_branches(&self.main_checkout(project_id)?)
+    }
+
+    /// Checks out a branch (`feature`, or `origin/feature` to track a remote
+    /// one). Git's own refusal, e.g. for uncommitted changes, is the error.
+    pub fn checkout_branch(&self, project_id: u32, name: &str) -> Result<()> {
+        self.switch_branch(project_id, |cwd| git::checkout(cwd, name))
+    }
+
+    /// Creates a branch from HEAD and checks it out.
+    pub fn create_branch(&self, project_id: u32, name: &str) -> Result<()> {
+        self.switch_branch(project_id, |cwd| git::create_branch(cwd, name))
+    }
+
+    /// `git fetch`, skipped when the last one was under [`FETCH_INTERVAL`] ago.
+    /// Returns whether it fetched.
+    pub fn fetch_project(&self, project_id: u32) -> Result<bool> {
+        self.fetch_project_at(project_id, std::time::Instant::now())
+    }
+
+    /// Like [`Core::fetch_project`], with the current time injected.
+    pub fn fetch_project_at(&self, project_id: u32, now: std::time::Instant) -> Result<bool> {
+        self.git.fetch(&self.main_checkout(project_id)?, now)
+    }
+
+    /// `git pull --ff-only`; a diverged branch fails with Git's message.
+    pub fn pull(&self, project_id: u32) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || git::pull(&cwd))
+    }
+
+    fn switch_branch(&self, project_id: u32, f: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || {
+            if let Some(reason) = self.checkout_blocked_reason(project_id)? {
+                return Err(Error::Git(reason));
+            }
+            f(&cwd)
+        })
+    }
+
+    /// Threads work in the main checkout, so switching branches under a
+    /// running Turn would change its files.
+    fn checkout_blocked_reason(&self, project_id: u32) -> Result<Option<String>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let working: u32 = db.query_row(
+            "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working'",
+            [project_id],
+            |r| r.get(0),
+        )?;
+        Ok((working > 0).then(|| {
+            "A Thread is working in this checkout. Wait for its Turn to finish or stop it.".into()
+        }))
+    }
+
+    fn main_checkout(&self, project_id: u32) -> Result<PathBuf> {
+        Ok(PathBuf::from(self.checkout_path(project_id, None)?))
     }
 
     fn checkout_path(&self, project_id: u32, thread_id: Option<u32>) -> Result<String> {

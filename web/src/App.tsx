@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { GitHeader } from "./GitHeader";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
@@ -128,6 +129,16 @@ export function App() {
           </span>
         ) : (
           <span className="title">Oxide</span>
+        )}
+        {selected && !selected.missing && (
+          <GitHeader
+            projectId={selected.id}
+            threadsKey={threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? ""}
+            onOpenDiff={() => {
+              setShowTools(true);
+              setActiveTool("Diff");
+            }}
+          />
         )}
         <div className="toggles">
           <button aria-pressed={showTools} title="Toggle tools panel (⌘\)" onClick={() => setShowTools((v) => !v)}>

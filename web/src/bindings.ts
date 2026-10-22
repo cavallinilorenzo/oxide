@@ -47,6 +47,17 @@ export const commands = {
 	listDir: (projectId: number, threadId: number | null, path: string) => typedError<FileEntry[], AppError>(__TAURI_INVOKE("list_dir", { projectId, threadId, path })),
 	/**  Reads a file of a Thread's checkout, capped at 1 MiB. */
 	readFile: (projectId: number, threadId: number | null, path: string) => typedError<FileContent, AppError>(__TAURI_INVOKE("read_file", { projectId, threadId, path })),
+	/**  Branch, ahead/behind and uncommitted-change counts of the main checkout. */
+	gitStatus: (projectId: number) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId })),
+	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
+	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
+	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
+	/**  Creates a branch from HEAD and checks it out. */
+	createBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("create_branch", { projectId, name })),
+	/**  Background fetch; returns whether it ran (it is throttled). */
+	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
+	/**  `git pull --ff-only`. */
+	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
 };
 
 /* Types */
@@ -137,6 +148,40 @@ export type FileEntry = {
 	name: string,
 	path: string,
 	isDir: boolean,
+};
+
+export type GitBranch = {
+	name: string,
+	remote: boolean,
+	current: boolean,
+};
+
+export type GitStatus = GitStatus_Serialize | GitStatus_Deserialize;
+
+export type GitStatus_Deserialize = {
+	/**  `null` while HEAD is detached. */
+	branch?: string | null,
+	upstream?: string | null,
+	ahead: number,
+	behind: number,
+	added: number,
+	removed: number,
+	changedFiles: number,
+	/**  Why the branch picker is disabled, if it is. */
+	pickerDisabledReason?: string | null,
+};
+
+export type GitStatus_Serialize = {
+	/**  `null` while HEAD is detached. */
+	branch: string | null,
+	upstream: string | null,
+	ahead: number,
+	behind: number,
+	added: number,
+	removed: number,
+	changedFiles: number,
+	/**  Why the branch picker is disabled, if it is. */
+	pickerDisabledReason: string | null,
 };
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";

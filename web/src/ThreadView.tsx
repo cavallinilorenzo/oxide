@@ -13,6 +13,7 @@ import {
   type Thread,
   type ThreadCapabilities,
   type ThreadStatus,
+  type ProviderCapabilities,
 } from "./bindings";
 import { TurnView } from "./TurnView";
 import { getClaudeCodeHint } from "./providerHints";
@@ -20,6 +21,8 @@ import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
+import { ModelEffortPicker } from "./ModelEffortPicker";
+import { parseSlashCommand } from "./modelPicker";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -116,6 +119,11 @@ export function ThreadView({
   }>({ threadId: null, events: [] });
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
+  const [draftModel, setDraftModel] = useState<string | null>(null);
+  const [draftEffort, setDraftEffort] = useState<string | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelPickerMode, setModelPickerMode] = useState<"model" | "effort">("model");
+  const [providerCaps, setProviderCaps] = useState<ProviderCapabilities | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -158,8 +166,11 @@ export function ThreadView({
       if (!active) return;
       const defProvider = s.settings.defaultProvider;
       setDraftProvider(defProvider);
-      const defMode = s.settings.providers[defProvider]?.permissionMode || "auto-edit";
+      const provSettings = s.settings.providers[defProvider];
+      const defMode = provSettings?.permissionMode || "auto-edit";
       setDraftMode(defMode);
+      setDraftModel(provSettings?.model ?? null);
+      setDraftEffort(provSettings?.effort ?? null);
 
       const capsRes = await commands.getProviderCapabilities(defProvider);
       if (active && capsRes.status === "ok") {
@@ -393,6 +404,8 @@ export function ThreadView({
     } else {
       setDraftProvider(newProvider);
       setDraftMode(newMode);
+      setDraftModel(provSettings?.model ?? null);
+      setDraftEffort(provSettings?.effort ?? null);
     }
 
     const capsRes = await commands.getProviderCapabilities(newProvider);
@@ -426,6 +439,50 @@ export function ThreadView({
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
+  const currentModel = threadId ? transcript.thread?.model ?? null : draftModel;
+  const currentEffort = threadId ? transcript.thread?.effort ?? null : draftEffort;
+
+  useEffect(() => {
+    let active = true;
+    void commands.getProviderCapabilities(currentProvider).then((res) => {
+      if (active && res.status === "ok") {
+        setProviderCaps(res.data);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentProvider]);
+
+  const handleSelectModelAndEffort = async (
+    newProvider: string,
+    newModel: string | null,
+    newEffort: string | null
+  ) => {
+    if (newProvider !== currentProvider && turnCount === 0) {
+      await handleProviderChange(newProvider);
+    }
+    if (threadId) {
+      const res = await commands.setThreadModelAndEffort(threadId, newModel, newEffort);
+      if (res.status === "ok") {
+        setTranscript((prev) =>
+          prev.thread
+            ? {
+                ...prev,
+                thread: {
+                  ...prev.thread,
+                  model: newModel,
+                  effort: newEffort,
+                },
+              }
+            : prev
+        );
+      }
+    } else {
+      setDraftModel(newModel);
+      setDraftEffort(newEffort);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -464,6 +521,28 @@ export function ThreadView({
       return;
     }
 
+    const slash = parseSlashCommand(input);
+    if (slash.type === "model") {
+      if (slash.arg) {
+        void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
+      } else {
+        setModelPickerMode("model");
+        setModelPickerOpen(true);
+      }
+      handleInputChange("");
+      return;
+    }
+    if (slash.type === "effort") {
+      if (slash.arg) {
+        void handleSelectModelAndEffort(currentProvider, currentModel, slash.arg);
+      } else {
+        setModelPickerMode("effort");
+        setModelPickerOpen(true);
+      }
+      handleInputChange("");
+      return;
+    }
+
     setSending(true);
     handleInputChange("");
 
@@ -478,8 +557,8 @@ export function ThreadView({
         const created = await commands.createThread(
           projectId,
           providerName,
-          provSettings?.model ?? null,
-          provSettings?.effort ?? null,
+          draftModel ?? provSettings?.model ?? null,
+          draftEffort ?? provSettings?.effort ?? null,
           draftMode
         );
         if (created.status === "ok") {
@@ -652,23 +731,21 @@ export function ThreadView({
       ) : (
       <form className="composer" onSubmit={handleSubmit}>
         <div className="composer-controls-row">
-          <div className="provider-chip-wrapper" title="Provider">
-            <label className="provider-chip" htmlFor="provider-select">
+          <div className="provider-chip-wrapper" title="Model & Effort">
+            <button
+              type="button"
+              className="model-trigger-chip"
+              onClick={() => {
+                setModelPickerMode("model");
+                setModelPickerOpen(true);
+              }}
+              disabled={isTurnActive || sending}
+              aria-label="Model and Effort"
+            >
               <ProviderMark provider={currentProvider} size={14} />
-              <select
-                id="provider-select"
-                className="provider-chip-select"
-                value={currentProvider}
-                disabled={turnCount > 0 || isTurnActive || sending}
-                onChange={(e) => void handleProviderChange(e.target.value)}
-                aria-label="Provider"
-              >
-                <option value="claude">Claude Code</option>
-                <option value="codex">Codex</option>
-                <option value="antigravity">Antigravity CLI</option>
-                {currentProvider === "fake" && <option value="fake">Fake Provider</option>}
-              </select>
-            </label>
+              <span className="model-trigger-name">{currentModel || currentProvider}</span>
+              {currentEffort && <span className="model-trigger-effort">{currentEffort}</span>}
+            </button>
           </div>
 
           <div className="permission-chip-wrapper" title="Permission mode">
@@ -767,6 +844,20 @@ export function ThreadView({
         <span className="checkout-badge">main checkout</span>
         <span className="branch-badge">⎇ {gitBranch ?? "main"}</span>
       </div>
+
+      {modelPickerOpen && (
+        <ModelEffortPicker
+          open={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          currentProvider={currentProvider}
+          currentModel={currentModel}
+          currentEffort={currentEffort}
+          turnCount={turnCount}
+          midThreadModelSwitch={providerCaps?.midThreadModelSwitch ?? true}
+          onSelectModelAndEffort={handleSelectModelAndEffort}
+          initialMode={modelPickerMode}
+        />
+      )}
     </div>
   );
 }

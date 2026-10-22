@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isClearCommand, isNewThreadShortcut, stopsTurn, toggleForKey } from "./shortcuts";
+import {
+  isClearCommand,
+  isModelShortcut,
+  isNewThreadShortcut,
+  stopsTurn,
+  toggleForKey,
+} from "./shortcuts";
 
 describe("stopsTurn", () => {
   const esc = { key: "Escape", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
@@ -81,6 +87,47 @@ describe("isClearCommand", () => {
     expect(isClearCommand("  /clear  ")).toBe(true);
     expect(isClearCommand("/clear something")).toBe(false);
     expect(isClearCommand("/model")).toBe(false);
+  });
+});
+
+describe("isModelShortcut", () => {
+  it("returns index for ⌘1..9 / Ctrl 1..9", () => {
+    expect(
+      isModelShortcut({
+        key: "1",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(1);
+    expect(
+      isModelShortcut({
+        key: "9",
+        metaKey: false,
+        ctrlKey: true,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(9);
+    expect(
+      isModelShortcut({
+        key: "0",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBeNull();
+    expect(
+      isModelShortcut({
+        key: "1",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBeNull();
   });
 });
 

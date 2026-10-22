@@ -25,10 +25,11 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    // A change on disk replaces the draft: the file is the source of truth.
+    // A valid change on disk replaces the draft (the file is the source of
+    // truth); an invalid one keeps the draft so unsaved edits aren't lost.
     const apply = (s: SettingsState) => {
       setState(s);
-      setDraft(s.settings);
+      setDraft((d) => (d && s.errors.length > 0 ? d : s.settings));
     };
     commands.getSettings().then(apply);
     const unlisten = listen<SettingsState>("settings-changed", (e) => apply(e.payload));

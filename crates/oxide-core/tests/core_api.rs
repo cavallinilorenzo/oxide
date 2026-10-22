@@ -239,4 +239,26 @@ mod settings {
             settings
         );
     }
+
+    #[test]
+    fn a_deleted_file_is_recreated_from_the_settings_in_effect() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("settings.json");
+        let core = Core::open(tmp.path()).unwrap();
+        let mut settings = core.settings().settings;
+        settings.editor = "zed".into();
+        core.save_settings(&settings).unwrap();
+
+        std::fs::remove_file(&file).unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !file.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("\"editor\": \"zed\"")
+        );
+    }
 }

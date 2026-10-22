@@ -176,6 +176,10 @@ impl SettingsStore {
 
     /// Re-reads the file; notifies subscribers only if the resulting state changed.
     fn reload(&self) -> Result<()> {
+        if !self.path.exists() {
+            // Deleted while running: recreate it from the Settings in effect.
+            write_file(&self.path, &self.get().settings)?;
+        }
         let text = fs::read_to_string(&self.path).map_err(|source| Error::Io {
             path: self.path.clone(),
             source,

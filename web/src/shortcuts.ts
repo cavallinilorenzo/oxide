@@ -1,7 +1,7 @@
 import type { ThreadStatus } from "./bindings";
 import { turnIsRunning } from "./transcript";
 
-export type LayoutToggle = "tools" | "terminal" | "settings";
+export type LayoutToggle = "tools" | "terminal" | "board" | "settings";
 
 type KeyPress = {
   key: string;
@@ -17,11 +17,12 @@ export function stopsTurn(e: KeyPress, status: ThreadStatus): boolean {
   return turnIsRunning(status);
 }
 
-/** ⌘\ toggles the tools panel, ⌘J toggles the Terminal area, ⌘, opens Settings. */
+/** ⌘\ toggles the tools panel, ⌘J toggles the Terminal area, ⌘B switches Chat / Board, ⌘, opens Settings. */
 export function toggleForKey(e: KeyPress): LayoutToggle | null {
   if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null;
   if (e.key === "\\") return "tools";
   if (e.key === "j") return "terminal";
+  if (e.key === "b") return "board";
   if (e.key === ",") return "settings";
   return null;
 }

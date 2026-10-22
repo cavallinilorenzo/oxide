@@ -45,6 +45,8 @@ export const commands = {
 	listTurns: (threadId: number, offset: number, limit: number) => typedError<TurnPage_Serialize, AppError>(__TAURI_INVOKE("list_turns", { threadId, offset, limit })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
+	/**  The Project's Thread Board: its cards now, then every change on `on_event`. */
+	subscribeBoard: (projectId: number, onEvent: Channel<BoardEvent_Deserialize>) => typedError<BoardCard_Serialize[], AppError>(__TAURI_INVOKE("subscribe_board", { projectId, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
@@ -146,6 +148,27 @@ export type ApprovalSnapshot_Serialize = {
 	createdAt: string,
 	decidedAt: string | null,
 };
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Deserialize = {
+	thread: Thread_Deserialize,
+	pendingApprovals: PendingApproval_Deserialize[],
+};
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Serialize = {
+	thread: Thread_Serialize,
+	pendingApprovals: PendingApproval_Serialize[],
+};
+
+export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
+
+export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize };
+
+export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize };
 
 export type CheckState = "success" | "failure" | "pending";
 
@@ -392,6 +415,25 @@ export type ModelInfo_Serialize = {
 	supportedEfforts: string[],
 	defaultEffort: string | null,
 	isLegacy: boolean,
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval = PendingApproval_Serialize | PendingApproval_Deserialize;
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Deserialize = {
+	approvalId: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Serialize = {
+	approvalId: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
 };
 
 export type PermissionMode = "ask" | "auto-edit" | "full-access";

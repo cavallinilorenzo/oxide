@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod activity;
+mod board;
 mod checkpoint;
 mod clock;
 mod continuation;
@@ -19,6 +20,7 @@ pub mod thread;
 mod thread_actor;
 
 pub use activity::{Notification, NotificationKind, System};
+pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
@@ -108,6 +110,7 @@ pub struct Core {
     git: git::GitState,
     gh: github::Gh,
     activity: Arc<activity::Activity>,
+    board: Arc<board::BoardHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
 }
 
@@ -141,6 +144,7 @@ impl Core {
         processes.reap_stale();
         mark_unfinished_work_interrupted(&db)?;
         let storage = StorageHandle::new(home.join(DB_FILE))?;
+        let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
         Ok(Self {
             home,
             user_home: std::env::var_os("HOME")
@@ -159,7 +163,8 @@ impl Core {
             next_terminal_id: AtomicU32::new(1),
             git: git::GitState::default(),
             gh: github::Gh::default(),
-            activity: Arc::new(activity::Activity::new()),
+            activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
+            board,
             model_catalogs: Mutex::new(HashMap::new()),
         })
     }
@@ -468,7 +473,10 @@ impl Core {
             rusqlite::params![project_id, provider, model, effort, mode_str, continued_from],
         )?;
         let id = db.last_insert_rowid() as u32;
-        self.get_thread_by_id(&db, id)
+        let thread = self.get_thread_by_id(&db, id)?;
+        drop(db);
+        self.board.publish(id);
+        Ok(thread)
     }
 
     pub fn set_thread_provider(&self, thread_id: u32, provider: &str) -> Result<ThreadSummary> {
@@ -509,6 +517,8 @@ impl Core {
             "UPDATE threads SET archived = ?2 WHERE id = ?1",
             (thread_id, archived),
         )?;
+        drop(db);
+        self.board.publish(thread_id);
         Ok(())
     }
 
@@ -883,6 +893,15 @@ impl Core {
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.interrupt()
+    }
+
+    /// The Project's Thread Board: a card per Thread, newest activity first, and the changes
+    /// that follow. Derived from Thread rows; the Board stores nothing of its own.
+    pub fn subscribe_board(
+        &self,
+        project_id: u32,
+    ) -> Result<(Vec<BoardCard>, crossbeam_channel::Receiver<BoardEvent>)> {
+        self.board.subscribe(project_id)
     }
 
     pub fn subscribe_thread(

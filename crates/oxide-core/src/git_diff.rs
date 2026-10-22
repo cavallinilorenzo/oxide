@@ -2,7 +2,7 @@
 //! parsed into files and hunks.
 
 use crate::Result;
-use crate::git::{MAX_COUNTED_BYTES, ref_exists, run, succeeds};
+use crate::git::{MAX_COUNTED_BYTES, ref_exists, run};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
@@ -122,15 +122,14 @@ pub fn diff(cwd: &Path, scope: DiffScope) -> Result<Diff> {
             let Some(base) = base_branch(cwd).filter(|_| has_head) else {
                 return Ok(none());
             };
-            let fork = if succeeds(cwd, &["merge-base", &base, "HEAD"]) {
-                run(cwd, &["merge-base", &base, "HEAD"])?.trim().to_string()
-            } else {
+            let Ok(fork) = run(cwd, &["merge-base", &base, "HEAD"]) else {
                 // Unrelated histories: nothing shared to compare from.
                 return Ok(Diff {
                     base: Some(base),
                     files: Vec::new(),
                 });
             };
+            let fork = fork.trim().to_string();
             Ok(Diff {
                 files: diff_against(cwd, &[&fork, "HEAD"])?,
                 base: Some(base),

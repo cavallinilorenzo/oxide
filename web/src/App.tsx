@@ -58,6 +58,9 @@ export function App() {
     ? [...terminalContexts, currentTerminalContext]
     : terminalContexts;
 
+  // Changes whenever a Thread's status does, so Git views refresh after a Turn.
+  const threadsKey = threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "";
+
   // Stable: it reaches memoized TurnViews through context.
   const openDiff = useCallback((hint?: string) => {
     setShowTools(true);
@@ -145,7 +148,7 @@ export function App() {
         {selected && !selected.missing && (
           <GitHeader
             projectId={selected.id}
-            threadsKey={threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? ""}
+            threadsKey={threadsKey}
             onOpenDiff={() => openDiff()}
           />
         )}
@@ -238,7 +241,7 @@ export function App() {
                     setDiffFocus(null);
                   }}
                   focus={diffFocus}
-                  refreshKey={threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? ""}
+                  refreshKey={threadsKey}
                 />
               </Suspense>
             )}

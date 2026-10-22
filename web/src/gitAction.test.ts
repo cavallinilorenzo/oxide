@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GitStatus } from "./bindings";
-import { commitPaths, nextAction } from "./gitAction";
+import { commitPaths, createPrBlockedReason, nextAction } from "./gitAction";
 
 const clean: GitStatus = {
   branch: "feat/x",
@@ -46,5 +46,16 @@ describe("commitPaths", () => {
       { path: "c.ts", oldPath: null },
     ];
     expect(commitPaths(files, new Set(["c.ts"]))).toEqual(["a.ts", "b.ts", "old.ts"]);
+  });
+});
+
+describe("createPrBlockedReason", () => {
+  it("allows a feature branch", () => {
+    expect(createPrBlockedReason(clean)).toBeNull();
+  });
+
+  it("refuses a detached HEAD and a main branch", () => {
+    expect(createPrBlockedReason({ ...clean, branch: null })).toMatch(/detached/);
+    expect(createPrBlockedReason({ ...clean, branch: "main", protected: true })).toMatch(/main/);
   });
 });

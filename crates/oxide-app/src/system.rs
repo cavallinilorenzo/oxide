@@ -69,6 +69,15 @@ impl System for MacSystem {
             .show();
     }
 
+    fn open_url(&self, url: &str) {
+        // Core only passes https URLs it read from `gh`.
+        #[cfg(target_os = "macos")]
+        let opener = "open";
+        #[cfg(not(target_os = "macos"))]
+        let opener = "xdg-open";
+        let _ = std::process::Command::new(opener).arg(url).spawn();
+    }
+
     fn set_badge(&self, count: u32) {
         if let Some(window) = self.app.get_webview_window("main") {
             let _ = window.set_badge_count((count > 0).then_some(i64::from(count)));

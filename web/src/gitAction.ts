@@ -20,6 +20,13 @@ export function pushBlockedReason(status: GitStatus): string | null {
   return status.ahead > 0 && status.behind > 0 ? DIVERGED : null;
 }
 
+/** Why a pull request can't be opened from this branch right now, if it can't. */
+export function createPrBlockedReason(status: GitStatus): string | null {
+  if (status.branch === null) return "HEAD is detached: switch to a branch first.";
+  if (status.protected) return `You are on ${status.branch}: create a branch to open a pull request from.`;
+  return null;
+}
+
 /** The paths Core must commit: every file not unchecked, plus a rename's old path. */
 export function commitPaths(
   files: { path: string; oldPath?: string | null }[],

@@ -11,6 +11,7 @@ mod error;
 mod files;
 mod git;
 mod git_diff;
+mod github;
 mod settings;
 mod storage_actor;
 mod terminal;
@@ -22,6 +23,9 @@ pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
+pub use github::{
+    GithubAvailability, PullRequest, PullRequestDraft, PullRequestInput, PullRequestState,
+};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -97,6 +101,7 @@ pub struct Core {
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
     git: git::GitState,
+    gh: github::Gh,
     activity: Arc<activity::Activity>,
 }
 
@@ -147,6 +152,7 @@ impl Core {
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
             git: git::GitState::default(),
+            gh: github::Gh::default(),
             activity: Arc::new(activity::Activity::new()),
         })
     }
@@ -928,6 +934,41 @@ impl Core {
     pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<()> {
         let cwd = self.main_checkout(project_id)?;
         self.git.mutate(&cwd, || git::push(&cwd, allow_protected))
+    }
+
+    /// Replaces the directories `gh` is looked up in (default: the process PATH
+    /// plus Homebrew's). Tests put a fake `gh` alone on it.
+    pub fn set_gh_search_path(&self, dirs: Option<Vec<PathBuf>>) {
+        self.gh.set_search_path(dirs);
+    }
+
+    /// Whether `gh` works, and the branch's open pull request when it does.
+    /// Runs `gh` only when called: the Surface refreshes it, Core never polls.
+    pub fn pull_request_state(&self, project_id: u32) -> Result<PullRequestState> {
+        github::pull_request_state(&self.gh, &self.main_checkout(project_id)?)
+    }
+
+    /// Title, body and base prefilled for a new pull request of the current branch.
+    pub fn pull_request_draft(&self, project_id: u32) -> Result<PullRequestDraft> {
+        github::pull_request_draft(&self.gh, &self.main_checkout(project_id)?)
+    }
+
+    /// Pushes the current branch if needed, then opens a pull request for it.
+    pub fn create_pull_request(
+        &self,
+        project_id: u32,
+        input: &PullRequestInput,
+    ) -> Result<PullRequest> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git
+            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, input))
+    }
+
+    /// Opens the current branch's pull request in the browser.
+    pub fn open_pull_request(&self, project_id: u32) -> Result<()> {
+        let url = github::pull_request_url(&self.gh, &self.main_checkout(project_id)?)?;
+        self.activity.open_url(&url);
+        Ok(())
     }
 
     /// Runs a command that changes the main checkout's files, serialized per

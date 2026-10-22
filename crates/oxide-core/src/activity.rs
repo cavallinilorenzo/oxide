@@ -29,6 +29,8 @@ pub trait System: Send + Sync + 'static {
     fn notify(&self, notification: Notification);
     /// The number of Threads in needs input.
     fn set_badge(&self, count: u32);
+    /// Opens a web page in the user's browser.
+    fn open_url(&self, _url: &str) {}
 }
 
 struct NoSystem;
@@ -121,6 +123,10 @@ impl Activity {
             tracked.badge = needs_input;
             system.set_badge(needs_input);
         }
+    }
+
+    pub(crate) fn open_url(&self, url: &str) {
+        self.system().open_url(url);
     }
 
     fn system(&self) -> Arc<dyn System> {

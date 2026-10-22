@@ -19,6 +19,8 @@ interface DiffPanelProps {
   refreshKey: string;
   /** Called after a commit or push, so other Git views reload. */
   onChanged: () => void;
+  /** Shows the Pull request Surface, after a push that offered to open one. */
+  onOpenPullRequest: () => void;
 }
 
 const SCOPES: { scope: PanelScope; label: string }[] = [
@@ -42,14 +44,14 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey, onChanged }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest }: DiffPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   // Files the user took out of the commit; everything starts checked.
   const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
-  const push = usePushFlow(projectId, onChanged);
+  const push = usePushFlow(projectId, onChanged, onOpenPullRequest);
 
   useEffect(() => {
     let active = true;

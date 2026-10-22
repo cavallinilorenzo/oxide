@@ -26,3 +26,14 @@ export function clearDraft(
   delete next[key];
   return next;
 }
+
+/** Truncates prompt to match Core's title truncation: first non-empty line up to 60 characters. */
+export function truncateTitle(prompt: string): string {
+  const firstLine =
+    prompt
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? "";
+  return firstLine.length > 60 ? firstLine.slice(0, 60) : firstLine;
+}
+

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearDraft, getDraft, setDraft } from "./threadDrafts";
+import { clearDraft, getDraft, setDraft, truncateTitle } from "./threadDrafts";
 
 describe("thread drafts", () => {
   it("keeps unsent drafts per thread and returns empty string for unknown threads", () => {
@@ -19,5 +19,14 @@ describe("thread drafts", () => {
     drafts = clearDraft(drafts, 1);
     expect(getDraft(drafts, 1)).toBe("");
     expect(getDraft(drafts, 2)).toBe("world");
+  });
+});
+
+describe("truncateTitle", () => {
+  it("takes the first non-empty line and truncates to 60 characters", () => {
+    expect(truncateTitle("Short prompt")).toBe("Short prompt");
+    expect(truncateTitle("\n\n  First line of prompt  \nSecond line")).toBe("First line of prompt");
+    const longPrompt = "A".repeat(100);
+    expect(truncateTitle(longPrompt)).toBe("A".repeat(60));
   });
 });

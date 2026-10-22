@@ -19,6 +19,7 @@ import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
+import { truncateTitle } from "./threadDrafts";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -486,7 +487,7 @@ export function ThreadView({
       setPendingImages([]);
 
       if (!transcript.thread?.title) {
-        const defaultTitle = prompt.length > 60 ? prompt.slice(0, 60) : prompt;
+        const defaultTitle = truncateTitle(prompt);
         setTranscript((prev) =>
           prev.thread ? { ...prev, thread: { ...prev.thread, title: defaultTitle } } : prev
         );

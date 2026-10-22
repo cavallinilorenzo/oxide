@@ -375,6 +375,261 @@ fn gh_is_only_called_when_asked_so_there_is_no_polling() {
     assert_eq!(f.gh_calls().len(), after_one);
 }
 
+fn pr_json(number: u32, title: &str, head: &str, author: &str) -> serde_json::Value {
+    serde_json::json!({
+        "number": number, "title": title, "state": "OPEN", "isDraft": false,
+        "url": format!("https://github.com/fake/repo/pull/{number}"),
+        "baseRefName": "main", "headRefName": head, "author": {"login": author},
+    })
+}
+
+const PR_DIFF: &str = "diff --git a/b.txt b/b.txt
+new file mode 100644
+index 0000000..2f8e1a0
+--- /dev/null
++++ b/b.txt
+@@ -0,0 +1,2 @@
++one
++two
+diff --git a/a.txt b/a.txt
+index 5626abf..f719efd 100644
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-one
++uno
+diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+diff --git a/gone.txt b/gone.txt
+deleted file mode 100644
+index 5626abf..0000000
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-bye
+";
+
+fn state_with_prs(prs: &[serde_json::Value]) -> serde_json::Value {
+    let by_head: serde_json::Map<String, serde_json::Value> = prs
+        .iter()
+        .map(|p| (p["headRefName"].as_str().unwrap().to_string(), p.clone()))
+        .collect();
+    serde_json::json!({"auth": "ok", "default_branch": "main", "prs": by_head})
+}
+
+fn detailed_pr() -> serde_json::Value {
+    let mut pr = pr_json(5, "Add b", "add-b", "other");
+    pr["body"] = "Adds b.".into();
+    pr["diff"] = PR_DIFF.into();
+    pr["comments"] = serde_json::json!([
+        {"author": {"login": "reviewer"}, "body": "Looks good", "createdAt": "2026-05-01T10:00:00Z"}
+    ]);
+    pr["statusCheckRollup"] = serde_json::json!([
+        {"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"__typename": "CheckRun", "name": "web", "status": "COMPLETED", "conclusion": "FAILURE"},
+        {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": ""},
+        {"__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS"},
+    ]);
+    pr
+}
+
+fn numbers(prs: &[oxide_core::PullRequest]) -> Vec<u32> {
+    prs.iter().map(|p| p.number).collect()
+}
+
+#[test]
+fn list_shows_open_pull_requests_mine_or_all_and_searches_them() {
+    let f = fixture();
+    let mut merged = pr_json(3, "Old", "old", "me");
+    merged["state"] = "MERGED".into();
+    install_gh(
+        &f,
+        state_with_prs(&[
+            pr_json(1, "Fix login", "fix-login", "me"),
+            pr_json(2, "Add search", "add-search", "other"),
+            merged,
+        ]),
+    );
+    let all = f.core.list_pull_requests(f.project.id, false, "").unwrap();
+    assert_eq!(numbers(&all), [1, 2]);
+    assert_eq!(all[1].author, "other");
+    assert_eq!(all[0].head, "fix-login");
+
+    let mine = f.core.list_pull_requests(f.project.id, true, "").unwrap();
+    assert_eq!(numbers(&mine), [1]);
+
+    let found = f
+        .core
+        .list_pull_requests(f.project.id, false, "search")
+        .unwrap();
+    assert_eq!(numbers(&found), [2]);
+}
+
+#[test]
+fn list_without_gh_explains_how_to_get_it() {
+    let f = fixture();
+    let err = f
+        .core
+        .list_pull_requests(f.project.id, false, "")
+        .unwrap_err();
+    assert!(err.to_string().contains("Install"), "{err}");
+}
+
+#[test]
+fn detail_has_description_checks_comments_and_changed_files() {
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+
+    assert_eq!(detail.pull_request.title, "Add b");
+    assert_eq!(detail.body, "Adds b.");
+    let checks: Vec<(&str, &str)> = detail
+        .checks
+        .iter()
+        .map(|c| (c.name.as_str(), c.state.as_str()))
+        .collect();
+    assert_eq!(
+        checks,
+        [
+            ("rust", "success"),
+            ("web", "failure"),
+            ("e2e", "pending"),
+            ("ci/legacy", "success")
+        ]
+    );
+    assert_eq!(detail.comments.len(), 1);
+    assert_eq!(detail.comments[0].author, "reviewer");
+    assert_eq!(detail.comments[0].body, "Looks good");
+
+    let files: Vec<(&str, Option<&str>, u32, u32)> = detail
+        .diff
+        .files
+        .iter()
+        .map(|d| (d.path.as_str(), d.old_path.as_deref(), d.added, d.removed))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ("b.txt", None, 2, 0),
+            ("a.txt", None, 1, 1),
+            ("new.txt", Some("old.txt"), 0, 0),
+            ("gone.txt", None, 0, 1)
+        ]
+    );
+    assert_eq!(detail.diff.files[0].hunks[0].lines[1].text, "two");
+    assert_eq!(detail.diff.base.as_deref(), Some("main"));
+}
+
+#[test]
+fn detail_offers_only_the_merge_methods_the_repository_allows() {
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["repo"] = serde_json::json!({
+        "mergeCommitAllowed": false, "squashMergeAllowed": true,
+        "rebaseMergeAllowed": false, "deleteBranchOnMerge": true,
+    });
+    install_gh(&f, state);
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.merge_methods, [oxide_core::MergeMethod::Squash]);
+    assert!(detail.delete_branch_on_merge);
+}
+
+#[test]
+fn comment_sends_the_body_and_shows_up_on_the_next_view() {
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    f.core
+        .comment_pull_request(f.project.id, 5, "  Thanks!  ")
+        .unwrap();
+    assert!(
+        f.gh_calls().contains(
+            &["pr", "comment", "5", "--body", "Thanks!"]
+                .map(String::from)
+                .to_vec()
+        )
+    );
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.comments.last().unwrap().body, "Thanks!");
+
+    let before = f.gh_calls().len();
+    assert!(f.core.comment_pull_request(f.project.id, 5, "  ").is_err());
+    assert_eq!(f.gh_calls().len(), before);
+}
+
+#[test]
+fn merge_uses_an_allowed_method_and_can_delete_the_branch() {
+    use oxide_core::MergeMethod;
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["repo"] = serde_json::json!({"rebaseMergeAllowed": false});
+    install_gh(&f, state);
+    let merge_calls = || -> Vec<Vec<String>> {
+        f.gh_calls()
+            .into_iter()
+            .filter(|c| c[..2] == ["pr", "merge"])
+            .collect()
+    };
+
+    let err = f
+        .core
+        .merge_pull_request(f.project.id, 5, MergeMethod::Rebase, false)
+        .unwrap_err();
+    assert!(err.to_string().contains("rebase"), "{err}");
+    assert!(merge_calls().is_empty());
+
+    f.core
+        .merge_pull_request(f.project.id, 5, MergeMethod::Squash, true)
+        .unwrap();
+    assert_eq!(
+        merge_calls(),
+        [["pr", "merge", "5", "--squash", "--delete-branch"]]
+    );
+    // Merged pull requests leave the open list.
+    let open = f.core.list_pull_requests(f.project.id, false, "").unwrap();
+    assert!(open.is_empty());
+}
+
+/// Publishes `add-b` (with `file` holding `content`) and leaves `main` checked out.
+fn publish_pr_branch(f: &Fixture, file: &str, content: &str) {
+    git(&f.work, &["checkout", "-q", "-b", "add-b"]);
+    commit_file(&f.work, file, content, "Add b");
+    git(&f.work, &["push", "-q", "origin", "add-b"]);
+    git(&f.work, &["checkout", "-q", "main"]);
+    git(&f.work, &["branch", "-q", "-D", "add-b"]);
+}
+
+#[test]
+fn checkout_switches_the_main_checkout_to_the_pull_requests_branch() {
+    let f = fixture();
+    publish_pr_branch(&f, "b.txt", "b\n");
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+
+    f.core.checkout_pull_request(f.project.id, 5).unwrap();
+
+    let status = f.core.git_status(f.project.id).unwrap();
+    assert_eq!(status.branch.as_deref(), Some("add-b"));
+    assert!(f.work.join("b.txt").exists());
+}
+
+#[test]
+fn checkout_shows_gits_refusal() {
+    let f = fixture();
+    publish_pr_branch(&f, "a.txt", "changed upstream\n");
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+
+    // An uncommitted edit to the same file: Git refuses to overwrite it.
+    std::fs::write(f.work.join("a.txt"), "local edit\n").unwrap();
+    let err = f.core.checkout_pull_request(f.project.id, 5).unwrap_err();
+
+    assert!(err.to_string().contains("a.txt"), "{err}");
+    assert_eq!(
+        f.core.git_status(f.project.id).unwrap().branch.as_deref(),
+        Some("main")
+    );
+}
+
 #[test]
 fn list_and_search_issues_against_fake_gh() {
     let f = fixture();

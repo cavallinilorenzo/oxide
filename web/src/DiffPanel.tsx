@@ -12,6 +12,8 @@ interface DiffPanelProps {
   /** Board Threads work in their own worktree, so nothing else edits it. */
   board: boolean;
   scope: PanelScope;
+  /** The pull request whose files the PR scope shows, once one was opened for review. */
+  reviewedPr: number | null;
   onScopeChange: (scope: PanelScope) => void;
   /** A file hint from the chat to scroll to and highlight. */
   focus: string | null;
@@ -41,10 +43,10 @@ type Loaded = { state: "loading" } | { state: "error"; message: string } | { sta
 
 /** Git's view of a Project's changes. State belongs to one Project, so a different one, or another scope, remounts it. */
 export function DiffPanel(props: DiffPanelProps) {
-  return <DiffBody key={`${props.projectId}:${props.scope}`} {...props} />;
+  return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest }: DiffPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   // Files the user took out of the commit; everything starts checked.
   const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
@@ -60,8 +62,18 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
         setLoaded({ state: "ready", diff: { base: null, files: [] } });
         return;
       }
+      if (scope === "pr" && reviewedPr === null) {
+        setLoaded({ state: "ready", diff: { base: null, files: [] } });
+        return;
+      }
       const result =
-        scope === "turn" ? await commands.gitTurnDiff(threadId!) : await commands.gitDiff(projectId, scope);
+        scope === "turn"
+          ? await commands.gitTurnDiff(threadId!)
+          : scope === "pr"
+            ? await commands.pullRequestDetail(projectId, reviewedPr!).then((r) =>
+                r.status === "ok" ? { status: "ok" as const, data: r.data.diff } : r,
+              )
+            : await commands.gitDiff(projectId, scope);
       if (!active) return;
       setLoaded(
         result.status === "ok"
@@ -76,7 +88,7 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
       active = false;
       window.removeEventListener("focus", reload);
     };
-  }, [projectId, threadId, scope, refreshKey]);
+  }, [projectId, threadId, scope, reviewedPr, refreshKey]);
 
   const files = loaded.state === "ready" ? loaded.diff.files : [];
   const focused = matchDiffFile(files, focus);
@@ -112,7 +124,7 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
   return (
     <section className="diff" aria-label="Diff">
       <div className="diff-scopes" role="tablist" aria-label="Diff scope">
-        {SCOPES.map((s) => (
+        {(reviewedPr === null ? SCOPES : [...SCOPES, { scope: "pr" as const, label: `PR #${reviewedPr}` }]).map((s) => (
           <button
             key={s.scope}
             role="tab"
@@ -122,7 +134,7 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
             {s.label}
           </button>
         ))}
-        {scope === "branch" && loaded.state === "ready" && loaded.diff.base && (
+        {(scope === "branch" || scope === "pr") && loaded.state === "ready" && loaded.diff.base && (
           <span className="diff-base">vs {loaded.diff.base}</span>
         )}
       </div>

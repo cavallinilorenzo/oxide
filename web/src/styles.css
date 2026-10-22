@@ -673,6 +673,23 @@ button[aria-pressed="true"] { background: #8883; }
 .pr-form textarea { resize: vertical; font: inherit; }
 .pr-actions { display: flex; gap: 8px; }
 .pr-guidance { opacity: 0.8; }
+.pr-views { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.pr-browser, .pr-review { display: grid; gap: 8px; align-content: start; }
+.pr-search { display: flex; align-items: center; gap: 6px; }
+.pr-search input[type="text"], .pr-search input:not([type]) { flex: 1; min-width: 0; }
+.pr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pr-row { display: grid; gap: 2px; width: 100%; text-align: left; font: inherit; padding: 6px 8px; border: 1px solid #8883; border-radius: 6px; background: none; color: inherit; cursor: pointer; }
+.pr-row:hover { background: #8881; }
+.pr-row-meta { opacity: 0.7; font-size: 12px; }
+.pr-back { justify-self: start; font: inherit; background: none; border: none; color: inherit; opacity: 0.8; cursor: pointer; padding: 0; }
+.pr-review h4 { margin: 8px 0 4px; font-size: 12px; opacity: 0.8; }
+.pr-body, .pr-comment pre { white-space: pre-wrap; font: inherit; margin: 0; }
+.pr-checks { list-style: none; margin: 0; padding: 0; }
+.pr-check-failure { color: #d33; }
+.pr-check-pending { opacity: 0.7; }
+.pr-check-state { opacity: 0.6; font-size: 12px; }
+.pr-comment { border: 1px solid #8883; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+.pr-comment header { font-weight: 600; font-size: 12px; }
 
 /* Model & Effort Picker */
 .model-picker-modal {

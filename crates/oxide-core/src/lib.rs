@@ -317,6 +317,15 @@ impl Core {
                     authenticated: false,
                     warning: None,
                 }),
+            "agy" | "antigravity" => oxide_provider::agy::AgyProvider::new().detect().unwrap_or(
+                oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                },
+            ),
             "fake" => oxide_provider::Detection {
                 available: true,
                 installed: true,
@@ -341,15 +350,7 @@ impl Core {
         match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
             "codex" => oxide_provider::codex::CodexProvider::new().capabilities(),
-            "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
-                supported_permission_modes: vec![
-                    PermissionMode::AutoEdit,
-                    PermissionMode::FullAccess,
-                ],
-                interactive_approvals: false,
-                supports_reasoning: false,
-                image_attachments: false,
-            },
+            "agy" | "antigravity" => oxide_provider::agy::AgyProvider::new().capabilities(),
             _ => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
                     PermissionMode::Ask,
@@ -424,6 +425,15 @@ impl Core {
                     return Err(Error::Provider("Claude Code is not installed".to_string()));
                 }
                 Box::new(claude)
+            } else if matches!(snapshot.thread.provider.as_str(), "agy" | "antigravity") {
+                let mut agy = oxide_provider::agy::AgyProvider::new();
+                agy.set_registry(Arc::clone(&self.processes));
+                if !agy.detect().is_ok_and(|d| d.installed) {
+                    return Err(Error::Provider(
+                        "Antigravity CLI is not installed".to_string(),
+                    ));
+                }
+                Box::new(agy)
             } else if snapshot.thread.provider == "codex" {
                 let codex = oxide_provider::codex::CodexProvider::new();
                 let detection = codex.detect().unwrap_or(oxide_provider::Detection {

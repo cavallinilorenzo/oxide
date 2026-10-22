@@ -52,6 +52,12 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 ",
+    "
+    ALTER TABLE items ADD COLUMN parent_item_index INTEGER;
+    ALTER TABLE turns ADD COLUMN model TEXT;
+    ALTER TABLE turns ADD COLUMN effort TEXT;
+    ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

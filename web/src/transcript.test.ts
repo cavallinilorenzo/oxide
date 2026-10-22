@@ -17,11 +17,15 @@ describe("transcript reducer", () => {
         createdAt: "2026-10-22T10:00:00Z",
         updatedAt: "2026-10-22T10:00:00Z",
       },
+      capabilities: { reasoningText: true, imageAttachments: false },
       turns: [
         {
           id: 10,
           turnIndex: 0,
           prompt: "Hello",
+          model: null,
+          effort: null,
+          attachments: [],
           status: "completed",
           startedAt: "2026-10-22T10:00:00Z",
           completedAt: "2026-10-22T10:00:05Z",
@@ -31,6 +35,7 @@ describe("transcript reducer", () => {
               itemIndex: 0,
               kind: "agent_message",
               content: "Hi there!",
+              parentItemIndex: null,
               createdAt: "2026-10-22T10:00:02Z",
             },
           ],
@@ -44,6 +49,7 @@ describe("transcript reducer", () => {
     expect(state.turns.length).toBe(1);
     expect(state.turns[0].items[0].content).toBe("Hi there!");
     expect(state.lastSeq).toBe(5);
+    expect(state.capabilities.reasoningText).toBe(true);
   });
 
   it("applies streaming turn and batched deltas in sequence", () => {
@@ -57,12 +63,18 @@ describe("transcript reducer", () => {
         payload: {
           turn_index: 0,
           prompt: "Streaming prompt",
+          model: "Opus 5.5",
+          effort: "high",
+          attachments: ["/home/.oxide/attachments/a.png"],
         },
       },
     });
     expect(state.turns.length).toBe(1);
     expect(state.turns[0].prompt).toBe("Streaming prompt");
     expect(state.turns[0].status).toBe("running");
+    expect(state.turns[0].model).toBe("Opus 5.5");
+    expect(state.turns[0].effort).toBe("high");
+    expect(state.turns[0].attachments).toEqual(["/home/.oxide/attachments/a.png"]);
 
     // ItemStarted
     state = applyThreadEvent(state, {
@@ -72,6 +84,7 @@ describe("transcript reducer", () => {
         payload: {
           item_index: 0,
           kind: "agent_message",
+          parent_item_index: null,
         },
       },
     });

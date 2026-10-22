@@ -58,6 +58,8 @@ pub struct ItemSnapshot {
     pub item_index: u32,
     pub kind: ItemKind,
     pub content: String,
+    /// The Subagent Item this Item is nested under.
+    pub parent_item_index: Option<u32>,
     pub created_at: String,
 }
 
@@ -66,15 +68,27 @@ pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
     pub prompt: String,
+    /// The Model and Effort the Turn ran with.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// Paths of image attachments, stored under the Oxide home.
+    pub attachments: Vec<String>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadCapabilities {
+    pub reasoning_text: bool,
+    pub image_attachments: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadSnapshot {
     pub thread: ThreadSummary,
+    pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub last_seq: u32,
 }
@@ -84,10 +98,14 @@ pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
         prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        attachments: Vec<String>,
     },
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        parent_item_index: Option<u32>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -97,6 +115,7 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     },
     TurnCompleted {
         turn_index: u32,

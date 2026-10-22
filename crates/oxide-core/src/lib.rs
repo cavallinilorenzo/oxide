@@ -29,11 +29,12 @@ pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
 pub use thread::{
-    ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary,
-    TurnSnapshot,
+    ItemSnapshot, SequencedThreadEvent, ThreadCapabilities, ThreadEvent, ThreadSnapshot,
+    ThreadStatus, ThreadSummary, TurnSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";
+static ATTACHMENT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectSummary {
@@ -250,7 +251,7 @@ impl Core {
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
             } else {
-                Box::new(oxide_provider::FakeProvider::default())
+                Box::new(oxide_provider::FakeProvider::scripted())
             };
 
         let real_time = self.real_time_ticker.load(Ordering::Relaxed);
@@ -267,8 +268,83 @@ impl Core {
     }
 
     pub fn send_prompt(&self, thread_id: u32, prompt: &str) -> Result<()> {
+        self.send_prompt_with_attachments(thread_id, prompt, &[])
+    }
+
+    /// Sends a prompt with image attachments previously stored by [`Core::save_attachment`].
+    /// Fails if the Provider doesn't accept images or a path is outside the attachments folder.
+    pub fn send_prompt_with_attachments(
+        &self,
+        thread_id: u32,
+        prompt: &str,
+        attachments: &[PathBuf],
+    ) -> Result<()> {
+        let dir = self.attachments_dir();
+        if let Some(bad) = attachments.iter().find(|p| !p.starts_with(&dir)) {
+            return Err(Error::Io {
+                path: bad.clone(),
+                source: std::io::Error::other("attachment is not stored under the Oxide home"),
+            });
+        }
         let actor = self.get_or_create_thread_actor(thread_id)?;
-        actor.send_prompt(prompt.to_string())
+        actor.send_prompt(prompt.to_string(), attachments.to_vec())
+    }
+
+    /// Reads a stored attachment; refuses paths outside the attachments folder.
+    pub fn read_attachment(&self, path: &Path) -> Result<Vec<u8>> {
+        let dir = self.attachments_dir();
+        let io = |source| Error::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let canonical = path.canonicalize().map_err(io)?;
+        let dir = dir.canonicalize().map_err(io)?;
+        if !canonical.starts_with(&dir) {
+            return Err(io(std::io::Error::other("not stored under the Oxide home")));
+        }
+        fs::read(&canonical).map_err(io)
+    }
+
+    /// Capabilities of a Provider, before any Thread of it exists.
+    pub fn provider_capabilities(&self, _provider: &str) -> ThreadCapabilities {
+        // Only the fake Provider exists so far.
+        let caps = oxide_provider::FakeProvider::scripted().capabilities();
+        ThreadCapabilities {
+            reasoning_text: caps.reasoning_text,
+            image_attachments: caps.image_attachments,
+        }
+    }
+
+    fn attachments_dir(&self) -> PathBuf {
+        self.home.join("attachments")
+    }
+
+    /// Stores an image under `<home>/attachments/` and returns its path.
+    pub fn save_attachment(&self, bytes: &[u8], extension: &str) -> Result<PathBuf> {
+        const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+        let ext = extension.to_ascii_lowercase();
+        let dir = self.attachments_dir();
+        if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(Error::Io {
+                path: dir,
+                source: std::io::Error::other(format!("unsupported image type `{extension}`")),
+            });
+        }
+        fs::create_dir_all(&dir).map_err(|source| Error::Io {
+            path: dir.clone(),
+            source,
+        })?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let seq = ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("{nanos}-{seq}.{ext}"));
+        fs::write(&path, bytes).map_err(|source| Error::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(path)
     }
 
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {

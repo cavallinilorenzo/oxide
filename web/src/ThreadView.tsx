@@ -1,13 +1,14 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { PaperclipIcon, XIcon } from "@primer/octicons-react";
 import {
   commands,
-  type ItemSnapshot,
   type SequencedThreadEvent,
   type Thread,
+  type ThreadCapabilities,
   type ThreadStatus,
-  type TurnSnapshot,
 } from "./bindings";
+import { TurnView } from "./TurnView";
 import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
 
 interface ThreadViewProps {
@@ -17,30 +18,20 @@ interface ThreadViewProps {
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
 }
 
-const ItemView = memo(function ItemView({ item }: { item: ItemSnapshot }) {
-  return (
-    <div className="message agent">
-      <div className="message-header">
-        Agent {item.kind !== "agent_message" && `(${item.kind})`}
-      </div>
-      <div className="message-content">{item.content}</div>
-    </div>
-  );
-});
+const NEW_THREAD_PROVIDER = "fake";
 
-const TurnView = memo(function TurnView({ turn }: { turn: TurnSnapshot }) {
-  return (
-    <div className="turn">
-      <div className="message user">
-        <div className="message-header">You</div>
-        <div className="message-content">{turn.prompt}</div>
-      </div>
-      {turn.items.map((item, iIdx) => (
-        <ItemView key={item.id || iIdx} item={item} />
-      ))}
-    </div>
-  );
-});
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+interface PendingImage {
+  path: string;
+  previewUrl: string;
+}
 
 export function ThreadView({
   threadId,
@@ -51,6 +42,9 @@ export function ThreadView({
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pendingEventsRef = useRef<SequencedThreadEvent[]>([]);
   const rafIdRef = useRef<number>(0);
@@ -110,6 +104,48 @@ export function ThreadView({
     };
   }, [threadId, onStatusChange]);
 
+  // Before a Thread exists, ask what the Provider it will use supports.
+  useEffect(() => {
+    if (threadId) return;
+    let active = true;
+    void commands.providerCapabilities(NEW_THREAD_PROVIDER).then((caps) => {
+      if (active) setNewThreadCaps(caps);
+    });
+    return () => {
+      active = false;
+    };
+  }, [threadId]);
+
+  const imagesOffered = (threadId ? transcript.capabilities : newThreadCaps)?.imageAttachments ?? false;
+
+  const addImage = async (file: File) => {
+    const ext = IMAGE_EXTENSIONS[file.type];
+    if (!ext) return;
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+    const saved = await commands.saveAttachment(bytes, ext);
+    if (saved.status !== "ok") {
+      console.error("Failed to store image:", saved.error);
+      return;
+    }
+    setPendingImages((prev) => [...prev, { path: saved.data, previewUrl: URL.createObjectURL(file) }]);
+  };
+
+  const removeImage = (path: string) => {
+    setPendingImages((prev) => {
+      const gone = prev.find((i) => i.path === path);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((i) => i.path !== path);
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (!imagesOffered) return;
+    const files = Array.from(e.clipboardData.files).filter((f) => f.type in IMAGE_EXTENSIONS);
+    if (files.length === 0) return;
+    e.preventDefault();
+    files.forEach((f) => void addImage(f));
+  };
+
   // Auto-scroll to bottom as messages stream in
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -129,7 +165,7 @@ export function ThreadView({
         // Create new thread for this project
         const created = await commands.createThread(
           projectId,
-          "fake",
+          NEW_THREAD_PROVIDER,
           null,
           null,
           "auto-edit"
@@ -144,7 +180,10 @@ export function ThreadView({
         }
       }
 
-      await commands.sendPrompt(targetThreadId, prompt);
+      const attachments = pendingImages.map((i) => i.path);
+      pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
+      setPendingImages([]);
+      await commands.sendPrompt(targetThreadId, prompt, attachments);
     } finally {
       setSending(false);
     }
@@ -161,28 +200,75 @@ export function ThreadView({
           </div>
         ) : (
           transcript.turns.map((turn, tIdx) => (
-            <TurnView key={turn.id || tIdx} turn={turn} />
+            <TurnView
+              key={turn.id || tIdx}
+              turn={turn}
+              provider={transcript.thread?.provider ?? NEW_THREAD_PROVIDER}
+            />
           ))
         )}
         <div ref={bottomRef} />
       </div>
 
       <form className="composer" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          className="composer-input"
-          placeholder={isWorking ? "Agent is working…" : "Type a prompt…"}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={isWorking || sending}
-        />
-        <button
-          type="submit"
-          className="composer-submit"
-          disabled={!input.trim() || isWorking || sending}
-        >
-          Send
-        </button>
+        {pendingImages.length > 0 && (
+          <div className="pending-images">
+            {pendingImages.map((img) => (
+              <div className="pending-image" key={img.path}>
+                <img src={img.previewUrl} alt="Pending attachment" />
+                <button
+                  type="button"
+                  aria-label="Remove image"
+                  onClick={() => removeImage(img.path)}
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          {imagesOffered && (
+            <>
+              <button
+                type="button"
+                className="composer-attach"
+                aria-label="Attach image"
+                disabled={isWorking || sending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <PaperclipIcon size={16} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  Array.from(e.target.files ?? []).forEach((f) => void addImage(f));
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
+          <input
+            type="text"
+            className="composer-input"
+            placeholder={isWorking ? "Agent is working…" : "Type a prompt…"}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
+            disabled={isWorking || sending}
+          />
+          <button
+            type="submit"
+            className="composer-submit"
+            disabled={!input.trim() || isWorking || sending}
+          >
+            Send
+          </button>
+        </div>
       </form>
     </div>
   );

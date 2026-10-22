@@ -1,15 +1,21 @@
 use crossbeam_channel::{Receiver, Sender};
-use oxide_provider::{Provider, ProviderEvent, StartContext, TurnStatus};
-use std::collections::HashMap;
+use oxide_provider::{
+    ItemKind, Provider, ProviderCapabilities, ProviderEvent, StartContext, TurnStatus,
+};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
-use crate::thread::{SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus};
+use crate::thread::{
+    SequencedThreadEvent, ThreadCapabilities, ThreadEvent, ThreadSnapshot, ThreadStatus,
+};
 
 pub enum ThreadActorMsg {
     SendPrompt {
         prompt: String,
+        attachments: Vec<PathBuf>,
         reply: mpsc::Sender<Result<()>>,
     },
     Interrupt {
@@ -62,10 +68,11 @@ impl ThreadActorHandle {
         Ok(Self { sender: tx })
     }
 
-    pub fn send_prompt(&self, prompt: String) -> Result<()> {
+    pub fn send_prompt(&self, prompt: String, attachments: Vec<PathBuf>) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(ThreadActorMsg::SendPrompt {
             prompt,
+            attachments,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -107,17 +114,25 @@ struct ActorState {
     current_turn_index: u32,
     current_turn_id: Option<u32>,
     pending_deltas: HashMap<u32, String>,
+    capabilities: ProviderCapabilities,
+    /// Attachments of the prompt in flight, claimed by the Turn it starts.
+    pending_attachments: Vec<String>,
+    /// Items withheld from the Transcript (reasoning the Provider shouldn't expose).
+    dropped_items: HashSet<u32>,
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
 }
 
 impl ActorState {
-    fn new(thread_id: u32) -> Self {
+    fn new(thread_id: u32, capabilities: ProviderCapabilities) -> Self {
         Self {
             thread_id,
             current_turn_index: 0,
             current_turn_id: None,
             pending_deltas: HashMap::new(),
+            capabilities,
+            pending_attachments: Vec::new(),
+            dropped_items: HashSet::new(),
             seq: 0,
             subscribers: Vec::new(),
         }
@@ -146,7 +161,7 @@ impl ActorState {
         }
         let deltas = std::mem::take(&mut self.pending_deltas);
         for (item_index, delta) in deltas {
-            if !delta.is_empty() {
+            if !delta.is_empty() && !self.dropped_items.contains(&item_index) {
                 self.broadcast(ThreadEvent::ItemDeltaBatch { item_index, delta });
             }
         }
@@ -160,19 +175,48 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         }
         ProviderEvent::TurnStarted { turn_index, prompt } => {
             state.current_turn_index = turn_index;
-            if let Ok(turn_id) =
-                storage.write_turn_started(state.thread_id, turn_index, prompt.clone())
-            {
-                state.current_turn_id = Some(turn_id);
+            state.dropped_items.clear();
+            let attachments = std::mem::take(&mut state.pending_attachments);
+            let (mut model, mut effort) = (None, None);
+            if let Ok(started) = storage.write_turn_started(
+                state.thread_id,
+                turn_index,
+                prompt.clone(),
+                attachments.clone(),
+            ) {
+                state.current_turn_id = Some(started.id);
+                model = started.model;
+                effort = started.effort;
             }
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
-            state.broadcast(ThreadEvent::TurnStarted { turn_index, prompt });
+            state.broadcast(ThreadEvent::TurnStarted {
+                turn_index,
+                prompt,
+                model,
+                effort,
+                attachments,
+            });
             state.broadcast_status(ThreadStatus::Working);
         }
-        ProviderEvent::ItemStarted { item_index, kind } => {
-            state.broadcast(ThreadEvent::ItemStarted { item_index, kind });
+        ProviderEvent::ItemStarted {
+            item_index,
+            kind,
+            parent_item_index,
+        } => {
+            if kind == ItemKind::Reasoning && !state.capabilities.reasoning_text {
+                state.dropped_items.insert(item_index);
+                return;
+            }
+            state.broadcast(ThreadEvent::ItemStarted {
+                item_index,
+                kind,
+                parent_item_index,
+            });
         }
         ProviderEvent::ItemDelta { item_index, delta } => {
+            if state.dropped_items.contains(&item_index) {
+                return;
+            }
             state
                 .pending_deltas
                 .entry(item_index)
@@ -183,15 +227,27 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             item_index,
             kind,
             content,
+            parent_item_index,
         } => {
+            if kind == ItemKind::Reasoning && !state.capabilities.reasoning_text {
+                state.dropped_items.insert(item_index);
+                return;
+            }
             state.flush_pending_deltas();
             if let Some(turn_id) = state.current_turn_id {
-                let _ = storage.write_item_completed(turn_id, item_index, kind, content.clone());
+                let _ = storage.write_item_completed(
+                    turn_id,
+                    item_index,
+                    kind,
+                    content.clone(),
+                    parent_item_index,
+                );
             }
             state.broadcast(ThreadEvent::ItemCompleted {
                 item_index,
                 kind,
                 content,
+                parent_item_index,
             });
         }
         ProviderEvent::TurnCompleted {
@@ -239,10 +295,9 @@ fn run_thread_actor(
     storage: StorageHandle,
     rx: Receiver<ThreadActorMsg>,
 ) {
-    let mut state = ActorState::new(thread_id);
-
     // Start provider
     let caps = provider.capabilities();
+    let mut state = ActorState::new(thread_id, caps.clone());
     let start_ctx = StartContext {
         working_dir,
         model: None,
@@ -270,9 +325,27 @@ fn run_thread_actor(
                     Err(_) => break,
                 };
                 match msg {
-                    ThreadActorMsg::SendPrompt { prompt, reply } => {
-                        let p_res = provider.send_prompt(&prompt).map_err(|e| Error::Io {
-                            path: std::path::PathBuf::from("provider"),
+                    ThreadActorMsg::SendPrompt { prompt, attachments, reply } => {
+                        if !attachments.is_empty() && !state.capabilities.image_attachments {
+                            let _ = reply.send(Err(Error::Io {
+                                path: PathBuf::from("attachments"),
+                                source: std::io::Error::other(
+                                    "this Provider does not accept image attachments",
+                                ),
+                            }));
+                            continue;
+                        }
+                        state.pending_attachments = attachments
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        let sent = if attachments.is_empty() {
+                            provider.send_prompt(&prompt)
+                        } else {
+                            provider.send_prompt_with_images(&prompt, &attachments)
+                        };
+                        let p_res = sent.map_err(|e| Error::Io {
+                            path: PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
                         let _ = reply.send(p_res);
@@ -291,6 +364,10 @@ fn run_thread_actor(
                             }
                         };
                         snapshot.last_seq = state.seq;
+                        snapshot.capabilities = ThreadCapabilities {
+                            reasoning_text: state.capabilities.reasoning_text,
+                            image_attachments: state.capabilities.image_attachments,
+                        };
                         state.subscribers.push(sub_tx);
                         let _ = reply.send((snapshot, sub_rx));
                     }

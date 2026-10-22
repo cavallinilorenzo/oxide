@@ -34,6 +34,7 @@ fn fake_provider_passes_shared_contract_suite() {
                     prompt,
                 });
                 let _ = s.send(ProviderEvent::ItemStarted {
+                    parent_item_index: None,
                     item_index: 0,
                     kind: ItemKind::AgentMessage,
                 });
@@ -46,6 +47,7 @@ fn fake_provider_passes_shared_contract_suite() {
                     delta: "world!".into(),
                 });
                 let _ = s.send(ProviderEvent::ItemCompleted {
+                    parent_item_index: None,
                     item_index: 0,
                     kind: ItemKind::AgentMessage,
                     content: "Hello world!".into(),

@@ -2,6 +2,7 @@ import type {
   ItemSnapshot,
   SequencedThreadEvent,
   Thread,
+  ThreadCapabilities,
   ThreadSnapshot,
   ThreadStatus,
   TurnSnapshot,
@@ -11,8 +12,11 @@ export interface TranscriptState {
   thread: Thread | null;
   status: ThreadStatus;
   turns: TurnSnapshot[];
+  capabilities: ThreadCapabilities;
   lastSeq: number;
 }
+
+const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false, imageAttachments: false };
 
 export function initialTranscriptState(snapshot: ThreadSnapshot | null): TranscriptState {
   if (!snapshot) {
@@ -20,6 +24,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
       thread: null,
       status: "completed",
       turns: [],
+      capabilities: NO_CAPABILITIES,
       lastSeq: 0,
     };
   }
@@ -27,6 +32,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
     thread: snapshot.thread,
     status: snapshot.thread.status,
     turns: snapshot.turns,
+    capabilities: snapshot.capabilities,
     lastSeq: snapshot.lastSeq,
   };
 }
@@ -72,6 +78,9 @@ export function applyThreadEvent(
         id: existing >= 0 ? turns[existing].id : 0,
         turnIndex: event.payload.turn_index,
         prompt: event.payload.prompt,
+        model: event.payload.model ?? null,
+        effort: event.payload.effort ?? null,
+        attachments: event.payload.attachments,
         status: "running",
         startedAt: new Date().toISOString(),
         completedAt: null,
@@ -88,6 +97,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: event.payload.kind,
         content: existing ? existing.content : "",
+        parentItemIndex: event.payload.parent_item_index ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -99,6 +109,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: existing ? existing.kind : "agent_message",
         content: (existing ? existing.content : "") + event.payload.delta,
+        parentItemIndex: existing ? existing.parentItemIndex : null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -110,6 +121,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: event.payload.kind,
         content: event.payload.content,
+        parentItemIndex: event.payload.parent_item_index ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -151,6 +163,7 @@ export function applyThreadEvent(
     thread: state.thread ? { ...state.thread, status } : null,
     status,
     turns,
+    capabilities: state.capabilities,
     lastSeq: sequenced.seq,
   };
 }

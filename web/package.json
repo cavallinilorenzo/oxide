@@ -12,9 +12,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@primer/octicons-react": "^19.41.0",
     "@tauri-apps/api": "^2.12.4",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "simple-icons": "^16.35.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

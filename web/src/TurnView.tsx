@@ -1,0 +1,184 @@
+import { memo, useEffect, useState } from "react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CommentDiscussionIcon,
+  FileDiffIcon,
+  LightBulbIcon,
+  PersonIcon,
+  ToolsIcon,
+} from "@primer/octicons-react";
+import { commands, type ItemSnapshot, type TurnSnapshot } from "./bindings";
+import { ProviderMark } from "./ProviderMark";
+import {
+  formatTime,
+  groupTurnItems,
+  modelEffortLabel,
+  splitHeadline,
+  type Block,
+} from "./transcriptView";
+
+/** Opens the Diff Surface for a file; a no-op until the Diff ticket lands. */
+const openDiff: (path: string) => void = () => {};
+
+function Collapsible({
+  label,
+  icon,
+  defaultOpen = false,
+  className,
+  children,
+}: {
+  label: React.ReactNode;
+  icon: React.ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`collapsible ${className ?? ""}`}>
+      <button
+        type="button"
+        className="collapsible-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        {icon}
+        <span className="collapsible-label">{label}</span>
+      </button>
+      {open && <div className="collapsible-body">{children}</div>}
+    </div>
+  );
+}
+
+function ToolCall({ item }: { item: ItemSnapshot }) {
+  const { headline, detail } = splitHeadline(item.content);
+  if (!detail) {
+    return <div className="tool-call tool-call-plain">{headline}</div>;
+  }
+  return (
+    <Collapsible label={headline} icon={<ToolsIcon size={12} />} className="tool-call">
+      <pre className="tool-detail">{detail}</pre>
+    </Collapsible>
+  );
+}
+
+function BlockView({ block }: { block: Block }) {
+  switch (block.type) {
+    case "tools":
+      return (
+        <Collapsible
+          label={`${block.items.length} tool call${block.items.length === 1 ? "" : "s"}`}
+          icon={<ToolsIcon size={12} />}
+          className="tool-group"
+        >
+          <div className="rail">
+            {block.items.map((it) => (
+              <ToolCall key={it.id || it.itemIndex} item={it} />
+            ))}
+          </div>
+        </Collapsible>
+      );
+    case "message":
+      return (
+        <div className={block.final ? "agent-message final" : "agent-message"}>
+          {block.item.content}
+        </div>
+      );
+    case "reasoning":
+      return (
+        <Collapsible label="Reasoning" icon={<LightBulbIcon size={12} />} className="reasoning">
+          <div className="reasoning-text">{block.item.content}</div>
+        </Collapsible>
+      );
+    case "file":
+      return (
+        <button
+          type="button"
+          className="file-change"
+          onClick={() => openDiff(block.item.content)}
+        >
+          <FileDiffIcon size={12} />
+          <span>{splitHeadline(block.item.content).headline}</span>
+        </button>
+      );
+    case "subagent": {
+      const { headline, detail } = splitHeadline(block.item.content);
+      return (
+        <Collapsible
+          label={headline}
+          icon={<CommentDiscussionIcon size={12} />}
+          className="subagent"
+          defaultOpen
+        >
+          {detail && <div className="subagent-task">{detail}</div>}
+          <div className="rail">
+            {block.children.map((child, i) => (
+              <BlockView key={i} block={child} />
+            ))}
+          </div>
+        </Collapsible>
+      );
+    }
+  }
+}
+
+function AttachmentImage({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let revoked: string | null = null;
+    let active = true;
+    void commands.readAttachment(path).then((res) => {
+      if (!active || res.status !== "ok") return;
+      revoked = URL.createObjectURL(new Blob([new Uint8Array(res.data)]));
+      setUrl(revoked);
+    });
+    return () => {
+      active = false;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [path]);
+  if (!url) return null;
+  return <img className="attachment" src={url} alt="Attached" />;
+}
+
+export const TurnView = memo(function TurnView({
+  turn,
+  provider,
+}: {
+  turn: TurnSnapshot;
+  provider: string;
+}) {
+  const blocks = groupTurnItems(turn.items);
+  return (
+    <section className="turn">
+      <div className="user-message">
+        <div className="user-meta">
+          <PersonIcon size={12} /> You · {formatTime(turn.startedAt)}
+        </div>
+        <div className="user-bubble">
+          {turn.attachments.length > 0 && (
+            <div className="attachments">
+              {turn.attachments.map((p) => (
+                <AttachmentImage key={p} path={p} />
+              ))}
+            </div>
+          )}
+          {turn.prompt}
+        </div>
+      </div>
+      {(blocks.length > 0 || turn.status === "running") && (
+        <div className="agent-turn">
+          <div className="agent-header">
+            <ProviderMark provider={provider} />
+            <span>{modelEffortLabel(turn.model ?? null, turn.effort ?? null)}</span>
+          </div>
+          {blocks.map((block, i) => (
+            <BlockView key={i} block={block} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});

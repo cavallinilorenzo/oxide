@@ -129,3 +129,40 @@ fn pending_approvals_are_on_the_card_and_answering_clears_them() {
         }
     }
 }
+
+#[test]
+fn renaming_and_stopping_a_thread_reach_the_board() {
+    let (_dir, core, project) = core_with_project();
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+    fake.on_prompt(move |prompt| {
+        let _ = sender.send(ProviderEvent::TurnStarted {
+            turn_index: 0,
+            prompt: prompt.to_string(),
+        });
+    });
+    let thread = core
+        .create_thread(project, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    let (_, rx) = core.subscribe_board(project).unwrap();
+
+    core.rename_thread(thread.id, "Fix login").unwrap();
+    let BoardEvent::ThreadChanged(card) = next(&rx);
+    assert_eq!(card.thread.title.as_deref(), Some("Fix login"));
+
+    core.send_prompt(thread.id, "go").unwrap();
+    loop {
+        let BoardEvent::ThreadChanged(card) = next(&rx);
+        if card.thread.status == ThreadStatus::Working {
+            break;
+        }
+    }
+    core.interrupt_thread(thread.id).unwrap();
+    loop {
+        let BoardEvent::ThreadChanged(card) = next(&rx);
+        if card.thread.status == ThreadStatus::Interrupted {
+            break;
+        }
+    }
+}

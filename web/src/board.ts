@@ -18,9 +18,14 @@ export function groupBoard(cards: BoardCard[], query: string): BoardColumns {
   return columns;
 }
 
+/** Adds or replaces a card, unless the one held is newer (events and the snapshot can arrive out of order). */
+export function mergeCard(cards: BoardCard[], next: BoardCard): BoardCard[] {
+  const held = cards.find((c) => c.thread.id === next.thread.id);
+  if (!held) return [...cards, next];
+  if (held.thread.updatedAt > next.thread.updatedAt) return cards;
+  return cards.map((c) => (c === held ? next : c));
+}
+
 export function applyBoardEvent(cards: BoardCard[], event: BoardEvent): BoardCard[] {
-  const next = event.payload;
-  return cards.some((c) => c.thread.id === next.thread.id)
-    ? cards.map((c) => (c.thread.id === next.thread.id ? next : c))
-    : [...cards, next];
+  return mergeCard(cards, event.payload);
 }

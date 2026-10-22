@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { commands, type ApprovalDecision, type BoardCard, type BoardEvent } from "./bindings";
-import { applyBoardEvent, groupBoard } from "./board";
+import { applyBoardEvent, groupBoard, mergeCard } from "./board";
 import { threadTitle } from "./threadList";
 
 interface BoardViewProps {
@@ -26,10 +26,7 @@ export function BoardView({ projectId, onOpenThread, onArchiveThread }: BoardVie
       if (!active) return;
       if (res.status === "ok") {
         // Events that raced ahead of the snapshot are newer: keep them.
-        setCards((previous) => res.data.reduce(
-          (merged, card) => merged.some((c) => c.thread.id === card.thread.id) ? merged : [...merged, card],
-          previous ?? [],
-        ));
+        setCards((previous) => res.data.reduce(mergeCard, previous ?? []));
       } else setError(res.error.message);
     });
     return () => {
@@ -43,11 +40,11 @@ export function BoardView({ projectId, onOpenThread, onArchiveThread }: BoardVie
 
   const respond = async (threadId: number, approvalId: string, decision: ApprovalDecision) => {
     const res = await commands.respondToApproval(threadId, approvalId, decision);
-    if (res.status === "error") setError(res.error.message);
+    setError(res.status === "error" ? res.error.message : null);
   };
   const stop = async (threadId: number) => {
     const res = await commands.interruptThread(threadId);
-    if (res.status === "error") setError(res.error.message);
+    setError(res.status === "error" ? res.error.message : null);
   };
 
   const render = (title: string, list: BoardCard[]) => (
@@ -133,6 +130,16 @@ function BoardCardView({
             <button type="button" className="approval-btn deny" onClick={() => onRespond(approval.approvalId, "deny")}>
               Deny
             </button>
+            {approval.options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="approval-btn option"
+                onClick={() => onRespond(approval.approvalId, "allow")}
+              >
+                {option}
+              </button>
+            ))}
           </div>
         </div>
       ))}

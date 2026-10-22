@@ -506,7 +506,10 @@ impl Core {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&thread_id);
-        self.get_thread_by_id(&db, thread_id)
+        let thread = self.get_thread_by_id(&db, thread_id)?;
+        drop(db);
+        self.board.publish(thread_id);
+        Ok(thread)
     }
 
     /// Archives or unarchives a Thread. Threads are archived, never deleted:
@@ -721,6 +724,7 @@ impl Core {
         {
             actor.rename(title.to_string());
         }
+        self.board.publish(thread_id);
         Ok(())
     }
 

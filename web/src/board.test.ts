@@ -42,4 +42,10 @@ describe("applyBoardEvent", () => {
     const added = applyBoardEvent(changed, { type: "ThreadChanged", payload: card(3) });
     expect(added.map((c) => c.thread.id)).toEqual([1, 2, 3]);
   });
+
+  it("ignores a card older than the one held", () => {
+    const start = [card(1, { status: "working", updatedAt: "2026-01-02T00:00:00Z" })];
+    const next = applyBoardEvent(start, { type: "ThreadChanged", payload: card(1, { updatedAt: "2026-01-01T00:00:00Z" }) });
+    expect(next[0].thread.status).toBe("working");
+  });
 });

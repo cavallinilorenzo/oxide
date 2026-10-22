@@ -41,13 +41,13 @@ pub enum StorageMsg {
         approval_id: String,
         decision: ApprovalDecision,
         decided_at: String,
-        reply: mpsc::Sender<Result<()>>,
+        reply: mpsc::Sender<Result<String>>,
     },
     ResolvePendingApprovals {
         turn_id: u32,
         decision: ApprovalDecision,
         decided_at: String,
-        reply: mpsc::Sender<Result<()>>,
+        reply: mpsc::Sender<Result<String>>,
     },
     UpdateThreadPermissionMode {
         thread_id: u32,
@@ -178,7 +178,7 @@ impl StorageHandle {
         approval_id: String,
         decision: ApprovalDecision,
         decided_at: String,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::UpdateApprovalDecision {
             turn_id,
@@ -187,7 +187,9 @@ impl StorageHandle {
             decided_at,
             reply: reply_tx,
         });
-        reply_rx.recv().unwrap_or(Ok(()))
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn resolve_pending_approvals(
@@ -195,7 +197,7 @@ impl StorageHandle {
         turn_id: u32,
         decision: ApprovalDecision,
         decided_at: String,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::ResolvePendingApprovals {
             turn_id,
@@ -203,7 +205,9 @@ impl StorageHandle {
             decided_at,
             reply: reply_tx,
         });
-        reply_rx.recv().unwrap_or(Ok(()))
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn update_thread_permission_mode(
@@ -350,16 +354,23 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 decided_at,
                 reply,
             } => {
-                let res = (|| -> Result<()> {
+                let res = (|| -> Result<String> {
                     let dec_str = serde_json::to_string(&decision)
                         .unwrap_or_default()
                         .trim_matches('"')
                         .to_string();
+                    let final_decided_at: String = if !decided_at.is_empty() {
+                        decided_at
+                    } else {
+                        conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |r| {
+                            r.get(0)
+                        })?
+                    };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND approval_id = ?4",
-                        rusqlite::params![dec_str, decided_at, turn_id, approval_id],
+                        rusqlite::params![dec_str, final_decided_at, turn_id, approval_id],
                     )?;
-                    Ok(())
+                    Ok(final_decided_at)
                 })();
                 let _ = reply.send(res);
             }
@@ -369,16 +380,23 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 decided_at,
                 reply,
             } => {
-                let res = (|| -> Result<()> {
+                let res = (|| -> Result<String> {
                     let dec_str = serde_json::to_string(&decision)
                         .unwrap_or_default()
                         .trim_matches('"')
                         .to_string();
+                    let final_decided_at: String = if !decided_at.is_empty() {
+                        decided_at
+                    } else {
+                        conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |r| {
+                            r.get(0)
+                        })?
+                    };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND decision IS NULL",
-                        rusqlite::params![dec_str, decided_at, turn_id],
+                        rusqlite::params![dec_str, final_decided_at, turn_id],
                     )?;
-                    Ok(())
+                    Ok(final_decided_at)
                 })();
                 let _ = reply.send(res);
             }

@@ -235,14 +235,8 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             status,
         } => {
             state.flush_pending_deltas();
+            resolve_pending_approvals_if_any(state, storage);
             if let Some(turn_id) = state.current_turn_id.take() {
-                if state.pending_approval_id.take().is_some() {
-                    let _ = storage.resolve_pending_approvals(
-                        turn_id,
-                        ApprovalDecision::Deny,
-                        String::new(),
-                    );
-                }
                 let _ = storage.update_turn_completed(turn_id, status);
             }
             let final_thread_status = match status {
@@ -295,6 +289,15 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
     }
 }
 
+fn resolve_pending_approvals_if_any(state: &mut ActorState, storage: &StorageHandle) {
+    if let Some(turn_id) = state.current_turn_id {
+        if state.pending_approval_id.take().is_some() {
+            let _ =
+                storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
+        }
+    }
+}
+
 fn run_thread_actor(
     thread_id: u32,
     working_dir: std::path::PathBuf,
@@ -306,15 +309,20 @@ fn run_thread_actor(
 
     // Start provider
     let caps = provider.capabilities();
+    let initial_mode = storage
+        .get_snapshot(thread_id)
+        .map(|s| s.thread.permission_mode)
+        .unwrap_or_else(|_| {
+            caps.supported_permission_modes
+                .first()
+                .copied()
+                .unwrap_or(oxide_provider::PermissionMode::AutoEdit)
+        });
     let start_ctx = StartContext {
         working_dir,
         model: None,
         effort: None,
-        permission_mode: caps
-            .supported_permission_modes
-            .first()
-            .copied()
-            .unwrap_or(oxide_provider::PermissionMode::AutoEdit),
+        permission_mode: initial_mode,
     };
     let prx = match provider.start(&start_ctx) {
         Ok(receiver) => receiver,
@@ -341,10 +349,8 @@ fn run_thread_actor(
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
+                        resolve_pending_approvals_if_any(&mut state, &storage);
                         if let Some(turn_id) = state.current_turn_id.take() {
-                            if state.pending_approval_id.take().is_some() {
-                                let _ = storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
-                            }
                             let _ = storage.update_turn_completed(turn_id, TurnStatus::Interrupted);
                         }
                         let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Interrupted);
@@ -361,19 +367,15 @@ fn run_thread_actor(
                             path: std::path::PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
-                        if let Some(turn_id) = state.current_turn_id {
-                            let _ = storage.update_approval_decision(turn_id, approval_id.clone(), decision, String::new());
-                        }
+                        let decided_at = if let Some(turn_id) = state.current_turn_id {
+                            storage
+                                .update_approval_decision(turn_id, approval_id.clone(), decision, String::new())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
                         state.pending_approval_id = None;
                         let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
-                        let decided_at = match storage.get_snapshot(thread_id) {
-                            Ok(s) => s.turns.iter()
-                                .flat_map(|t| &t.approvals)
-                                .find(|a| a.approval_id == approval_id)
-                                .and_then(|a| a.decided_at.clone())
-                                .unwrap_or_default(),
-                            Err(_) => String::new(),
-                        };
                         state.broadcast(ThreadEvent::ApprovalResponded {
                             id: approval_id,
                             decision,

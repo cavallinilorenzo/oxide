@@ -226,3 +226,161 @@ fn thread_permission_mode_defaults_and_updates_between_turns() {
     let reloaded = core.get_thread_snapshot(thread.id).unwrap();
     assert_eq!(reloaded.thread.permission_mode, PermissionMode::AutoEdit);
 }
+
+#[test]
+fn core_runs_approval_deny_end_to_end() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
+    core.save_settings(&settings).unwrap();
+
+    let project_dir = dir.path().join("my-project");
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
+    let projects = core.rescan_projects().unwrap();
+    let project = &projects[0];
+
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+    let sender_for_approval = sender.clone();
+
+    fake.on_prompt(move |prompt| {
+        let s = sender.clone();
+        let prompt = prompt.to_string();
+        std::thread::spawn(move || {
+            let _ = s.send(ProviderEvent::TurnStarted {
+                turn_index: 0,
+                prompt,
+            });
+            let _ = s.send(ProviderEvent::ApprovalRequested {
+                id: "appr-deny-1".into(),
+                kind: ApprovalKind::Command,
+                summary: "Dangerous command".into(),
+                options: vec![],
+            });
+        });
+    });
+
+    fake.on_approval(move |id, decision| {
+        let s = sender_for_approval.clone();
+        assert_eq!(id, "appr-deny-1");
+        assert_eq!(decision, ApprovalDecision::Deny);
+        std::thread::spawn(move || {
+            let _ = s.send(ProviderEvent::ItemStarted {
+                item_index: 0,
+                kind: ItemKind::AgentMessage,
+            });
+            let _ = s.send(ProviderEvent::ItemCompleted {
+                item_index: 0,
+                kind: ItemKind::AgentMessage,
+                content: "Action was denied".into(),
+            });
+            let _ = s.send(ProviderEvent::TurnCompleted {
+                turn_index: 0,
+                status: TurnStatus::Completed,
+            });
+        });
+    });
+
+    let thread = core
+        .create_thread(project.id, "fake", None, None, PermissionMode::Ask)
+        .expect("create_thread failed");
+    core.register_fake_provider(thread.id, fake);
+
+    let (_snapshot, rx) = core.subscribe_thread(thread.id).unwrap();
+    core.send_prompt(thread.id, "Try dangerous").unwrap();
+
+    while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if let ThreadEvent::ApprovalRequested { id, .. } = seq_evt.event {
+            if id == "appr-deny-1" {
+                break;
+            }
+        }
+    }
+
+    core.respond_to_approval(thread.id, "appr-deny-1", ApprovalDecision::Deny)
+        .expect("respond_to_approval failed");
+
+    let mut completed = false;
+    while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if let ThreadEvent::TurnCompleted { status, .. } = seq_evt.event {
+            assert_eq!(status, TurnStatus::Completed);
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed);
+
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.turns[0].approvals.len(), 1);
+    assert_eq!(
+        snapshot.turns[0].approvals[0].decision,
+        Some(ApprovalDecision::Deny)
+    );
+    assert!(snapshot.turns[0].approvals[0].decided_at.is_some());
+}
+
+#[test]
+fn unanswered_approval_resolves_when_turn_completes() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
+    core.save_settings(&settings).unwrap();
+
+    let project_dir = dir.path().join("my-project");
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
+    let projects = core.rescan_projects().unwrap();
+    let project = &projects[0];
+
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+
+    fake.on_prompt(move |prompt| {
+        let s = sender.clone();
+        let prompt = prompt.to_string();
+        std::thread::spawn(move || {
+            let _ = s.send(ProviderEvent::TurnStarted {
+                turn_index: 0,
+                prompt,
+            });
+            let _ = s.send(ProviderEvent::ApprovalRequested {
+                id: "appr-turn-end".into(),
+                kind: ApprovalKind::Tool,
+                summary: "Tool call".into(),
+                options: vec![],
+            });
+            // Complete turn without waiting for approval
+            let _ = s.send(ProviderEvent::TurnCompleted {
+                turn_index: 0,
+                status: TurnStatus::Completed,
+            });
+        });
+    });
+
+    let thread = core
+        .create_thread(project.id, "fake", None, None, PermissionMode::Ask)
+        .expect("create_thread failed");
+    core.register_fake_provider(thread.id, fake);
+
+    let (_snapshot, rx) = core.subscribe_thread(thread.id).unwrap();
+    core.send_prompt(thread.id, "Prompt").unwrap();
+
+    while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if let ThreadEvent::TurnCompleted { .. } = seq_evt.event {
+            break;
+        }
+    }
+
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.turns[0].approvals.len(), 1);
+    assert_eq!(
+        snapshot.turns[0].approvals[0].decision,
+        Some(ApprovalDecision::Deny)
+    );
+    assert!(snapshot.turns[0].approvals[0].decided_at.is_some());
+}

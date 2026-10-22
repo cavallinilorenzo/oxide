@@ -196,6 +196,7 @@ export function ThreadView({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
+  const [draftProvider, setDraftProvider] = useState<string>("claude");
   const bottomRef = useRef<HTMLDivElement>(null);
   const pendingEventsRef = useRef<SequencedThreadEvent[]>([]);
   const rafIdRef = useRef<number>(0);
@@ -208,6 +209,7 @@ export function ThreadView({
       const s = await commands.getSettings();
       if (!active) return;
       const defProvider = s.settings.defaultProvider;
+      setDraftProvider(defProvider);
       const defMode = s.settings.providers[defProvider]?.permissionMode || "auto-edit";
       setDraftMode(defMode);
 
@@ -303,7 +305,7 @@ export function ThreadView({
   };
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
-  const currentProvider = transcript.thread?.provider || "claude";
+  const currentProvider = transcript.thread?.provider || draftProvider;
   const offeredModes = getOfferedPermissionModes(
     transcript.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
     currentProvider
@@ -347,7 +349,7 @@ export function ThreadView({
     }
   };
 
-  const isWorking = transcript.status === "working";
+  const isTurnActive = transcript.status === "working" || transcript.status === "needs-input";
 
   return (
     <div className="thread-container">
@@ -362,7 +364,7 @@ export function ThreadView({
               key={turn.id || tIdx}
               turn={turn}
               onRespond={handleRespond}
-              isWorking={isWorking}
+              isWorking={isTurnActive}
             />
           ))
         )}
@@ -377,7 +379,7 @@ export function ThreadView({
               id="permission-mode-select"
               className="permission-chip-select"
               value={currentMode}
-              disabled={isWorking}
+              disabled={isTurnActive || sending}
               onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
               aria-label="Permission mode"
             >
@@ -393,15 +395,15 @@ export function ThreadView({
         <input
           type="text"
           className="composer-input"
-          placeholder={isWorking ? "Agent is working…" : "Type a prompt…"}
+          placeholder={isTurnActive ? "Agent is working…" : "Type a prompt…"}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={isWorking || sending}
+          disabled={isTurnActive || sending}
         />
         <button
           type="submit"
           className="composer-submit"
-          disabled={!input.trim() || isWorking || sending}
+          disabled={!input.trim() || isTurnActive || sending}
         >
           Send
         </button>

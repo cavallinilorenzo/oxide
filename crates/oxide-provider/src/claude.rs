@@ -74,6 +74,7 @@ impl ClaudeCodeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
+                image_attachments: false,
             })),
             child_process: Arc::new(Mutex::new(None)),
             child_stdin: Arc::new(Mutex::new(None)),
@@ -142,6 +143,7 @@ impl ClaudeCodeProvider {
             }
             PermissionMode::AutoEdit => {
                 cmd.arg("--permission-mode").arg("acceptEdits");
+                cmd.arg("--permission-prompt-tool").arg("oxide_approval");
             }
             PermissionMode::FullAccess => {
                 cmd.arg("--permission-mode").arg("bypassPermissions");
@@ -208,6 +210,14 @@ impl ClaudeCodeProvider {
                                             session_id: session_id.to_string(),
                                         });
                                     }
+                                    if val
+                                        .get("model")
+                                        .and_then(|v| v.as_str())
+                                        .is_some_and(|m| m.contains("haiku"))
+                                    {
+                                        capabilities_clone.lock().unwrap().supports_reasoning =
+                                            false;
+                                    }
                                     if let Some(reasoning) = val
                                         .get("capabilities")
                                         .and_then(|c| c.get("supports_reasoning"))
@@ -253,29 +263,41 @@ impl ClaudeCodeProvider {
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("");
 
-                                            let text = if dtype == "text_delta" {
-                                                delta
-                                                    .and_then(|d| d.get("text"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("")
+                                            let (text, is_known) = if dtype == "text_delta" {
+                                                (
+                                                    delta
+                                                        .and_then(|d| d.get("text"))
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or(""),
+                                                    true,
+                                                )
                                             } else if dtype == "thinking_delta" {
-                                                delta
-                                                    .and_then(|d| d.get("thinking"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("")
+                                                (
+                                                    delta
+                                                        .and_then(|d| d.get("thinking"))
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or(""),
+                                                    true,
+                                                )
                                             } else {
-                                                ""
+                                                ("", false)
                                             };
 
-                                            if !text.is_empty() {
-                                                if let Some(item) =
-                                                    accumulated_items.get_mut(&index)
-                                                {
-                                                    item.1.push_str(text);
+                                            if is_known {
+                                                if !text.is_empty() {
+                                                    if let Some(item) =
+                                                        accumulated_items.get_mut(&index)
+                                                    {
+                                                        item.1.push_str(text);
+                                                    }
+                                                    let _ = tx.send(ProviderEvent::ItemDelta {
+                                                        item_index: index,
+                                                        delta: text.to_string(),
+                                                    });
                                                 }
-                                                let _ = tx.send(ProviderEvent::ItemDelta {
-                                                    item_index: index,
-                                                    delta: text.to_string(),
+                                            } else {
+                                                let _ = tx.send(ProviderEvent::Unknown {
+                                                    raw: line.clone(),
                                                 });
                                             }
                                         }
@@ -542,8 +564,8 @@ impl Provider for ClaudeCodeProvider {
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {
         let mode_str = match mode {
             PermissionMode::Ask => "ask",
-            PermissionMode::AutoEdit => "auto-edit",
-            PermissionMode::FullAccess => "full-access",
+            PermissionMode::AutoEdit => "acceptEdits",
+            PermissionMode::FullAccess => "bypassPermissions",
         };
         let payload = json!({
             "type": "control",

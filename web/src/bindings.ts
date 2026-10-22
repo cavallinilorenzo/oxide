@@ -114,6 +114,7 @@ export type ProviderCapabilities = {
 	supportedPermissionModes: PermissionMode[],
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
+	imageAttachments: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;

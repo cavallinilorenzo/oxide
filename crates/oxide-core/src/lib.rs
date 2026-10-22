@@ -241,12 +241,19 @@ impl Core {
                     authenticated: false,
                     warning: None,
                 }),
-            _ => oxide_provider::Detection {
+            "fake" => oxide_provider::Detection {
                 available: true,
                 installed: true,
                 version: Some("0.1.0-fake".into()),
                 authenticated: true,
                 warning: None,
+            },
+            _ => oxide_provider::Detection {
+                available: false,
+                installed: false,
+                version: None,
+                authenticated: false,
+                warning: Some(format!("Unknown provider '{provider}'")),
             },
         }
     }
@@ -256,6 +263,7 @@ impl Core {
         provider: &str,
     ) -> oxide_provider::ProviderCapabilities {
         match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
             "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
                     PermissionMode::AutoEdit,
@@ -263,6 +271,7 @@ impl Core {
                 ],
                 interactive_approvals: false,
                 supports_reasoning: false,
+                image_attachments: false,
             },
             _ => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
@@ -272,6 +281,7 @@ impl Core {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
+                image_attachments: false,
             },
         }
     }
@@ -323,13 +333,19 @@ impl Core {
         let provider: Box<dyn ProviderTrait> =
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
-            } else if snapshot.thread.provider == "claude"
-                && oxide_provider::claude::ClaudeCodeProvider::new()
-                    .detect()
-                    .map(|d| d.installed)
-                    .unwrap_or(false)
-            {
-                Box::new(oxide_provider::claude::ClaudeCodeProvider::new())
+            } else if snapshot.thread.provider == "claude" {
+                let claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                let detection = claude.detect().unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                });
+                if !detection.installed {
+                    return Err(Error::Provider("Claude Code is not installed".to_string()));
+                }
+                Box::new(claude)
             } else {
                 Box::new(oxide_provider::FakeProvider::default())
             };

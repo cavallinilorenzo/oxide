@@ -217,6 +217,7 @@ fn thread_permission_mode_defaults_and_updates_between_turns() {
     let thread = core
         .create_thread(project.id, "claude", None, None, PermissionMode::FullAccess)
         .unwrap();
+    core.register_fake_provider(thread.id, FakeProvider::default());
     assert_eq!(thread.permission_mode, PermissionMode::FullAccess);
 
     // Update permission mode between turns

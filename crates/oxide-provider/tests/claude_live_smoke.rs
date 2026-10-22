@@ -5,7 +5,7 @@ use std::time::Duration;
 
 #[test]
 #[ignore = "Opt-in live smoke test against real installed claude CLI. Run with `cargo test --test claude_live_smoke -- --ignored`"]
-fn live_smoke_chat_with_real_claude_cli() {
+fn live_smoke_thread_with_real_claude_cli() {
     let mut provider = ClaudeCodeProvider::new();
     let detection = match provider.detect() {
         Ok(d) => d,

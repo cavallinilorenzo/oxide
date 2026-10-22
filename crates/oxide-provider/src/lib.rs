@@ -71,6 +71,8 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
+    #[serde(default)]
+    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +186,7 @@ impl Default for FakeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
+                image_attachments: false,
             },
             detection: Detection {
                 available: true,

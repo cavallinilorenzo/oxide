@@ -190,6 +190,7 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
+    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]

@@ -339,3 +339,94 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     }
     assert!(turn_completed);
 }
+
+/// A Thread whose fake Provider answers every prompt with one completed Turn
+/// holding one agent message, `"answer to <prompt>"`.
+fn thread_with_answering_provider(core: &Core, dir: &std::path::Path) -> oxide_core::ThreadSummary {
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
+    core.save_settings(&settings).unwrap();
+    std::fs::create_dir_all(dir.join("my-project").join(".git")).unwrap();
+    let project = core.rescan_projects().unwrap().remove(0);
+
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+    fake.on_prompt(move |prompt| {
+        // Every Turn reports index 0, as the default fake does: positions,
+        // not Provider turn indexes, order the Transcript.
+        let _ = sender.send(ProviderEvent::TurnStarted {
+            turn_index: 0,
+            prompt: prompt.to_string(),
+        });
+        let _ = sender.send(ProviderEvent::ItemCompleted {
+            item_index: 0,
+            kind: oxide_provider::ItemKind::AgentMessage,
+            content: format!("answer to {prompt}"),
+        });
+        let _ = sender.send(ProviderEvent::TurnCompleted {
+            turn_index: 0,
+            status: oxide_provider::TurnStatus::Completed,
+        });
+    });
+    let thread = core
+        .create_thread(project.id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    thread
+}
+
+fn run_turns(core: &Core, thread_id: u32, n: u32) {
+    let (_snapshot, rx) = core.subscribe_thread(thread_id).unwrap();
+    for i in 0..n {
+        core.send_prompt(thread_id, &format!("prompt {i}")).unwrap();
+        loop {
+            let evt = rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+            if let ThreadEvent::TurnCompleted { .. } = evt.event {
+                break;
+            }
+        }
+    }
+}
+
+#[test]
+fn list_turns_returns_turns_in_pages_by_position() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+    let thread = thread_with_answering_provider(&core, dir.path());
+    run_turns(&core, thread.id, 7);
+
+    let page = core.list_turns(thread.id, 2, 3).unwrap();
+    assert_eq!(page.offset, 2);
+    assert_eq!(page.turn_count, 7);
+    let prompts: Vec<_> = page.turns.iter().map(|t| t.prompt.as_str()).collect();
+    assert_eq!(prompts, ["prompt 2", "prompt 3", "prompt 4"]);
+    assert_eq!(page.turns[0].items.len(), 1);
+    assert_eq!(page.turns[0].items[0].content, "answer to prompt 2");
+
+    // The last page is short; past the end is empty.
+    let last = core.list_turns(thread.id, 5, 3).unwrap();
+    let prompts: Vec<_> = last.turns.iter().map(|t| t.prompt.as_str()).collect();
+    assert_eq!(prompts, ["prompt 5", "prompt 6"]);
+    assert!(core.list_turns(thread.id, 7, 3).unwrap().turns.is_empty());
+}
+
+#[test]
+fn subscribing_opens_on_the_most_recent_turns_only() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+    let thread = thread_with_answering_provider(&core, dir.path());
+    let total = oxide_core::SNAPSHOT_TURNS + 5;
+    run_turns(&core, thread.id, total);
+
+    let (snapshot, _rx) = core.subscribe_thread(thread.id).unwrap();
+    assert_eq!(snapshot.turn_count, total);
+    assert_eq!(snapshot.turn_offset, 5);
+    assert_eq!(snapshot.turns.len() as u32, oxide_core::SNAPSHOT_TURNS);
+    assert_eq!(snapshot.turns[0].prompt, "prompt 5");
+    assert_eq!(
+        snapshot.turns.last().unwrap().prompt,
+        format!("prompt {}", total - 1)
+    );
+}

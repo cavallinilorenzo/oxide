@@ -5,8 +5,8 @@ use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::thread::{
-    ApprovalSnapshot, ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot,
-    UnknownEventSnapshot,
+    ApprovalSnapshot, ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnPage,
+    TurnSnapshot, UnknownEventSnapshot,
 };
 use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
 
@@ -62,7 +62,14 @@ pub enum StorageMsg {
     },
     GetSnapshot {
         thread_id: u32,
+        tail: u32,
         reply: mpsc::Sender<Result<ThreadSnapshot>>,
+    },
+    ListTurns {
+        thread_id: u32,
+        offset: u32,
+        limit: u32,
+        reply: mpsc::Sender<Result<TurnPage>>,
     },
     SetProviderSessionId {
         thread_id: u32,
@@ -240,10 +247,25 @@ impl StorageHandle {
         reply_rx.recv().unwrap_or(Ok(()))
     }
 
-    pub fn get_snapshot(&self, thread_id: u32) -> Result<ThreadSnapshot> {
+    /// The Thread with its last `tail` Turns.
+    pub fn get_snapshot(&self, thread_id: u32, tail: u32) -> Result<ThreadSnapshot> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::GetSnapshot {
             thread_id,
+            tail,
+            reply: reply_tx,
+        });
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+    }
+
+    pub fn list_turns(&self, thread_id: u32, offset: u32, limit: u32) -> Result<TurnPage> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::ListTurns {
+            thread_id,
+            offset,
+            limit,
             reply: reply_tx,
         });
         reply_rx
@@ -451,8 +473,21 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 })();
                 let _ = reply.send(res);
             }
-            StorageMsg::GetSnapshot { thread_id, reply } => {
-                let res = query_snapshot(&conn, thread_id);
+            StorageMsg::GetSnapshot {
+                thread_id,
+                tail,
+                reply,
+            } => {
+                let res = query_snapshot(&conn, thread_id, tail);
+                let _ = reply.send(res);
+            }
+            StorageMsg::ListTurns {
+                thread_id,
+                offset,
+                limit,
+                reply,
+            } => {
+                let res = query_turns(&conn, thread_id, offset, limit);
                 let _ = reply.send(res);
             }
             StorageMsg::SetProviderSessionId {
@@ -483,19 +518,66 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
     }
 }
 
-pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapshot> {
+pub fn query_snapshot(conn: &Connection, thread_id: u32, tail: u32) -> Result<ThreadSnapshot> {
     let thread: ThreadSummary = conn.query_row(
         "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
          FROM threads WHERE id = ?1",
         [thread_id],
         crate::thread::parse_thread_summary,
     )?;
-
-    let mut turn_stmt = conn.prepare(
-        "SELECT id, turn_index, prompt, status, started_at, completed_at
-         FROM turns WHERE thread_id = ?1 ORDER BY turn_index ASC",
+    let turn_count = count_turns(conn, thread_id)?;
+    let page = turn_page(
+        conn,
+        thread_id,
+        turn_count,
+        turn_count.saturating_sub(tail),
+        tail,
     )?;
-    let turn_rows = turn_stmt.query_map([thread_id], |r| {
+    let supported_permission_modes = match thread.provider.as_str() {
+        "agy" | "antigravity" => vec![PermissionMode::AutoEdit, PermissionMode::FullAccess],
+        _ => vec![
+            PermissionMode::Ask,
+            PermissionMode::AutoEdit,
+            PermissionMode::FullAccess,
+        ],
+    };
+    Ok(ThreadSnapshot {
+        thread,
+        turns: page.turns,
+        turn_offset: page.offset,
+        turn_count: page.turn_count,
+        last_seq: 0,
+        supported_permission_modes,
+    })
+}
+
+fn count_turns(conn: &Connection, thread_id: u32) -> Result<u32> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM turns WHERE thread_id = ?1",
+        [thread_id],
+        |r| r.get(0),
+    )?)
+}
+
+/// Turns in the order they started (row id), not by the Provider's turn
+/// index, which can repeat across Provider sessions.
+pub fn query_turns(conn: &Connection, thread_id: u32, offset: u32, limit: u32) -> Result<TurnPage> {
+    let turn_count = count_turns(conn, thread_id)?;
+    turn_page(conn, thread_id, turn_count, offset, limit)
+}
+
+fn turn_page(
+    conn: &Connection,
+    thread_id: u32,
+    turn_count: u32,
+    offset: u32,
+    limit: u32,
+) -> Result<TurnPage> {
+    let mut turn_stmt = conn.prepare_cached(
+        "SELECT id, turn_index, prompt, status, started_at, completed_at
+         FROM turns WHERE thread_id = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3",
+    )?;
+    let turn_rows = turn_stmt.query_map(rusqlite::params![thread_id, limit, offset], |r| {
         let status_str: String = r.get(3)?;
         let turn_status = match status_str.as_str() {
             "running" => TurnStatus::Running,
@@ -514,15 +596,15 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
     })?;
 
     let mut turns = Vec::new();
-    let mut item_stmt = conn.prepare(
+    let mut item_stmt = conn.prepare_cached(
         "SELECT id, item_index, kind, content, created_at
          FROM items WHERE turn_id = ?1 ORDER BY item_index ASC",
     )?;
-    let mut approval_stmt = conn.prepare(
+    let mut approval_stmt = conn.prepare_cached(
         "SELECT id, approval_id, kind, summary, options, decision, created_at, decided_at
          FROM approvals WHERE turn_id = ?1 ORDER BY id ASC",
     )?;
-    let mut unknown_stmt = conn.prepare(
+    let mut unknown_stmt = conn.prepare_cached(
         "SELECT id, raw, created_at FROM unknown_events WHERE turn_id = ?1 ORDER BY id ASC",
     )?;
 
@@ -588,19 +670,9 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
         });
     }
 
-    let supported_permission_modes = match thread.provider.as_str() {
-        "agy" | "antigravity" => vec![PermissionMode::AutoEdit, PermissionMode::FullAccess],
-        _ => vec![
-            PermissionMode::Ask,
-            PermissionMode::AutoEdit,
-            PermissionMode::FullAccess,
-        ],
-    };
-
-    Ok(ThreadSnapshot {
-        thread,
+    Ok(TurnPage {
+        offset: offset.min(turn_count),
         turns,
-        last_seq: 0,
-        supported_permission_modes,
+        turn_count,
     })
 }

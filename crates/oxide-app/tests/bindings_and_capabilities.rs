@@ -5,7 +5,10 @@ fn bindings_are_up_to_date() {
     let ts = std::fs::read_to_string(oxide_app_lib::BINDINGS_PATH).unwrap();
     assert!(ts.contains("listProjects") && ts.contains("saveSettings"));
     assert!(
-        ts.contains("createThread") && ts.contains("subscribeThread") && ts.contains("sendPrompt")
+        ts.contains("createThread")
+            && ts.contains("subscribeThread")
+            && ts.contains("sendPrompt")
+            && ts.contains("listTurns")
     );
 }
 

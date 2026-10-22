@@ -34,10 +34,14 @@ pub use settings::{
 };
 pub use thread::{
     ApprovalSnapshot, DebugSequencedThreadEvent, ItemSnapshot, SequencedThreadEvent, ThreadEvent,
-    ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot, UnknownEventSnapshot,
+    ThreadSnapshot, ThreadStatus, ThreadSummary, TurnPage, TurnSnapshot, UnknownEventSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";
+
+/// How many of a Thread's most recent Turns it opens on; older Turns are paged
+/// in with [`Core::list_turns`].
+pub const SNAPSHOT_TURNS: u32 = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectSummary {
@@ -327,7 +331,7 @@ impl Core {
             return Ok(actor.clone());
         }
 
-        let snapshot = self.storage.get_snapshot(thread_id)?;
+        let snapshot = self.storage.get_snapshot(thread_id, 0)?;
         let project_path = {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             let path_str: String = db.query_row(
@@ -475,12 +479,22 @@ impl Core {
         }
     }
 
+    /// The whole Thread, every Turn included.
     pub fn get_thread_snapshot(&self, thread_id: u32) -> Result<ThreadSnapshot> {
-        let mut snapshot = self.storage.get_snapshot(thread_id)?;
+        let mut snapshot = self.storage.get_snapshot(thread_id, u32::MAX)?;
         for turn in &mut snapshot.turns {
             turn.unknown_events.clear();
         }
         Ok(snapshot)
+    }
+
+    /// Up to `limit` Turns of a Thread starting at position `offset`.
+    pub fn list_turns(&self, thread_id: u32, offset: u32, limit: u32) -> Result<TurnPage> {
+        let mut page = self.storage.list_turns(thread_id, offset, limit)?;
+        for turn in &mut page.turns {
+            turn.unknown_events.clear();
+        }
+        Ok(page)
     }
 
     fn expand_home(&self, root: &str) -> PathBuf {

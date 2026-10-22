@@ -398,7 +398,7 @@ fn run_thread_actor(
     // Start provider
     let caps = provider.capabilities();
     let initial_mode = storage
-        .get_snapshot(thread_id)
+        .get_snapshot(thread_id, 0)
         .map(|s| s.thread.permission_mode)
         .unwrap_or_else(|_| {
             caps.supported_permission_modes
@@ -482,7 +482,7 @@ fn run_thread_actor(
                     }
                     ThreadActorMsg::Subscribe { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
-                        let mut snapshot = match storage.get_snapshot(thread_id) {
+                        let mut snapshot = match storage.get_snapshot(thread_id, crate::SNAPSHOT_TURNS) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("failed to get snapshot for thread {thread_id}: {e}");
@@ -499,7 +499,7 @@ fn run_thread_actor(
                     }
                     ThreadActorMsg::SubscribeDebug { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
-                        let mut snapshot = match storage.get_snapshot(thread_id) {
+                        let mut snapshot = match storage.get_snapshot(thread_id, u32::MAX) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("failed to get snapshot for thread {thread_id}: {e}");

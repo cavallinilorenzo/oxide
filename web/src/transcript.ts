@@ -10,10 +10,16 @@ import type {
   TurnSnapshot,
 } from "./bindings";
 
+/**
+ * The live tail of a Thread: `turns` are the Turns at positions
+ * `turnOffset..turnOffset + turns.length`, which always runs to the newest
+ * Turn. Older Turns are paged in separately (see `history.ts`).
+ */
 export interface TranscriptState {
   thread: Thread | null;
   status: ThreadStatus;
   turns: TurnSnapshot[];
+  turnOffset: number;
   lastSeq: number;
   supportedPermissionModes: PermissionMode[];
 }
@@ -24,6 +30,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
       thread: null,
       status: "completed",
       turns: [],
+      turnOffset: 0,
       lastSeq: 0,
       supportedPermissionModes: ["ask", "auto-edit", "full-access"],
     };
@@ -32,6 +39,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
     thread: snapshot.thread,
     status: snapshot.thread.status,
     turns: snapshot.turns.map((t) => ({ ...t, approvals: t.approvals || [] })),
+    turnOffset: snapshot.turnOffset,
     lastSeq: snapshot.lastSeq,
     supportedPermissionModes: snapshot.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
   };
@@ -72,21 +80,20 @@ export function applyThreadEvent(
 
   switch (event.type) {
     case "TurnStarted": {
+      // Always a new Turn: Providers may repeat turn indexes across sessions,
+      // and replays are already dropped by `seq`.
       status = "working";
-      const existing = turns.findIndex((t) => t.turnIndex === event.payload.turn_index);
-      const newTurn: TurnSnapshot = {
-        id: existing >= 0 ? turns[existing].id : 0,
+      turns.push({
+        id: 0,
         turnIndex: event.payload.turn_index,
         prompt: event.payload.prompt,
         status: "running",
         startedAt: new Date().toISOString(),
         completedAt: null,
-        items: existing >= 0 ? turns[existing].items : [],
-        approvals: existing >= 0 ? turns[existing].approvals : [],
-        unknownEvents: existing >= 0 ? turns[existing].unknownEvents : [],
-      };
-      if (existing >= 0) turns[existing] = newTurn;
-      else turns.push(newTurn);
+        items: [],
+        approvals: [],
+        unknownEvents: [],
+      });
       break;
     }
 
@@ -124,7 +131,8 @@ export function applyThreadEvent(
     }
 
     case "TurnCompleted": {
-      const idx = turns.findIndex((t) => t.turnIndex === event.payload.turn_index);
+      // Only the newest Turn can be running.
+      const idx = turns.length - 1;
       if (idx >= 0) {
         const turn = { ...turns[idx] };
         const approvals = (turn.approvals || []).map((app) =>
@@ -213,6 +221,7 @@ export function applyThreadEvent(
     thread: state.thread ? { ...state.thread, status } : null,
     status,
     turns,
+    turnOffset: state.turnOffset,
     lastSeq: sequenced.seq,
     supportedPermissionModes: state.supportedPermissionModes,
   };

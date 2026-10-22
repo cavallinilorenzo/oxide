@@ -73,6 +73,11 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 ",
+    // Transcript paging reads Turns by position and Items by Turn.
+    "
+    CREATE INDEX turns_by_thread ON turns(thread_id, id);
+    CREATE INDEX items_by_turn ON items(turn_id, item_index);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

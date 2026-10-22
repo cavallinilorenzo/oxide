@@ -374,6 +374,44 @@ describe("transcript reducer", () => {
     expect(state.turns[1].items[0]).toBe(before.turns[1].items[0]);
     expect(state.turns[1].items[1].content).toBe("stream");
   });
+
+  it("updates thread title on ThreadRenamed event", () => {
+    let state = initialTranscriptState({
+      thread: {
+        id: 1,
+        projectId: 1,
+        provider: "fake",
+        model: null,
+        effort: null,
+        permissionMode: "auto-edit",
+        status: "completed",
+        archived: false,
+        createdAt: "2026-10-22T10:00:00Z",
+        updatedAt: "2026-10-22T10:00:00Z",
+        title: null,
+      },
+      capabilities: { reasoningText: true, imageAttachments: false },
+      turns: [],
+      turnOffset: 0,
+      turnCount: 0,
+      lastSeq: 0,
+      supportedPermissionModes: ["ask", "auto-edit", "full-access"],
+    });
+
+    expect(state.thread?.title).toBeNull();
+
+    state = applyThreadEvent(state, {
+      seq: 1,
+      event: {
+        type: "ThreadRenamed",
+        payload: {
+          title: "New Custom Title",
+        },
+      },
+    });
+
+    expect(state.thread?.title).toBe("New Custom Title");
+  });
 });
 
 function startTurn(seq: number, prompt: string): SequencedThreadEvent {

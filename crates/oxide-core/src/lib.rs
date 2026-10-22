@@ -323,6 +323,10 @@ impl Core {
             "UPDATE threads SET provider = ?1, model = ?2, effort = ?3, permission_mode = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
             rusqlite::params![provider, def_model, def_effort, mode_str, thread_id],
         )?;
+        self.thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&thread_id);
         self.get_thread_by_id(&db, thread_id)
     }
 
@@ -433,6 +437,15 @@ impl Core {
             "UPDATE threads SET title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
             rusqlite::params![title, thread_id],
         )?;
+        drop(db);
+        if let Some(actor) = self
+            .thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&thread_id)
+        {
+            actor.rename(title.to_string());
+        }
         Ok(())
     }
 

@@ -209,11 +209,7 @@ export function App() {
           onNewThread={() => {
             void startNewThread();
           }}
-          onRenameThread={(threadId, newTitle) => {
-            setThreads((prev) =>
-              prev?.map((t) => (t.id === threadId ? { ...t, title: newTitle } : t)) ?? null
-            );
-          }}
+          onRenameThread={onThreadTitleChange}
         />
         <div className="centre-column">
           {showSettings ? (

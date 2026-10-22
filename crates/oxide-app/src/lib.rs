@@ -356,6 +356,9 @@ pub enum ThreadEvent {
     ThreadStatusChanged {
         status: ThreadStatus,
     },
+    ThreadRenamed {
+        title: String,
+    },
     ApprovalRequested {
         id: String,
         kind: ApprovalKind,

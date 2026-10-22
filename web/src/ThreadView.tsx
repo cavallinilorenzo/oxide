@@ -19,7 +19,6 @@ import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
-import { truncateTitle } from "./threadDrafts";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -194,6 +193,9 @@ export function ThreadView({
         if (next.status !== prev.status) {
           onStatusChange(threadId, next.status);
         }
+        if (next.thread?.title !== prev.thread?.title && next.thread?.title) {
+          onThreadTitleChange?.(threadId, next.thread.title);
+        }
         return next;
       });
     });
@@ -365,18 +367,7 @@ export function ThreadView({
       const res = await commands.setThreadProvider(threadId, newProvider);
       if (res.status === "ok") {
         setTranscript((prev) =>
-          prev.thread
-            ? {
-                ...prev,
-                thread: {
-                  ...prev.thread,
-                  provider: newProvider,
-                  model: provSettings?.model ?? null,
-                  effort: provSettings?.effort ?? null,
-                  permissionMode: newMode,
-                },
-              }
-            : prev
+          prev.thread ? { ...prev, thread: res.data } : prev
         );
         onThreadUpdated?.(res.data);
       }
@@ -485,14 +476,6 @@ export function ThreadView({
       const attachments = pendingImages.map((i) => i.path);
       pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
       setPendingImages([]);
-
-      if (!transcript.thread?.title) {
-        const defaultTitle = truncateTitle(prompt);
-        setTranscript((prev) =>
-          prev.thread ? { ...prev, thread: { ...prev.thread, title: defaultTitle } } : prev
-        );
-        onThreadTitleChange?.(targetThreadId, defaultTitle);
-      }
 
       await commands.sendPrompt(targetThreadId, prompt, attachments);
     } finally {
@@ -621,7 +604,7 @@ export function ThreadView({
               >
                 <option value="claude">Claude Code</option>
                 <option value="codex">Codex</option>
-                <option value="antigravity">Antigravity</option>
+                <option value="antigravity">Antigravity CLI</option>
                 {currentProvider === "fake" && <option value="fake">Fake Provider</option>}
               </select>
             </label>

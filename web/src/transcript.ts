@@ -91,6 +91,7 @@ export function applyThreadEvent(
   const { event } = sequenced;
   const turns = [...state.turns];
   let status = state.status;
+  const thread = state.thread ? { ...state.thread } : null;
 
   switch (event.type) {
     case "TurnStarted": {
@@ -185,6 +186,13 @@ export function applyThreadEvent(
       break;
     }
 
+    case "ThreadRenamed": {
+      if (thread) {
+        thread.title = event.payload.title;
+      }
+      break;
+    }
+
     case "ApprovalRequested": {
       status = "needs-input";
       if (turns.length > 0) {
@@ -249,8 +257,12 @@ export function applyThreadEvent(
     }
   }
 
+  if (thread) {
+    thread.status = status;
+  }
+
   return {
-    thread: state.thread ? { ...state.thread, status } : null,
+    thread,
     status,
     turns,
     turnOffset: state.turnOffset,

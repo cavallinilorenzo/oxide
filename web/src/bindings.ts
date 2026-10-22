@@ -336,6 +336,8 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	error?: TurnError_Deserialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Deserialize,
@@ -375,6 +377,8 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	error: TurnError_Serialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Serialize,

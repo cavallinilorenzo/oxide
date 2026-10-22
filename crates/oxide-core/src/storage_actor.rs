@@ -15,6 +15,7 @@ pub struct TurnStarted {
     pub id: u32,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub thread_title: Option<String>,
 }
 
 pub enum StorageMsg {
@@ -359,12 +360,14 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         rusqlite::params![thread_id, turn_index, prompt, model, effort, attachments_json],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
+                    let mut thread_title = None;
                     if turn_index == 0 && current_title.is_none() {
                         let title = crate::thread::truncate_title(&prompt);
                         tx.execute(
                             "UPDATE threads SET status = 'working', title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
                             rusqlite::params![title, thread_id],
                         )?;
+                        thread_title = Some(title);
                     } else {
                         tx.execute(
                             "UPDATE threads SET status = 'working', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
@@ -376,6 +379,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         id: turn_id,
                         model,
                         effort,
+                        thread_title,
                     })
                 })();
                 let _ = reply.send(res);

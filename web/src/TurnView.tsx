@@ -14,6 +14,7 @@ import {
   type ApprovalSnapshot,
   type ItemSnapshot,
 } from "./bindings";
+import { useOpenDiff } from "./diffOpen";
 import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
 import type { TranscriptTurn } from "./transcript";
@@ -24,9 +25,6 @@ import {
   splitHeadline,
   type Block,
 } from "./transcriptView";
-
-/** Opens the Diff Surface for a file; a no-op until the Diff ticket lands. */
-const openDiff: (path: string) => void = () => {};
 
 function Collapsible({
   label,
@@ -72,6 +70,7 @@ function ToolCall({ item }: { item: ItemSnapshot }) {
 }
 
 function BlockView({ block }: { block: Block }) {
+  const openDiff = useOpenDiff();
   switch (block.type) {
     case "tools":
       return (

@@ -7,6 +7,7 @@ mod discovery;
 mod error;
 mod files;
 mod git;
+mod git_diff;
 mod settings;
 mod storage_actor;
 mod terminal;
@@ -15,6 +16,7 @@ mod thread_actor;
 
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
+pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -306,6 +308,15 @@ impl Core {
                     authenticated: false,
                     warning: None,
                 }),
+            "codex" => oxide_provider::codex::CodexProvider::new()
+                .detect()
+                .unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                }),
             "agy" | "antigravity" => oxide_provider::agy::AgyProvider::new().detect().unwrap_or(
                 oxide_provider::Detection {
                     available: false,
@@ -338,6 +349,7 @@ impl Core {
     ) -> oxide_provider::ProviderCapabilities {
         match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
+            "codex" => oxide_provider::codex::CodexProvider::new().capabilities(),
             "agy" | "antigravity" => oxide_provider::agy::AgyProvider::new().capabilities(),
             _ => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
@@ -422,6 +434,19 @@ impl Core {
                     ));
                 }
                 Box::new(agy)
+            } else if snapshot.thread.provider == "codex" {
+                let codex = oxide_provider::codex::CodexProvider::new();
+                let detection = codex.detect().unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                });
+                if !detection.installed {
+                    return Err(Error::Provider("Codex is not installed".to_string()));
+                }
+                Box::new(codex)
             } else {
                 Box::new(oxide_provider::FakeProvider::scripted())
             };
@@ -603,6 +628,11 @@ impl Core {
         let mut status = git::status(&self.main_checkout(project_id)?)?;
         status.picker_disabled_reason = self.checkout_blocked_reason(project_id)?;
         Ok(status)
+    }
+
+    /// The changes of a Project's main checkout in one scope, straight from Git.
+    pub fn diff(&self, project_id: u32, scope: DiffScope) -> Result<Diff> {
+        git_diff::diff(&self.main_checkout(project_id)?, scope)
     }
 
     /// Local and remote branches of a Project's main checkout.

@@ -572,6 +572,78 @@ async fn list_branches(
         .map(|branches| branches.iter().map(convert).collect())
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffScope {
+    Uncommitted,
+    Branch,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    pub kind: DiffKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: DiffStatus,
+    pub added: u32,
+    pub removed: u32,
+    pub binary: bool,
+    pub hunks: Vec<DiffHunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Diff {
+    /// What the Branch scope compares against, if a base branch exists.
+    pub base: Option<String>,
+    pub files: Vec<DiffFile>,
+}
+
+/// The changes of the main checkout in one scope, from Git.
+#[tauri::command]
+#[specta::specta]
+async fn git_diff(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    scope: DiffScope,
+) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.diff(project_id, convert(&scope)))
+        .await
+        .map(|diff| convert(&diff))
+}
+
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
 #[tauri::command]
 #[specta::specta]
@@ -819,6 +891,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         read_file,
         git_status,
         list_branches,
+        git_diff,
         checkout_branch,
         create_branch,
         fetch_project,

@@ -244,6 +244,7 @@ pub struct ItemSnapshot {
     pub item_index: u32,
     pub kind: ItemKind,
     pub content: String,
+    pub parent_item_index: Option<u32>,
     pub created_at: String,
 }
 
@@ -267,12 +268,23 @@ pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
     pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub attachments: Vec<String>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    pub error: Option<TurnError>,
     pub approvals: Vec<ApprovalSnapshot>,
     pub unknown_events: Vec<UnknownEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnError {
+    pub message: String,
+    pub stderr_tail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -285,8 +297,16 @@ pub struct UnknownEventSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadCapabilities {
+    pub reasoning_text: bool,
+    pub image_attachments: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: Thread,
+    pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub turn_offset: u32,
     pub turn_count: u32,
@@ -308,10 +328,14 @@ pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
         prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        attachments: Vec<String>,
     },
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        parent_item_index: Option<u32>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -321,10 +345,12 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     },
     TurnCompleted {
         turn_index: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
     },
     ThreadStatusChanged {
         status: ThreadStatus,
@@ -339,6 +365,9 @@ pub enum ThreadEvent {
         id: String,
         decision: ApprovalDecision,
         decided_at: String,
+    },
+    ProviderRetrying {
+        message: String,
     },
     Error {
         message: String,
@@ -498,8 +527,40 @@ fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Threa
 
 #[tauri::command]
 #[specta::specta]
-fn send_prompt(core: State<'_, Arc<Core>>, thread_id: u32, prompt: String) -> Result<(), AppError> {
-    Ok(core.send_prompt(thread_id, &prompt)?)
+fn send_prompt(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    prompt: String,
+    attachments: Vec<String>,
+) -> Result<(), AppError> {
+    let paths: Vec<std::path::PathBuf> = attachments.into_iter().map(Into::into).collect();
+    Ok(core.send_prompt_with_attachments(thread_id, &prompt, &paths)?)
+}
+
+/// Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path.
+#[tauri::command]
+#[specta::specta]
+fn save_attachment(
+    core: State<'_, Arc<Core>>,
+    bytes: Vec<u8>,
+    extension: String,
+) -> Result<String, AppError> {
+    let path = core.save_attachment(&bytes, &extension)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Bytes of a stored attachment, for rendering it in the Transcript.
+#[tauri::command]
+#[specta::specta]
+fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, AppError> {
+    Ok(core.read_attachment(std::path::Path::new(&path))?)
+}
+
+/// What a Provider supports, so the composer can offer image attachments before a Thread exists.
+#[tauri::command]
+#[specta::specta]
+fn provider_capabilities(core: State<'_, Arc<Core>>, provider: String) -> ThreadCapabilities {
+    convert(&core.provider_capabilities(&provider))
 }
 
 #[tauri::command]
@@ -588,6 +649,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_provider_capabilities,
         list_threads,
         send_prompt,
+        save_attachment,
+        read_attachment,
+        provider_capabilities,
         interrupt_thread,
         list_turns,
         subscribe_thread,
@@ -635,4 +699,82 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Oxide");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thread_snapshots_and_events_convert_from_core() {
+        let error = oxide_core::TurnError {
+            message: "The Provider exited unexpectedly".into(),
+            stderr_tail: Some("panicked".into()),
+        };
+        let core = oxide_core::ThreadSnapshot {
+            thread: oxide_core::ThreadSummary {
+                id: 1,
+                project_id: 2,
+                provider: "fake".into(),
+                model: None,
+                effort: None,
+                permission_mode: oxide_core::PermissionMode::Ask,
+                status: oxide_core::ThreadStatus::Error,
+                archived: false,
+                created_at: "a".into(),
+                updated_at: "b".into(),
+            },
+            turns: vec![oxide_core::TurnSnapshot {
+                id: 3,
+                turn_index: 0,
+                prompt: "hi".into(),
+                model: None,
+                effort: None,
+                attachments: vec![],
+                status: oxide_core::TurnStatus::Error,
+                started_at: "a".into(),
+                completed_at: Some("b".into()),
+                items: vec![oxide_core::ItemSnapshot {
+                    id: 4,
+                    item_index: 0,
+                    kind: oxide_core::ItemKind::AgentMessage,
+                    content: "partial".into(),
+                    created_at: "a".into(),
+                    parent_item_index: None,
+                }],
+                error: Some(error.clone()),
+                approvals: vec![],
+                unknown_events: vec![],
+            }],
+            capabilities: oxide_core::ThreadCapabilities::default(),
+            turn_offset: 0,
+            turn_count: 1,
+            last_seq: 7,
+            supported_permission_modes: vec![],
+        };
+        let app: ThreadSnapshot = convert(&core);
+        let turn_error = app.turns[0].error.as_ref().unwrap();
+        assert_eq!(turn_error.stderr_tail.as_deref(), Some("panicked"));
+
+        let event = oxide_core::SequencedThreadEvent {
+            seq: 8,
+            event: oxide_core::ThreadEvent::TurnCompleted {
+                turn_index: 0,
+                status: oxide_core::TurnStatus::Error,
+                error: Some(error),
+            },
+        };
+        let app: SequencedThreadEvent = convert(&event);
+        assert!(matches!(
+            app.event,
+            ThreadEvent::TurnCompleted { error: Some(_), .. }
+        ));
+        let app: SequencedThreadEvent = convert(&oxide_core::SequencedThreadEvent {
+            seq: 9,
+            event: oxide_core::ThreadEvent::ProviderRetrying {
+                message: "rate limited".into(),
+            },
+        });
+        assert!(matches!(app.event, ThreadEvent::ProviderRetrying { .. }));
+    }
 }

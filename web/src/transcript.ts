@@ -5,10 +5,14 @@ import type {
   PermissionMode,
   SequencedThreadEvent,
   Thread,
+  ThreadCapabilities,
   ThreadSnapshot,
   ThreadStatus,
   TurnSnapshot,
 } from "./bindings";
+
+/** A Turn as shown: the stored snapshot plus the live Provider retry notice, if any. */
+export type TranscriptTurn = TurnSnapshot & { retryNotice?: string | null };
 
 /**
  * The live tail of a Thread: `turns` are the Turns at positions
@@ -18,11 +22,19 @@ import type {
 export interface TranscriptState {
   thread: Thread | null;
   status: ThreadStatus;
-  turns: TurnSnapshot[];
+  turns: TranscriptTurn[];
   turnOffset: number;
+  capabilities: ThreadCapabilities;
   lastSeq: number;
   supportedPermissionModes: PermissionMode[];
 }
+
+/** A Turn is running (working, or waiting on an Approval), so Stop applies. */
+export function turnIsRunning(status: ThreadStatus): boolean {
+  return status === "working" || status === "needs-input";
+}
+
+const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false, imageAttachments: false };
 
 export function initialTranscriptState(snapshot: ThreadSnapshot | null): TranscriptState {
   if (!snapshot) {
@@ -31,6 +43,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
       status: "completed",
       turns: [],
       turnOffset: 0,
+      capabilities: NO_CAPABILITIES,
       lastSeq: 0,
       supportedPermissionModes: ["ask", "auto-edit", "full-access"],
     };
@@ -40,13 +53,14 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
     status: snapshot.thread.status,
     turns: snapshot.turns.map((t) => ({ ...t, approvals: t.approvals || [] })),
     turnOffset: snapshot.turnOffset,
+    capabilities: snapshot.capabilities,
     lastSeq: snapshot.lastSeq,
     supportedPermissionModes: snapshot.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
   };
 }
 
 function updateLastTurnItem(
-  turns: TurnSnapshot[],
+  turns: TranscriptTurn[],
   itemIndex: number,
   updater: (existing: ItemSnapshot | undefined) => ItemSnapshot
 ): void {
@@ -87,10 +101,15 @@ export function applyThreadEvent(
         id: 0,
         turnIndex: event.payload.turn_index,
         prompt: event.payload.prompt,
+        model: event.payload.model ?? null,
+        effort: event.payload.effort ?? null,
+        attachments: event.payload.attachments,
         status: "running",
         startedAt: new Date().toISOString(),
         completedAt: null,
         items: [],
+        error: null,
+        retryNotice: null,
         approvals: [],
         unknownEvents: [],
       });
@@ -103,6 +122,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: event.payload.kind,
         content: existing ? existing.content : "",
+        parentItemIndex: event.payload.parent_item_index ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -114,6 +134,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: existing ? existing.kind : "agent_message",
         content: (existing ? existing.content : "") + event.payload.delta,
+        parentItemIndex: existing ? existing.parentItemIndex : null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -125,6 +146,7 @@ export function applyThreadEvent(
         itemIndex: event.payload.item_index,
         kind: event.payload.kind,
         content: event.payload.content,
+        parentItemIndex: event.payload.parent_item_index ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -142,8 +164,18 @@ export function applyThreadEvent(
           ...turn,
           status: event.payload.status,
           completedAt: new Date().toISOString(),
+          error: event.payload.error ?? null,
+          retryNotice: null,
           approvals,
         };
+      }
+      break;
+    }
+
+    case "ProviderRetrying": {
+      const last = turns.length - 1;
+      if (last >= 0) {
+        turns[last] = { ...turns[last], retryNotice: event.payload.message };
       }
       break;
     }
@@ -222,6 +254,7 @@ export function applyThreadEvent(
     status,
     turns,
     turnOffset: state.turnOffset,
+    capabilities: state.capabilities,
     lastSeq: sequenced.seq,
     supportedPermissionModes: state.supportedPermissionModes,
   };

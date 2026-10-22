@@ -5,21 +5,30 @@ use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::thread::{
-    ApprovalSnapshot, ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnPage,
-    TurnSnapshot, UnknownEventSnapshot,
+    ApprovalSnapshot, ItemSnapshot, ThreadCapabilities, ThreadSnapshot, ThreadStatus,
+    ThreadSummary, TurnError, TurnPage, TurnSnapshot, UnknownEventSnapshot,
 };
 use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
+
+/// What storage recorded when a Turn started.
+pub struct TurnStarted {
+    pub id: u32,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
 
 pub enum StorageMsg {
     WriteTurnStarted {
         thread_id: u32,
         turn_index: u32,
         prompt: String,
-        reply: mpsc::Sender<Result<u32>>,
+        attachments: Vec<String>,
+        reply: mpsc::Sender<Result<TurnStarted>>,
     },
     UpdateTurnCompleted {
         turn_id: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
         reply: mpsc::Sender<Result<()>>,
     },
     WriteItemCompleted {
@@ -27,6 +36,7 @@ pub enum StorageMsg {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
         reply: mpsc::Sender<Result<u32>>,
     },
     WriteApprovalRequested {
@@ -120,12 +130,14 @@ impl StorageHandle {
         thread_id: u32,
         turn_index: u32,
         prompt: String,
-    ) -> Result<u32> {
+        attachments: Vec<String>,
+    ) -> Result<TurnStarted> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteTurnStarted {
             thread_id,
             turn_index,
             prompt,
+            attachments,
             reply: reply_tx,
         });
         reply_rx
@@ -133,11 +145,17 @@ impl StorageHandle {
             .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
-    pub fn update_turn_completed(&self, turn_id: u32, status: TurnStatus) -> Result<()> {
+    pub fn update_turn_completed(
+        &self,
+        turn_id: u32,
+        status: TurnStatus,
+        error: Option<TurnError>,
+    ) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::UpdateTurnCompleted {
             turn_id,
             status,
+            error,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -149,6 +167,7 @@ impl StorageHandle {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     ) -> Result<u32> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteItemCompleted {
@@ -156,6 +175,7 @@ impl StorageHandle {
             item_index,
             kind,
             content,
+            parent_item_index,
             reply: reply_tx,
         });
         reply_rx
@@ -304,13 +324,21 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 thread_id,
                 turn_index,
                 prompt,
+                attachments,
                 reply,
             } => {
-                let res = (|| -> Result<u32> {
+                let res = (|| -> Result<TurnStarted> {
                     let tx = conn.unchecked_transaction()?;
+                    let (model, effort): (Option<String>, Option<String>) = tx.query_row(
+                        "SELECT model, effort FROM threads WHERE id = ?1",
+                        [thread_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )?;
+                    let attachments_json =
+                        serde_json::to_string(&attachments).unwrap_or_else(|_| "[]".into());
                     tx.execute(
-                        "INSERT INTO turns (thread_id, turn_index, prompt, status) VALUES (?1, ?2, ?3, 'running')",
-                        rusqlite::params![thread_id, turn_index, prompt],
+                        "INSERT INTO turns (thread_id, turn_index, prompt, model, effort, attachments, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running')",
+                        rusqlite::params![thread_id, turn_index, prompt, model, effort, attachments_json],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
                     tx.execute(
@@ -318,13 +346,18 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         rusqlite::params![thread_id],
                     )?;
                     tx.commit()?;
-                    Ok(turn_id)
+                    Ok(TurnStarted {
+                        id: turn_id,
+                        model,
+                        effort,
+                    })
                 })();
                 let _ = reply.send(res);
             }
             StorageMsg::UpdateTurnCompleted {
                 turn_id,
                 status,
+                error,
                 reply,
             } => {
                 let res = (|| -> Result<()> {
@@ -334,9 +367,13 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         TurnStatus::Interrupted => "interrupted",
                         TurnStatus::Error => "error",
                     };
+                    let (error_message, stderr_tail) = match error {
+                        Some(e) => (Some(e.message), e.stderr_tail),
+                        None => (None, None),
+                    };
                     conn.execute(
-                        "UPDATE turns SET status = ?1, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
-                        rusqlite::params![status_str, turn_id],
+                        "UPDATE turns SET status = ?1, error_message = ?2, stderr_tail = ?3, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?4",
+                        rusqlite::params![status_str, error_message, stderr_tail, turn_id],
                     )?;
                     Ok(())
                 })();
@@ -347,6 +384,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 item_index,
                 kind,
                 content,
+                parent_item_index,
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
@@ -355,8 +393,8 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         .trim_matches('"')
                         .to_string();
                     conn.execute(
-                        "INSERT INTO items (turn_id, item_index, kind, content) VALUES (?1, ?2, ?3, ?4)",
-                        rusqlite::params![turn_id, item_index, kind_str, content],
+                        "INSERT INTO items (turn_id, item_index, kind, content, parent_item_index) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![turn_id, item_index, kind_str, content, parent_item_index],
                     )?;
                     let item_id = conn.last_insert_rowid() as u32;
                     Ok(item_id)
@@ -543,6 +581,8 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32, tail: u32) -> Result<Th
     };
     Ok(ThreadSnapshot {
         thread,
+        // Filled in by the Thread actor, which knows its Provider.
+        capabilities: ThreadCapabilities::default(),
         turns: page.turns,
         turn_offset: page.offset,
         turn_count: page.turn_count,
@@ -574,7 +614,7 @@ fn turn_page(
     limit: u32,
 ) -> Result<TurnPage> {
     let mut turn_stmt = conn.prepare_cached(
-        "SELECT id, turn_index, prompt, status, started_at, completed_at
+        "SELECT id, turn_index, prompt, status, started_at, completed_at, model, effort, attachments, error_message, stderr_tail
          FROM turns WHERE thread_id = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3",
     )?;
     let turn_rows = turn_stmt.query_map(rusqlite::params![thread_id, limit, offset], |r| {
@@ -592,12 +632,23 @@ fn turn_page(
             turn_status,
             r.get::<_, String>(4)?,
             r.get::<_, Option<String>>(5)?,
+            r.get::<_, Option<String>>(6)?,
+            r.get::<_, Option<String>>(7)?,
+            r.get::<_, String>(8)?,
+            r.get::<_, Option<String>>(9)?
+                .map(|message| -> rusqlite::Result<TurnError> {
+                    Ok(TurnError {
+                        message,
+                        stderr_tail: r.get(10)?,
+                    })
+                })
+                .transpose()?,
         ))
     })?;
 
     let mut turns = Vec::new();
     let mut item_stmt = conn.prepare_cached(
-        "SELECT id, item_index, kind, content, created_at
+        "SELECT id, item_index, kind, content, created_at, parent_item_index
          FROM items WHERE turn_id = ?1 ORDER BY item_index ASC",
     )?;
     let mut approval_stmt = conn.prepare_cached(
@@ -609,7 +660,18 @@ fn turn_page(
     )?;
 
     for t in turn_rows {
-        let (t_id, t_idx, prompt, status, started_at, completed_at) = t?;
+        let (
+            t_id,
+            t_idx,
+            prompt,
+            status,
+            started_at,
+            completed_at,
+            model,
+            effort,
+            attachments,
+            error,
+        ) = t?;
         let item_rows = item_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
             let kind: ItemKind = serde_json::from_value(serde_json::Value::String(kind_str))
@@ -620,6 +682,7 @@ fn turn_page(
                 kind,
                 content: r.get(3)?,
                 created_at: r.get(4)?,
+                parent_item_index: r.get(5)?,
             })
         })?;
         let items: Vec<ItemSnapshot> = item_rows.collect::<std::result::Result<_, _>>()?;
@@ -661,10 +724,14 @@ fn turn_page(
             id: t_id,
             turn_index: t_idx,
             prompt,
+            model,
+            effort,
+            attachments: serde_json::from_str(&attachments).unwrap_or_default(),
             status,
             started_at,
             completed_at,
             items,
+            error,
             approvals,
             unknown_events,
         });

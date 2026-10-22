@@ -73,6 +73,16 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 ",
+    "
+    ALTER TABLE items ADD COLUMN parent_item_index INTEGER;
+    ALTER TABLE turns ADD COLUMN model TEXT;
+    ALTER TABLE turns ADD COLUMN effort TEXT;
+    ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+",
+    "
+    ALTER TABLE turns ADD COLUMN error_message TEXT;
+    ALTER TABLE turns ADD COLUMN stderr_tail TEXT;
+",
     // Transcript paging reads Turns by position and Items by Turn.
     "
     CREATE INDEX turns_by_thread ON turns(thread_id, id);

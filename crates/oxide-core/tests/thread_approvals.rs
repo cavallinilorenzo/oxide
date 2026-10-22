@@ -46,11 +46,13 @@ fn core_runs_approval_end_to_end_and_persists_in_transcript() {
             let _ = s.send(ProviderEvent::ItemStarted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
                 content: "Executed command with approval".into(),
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,
@@ -185,6 +187,12 @@ fn unanswered_approval_waits_indefinitely_and_resolves_when_interrupted() {
 
     // Now interrupt the thread
     core.interrupt_thread(thread.id).unwrap();
+    // The Provider ends the Turn; wait for it.
+    while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if let ThreadEvent::TurnCompleted { .. } = seq_evt.event {
+            break;
+        }
+    }
 
     // Must be resolved and status Interrupted
     let snapshot_after_interrupt = core.get_thread_snapshot(thread.id).unwrap();
@@ -272,11 +280,13 @@ fn core_runs_approval_deny_end_to_end() {
             let _ = s.send(ProviderEvent::ItemStarted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
                 content: "Action was denied".into(),
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,

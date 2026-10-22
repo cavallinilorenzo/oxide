@@ -1,4 +1,4 @@
-:root { color-scheme: light dark; font: 13px -apple-system, system-ui, sans-serif; }
+:root { color-scheme: dark; font: 13px -apple-system, system-ui, sans-serif; background: #16171a; color: #e6e6e6; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 .window { display: flex; flex-direction: column; height: 100vh; }
@@ -181,37 +181,104 @@ button[aria-pressed="true"] { background: #8883; }
   flex-direction: column;
   gap: 12px;
 }
-.message {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  max-width: 80%;
-}
-.message.user {
-  align-self: flex-end;
-  background: #0070f322;
-  border: 1px solid #0070f344;
-}
-.message.agent {
+.turn-notice {
   align-self: flex-start;
-  background: #8882;
-  border: 1px solid #8883;
-}
-.message-header {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
   opacity: 0.6;
 }
-.message-content {
+.turn-error {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 10px 14px;
+  border: 1px solid #ef444466;
+  border-radius: 8px;
+  color: #ef4444;
+}
+.turn-stderr {
+  margin: 8px 0 0;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  opacity: 0.8;
+}
+.user-message {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 80%;
+}
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.user-bubble {
+  padding: 8px 12px;
+  border-radius: 12px 12px 2px 12px;
+  background: #0070f322;
+  border: 1px solid #0070f355;
   white-space: pre-wrap;
   line-height: 1.5;
   word-break: break-word;
 }
-.composer {
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.attachment { max-width: 240px; max-height: 160px; border-radius: 6px; }
+.agent-turn { display: flex; flex-direction: column; gap: 8px; max-width: 90%; }
+.agent-header {
   display: flex;
   align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.provider-mark { display: inline-flex; }
+.agent-message { line-height: 1.5; white-space: pre-wrap; word-break: break-word; opacity: 0.85; }
+.agent-message.final { font-size: 15px; opacity: 1; color: #fff; }
+.collapsible-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.collapsible-toggle:hover { opacity: 1; }
+.collapsible-body { padding-left: 6px; }
+.rail { display: flex; flex-direction: column; gap: 4px; border-left: 2px solid #8884; padding-left: 10px; margin-left: 5px; }
+.tool-call-plain { font-size: 12px; opacity: 0.6; padding: 2px 4px; }
+.tool-detail { margin: 2px 0 4px; padding: 6px 8px; border-radius: 4px; background: #8881; font-size: 11px; white-space: pre-wrap; opacity: 0.8; }
+.reasoning-text { font-style: italic; opacity: 0.6; white-space: pre-wrap; line-height: 1.5; }
+.file-change {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid #8884;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-change:hover { background: #8882; }
+.subagent { border: 1px solid #8883; border-radius: 8px; padding: 4px 8px; }
+.subagent-task { font-size: 12px; opacity: 0.6; margin-bottom: 6px; }
+.composer {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid #8884;
@@ -242,6 +309,13 @@ button[aria-pressed="true"] { background: #8883; }
   opacity: 0.5;
   cursor: not-allowed;
 }
+.composer-row { display: flex; align-items: center; gap: 8px; }
+.composer-attach { background: none; border: 0; color: inherit; opacity: 0.7; cursor: pointer; padding: 4px; }
+.composer-attach:hover { opacity: 1; }
+.pending-images { display: flex; gap: 6px; flex-wrap: wrap; }
+.pending-image { position: relative; }
+.pending-image img { height: 48px; border-radius: 6px; display: block; }
+.pending-image button { position: absolute; top: -6px; right: -6px; border-radius: 999px; border: 0; width: 18px; height: 18px; display: grid; place-items: center; cursor: pointer; }
 
 /* Permission mode chip in composer */
 .permission-chip-wrapper {

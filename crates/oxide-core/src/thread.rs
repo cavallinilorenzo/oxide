@@ -38,7 +38,10 @@ impl std::str::FromStr for ThreadStatus {
     }
 }
 
+// The serde shapes below are the IPC shapes: the App shell's mirrors convert through JSON.
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
     pub id: u32,
     pub project_id: u32,
@@ -53,11 +56,14 @@ pub struct ThreadSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ItemSnapshot {
     pub id: u32,
     pub item_index: u32,
     pub kind: ItemKind,
     pub content: String,
+    /// The Subagent Item this Item is nested under.
+    pub parent_item_index: Option<u32>,
     pub created_at: String,
 }
 
@@ -82,23 +88,47 @@ pub struct UnknownEventSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
     pub prompt: String,
+    /// The Model and Effort the Turn ran with.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// Paths of image attachments, stored under the Oxide home.
+    pub attachments: Vec<String>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    /// Why the Turn failed; set only when `status` is error.
+    pub error: Option<TurnError>,
     pub approvals: Vec<ApprovalSnapshot>,
     pub unknown_events: Vec<UnknownEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCapabilities {
+    pub reasoning_text: bool,
+    pub image_attachments: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnError {
+    pub message: String,
+    pub stderr_tail: Option<String>,
 }
 
 /// A Thread as of `last_seq`. `turns` holds the Turns at positions
 /// `turn_offset..turn_count`, in order; earlier ones are paged in on demand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: ThreadSummary,
+    pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub turn_offset: u32,
     pub turn_count: u32,
@@ -116,14 +146,19 @@ pub struct TurnPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
 pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
         prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        attachments: Vec<String>,
     },
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        parent_item_index: Option<u32>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -133,10 +168,12 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     },
     TurnCompleted {
         turn_index: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
     },
     ThreadStatusChanged {
         status: ThreadStatus,
@@ -151,6 +188,10 @@ pub enum ThreadEvent {
         id: String,
         decision: ApprovalDecision,
         decided_at: String,
+    },
+    /// The Provider hit a transient failure and is retrying the Turn itself.
+    ProviderRetrying {
+        message: String,
     },
     Error {
         message: String,

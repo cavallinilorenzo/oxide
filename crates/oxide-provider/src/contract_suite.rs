@@ -53,7 +53,9 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
                 assert_eq!(prompt, "Hello test");
                 turn_started_seen = true;
             }
-            ProviderEvent::ItemStarted { item_index, kind } => {
+            ProviderEvent::ItemStarted {
+                item_index, kind, ..
+            } => {
                 assert_eq!(item_index, 0);
                 assert_eq!(kind, ItemKind::AgentMessage);
                 item_started_seen = true;
@@ -67,6 +69,7 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
                 item_index,
                 kind,
                 content,
+                ..
             } => {
                 assert_eq!(item_index, 0);
                 assert_eq!(kind, ItemKind::AgentMessage);

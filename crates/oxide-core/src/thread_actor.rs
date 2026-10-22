@@ -1,19 +1,23 @@
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{
-    ApprovalDecision, PermissionMode, Provider, ProviderEvent, StartContext, TurnStatus,
+    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderEvent,
+    StartContext, TurnStatus,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
 use crate::thread::{
-    DebugSequencedThreadEvent, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus,
+    DebugSequencedThreadEvent, SequencedThreadEvent, ThreadCapabilities, ThreadEvent,
+    ThreadSnapshot, ThreadStatus, TurnError,
 };
 
 pub enum ThreadActorMsg {
     SendPrompt {
         prompt: String,
+        attachments: Vec<PathBuf>,
         reply: mpsc::Sender<Result<()>>,
     },
     Interrupt {
@@ -78,10 +82,11 @@ impl ThreadActorHandle {
         Ok(Self { sender: tx })
     }
 
-    pub fn send_prompt(&self, prompt: String) -> Result<()> {
+    pub fn send_prompt(&self, prompt: String, attachments: Vec<PathBuf>) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(ThreadActorMsg::SendPrompt {
             prompt,
+            attachments,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -155,11 +160,24 @@ impl ThreadActorHandle {
     }
 }
 
+/// The Turn in flight. Oxide numbers Turns itself; the Provider's own `turn_index` is ignored.
+struct CurrentTurn {
+    index: u32,
+    id: Option<u32>,
+    /// The Provider's own error, kept until the Turn ends.
+    error_message: Option<String>,
+}
+
 struct ActorState {
     thread_id: u32,
-    current_turn_index: u32,
-    current_turn_id: Option<u32>,
+    next_turn_index: u32,
+    current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
+    capabilities: ProviderCapabilities,
+    /// Attachments of the prompt in flight, claimed by the Turn it starts.
+    pending_attachments: Vec<String>,
+    /// Items withheld from the Transcript (reasoning the Provider shouldn't expose).
+    dropped_items: HashSet<u32>,
     pending_approval_id: Option<String>,
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
@@ -173,17 +191,24 @@ struct PendingDelta {
 }
 
 impl ActorState {
-    fn new(thread_id: u32) -> Self {
+    fn new(thread_id: u32, next_turn_index: u32, capabilities: ProviderCapabilities) -> Self {
         Self {
             thread_id,
-            current_turn_index: 0,
-            current_turn_id: None,
+            next_turn_index,
+            current_turn: None,
             pending_deltas: HashMap::new(),
+            capabilities,
+            pending_attachments: Vec::new(),
+            dropped_items: HashSet::new(),
             pending_approval_id: None,
             seq: 0,
             subscribers: Vec::new(),
             debug_subscribers: Vec::new(),
         }
+    }
+
+    fn current_turn_id(&self) -> Option<u32> {
+        self.current_turn.as_ref().and_then(|t| t.id)
     }
 
     fn has_any_subscriber(&self) -> bool {
@@ -231,7 +256,7 @@ impl ActorState {
         }
         let deltas = std::mem::take(&mut self.pending_deltas);
         for (item_index, delta) in deltas {
-            if !delta.text.is_empty() {
+            if !delta.text.is_empty() && !self.dropped_items.contains(&item_index) {
                 let raw_payload = if delta.raw_payloads.is_empty() {
                     None
                 } else {
@@ -260,21 +285,66 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::SessionInfo { session_id } => {
             storage.set_provider_session_id(state.thread_id, session_id);
         }
-        ProviderEvent::TurnStarted { turn_index, prompt } => {
-            state.current_turn_index = turn_index;
-            if let Ok(turn_id) =
-                storage.write_turn_started(state.thread_id, turn_index, prompt.clone())
-            {
-                state.current_turn_id = Some(turn_id);
+        ProviderEvent::TurnStarted {
+            turn_index: _,
+            prompt,
+        } => {
+            let turn_index = state.next_turn_index;
+            state.next_turn_index += 1;
+            state.dropped_items.clear();
+            let attachments = std::mem::take(&mut state.pending_attachments);
+            let (mut model, mut effort) = (None, None);
+            let mut id = None;
+            if let Ok(started) = storage.write_turn_started(
+                state.thread_id,
+                turn_index,
+                prompt.clone(),
+                attachments.clone(),
+            ) {
+                id = Some(started.id);
+                model = started.model;
+                effort = started.effort;
             }
+            state.current_turn = Some(CurrentTurn {
+                index: turn_index,
+                id,
+                error_message: None,
+            });
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
-            state.broadcast_with_raw(ThreadEvent::TurnStarted { turn_index, prompt }, raw);
+            state.broadcast_with_raw(
+                ThreadEvent::TurnStarted {
+                    turn_index,
+                    prompt,
+                    model,
+                    effort,
+                    attachments,
+                },
+                raw,
+            );
             state.broadcast_status(ThreadStatus::Working);
         }
-        ProviderEvent::ItemStarted { item_index, kind } => {
-            state.broadcast_with_raw(ThreadEvent::ItemStarted { item_index, kind }, raw);
+        ProviderEvent::ItemStarted {
+            item_index,
+            kind,
+            parent_item_index,
+        } => {
+            if kind == ItemKind::Reasoning && !state.capabilities.supports_reasoning {
+                state.dropped_items.insert(item_index);
+                return;
+            }
+            state.broadcast_with_raw(
+                ThreadEvent::ItemStarted {
+                    item_index,
+                    kind,
+                    parent_item_index,
+                },
+                raw,
+            );
         }
         ProviderEvent::ItemDelta { item_index, delta } => {
+            if state.dropped_items.contains(&item_index) {
+                return;
+            }
             let pending = state.pending_deltas.entry(item_index).or_default();
             pending.text.push_str(&delta);
             if let Some(raw) = raw {
@@ -285,16 +355,28 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             item_index,
             kind,
             content,
+            parent_item_index,
         } => {
+            if kind == ItemKind::Reasoning && !state.capabilities.supports_reasoning {
+                state.dropped_items.insert(item_index);
+                return;
+            }
             state.flush_pending_deltas();
-            if let Some(turn_id) = state.current_turn_id {
-                let _ = storage.write_item_completed(turn_id, item_index, kind, content.clone());
+            if let Some(turn_id) = state.current_turn_id() {
+                let _ = storage.write_item_completed(
+                    turn_id,
+                    item_index,
+                    kind,
+                    content.clone(),
+                    parent_item_index,
+                );
             }
             state.broadcast_with_raw(
                 ThreadEvent::ItemCompleted {
                     item_index,
                     kind,
                     content,
+                    parent_item_index,
                 },
                 raw,
             );
@@ -302,29 +384,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::TurnCompleted {
             turn_index: _,
             status,
-        } => {
-            state.flush_pending_deltas();
-            resolve_pending_approvals_if_any(state, storage);
-            if let Some(turn_id) = state.current_turn_id.take() {
-                let _ = storage.update_turn_completed(turn_id, status);
-            }
-            let final_thread_status = match status {
-                TurnStatus::Completed => ThreadStatus::Completed,
-                TurnStatus::Interrupted => ThreadStatus::Interrupted,
-                TurnStatus::Error => ThreadStatus::Error,
-                TurnStatus::Running => ThreadStatus::Working,
-            };
-            let _ = storage.update_thread_status(state.thread_id, final_thread_status);
-            state.broadcast_with_raw(
-                ThreadEvent::TurnCompleted {
-                    turn_index: state.current_turn_index,
-                    status,
-                },
-                raw,
-            );
-            state.broadcast_status(final_thread_status);
-            state.current_turn_index += 1;
-        }
+        } => finish_turn(state, storage, status, None, raw),
         ProviderEvent::ApprovalRequested {
             id,
             kind,
@@ -332,7 +392,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             options,
         } => {
             state.pending_approval_id = Some(id.clone());
-            if let Some(turn_id) = state.current_turn_id {
+            if let Some(turn_id) = state.current_turn_id() {
                 let _ = storage.write_approval_requested(
                     turn_id,
                     id.clone(),
@@ -353,18 +413,31 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             );
             state.broadcast_status(ThreadStatus::NeedsInput);
         }
-        ProviderEvent::Error { message, code: _ } => {
-            let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Error);
-            state.broadcast_with_raw(
-                ThreadEvent::Error {
-                    message: message.clone(),
-                },
-                raw,
-            );
-            state.broadcast_status(ThreadStatus::Error);
+        ProviderEvent::Error {
+            message,
+            code: _,
+            retrying: true,
+        } => {
+            state.broadcast_with_raw(ThreadEvent::ProviderRetrying { message }, raw);
+        }
+        ProviderEvent::Error {
+            message,
+            code: _,
+            retrying: false,
+        } => {
+            if let Some(turn) = state.current_turn.as_mut() {
+                turn.error_message = Some(message);
+            } else {
+                let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Error);
+                state.broadcast_with_raw(ThreadEvent::Error { message }, raw);
+                state.broadcast_status(ThreadStatus::Error);
+            }
+        }
+        ProviderEvent::Exited { code, stderr_tail } => {
+            provider_exited(state, storage, code, stderr_tail, raw)
         }
         ProviderEvent::Unknown { raw: raw_str } => {
-            if let Some(turn_id) = state.current_turn_id {
+            if let Some(turn_id) = state.current_turn_id() {
                 let _ = storage.write_unknown_event(turn_id, raw_str.clone());
             }
             let debug_raw = if !state.debug_subscribers.is_empty() {
@@ -379,11 +452,81 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
 
 fn resolve_pending_approvals_if_any(state: &mut ActorState, storage: &StorageHandle) {
     if let (Some(turn_id), true) = (
-        state.current_turn_id,
+        state.current_turn_id(),
         state.pending_approval_id.take().is_some(),
     ) {
         let _ = storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
     }
+}
+
+/// Ends the Turn in flight, if any. Never re-sends anything to the Provider.
+/// A failed Turn keeps the Provider's own error message when it sent one, else `exit_error`'s.
+fn finish_turn(
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    status: TurnStatus,
+    exit_error: Option<TurnError>,
+    raw: Option<String>,
+) {
+    state.flush_pending_deltas();
+    resolve_pending_approvals_if_any(state, storage);
+    let Some(turn) = state.current_turn.take() else {
+        return;
+    };
+    let error = (status == TurnStatus::Error).then(|| {
+        let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
+        let message = turn
+            .error_message
+            .or(exit_error.map(|e| e.message))
+            .unwrap_or_else(|| "The Turn failed".to_string());
+        TurnError {
+            message,
+            stderr_tail,
+        }
+    });
+    if let Some(turn_id) = turn.id {
+        let _ = storage.update_turn_completed(turn_id, status, error.clone());
+    }
+    let final_thread_status = match status {
+        TurnStatus::Completed => ThreadStatus::Completed,
+        TurnStatus::Interrupted => ThreadStatus::Interrupted,
+        TurnStatus::Error => ThreadStatus::Error,
+        TurnStatus::Running => ThreadStatus::Working,
+    };
+    let _ = storage.update_thread_status(state.thread_id, final_thread_status);
+    state.broadcast_with_raw(
+        ThreadEvent::TurnCompleted {
+            turn_index: turn.index,
+            status,
+            error,
+        },
+        raw,
+    );
+    state.broadcast_status(final_thread_status);
+}
+
+/// A Provider ending mid-Turn (or during an Approval) fails that Turn; while idle it's silent.
+fn provider_exited(
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    code: Option<i32>,
+    stderr_tail: Option<String>,
+    raw: Option<String>,
+) {
+    let message = match code {
+        Some(code) => format!("The Provider exited unexpectedly (exit code {code})"),
+        None => "The Provider exited unexpectedly".to_string(),
+    };
+    finish_turn(
+        state,
+        storage,
+        TurnStatus::Error,
+        Some(TurnError {
+            message,
+            stderr_tail,
+        }),
+        raw,
+    );
 }
 
 fn run_thread_actor(
@@ -393,10 +536,14 @@ fn run_thread_actor(
     storage: StorageHandle,
     rx: Receiver<ThreadActorMsg>,
 ) {
-    let mut state = ActorState::new(thread_id);
+    let next_turn_index = storage
+        .get_snapshot(thread_id, 0)
+        .map(|s| s.turn_count)
+        .unwrap_or(0);
 
     // Start provider
     let caps = provider.capabilities();
+    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone());
     let initial_mode = storage
         .get_snapshot(thread_id, 0)
         .map(|s| s.thread.permission_mode)
@@ -412,7 +559,7 @@ fn run_thread_actor(
         effort: None,
         permission_mode: initial_mode,
     };
-    let prx = match provider.start(&start_ctx) {
+    let mut prx = match provider.start(&start_ctx) {
         Ok(receiver) => receiver,
         Err(e) => {
             eprintln!("failed to start provider for thread {thread_id}: {e}");
@@ -429,33 +576,50 @@ fn run_thread_actor(
                     Err(_) => break,
                 };
                 match msg {
-                    ThreadActorMsg::SendPrompt { prompt, reply } => {
-                        let p_res = provider.send_prompt(&prompt).map_err(|e| Error::Io {
-                            path: std::path::PathBuf::from("provider"),
+                    ThreadActorMsg::SendPrompt { prompt, attachments, reply } => {
+                        if !attachments.is_empty() && !state.capabilities.image_attachments {
+                            let _ = reply.send(Err(Error::Io {
+                                path: PathBuf::from("attachments"),
+                                source: std::io::Error::other(
+                                    "this Provider does not accept image attachments",
+                                ),
+                            }));
+                            continue;
+                        }
+                        state.pending_attachments = attachments
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        let sent = if attachments.is_empty() {
+                            provider.send_prompt(&prompt)
+                        } else {
+                            provider.send_prompt_with_images(&prompt, &attachments)
+                        };
+                        let p_res = sent.map_err(|e| Error::Io {
+                            path: PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
-                        resolve_pending_approvals_if_any(&mut state, &storage);
-                        if let Some(turn_id) = state.current_turn_id.take() {
-                            let _ = storage.update_turn_completed(turn_id, TurnStatus::Interrupted);
-                        }
-                        let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Interrupted);
-                        state.broadcast(ThreadEvent::TurnCompleted {
-                            turn_index: state.current_turn_index,
-                            status: TurnStatus::Interrupted,
-                        });
-                        state.broadcast_status(ThreadStatus::Interrupted);
-                        let _ = provider.interrupt();
-                        let _ = reply.send(Ok(()));
+                        // Stop applies only to a running Turn; the Provider ends it with
+                        // `TurnCompleted { Interrupted }`.
+                        let result = if state.current_turn.is_some() {
+                            provider.interrupt().map_err(|e| Error::Io {
+                                path: std::path::PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
+                        let _ = reply.send(result);
                     }
                     ThreadActorMsg::RespondToApproval { approval_id, decision, reply } => {
                         let p_res = provider.respond_to_approval(&approval_id, decision).map_err(|e| Error::Io {
                             path: std::path::PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
-                        let decided_at = if let Some(turn_id) = state.current_turn_id {
+                        let decided_at = if let Some(turn_id) = state.current_turn_id() {
                             storage
                                 .update_approval_decision(turn_id, approval_id.clone(), decision, String::new())
                                 .unwrap_or_default()
@@ -493,6 +657,10 @@ fn run_thread_actor(
                         for turn in &mut snapshot.turns {
                             turn.unknown_events.clear();
                         }
+                        snapshot.capabilities = ThreadCapabilities {
+                            reasoning_text: state.capabilities.supports_reasoning,
+                            image_attachments: state.capabilities.image_attachments,
+                        };
                         snapshot.supported_permission_modes = provider.capabilities().supported_permission_modes;
                         state.subscribers.push(sub_tx);
                         let _ = reply.send((snapshot, sub_rx));
@@ -512,12 +680,15 @@ fn run_thread_actor(
                         let _ = reply.send((snapshot, sub_rx));
                     }
                     ThreadActorMsg::Tick => {
-                        while let Ok(evt) = prx.try_recv() {
-                            handle_provider_event(
-                                evt,
-                                &mut state,
-                                &storage,
-                            );
+                        loop {
+                            match prx.try_recv() {
+                                Ok(evt) => handle_provider_event(evt, &mut state, &storage),
+                                Err(TryRecvError::Empty) => break,
+                                Err(TryRecvError::Disconnected) => {
+                                    provider_channel_closed(&mut prx, &mut state, &storage);
+                                    break;
+                                }
+                            }
                         }
                         state.flush_pending_deltas();
                     }
@@ -527,17 +698,21 @@ fn run_thread_actor(
                     }
                 }
             }
-            recv(prx) -> evt => {
-                let evt = match evt {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-                handle_provider_event(
-                    evt,
-                    &mut state,
-                    &storage,
-                );
+            recv(prx) -> evt => match evt {
+                Ok(evt) => handle_provider_event(evt, &mut state, &storage),
+                Err(_) => provider_channel_closed(&mut prx, &mut state, &storage),
             }
         }
     }
+}
+
+/// The Provider's event channel closed (after `Exited`, or because an adapter's reader died):
+/// treat it as an exit, and stop selecting on the dead channel.
+fn provider_channel_closed(
+    prx: &mut Receiver<ProviderEvent>,
+    state: &mut ActorState,
+    storage: &StorageHandle,
+) {
+    *prx = crossbeam_channel::never();
+    provider_exited(state, storage, None, None, None);
 }

@@ -7,6 +7,7 @@ pub mod contract_suite;
 use crossbeam_channel::Receiver;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,7 +36,7 @@ pub enum ApprovalKind {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
     AgentMessage,
@@ -71,6 +72,7 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
+    /// The Provider accepts image attachments with a prompt.
     #[serde(default)]
     pub image_attachments: bool,
 }
@@ -109,6 +111,9 @@ pub enum ProviderEvent {
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        /// The Subagent Item this Item runs inside, if any.
+        #[serde(default)]
+        parent_item_index: Option<u32>,
     },
     ItemDelta {
         item_index: u32,
@@ -118,6 +123,8 @@ pub enum ProviderEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        #[serde(default)]
+        parent_item_index: Option<u32>,
     },
     ApprovalRequested {
         id: String,
@@ -128,12 +135,23 @@ pub enum ProviderEvent {
         #[serde(default)]
         options: Vec<String>,
     },
+    /// A Provider-side failure. With `retrying` the Provider is retrying on its own (e.g. a rate
+    /// limit); otherwise the Turn in flight has failed and must still end with `TurnCompleted`
+    /// or `Exited`.
     Error {
         message: String,
         code: Option<String>,
+        #[serde(default)]
+        retrying: bool,
     },
     SessionInfo {
         session_id: String,
+    },
+    /// The Provider process ended on its own. Adapters send it once, then drop the channel.
+    Exited {
+        code: Option<i32>,
+        /// The last lines the Provider wrote to stderr, if it wrote any.
+        stderr_tail: Option<String>,
     },
     Unknown {
         raw: String,
@@ -149,6 +167,14 @@ pub trait Provider: Send + 'static {
         context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError>;
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError>;
+    /// Sends a prompt with image files. Only called when `image_attachments` holds.
+    fn send_prompt_with_images(
+        &mut self,
+        prompt: &str,
+        _images: &[PathBuf],
+    ) -> Result<(), ProviderError> {
+        self.send_prompt(prompt)
+    }
     fn interrupt(&mut self) -> Result<(), ProviderError>;
     fn respond_to_approval(
         &mut self,
@@ -161,8 +187,119 @@ pub trait Provider: Send + 'static {
     fn capabilities(&self) -> ProviderCapabilities;
 }
 
+/// The events of one scripted Turn. By convention the first line of a tool call, file change
+/// or Subagent `content` is its headline and the rest is detail.
+pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
+    fn item(
+        item_index: u32,
+        kind: ItemKind,
+        parent_item_index: Option<u32>,
+        content: &str,
+    ) -> [ProviderEvent; 2] {
+        [
+            ProviderEvent::ItemStarted {
+                item_index,
+                kind,
+                parent_item_index,
+            },
+            ProviderEvent::ItemCompleted {
+                item_index,
+                kind,
+                content: content.to_string(),
+                parent_item_index,
+            },
+        ]
+    }
+    let answer = "All done: the fix is in place.";
+    let mut events = vec![ProviderEvent::TurnStarted {
+        turn_index,
+        prompt: prompt.to_string(),
+    }];
+    events.extend(item(
+        0,
+        ItemKind::Reasoning,
+        None,
+        "The user wants a change; look at the file first.",
+    ));
+    events.extend(item(
+        1,
+        ItemKind::ToolCall,
+        None,
+        "Read src/main.rs\nfn main() {}",
+    ));
+    events.extend(item(
+        2,
+        ItemKind::ToolCall,
+        None,
+        "Run cargo test\n1 passed",
+    ));
+    events.push(ProviderEvent::ItemStarted {
+        item_index: 3,
+        kind: ItemKind::Subagent,
+        parent_item_index: None,
+    });
+    events.extend(item(
+        4,
+        ItemKind::ToolCall,
+        Some(3),
+        "Grep TODO\nsrc/main.rs:1",
+    ));
+    events.extend(item(
+        5,
+        ItemKind::AgentMessage,
+        Some(3),
+        "No other TODOs found.",
+    ));
+    events.push(ProviderEvent::ItemCompleted {
+        item_index: 3,
+        kind: ItemKind::Subagent,
+        content: "Explore\nSearch the codebase for TODOs".to_string(),
+        parent_item_index: None,
+    });
+    events.extend(item(6, ItemKind::FileChange, None, "src/main.rs"));
+    events.push(ProviderEvent::ItemStarted {
+        item_index: 7,
+        kind: ItemKind::AgentMessage,
+        parent_item_index: None,
+    });
+    events.push(ProviderEvent::ItemDelta {
+        item_index: 7,
+        delta: answer.to_string(),
+    });
+    events.push(ProviderEvent::ItemCompleted {
+        item_index: 7,
+        kind: ItemKind::AgentMessage,
+        content: answer.to_string(),
+        parent_item_index: None,
+    });
+    events.push(ProviderEvent::TurnCompleted {
+        turn_index,
+        status: TurnStatus::Completed,
+    });
+    events
+}
+
 type PromptHandler = Box<dyn Fn(&str) + Send + Sync>;
 type ApprovalHandler = Box<dyn Fn(&str, ApprovalDecision) + Send + Sync>;
+
+/// What a [`FakeProvider`] was asked to do, readable after the Fake is handed to Core.
+#[derive(Clone, Default)]
+pub struct FakeRecorder {
+    starts: Arc<Mutex<u32>>,
+    prompts: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeRecorder {
+    /// How many times a session was started or resumed.
+    pub fn starts(&self) -> u32 {
+        *self.starts.lock().unwrap()
+    }
+
+    /// Every prompt sent, in order.
+    pub fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().unwrap().clone()
+    }
+}
 
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
@@ -170,6 +307,7 @@ pub struct FakeProvider {
     event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
     event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
     prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
+    recorder: FakeRecorder,
     approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
     current_permission_mode: Arc<Mutex<PermissionMode>>,
 }
@@ -186,7 +324,7 @@ impl Default for FakeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: false,
+                image_attachments: true,
             },
             detection: Detection {
                 available: true,
@@ -198,6 +336,7 @@ impl Default for FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
@@ -213,9 +352,29 @@ impl FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
+    }
+
+    /// A fake that answers every prompt with a Turn containing every Item kind:
+    /// reasoning, tool calls, a Subagent with nested tool calls, a file change and a final answer.
+    pub fn scripted() -> Self {
+        let fake = Self::default();
+        let sender = fake.sender();
+        let turn_counter = Arc::new(AtomicU32::new(0));
+        fake.on_prompt(move |prompt| {
+            let turn_index = turn_counter.fetch_add(1, Ordering::SeqCst);
+            for event in scripted_turn(turn_index, prompt) {
+                let _ = sender.send(event);
+            }
+        });
+        fake
+    }
+
+    pub fn set_capabilities(&mut self, capabilities: ProviderCapabilities) {
+        self.capabilities = capabilities;
     }
 
     pub fn sender(&self) -> crossbeam_channel::Sender<ProviderEvent> {
@@ -223,6 +382,10 @@ impl FakeProvider {
             .as_ref()
             .expect("provider already shut down")
             .clone()
+    }
+
+    pub fn recorder(&self) -> FakeRecorder {
+        self.recorder.clone()
     }
 
     pub fn on_prompt(&self, handler: impl Fn(&str) + Send + Sync + 'static) {
@@ -244,6 +407,7 @@ impl Provider for FakeProvider {
     }
 
     fn start(&mut self, _context: &StartContext) -> Result<Receiver<ProviderEvent>, ProviderError> {
+        *self.recorder.starts.lock().unwrap() += 1;
         Ok(self.event_receiver.clone())
     }
 
@@ -252,10 +416,16 @@ impl Provider for FakeProvider {
         _session_id: &str,
         _context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError> {
+        *self.recorder.starts.lock().unwrap() += 1;
         Ok(self.event_receiver.clone())
     }
 
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+        self.recorder
+            .prompts
+            .lock()
+            .unwrap()
+            .push(prompt.to_string());
         if let Some(ref handler) = *self.prompt_handler.lock().unwrap() {
             handler(prompt);
         } else if let Some(ref sender) = self.event_sender {

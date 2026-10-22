@@ -5,8 +5,10 @@ use oxide_provider::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
+use std::time::Instant;
 
+use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
 use crate::thread::{
@@ -39,7 +41,9 @@ pub enum ThreadActorMsg {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)>,
     },
     Tick,
-    Shutdown,
+    Shutdown {
+        reply: mpsc::Sender<()>,
+    },
 }
 
 #[derive(Clone)]
@@ -54,6 +58,7 @@ impl ThreadActorHandle {
         provider: Box<dyn Provider>,
         storage: StorageHandle,
         real_time_ticker: bool,
+        clock: Arc<dyn Clock>,
     ) -> Result<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -72,7 +77,7 @@ impl ThreadActorHandle {
         std::thread::Builder::new()
             .name(format!("thread-actor-{thread_id}"))
             .spawn(move || {
-                run_thread_actor(thread_id, working_dir, provider, storage, rx);
+                run_thread_actor(thread_id, working_dir, provider, storage, clock, rx);
             })
             .map_err(|e| Error::Io {
                 path: std::path::PathBuf::from(format!("thread-{thread_id}")),
@@ -155,8 +160,17 @@ impl ThreadActorHandle {
         let _ = self.sender.send(ThreadActorMsg::Tick);
     }
 
+    /// Shuts the Provider down (escalating to SIGKILL if it won't go) and stops the actor.
+    /// Returns once the Provider's processes are gone.
     pub fn shutdown(&self) {
-        let _ = self.sender.send(ThreadActorMsg::Shutdown);
+        let (reply_tx, reply_rx) = mpsc::channel();
+        if self
+            .sender
+            .send(ThreadActorMsg::Shutdown { reply: reply_tx })
+            .is_ok()
+        {
+            let _ = reply_rx.recv();
+        }
     }
 }
 
@@ -182,6 +196,13 @@ struct ActorState {
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
     debug_subscribers: Vec<Sender<DebugSequencedThreadEvent>>,
+    clock: Arc<dyn Clock>,
+    /// A Provider process is running for this Thread.
+    provider_live: bool,
+    /// The Provider ended on its own; its adapter still has to be shut down before a restart.
+    provider_exited: bool,
+    /// Since when no Turn has been in flight. `None` while a prompt is on its way.
+    idle_since: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -191,8 +212,18 @@ struct PendingDelta {
 }
 
 impl ActorState {
-    fn new(thread_id: u32, next_turn_index: u32, capabilities: ProviderCapabilities) -> Self {
+    fn new(
+        thread_id: u32,
+        next_turn_index: u32,
+        capabilities: ProviderCapabilities,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let idle_since = Some(clock.now());
         Self {
+            clock,
+            provider_live: false,
+            provider_exited: false,
+            idle_since,
             thread_id,
             next_turn_index,
             current_turn: None,
@@ -473,6 +504,7 @@ fn finish_turn(
     let Some(turn) = state.current_turn.take() else {
         return;
     };
+    state.idle_since = Some(state.clock.now());
     let error = (status == TurnStatus::Error).then(|| {
         let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
         let message = turn
@@ -513,6 +545,8 @@ fn provider_exited(
     stderr_tail: Option<String>,
     raw: Option<String>,
 ) {
+    state.provider_live = false;
+    state.provider_exited = true;
     let message = match code {
         Some(code) => format!("The Provider exited unexpectedly (exit code {code})"),
         None => "The Provider exited unexpectedly".to_string(),
@@ -534,6 +568,7 @@ fn run_thread_actor(
     working_dir: std::path::PathBuf,
     mut provider: Box<dyn Provider>,
     storage: StorageHandle,
+    clock: Arc<dyn Clock>,
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
@@ -541,32 +576,10 @@ fn run_thread_actor(
         .map(|s| s.turn_count)
         .unwrap_or(0);
 
-    // Start provider
+    // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
-    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone());
-    let initial_mode = storage
-        .get_snapshot(thread_id, 0)
-        .map(|s| s.thread.permission_mode)
-        .unwrap_or_else(|_| {
-            caps.supported_permission_modes
-                .first()
-                .copied()
-                .unwrap_or(oxide_provider::PermissionMode::AutoEdit)
-        });
-    let start_ctx = StartContext {
-        working_dir,
-        model: None,
-        effort: None,
-        permission_mode: initial_mode,
-    };
-    let mut prx = match provider.start(&start_ctx) {
-        Ok(receiver) => receiver,
-        Err(e) => {
-            eprintln!("failed to start provider for thread {thread_id}: {e}");
-            let (_dummy_tx, dummy_rx) = crossbeam_channel::unbounded();
-            dummy_rx
-        }
-    };
+    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock);
+    let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {
         crossbeam_channel::select! {
@@ -586,6 +599,13 @@ fn run_thread_actor(
                             }));
                             continue;
                         }
+                        if let Err(e) = ensure_provider_started(
+                            &mut *provider, &mut state, &storage, &working_dir, &mut prx,
+                        ) {
+                            let _ = reply.send(Err(e));
+                            continue;
+                        }
+                        state.idle_since = None;
                         state.pending_attachments = attachments
                             .iter()
                             .map(|p| p.to_string_lossy().to_string())
@@ -599,6 +619,9 @@ fn run_thread_actor(
                             path: PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
+                        if p_res.is_err() && state.current_turn.is_none() {
+                            state.idle_since = Some(state.clock.now());
+                        }
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
@@ -637,10 +660,15 @@ fn run_thread_actor(
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::SetPermissionMode { mode, reply } => {
-                        let p_res = provider.set_permission_mode(mode).map_err(|e| Error::Io {
-                            path: std::path::PathBuf::from("provider"),
-                            source: std::io::Error::other(e.to_string()),
-                        });
+                        // Without a live Provider the stored mode applies when the next one starts.
+                        let p_res = if state.provider_live {
+                            provider.set_permission_mode(mode).map_err(|e| Error::Io {
+                                path: std::path::PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
                         let s_res = storage.update_thread_permission_mode(state.thread_id, mode);
                         let _ = reply.send(p_res.and(s_res));
                     }
@@ -691,9 +719,11 @@ fn run_thread_actor(
                             }
                         }
                         state.flush_pending_deltas();
+                        reap_if_idle(&mut *provider, &mut state, &mut prx);
                     }
-                    ThreadActorMsg::Shutdown => {
-                        let _ = provider.shutdown();
+                    ThreadActorMsg::Shutdown { reply } => {
+                        stop_provider(&mut *provider, &mut state, &mut prx);
+                        let _ = reply.send(());
                         break;
                     }
                 }
@@ -703,6 +733,89 @@ fn run_thread_actor(
                 Err(_) => provider_channel_closed(&mut prx, &mut state, &storage),
             }
         }
+    }
+    stop_provider(&mut *provider, &mut state, &mut prx);
+}
+
+/// Starts the Provider if none is running: resumes the Thread's stored session when it has one,
+/// otherwise starts a fresh one.
+fn ensure_provider_started(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    working_dir: &std::path::Path,
+    prx: &mut Receiver<ProviderEvent>,
+) -> Result<()> {
+    if state.provider_live {
+        return Ok(());
+    }
+    if state.provider_exited {
+        // Reap what is left of the process that went away on its own.
+        let _ = provider.shutdown();
+        state.provider_exited = false;
+    }
+    let permission_mode = storage
+        .get_snapshot(state.thread_id, 0)
+        .map(|s| s.thread.permission_mode)
+        .unwrap_or_else(|_| {
+            state
+                .capabilities
+                .supported_permission_modes
+                .first()
+                .copied()
+                .unwrap_or(PermissionMode::AutoEdit)
+        });
+    let context = StartContext {
+        working_dir: working_dir.to_path_buf(),
+        model: None,
+        effort: None,
+        permission_mode,
+    };
+    let started = match storage.get_provider_session_id(state.thread_id) {
+        Some(session_id) => provider.resume(&session_id, &context),
+        None => provider.start(&context),
+    };
+    match started {
+        Ok(receiver) => {
+            *prx = receiver;
+            state.provider_live = true;
+            Ok(())
+        }
+        Err(e) => Err(Error::Io {
+            path: PathBuf::from("provider"),
+            source: std::io::Error::other(e.to_string()),
+        }),
+    }
+}
+
+/// Shuts the Provider down and stops listening to it, if one is running.
+fn stop_provider(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    prx: &mut Receiver<ProviderEvent>,
+) {
+    if state.provider_live || state.provider_exited {
+        let _ = provider.shutdown();
+    }
+    state.provider_live = false;
+    state.provider_exited = false;
+    *prx = crossbeam_channel::never();
+}
+
+/// Shuts the Provider down once the Thread has had no Turn in flight for the idle timeout.
+/// The next prompt resumes it lazily from the stored session; the Thread's status is untouched.
+fn reap_if_idle(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    prx: &mut Receiver<ProviderEvent>,
+) {
+    let idle = state.provider_live
+        && state.current_turn.is_none()
+        && state.idle_since.is_some_and(|since| {
+            state.clock.now().saturating_duration_since(since) >= PROVIDER_IDLE_TIMEOUT
+        });
+    if idle {
+        stop_provider(provider, state, prx);
     }
 }
 

@@ -3,6 +3,7 @@
 
 pub mod claude;
 pub mod contract_suite;
+pub mod process;
 
 use crossbeam_channel::Receiver;
 use serde::{Deserialize, Serialize};
@@ -286,6 +287,8 @@ type ApprovalHandler = Box<dyn Fn(&str, ApprovalDecision) + Send + Sync>;
 #[derive(Clone, Default)]
 pub struct FakeRecorder {
     starts: Arc<Mutex<u32>>,
+    resumes: Arc<Mutex<Vec<String>>>,
+    shutdowns: Arc<Mutex<u32>>,
     prompts: Arc<Mutex<Vec<String>>>,
 }
 
@@ -293,6 +296,16 @@ impl FakeRecorder {
     /// How many times a session was started or resumed.
     pub fn starts(&self) -> u32 {
         *self.starts.lock().unwrap()
+    }
+
+    /// The session id of every resume, in order (each also counts as a start).
+    pub fn resumes(&self) -> Vec<String> {
+        self.resumes.lock().unwrap().clone()
+    }
+
+    /// How many times the Provider was shut down.
+    pub fn shutdowns(&self) -> u32 {
+        *self.shutdowns.lock().unwrap()
     }
 
     /// Every prompt sent, in order.
@@ -304,12 +317,13 @@ impl FakeRecorder {
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
     detection: Detection,
-    event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
-    event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
+    event_sender: Arc<Mutex<Option<crossbeam_channel::Sender<ProviderEvent>>>>,
+    event_receiver: Arc<Mutex<crossbeam_channel::Receiver<ProviderEvent>>>,
     prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
     recorder: FakeRecorder,
     approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
     current_permission_mode: Arc<Mutex<PermissionMode>>,
+    reusable: bool,
 }
 
 impl Default for FakeProvider {
@@ -333,12 +347,13 @@ impl Default for FakeProvider {
                 authenticated: true,
                 warning: None,
             },
-            event_sender: Some(event_sender),
-            event_receiver,
+            event_sender: Arc::new(Mutex::new(Some(event_sender))),
+            event_receiver: Arc::new(Mutex::new(event_receiver)),
             prompt_handler: Arc::new(Mutex::new(None)),
             recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
+            reusable: false,
         }
     }
 }
@@ -349,28 +364,51 @@ impl FakeProvider {
         Self {
             capabilities,
             detection,
-            event_sender: Some(event_sender),
-            event_receiver,
+            event_sender: Arc::new(Mutex::new(Some(event_sender))),
+            event_receiver: Arc::new(Mutex::new(event_receiver)),
             prompt_handler: Arc::new(Mutex::new(None)),
             recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
+            reusable: false,
         }
     }
 
     /// A fake that answers every prompt with a Turn containing every Item kind:
     /// reasoning, tool calls, a Subagent with nested tool calls, a file change and a final answer.
     pub fn scripted() -> Self {
-        let fake = Self::default();
-        let sender = fake.sender();
+        let fake = Self::default().reusable();
+        let slot = Arc::clone(&fake.event_sender);
         let turn_counter = Arc::new(AtomicU32::new(0));
         fake.on_prompt(move |prompt| {
             let turn_index = turn_counter.fetch_add(1, Ordering::SeqCst);
-            for event in scripted_turn(turn_index, prompt) {
-                let _ = sender.send(event);
+            if let Some(sender) = slot.lock().unwrap().as_ref() {
+                for event in scripted_turn(turn_index, prompt) {
+                    let _ = sender.send(event);
+                }
             }
         });
         fake
+    }
+
+    /// The event channel of a new session: the current one, or a fresh one after a shutdown.
+    fn open_channel(&mut self) -> Receiver<ProviderEvent> {
+        let mut sender = self.event_sender.lock().unwrap();
+        let mut receiver = self.event_receiver.lock().unwrap();
+        if sender.is_none() {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            *sender = Some(tx);
+            *receiver = rx;
+        }
+        receiver.clone()
+    }
+
+    /// Keeps the prompt and approval handlers across a shutdown, so a later `start` or
+    /// `resume` brings the same Fake back to life. Handlers must not capture a sender
+    /// (use [`FakeProvider::scripted`]'s approach), or the old channel never closes.
+    pub fn reusable(mut self) -> Self {
+        self.reusable = true;
+        self
     }
 
     pub fn set_capabilities(&mut self, capabilities: ProviderCapabilities) {
@@ -379,6 +417,8 @@ impl FakeProvider {
 
     pub fn sender(&self) -> crossbeam_channel::Sender<ProviderEvent> {
         self.event_sender
+            .lock()
+            .unwrap()
             .as_ref()
             .expect("provider already shut down")
             .clone()
@@ -408,16 +448,21 @@ impl Provider for FakeProvider {
 
     fn start(&mut self, _context: &StartContext) -> Result<Receiver<ProviderEvent>, ProviderError> {
         *self.recorder.starts.lock().unwrap() += 1;
-        Ok(self.event_receiver.clone())
+        Ok(self.open_channel())
     }
 
     fn resume(
         &mut self,
-        _session_id: &str,
+        session_id: &str,
         _context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError> {
         *self.recorder.starts.lock().unwrap() += 1;
-        Ok(self.event_receiver.clone())
+        self.recorder
+            .resumes
+            .lock()
+            .unwrap()
+            .push(session_id.to_string());
+        Ok(self.open_channel())
     }
 
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
@@ -428,7 +473,7 @@ impl Provider for FakeProvider {
             .push(prompt.to_string());
         if let Some(ref handler) = *self.prompt_handler.lock().unwrap() {
             handler(prompt);
-        } else if let Some(ref sender) = self.event_sender {
+        } else if let Some(ref sender) = *self.event_sender.lock().unwrap() {
             let _ = sender.send(ProviderEvent::TurnStarted {
                 turn_index: 0,
                 prompt: prompt.to_string(),
@@ -438,7 +483,7 @@ impl Provider for FakeProvider {
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
-        if let Some(ref sender) = self.event_sender {
+        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
             let _ = sender.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,
                 status: TurnStatus::Interrupted,
@@ -468,9 +513,13 @@ impl Provider for FakeProvider {
     }
 
     fn shutdown(&mut self) -> Result<(), ProviderError> {
-        *self.prompt_handler.lock().unwrap() = None;
-        *self.approval_handler.lock().unwrap() = None;
-        self.event_sender.take();
+        *self.recorder.shutdowns.lock().unwrap() += 1;
+        if !self.reusable {
+            // Dropping the handlers releases any event sender they captured, so the channel closes.
+            *self.prompt_handler.lock().unwrap() = None;
+            *self.approval_handler.lock().unwrap() = None;
+        }
+        self.event_sender.lock().unwrap().take();
         Ok(())
     }
 

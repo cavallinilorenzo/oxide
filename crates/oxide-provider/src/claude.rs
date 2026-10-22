@@ -1,5 +1,6 @@
 //! Claude Code native provider adapter.
 
+use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
@@ -49,6 +50,7 @@ pub struct ClaudeCodeProvider {
     event_sender: Arc<Mutex<Option<Sender<ProviderEvent>>>>,
     turn_counter: Arc<AtomicU32>,
     active_turn: Arc<Mutex<Option<u32>>>,
+    registry: Option<Arc<ProcessRegistry>>,
 }
 
 impl Default for ClaudeCodeProvider {
@@ -81,7 +83,14 @@ impl ClaudeCodeProvider {
             event_sender: Arc::new(Mutex::new(None)),
             turn_counter: Arc::new(AtomicU32::new(0)),
             active_turn: Arc::new(Mutex::new(None)),
+            registry: None,
         }
+    }
+
+    /// Records the process group of every session in `registry`, so a crashed Oxide's
+    /// orphans can be found and killed on the next launch.
+    pub fn set_registry(&mut self, registry: Arc<ProcessRegistry>) {
+        self.registry = Some(registry);
     }
 
     pub fn set_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -163,6 +172,7 @@ impl ClaudeCodeProvider {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
+        process::spawn_in_own_group(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| {
             ProviderError::StartFailed(format!(
                 "Failed to spawn Claude Code binary `{}`: {e}",
@@ -173,6 +183,9 @@ impl ClaudeCodeProvider {
         let stdin = child.stdin.take().expect("stdin must be piped");
         let stdout = child.stdout.take().expect("stdout must be piped");
 
+        if let Some(registry) = &self.registry {
+            registry.register(child.id() as i32, &self.command);
+        }
         *self.child_stdin.lock().unwrap() = Some(stdin);
         *self.child_process.lock().unwrap() = Some(child);
 
@@ -581,10 +594,16 @@ impl Provider for ClaudeCodeProvider {
         // Drop child stdin to signal EOF
         self.child_stdin.lock().unwrap().take();
 
-        // Kill or wait for child process
+        // Then SIGTERM the whole group, SIGKILL after the grace period.
         if let Some(mut child) = self.child_process.lock().unwrap().take() {
-            let _ = child.kill();
+            let pgid = child.id() as i32;
+            process::terminate_group(pgid, SHUTDOWN_GRACE, || {
+                let _ = child.try_wait();
+            });
             let _ = child.wait();
+            if let Some(registry) = &self.registry {
+                registry.unregister(pgid);
+            }
         }
 
         // Drop event sender

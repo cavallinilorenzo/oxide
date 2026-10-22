@@ -1,5 +1,6 @@
 use crate::{Error, Result};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use oxide_provider::process::{ProcessRegistry, SHUTDOWN_GRACE, terminate_group};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};
@@ -30,7 +31,7 @@ enum SessionCommand {
 }
 
 impl TerminalSession {
-    pub fn start(id: u32, cwd: &Path) -> Result<Self> {
+    pub fn start(id: u32, cwd: &Path, registry: Arc<ProcessRegistry>) -> Result<Self> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -41,6 +42,11 @@ impl TerminalSession {
             })
             .map_err(|e| Error::Terminal(format!("open terminal: {e}")))?;
         let command = shell_command(cwd);
+        let shell = command
+            .get_argv()
+            .first()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let mut child = pair
             .slave
             .spawn_command(command)
@@ -48,6 +54,9 @@ impl TerminalSession {
         let pid = child.process_id().unwrap_or_default();
         #[cfg(unix)]
         let process_group = pair.master.process_group_leader().unwrap_or(pid as i32);
+        // The PTY child is a session leader, so it also leads its own process group.
+        #[cfg(unix)]
+        registry.register(process_group, &shell);
         let reader = pair
             .master
             .try_clone_reader()
@@ -74,9 +83,19 @@ impl TerminalSession {
                     }
                     SessionCommand::Close(reply) => {
                         #[cfg(unix)]
-                        kill_session_processes(process_group);
+                        {
+                            // Interactive shells ignore SIGTERM but hang up on SIGHUP.
+                            unsafe { libc::kill(-process_group, libc::SIGHUP) };
+                            terminate_group(process_group, SHUTDOWN_GRACE, || {
+                                let _ = child.try_wait();
+                            });
+                            // Anything that moved to its own process group but stayed in the session.
+                            kill_session_processes(process_group);
+                            registry.unregister(process_group);
+                        }
                         #[cfg(not(unix))]
                         {
+                            let _ = (&registry, &shell);
                             let _ = child.kill();
                         }
                         let _ = child.wait();

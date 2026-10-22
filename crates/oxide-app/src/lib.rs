@@ -761,8 +761,14 @@ pub fn run() {
             app.manage(Arc::new(core));
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Oxide");
+        .build(tauri::generate_context!())
+        .expect("error while building Oxide")
+        .run(|app, event| {
+            // Managed state is not dropped on exit, so stop every Provider and shell by hand.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Arc<Core>>().shutdown();
+            }
+        });
 }
 
 #[cfg(test)]

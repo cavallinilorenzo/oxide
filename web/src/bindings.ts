@@ -7,6 +7,12 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
+	/**
+	 *  Scans the scan roots for new repositories, then lists all Projects.
+	 *  Async so the walk runs off the main thread.
+	 */
+	rescanProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("rescan_projects")),
+	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 };
@@ -27,6 +33,8 @@ export type Project = {
 	id: number,
 	name: string,
 	path: string,
+	hidden: boolean,
+	missing: boolean,
 };
 
 export type Provider = "claude" | "codex" | "antigravity";

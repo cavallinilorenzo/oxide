@@ -77,7 +77,17 @@ impl Default for Settings {
         Self {
             default_provider: Provider::Claude,
             providers: Providers::default(),
-            scan_roots: vec!["~/Developer".into()],
+            scan_roots: [
+                "Developer",
+                "Projects",
+                "Code",
+                "dev",
+                "src",
+                "workspace",
+                "repos",
+            ]
+            .map(|d| format!("~/{d}"))
+            .into(),
             confirm_quit: true,
             editor: "code".into(),
         }

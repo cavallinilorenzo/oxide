@@ -25,6 +25,8 @@ pub struct Project {
     id: u32,
     name: String,
     path: String,
+    hidden: bool,
+    missing: bool,
 }
 
 impl From<ProjectSummary> for Project {
@@ -33,6 +35,8 @@ impl From<ProjectSummary> for Project {
             id: p.id,
             name: p.name,
             path: p.path,
+            hidden: p.hidden,
+            missing: p.missing,
         }
     }
 }
@@ -45,6 +49,24 @@ fn list_projects(core: State<'_, Core>) -> Result<Vec<Project>, AppError> {
         .into_iter()
         .map(Project::from)
         .collect())
+}
+
+/// Scans the scan roots for new repositories, then lists all Projects.
+/// Async so the walk runs off the main thread.
+#[tauri::command]
+#[specta::specta]
+async fn rescan_projects(core: State<'_, Core>) -> Result<Vec<Project>, AppError> {
+    Ok(core
+        .rescan_projects()?
+        .into_iter()
+        .map(Project::from)
+        .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_project_hidden(core: State<'_, Core>, id: u32, hidden: bool) -> Result<(), AppError> {
+    Ok(core.set_project_hidden(id, hidden)?)
 }
 
 // Settings cross the boundary as the same JSON shape as `settings.json`, so
@@ -144,6 +166,8 @@ fn save_settings(core: State<'_, Core>, settings: Settings) -> Result<(), AppErr
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
+        rescan_projects,
+        set_project_hidden,
         get_settings,
         save_settings
     ])

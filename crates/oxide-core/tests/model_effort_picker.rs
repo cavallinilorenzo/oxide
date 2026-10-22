@@ -1,5 +1,5 @@
-use oxide_core::{Core, PermissionMode, ProviderCapabilities, TurnStatus};
-use oxide_provider::{FakeProvider, ModelInfo, ProviderEvent};
+use oxide_core::{Core, PermissionMode, TurnStatus};
+use oxide_provider::{FakeProvider, Provider, ProviderEvent};
 use tempfile::tempdir;
 
 fn setup_project(core: &Core, dir: &std::path::Path) -> u32 {
@@ -164,7 +164,7 @@ fn turn_records_model_and_effort_used() {
     core.send_prompt(thread.id, "Turn 1").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let page1 = core.get_turn_page(thread.id, 10, 0).unwrap();
+    let page1 = core.list_turns(thread.id, 0, 10).unwrap();
     assert_eq!(page1.turns.len(), 1);
     assert_eq!(page1.turns[0].model.as_deref(), Some("model-v1"));
     assert_eq!(page1.turns[0].effort.as_deref(), Some("low"));
@@ -181,7 +181,7 @@ fn turn_records_model_and_effort_used() {
     core.send_prompt(thread.id, "Turn 2").unwrap();
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let page2 = core.get_turn_page(thread.id, 10, 0).unwrap();
+    let page2 = core.list_turns(thread.id, 0, 10).unwrap();
     assert_eq!(page2.turns.len(), 2);
     assert_eq!(page2.turns[1].model.as_deref(), Some("model-v2"));
     assert_eq!(page2.turns[1].effort.as_deref(), Some("high"));
@@ -217,10 +217,10 @@ fn slash_commands_model_and_effort_intercepted_and_not_sent_to_provider() {
     core.send_prompt(thread.id, "/effort high").unwrap();
 
     // None of these should have reached the provider!
-    assert_eq!(recorder.prompts.lock().unwrap().len(), 0);
+    assert_eq!(recorder.prompts().len(), 0);
 
     // And the model/effort on thread should be updated
-    let snapshot = core.get_snapshot(thread.id).unwrap();
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
     assert_eq!(snapshot.thread.model.as_deref(), Some("new-cool-model"));
     assert_eq!(snapshot.thread.effort.as_deref(), Some("high"));
 }
@@ -253,7 +253,7 @@ fn slash_command_passthrough_gated() {
     // Other slash command (e.g. /compact or /custom) should be rejected
     let res = core.send_prompt(t1.id, "/compact");
     assert!(res.is_err());
-    assert_eq!(rec1.prompts.lock().unwrap().len(), 0);
+    assert_eq!(rec1.prompts().len(), 0);
 
     // 2. When passthrough is TRUE
     let mut fake2 = FakeProvider::default().reusable();
@@ -275,5 +275,5 @@ fn slash_command_passthrough_gated() {
 
     let res2 = core.send_prompt(t2.id, "/compact");
     assert!(res2.is_ok());
-    assert_eq!(rec2.prompts.lock().unwrap().as_slice(), &["/compact"]);
+    assert_eq!(rec2.prompts().as_slice(), &["/compact"]);
 }

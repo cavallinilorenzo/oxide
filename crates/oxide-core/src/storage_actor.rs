@@ -66,6 +66,12 @@ pub enum StorageMsg {
         permission_mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
+    UpdateThreadModelAndEffort {
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+        reply: mpsc::Sender<Result<()>>,
+    },
     UpdateThreadStatus {
         thread_id: u32,
         status: ThreadStatus,

@@ -59,10 +59,15 @@ pub struct ThreadSummary {
     /// The Thread this one continues, and the Thread that continues this one.
     pub continued_from: Option<u32>,
     pub continued_in: Option<u32>,
+    /// A Board Thread's `oxide/` branch and the worktree it lives in; both `None` for a chat Thread.
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    /// What the Project's Setup command printed in the worktree, when one ran.
+    pub setup_output: Option<String>,
 }
 
 /// The `threads` columns [`parse_thread_summary`] reads, in order.
-pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title";
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,5 +266,8 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         continued_from: r.get(11)?,
         continued_in: r.get(12)?,
         title: r.get(13)?,
+        branch: r.get(14)?,
+        worktree_path: r.get(15)?,
+        setup_output: r.get(16)?,
     })
 }

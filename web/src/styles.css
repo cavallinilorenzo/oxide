@@ -1028,3 +1028,16 @@ button[aria-pressed="true"] { background: #8883; }
 .board-badge.interrupted { color: #6b7280; }
 .board-approval { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .board-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Board Threads: dispatch, Setup command, branch icon */
+.board-toolbar { display: flex; gap: 8px; }
+.board-card-branch { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; opacity: 0.65; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-item-branch { display: inline-flex; opacity: 0.65; margin-right: 4px; }
+.setup-command { font-size: 12px; display: grid; gap: 6px; max-width: 40rem; }
+.setup-command input { font-family: ui-monospace, monospace; }
+.dispatch-dialog { width: min(480px, 90vw); }
+.dispatch-dialog label { display: grid; gap: 4px; font-size: 12px; }
+.dispatch-dialog textarea { resize: vertical; font: inherit; }
+.dispatch-dialog .hint, .setup-command .hint { margin: 0; font-size: 11px; opacity: 0.6; }
+.setup-output { margin: 8px 12px 0; font-size: 12px; }
+.setup-output pre { max-height: 14rem; overflow: auto; margin: 4px 0 0; padding: 8px; background: #1a1b1e; border-radius: 6px; white-space: pre-wrap; }

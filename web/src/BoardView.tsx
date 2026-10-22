@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { GitBranchIcon } from "@primer/octicons-react";
 import { Channel } from "@tauri-apps/api/core";
-import { commands, type ApprovalDecision, type BoardCard, type BoardEvent } from "./bindings";
+import { commands, type ApprovalDecision, type BoardCard, type BoardEvent, type Thread } from "./bindings";
+import { DispatchDialog } from "./DispatchDialog";
 import { applyBoardEvent, groupBoard, mergeCard } from "./board";
 import { threadTitle } from "./threadList";
 
@@ -8,13 +10,16 @@ interface BoardViewProps {
   projectId: number;
   onOpenThread: (threadId: number) => void;
   onArchiveThread: (threadId: number) => void;
+  /** A task was dispatched: the new Thread, for the sidebar. */
+  onDispatched: (thread: Thread) => void;
 }
 
 /** The Project's Thread Board: derived from Thread rows, so it only ever mirrors the feed. Mount per Project (`key`). */
-export function BoardView({ projectId, onOpenThread, onArchiveThread }: BoardViewProps) {
+export function BoardView({ projectId, onOpenThread, onArchiveThread, onDispatched }: BoardViewProps) {
   const [cards, setCards] = useState<BoardCard[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [dispatching, setDispatching] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -78,7 +83,19 @@ export function BoardView({ projectId, onOpenThread, onArchiveThread }: BoardVie
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <button onClick={() => setDispatching(true)}>Dispatch</button>
       </div>
+      <SetupCommandEditor projectId={projectId} />
+      {dispatching && (
+        <DispatchDialog
+          projectId={projectId}
+          onClose={() => setDispatching(false)}
+          onDispatched={(thread) => {
+            setDispatching(false);
+            onDispatched(thread);
+          }}
+        />
+      )}
       {error && <p className="error">{error}</p>}
       {cards === null ? (
         <p className="empty">Loading…</p>
@@ -115,6 +132,11 @@ function BoardCardView({
         <button className="board-card-title" onClick={onOpen} title="Open Thread">
           {threadTitle(thread)}
         </button>
+        {thread.branch && (
+          <span className="board-card-branch" title={thread.branch}>
+            <GitBranchIcon size={12} /> {thread.branch}
+          </span>
+        )}
         {(thread.status === "error" || thread.status === "interrupted") && (
           <span className={`badge board-badge ${thread.status}`}>{thread.status}</span>
         )}
@@ -149,5 +171,58 @@ function BoardCardView({
         <button onClick={onArchive}>Archive</button>
       </div>
     </li>
+  );
+}
+
+/** The Project's Setup command: kept by Oxide, run in every new worktree, never written to the repository. */
+function SetupCommandEditor({ projectId }: { projectId: number }) {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void commands.getProjectSetupCommand(projectId).then((res) => {
+      if (!active) return;
+      if (res.status === "ok") {
+        setSaved(res.data);
+        setText(res.data ?? "");
+      } else setError(res.error.message);
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  const save = async () => {
+    const res = await commands.setProjectSetupCommand(projectId, text.trim() || null);
+    if (res.status === "ok") {
+      setSaved(text.trim() || null);
+      setError(null);
+    } else setError(res.error.message);
+  };
+
+  return (
+    <details className="setup-command">
+      <summary>Setup command{saved ? "" : " (none)"}</summary>
+      <p className="hint">
+        Runs in each new worktree before its first Turn, with <code>$OXIDE_PROJECT_ROOT</code> pointing at the main
+        checkout. Stored by Oxide, not in the repository.
+      </p>
+      <input
+        aria-label="Setup command"
+        placeholder="cp $OXIDE_PROJECT_ROOT/.env . && npm install"
+        value={text}
+        spellCheck={false}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void save();
+        }}
+      />
+      <button onClick={() => void save()} disabled={text.trim() === (saved ?? "")}>
+        Save
+      </button>
+      {error && <p className="error">{error}</p>}
+    </details>
   );
 }

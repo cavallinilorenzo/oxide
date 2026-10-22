@@ -1,6 +1,7 @@
 //! The Provider contract: the seam between Core and the agent CLI adapters
 //! (Claude Code, Codex, Antigravity CLI). Adapters implement it; Core depends only on it.
 
+pub mod agy;
 pub mod claude;
 pub mod contract_suite;
 pub mod process;

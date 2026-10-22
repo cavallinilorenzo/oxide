@@ -42,6 +42,9 @@ pub enum ThreadActorMsg {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)>,
     },
     Tick,
+    Rename {
+        title: String,
+    },
     Shutdown {
         reply: mpsc::Sender<()>,
     },
@@ -168,6 +171,10 @@ impl ThreadActorHandle {
 
     pub fn tick(&self) {
         let _ = self.sender.send(ThreadActorMsg::Tick);
+    }
+
+    pub fn rename(&self, title: String) {
+        let _ = self.sender.send(ThreadActorMsg::Rename { title });
     }
 
     /// Shuts the Provider down (escalating to SIGKILL if it won't go) and stops the actor.
@@ -340,6 +347,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             let attachments = std::mem::take(&mut state.pending_attachments);
             let (mut model, mut effort) = (None, None);
             let mut id = None;
+            let mut new_title = None;
             if let Ok(started) = storage.write_turn_started(
                 state.thread_id,
                 turn_index,
@@ -349,6 +357,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 id = Some(started.id);
                 model = started.model;
                 effort = started.effort;
+                new_title = started.thread_title;
             }
             state.current_turn = Some(CurrentTurn {
                 index: turn_index,
@@ -366,6 +375,9 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 },
                 raw,
             );
+            if let Some(title) = new_title {
+                state.broadcast(ThreadEvent::ThreadRenamed { title });
+            }
             state.broadcast_status(ThreadStatus::Working);
         }
         ProviderEvent::ItemStarted {
@@ -735,6 +747,9 @@ fn run_thread_actor(
                         }
                         state.flush_pending_deltas();
                         reap_if_idle(&mut *provider, &mut state, &mut prx);
+                    }
+                    ThreadActorMsg::Rename { title } => {
+                        state.broadcast(ThreadEvent::ThreadRenamed { title });
                     }
                     ThreadActorMsg::Shutdown { reply } => {
                         stop_provider(&mut *provider, &mut state, &mut prx);

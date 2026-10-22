@@ -238,6 +238,7 @@ pub struct Thread {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
     pub session_lost: bool,
     pub continued_from: Option<u32>,
     pub continued_in: Option<u32>,
@@ -368,6 +369,9 @@ pub enum ThreadEvent {
     },
     ThreadStatusChanged {
         status: ThreadStatus,
+    },
+    ThreadRenamed {
+        title: String,
     },
     ApprovalRequested {
         id: String,
@@ -732,6 +736,27 @@ fn set_thread_permission_mode(
 
 #[tauri::command]
 #[specta::specta]
+fn set_thread_provider(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    provider: String,
+) -> Result<Thread, AppError> {
+    let summary = core.set_thread_provider(thread_id, &provider)?;
+    Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn rename_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    title: String,
+) -> Result<(), AppError> {
+    Ok(core.rename_thread(thread_id, &title)?)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn respond_to_approval(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
@@ -1006,6 +1031,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_thread,
         continue_thread,
         set_thread_permission_mode,
+        set_thread_provider,
+        rename_thread,
         respond_to_approval,
         detect_provider,
         get_provider_capabilities,
@@ -1151,6 +1178,7 @@ mod tests {
                 archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
+                title: None,
                 session_lost: false,
                 continued_from: None,
                 continued_in: None,

@@ -378,6 +378,32 @@ describe("transcript reducer", () => {
     expect(state.turns[1].items[1].content).toBe("stream");
   });
 
+  it("updates thread title on ThreadRenamed event", () => {
+    let state = initialTranscriptState({
+      thread: sampleThread(),
+      capabilities: { reasoningText: true, imageAttachments: false },
+      turns: [],
+      turnOffset: 0,
+      turnCount: 0,
+      lastSeq: 0,
+      supportedPermissionModes: ["ask", "auto-edit", "full-access"],
+    });
+
+    expect(state.thread?.title).toBeNull();
+
+    state = applyThreadEvent(state, {
+      seq: 1,
+      event: {
+        type: "ThreadRenamed",
+        payload: {
+          title: "New Custom Title",
+        },
+      },
+    });
+
+    expect(state.thread?.title).toBe("New Custom Title");
+  });
+
   it("marks the Thread's session lost when the Provider session is gone", () => {
     const thread = { ...initialTranscriptState(null), thread: sampleThread() };
 
@@ -409,6 +435,7 @@ function sampleThread(): Thread {
     archived: false,
     createdAt: "a",
     updatedAt: "b",
+    title: null,
     sessionLost: false,
     continuedFrom: null,
     continuedIn: null,

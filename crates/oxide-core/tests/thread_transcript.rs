@@ -937,3 +937,121 @@ fn subscribing_opens_on_the_most_recent_turns_only() {
         format!("prompt {}", total - 1)
     );
 }
+
+#[test]
+fn thread_title_defaults_to_first_message_and_can_be_renamed() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+    let thread = thread_with_answering_provider(&core, dir.path());
+
+    // Initially before turns, title is None
+    assert_eq!(thread.title, None);
+
+    let (snapshot, rx) = core.subscribe_thread(thread.id).unwrap();
+    assert_eq!(snapshot.thread.title, None);
+
+    // Send first prompt
+    let long_prompt = "A very long initial prompt that describes what we are going to build in full detail to test truncation behavior of the thread title";
+    core.send_prompt(thread.id, long_prompt).unwrap();
+
+    loop {
+        let evt = rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+        if let ThreadEvent::TurnCompleted { .. } = evt.event {
+            break;
+        }
+    }
+
+    // After first prompt, title comes from the first message, truncated (up to 60 characters)
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    let expected_title: String = long_prompt.chars().take(60).collect();
+    assert_eq!(snapshot.thread.title, Some(expected_title.clone()));
+
+    let threads = core.list_threads(thread.project_id).unwrap();
+    assert_eq!(threads[0].title, Some(expected_title));
+
+    // Thread title is renameable
+    core.rename_thread(thread.id, "Renamed Thread").unwrap();
+
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.thread.title, Some("Renamed Thread".to_string()));
+
+    let threads = core.list_threads(thread.project_id).unwrap();
+    assert_eq!(threads[0].title, Some("Renamed Thread".to_string()));
+
+    // Rename persists across reloading database
+    drop(core);
+    let reloaded_core = Core::open(dir.path()).unwrap();
+    let threads = reloaded_core.list_threads(thread.project_id).unwrap();
+    assert_eq!(threads[0].title, Some("Renamed Thread".to_string()));
+
+    // If renamed before first prompt, sending prompt preserves custom title
+    let thread2 = thread_with_answering_provider(&reloaded_core, dir.path());
+    reloaded_core
+        .rename_thread(thread2.id, "Pre-named Thread")
+        .unwrap();
+    reloaded_core
+        .send_prompt(thread2.id, "Another long first prompt")
+        .unwrap();
+    let snapshot2 = reloaded_core.get_thread_snapshot(thread2.id).unwrap();
+    assert_eq!(snapshot2.thread.title, Some("Pre-named Thread".to_string()));
+}
+
+#[test]
+fn switching_provider_before_first_turn_replaces_model_effort_and_permission_mode_with_defaults() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
+    settings.providers.claude.model = Some("claude-3-7-sonnet".into());
+    settings.providers.claude.effort = Some("high".into());
+    settings.providers.claude.permission_mode = PermissionMode::AutoEdit;
+
+    settings.providers.codex.model = Some("o3-mini".into());
+    settings.providers.codex.effort = Some("medium".into());
+    settings.providers.codex.permission_mode = PermissionMode::Ask;
+
+    core.save_settings(&settings).unwrap();
+
+    std::fs::create_dir_all(dir.path().join("my-project").join(".git")).unwrap();
+    let project = core.rescan_projects().unwrap().remove(0);
+
+    // Create thread with provider "claude" and no explicit model/effort/permission_mode
+    let thread = core
+        .create_thread(project.id, "claude", None, None, None)
+        .unwrap();
+
+    assert_eq!(thread.provider, "claude");
+    assert_eq!(thread.model, Some("claude-3-7-sonnet".to_string()));
+    assert_eq!(thread.effort, Some("high".to_string()));
+    assert_eq!(thread.permission_mode, PermissionMode::AutoEdit);
+
+    // Switch provider before first turn to "codex"
+    let updated = core.set_thread_provider(thread.id, "codex").unwrap();
+    assert_eq!(updated.provider, "codex");
+    assert_eq!(updated.model, Some("o3-mini".to_string()));
+    assert_eq!(updated.effort, Some("medium".to_string()));
+    assert_eq!(updated.permission_mode, PermissionMode::Ask);
+
+    // Snapshot also reflects updated provider and defaults
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.thread.provider, "codex");
+    assert_eq!(snapshot.thread.model, Some("o3-mini".to_string()));
+    assert_eq!(snapshot.thread.effort, Some("medium".to_string()));
+    assert_eq!(snapshot.thread.permission_mode, PermissionMode::Ask);
+}
+
+#[test]
+fn switching_provider_after_first_turn_is_rejected() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+    let thread = thread_with_answering_provider(&core, dir.path());
+    run_turns(&core, thread.id, 1);
+
+    // Attempting to switch provider after first turn should fail
+    let err = core.set_thread_provider(thread.id, "codex");
+    assert!(err.is_err());
+}

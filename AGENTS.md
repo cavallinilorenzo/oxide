@@ -15,5 +15,6 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 ### Workflow and PRs
 
 - Claim assigned tickets via `gh issue edit <id> --add-assignee @me`.
-- Always work on a dedicated branch and open a Pull Request targeting `main`.
-- Automatically close the issue (`gh issue close <id>`) once implementation and verification are complete.
+- Branching model: `main` is stable, `dev` is integration. Never commit or push directly to either. Branch off `dev`, open the Pull Request with `--base dev`, **never** `main`. Full rules in `docs/agents/git-workflow.md`.
+- Only a human promotes `dev` to `main`.
+- Close the issue (`gh issue close <id>`) once its PR is merged into `dev` (GitHub auto-close only fires on the default branch, so do it by hand).

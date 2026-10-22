@@ -542,6 +542,10 @@ pub struct GitStatus {
     pub changed_files: u32,
     /// Why the branch picker is disabled, if it is.
     pub picker_disabled_reason: Option<String>,
+    /// Pushing this branch (`main`, `master`) needs the user's consent.
+    pub protected: bool,
+    /// A branch with commits and no upstream yet; the first push publishes it.
+    pub unpublished: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -692,6 +696,29 @@ async fn fetch_project(core: State<'_, Arc<Core>>, project_id: u32) -> Result<bo
 #[specta::specta]
 async fn pull(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
     git_blocking(&core, move |core| core.pull(project_id)).await
+}
+
+/// Commits exactly the given files; other staged state is untouched.
+#[tauri::command]
+#[specta::specta]
+async fn commit(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    paths: Vec<String>,
+    message: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.commit(project_id, &paths, &message)).await
+}
+
+/// Pushes the current branch; never forced.
+#[tauri::command]
+#[specta::specta]
+async fn push(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    allow_protected: bool,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.push(project_id, allow_protected)).await
 }
 
 #[tauri::command]
@@ -1031,6 +1058,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_branch,
         fetch_project,
         pull,
+        commit,
+        push,
         last_selection,
         remember_selection,
         confirm_quit

@@ -526,3 +526,12 @@ button[aria-pressed="true"] { background: #8883; }
 .modal { background: #202226; border: 1px solid #34363c; border-radius: 8px; padding: 18px 20px; min-width: 320px; display: grid; gap: 12px; }
 .modal h2 { margin: 0; font-size: 14px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.split-button { position: relative; display: inline-flex; }
+.split-button .git-primary { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-button .git-menu-toggle { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; padding: 0 6px; }
+.git-menu { position: absolute; top: 100%; right: 0; z-index: 20; display: grid; min-width: 140px; padding: 4px; background: Canvas; border: 1px solid #8886; border-radius: 6px; box-shadow: 0 4px 16px #0003; }
+.git-menu button { text-align: left; background: none; border: 0; padding: 3px 6px; }
+.commit-form { display: grid; gap: 6px; padding: 8px; border-bottom: 1px solid #8884; }
+.commit-form textarea { width: 100%; resize: vertical; font: inherit; }
+.commit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.commit-count { margin-right: auto; opacity: 0.7; font-size: 12px; }

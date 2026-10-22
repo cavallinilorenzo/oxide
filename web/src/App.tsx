@@ -63,7 +63,11 @@ export function App() {
     : terminalContexts;
 
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
-  const threadsKey = threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "";
+  // A commit or push bumps it too, so the header and the Diff Surface reload.
+  const [gitRevision, setGitRevision] = useState(0);
+  const onGitChanged = useCallback(() => setGitRevision((n) => n + 1), []);
+  const threadsKey =
+    (threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "") + `#${gitRevision}`;
 
   // Stable: it reaches memoized TurnViews through context.
   const openDiff = useCallback((hint?: string) => {
@@ -198,6 +202,7 @@ export function App() {
             projectId={selected.id}
             threadsKey={threadsKey}
             onOpenDiff={() => openDiff()}
+            onChanged={onGitChanged}
           />
         )}
         <div className="toggles">
@@ -306,6 +311,7 @@ export function App() {
                   }}
                   focus={diffFocus}
                   refreshKey={threadsKey}
+                  onChanged={onGitChanged}
                 />
               </Suspense>
             )}

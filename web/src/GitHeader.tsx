@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands, type AppError, type GitBranch, type GitStatus } from "./bindings";
 import { canCreateBranch, filterBranches } from "./branchFilter";
+import { nextAction, pushBlockedReason } from "./gitAction";
+import { usePushFlow } from "./usePushFlow";
 
 interface GitHeaderProps {
   projectId: number;
   /** Changes whenever a Thread's status does, so the picker lock stays current. */
   threadsKey: string;
   onOpenDiff: () => void;
+  /** Called after Git changed the checkout or its remote, so other views reload. */
+  onChanged: () => void;
 }
 
 type Outcome = { status: "ok"; data: unknown } | { status: "error"; error: AppError };
@@ -17,11 +21,12 @@ export function GitHeader(props: GitHeaderProps) {
   return <GitHeaderBody key={props.projectId} {...props} />;
 }
 
-function GitHeaderBody({ projectId, threadsKey, onOpenDiff }: GitHeaderProps) {
+function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onChanged }: GitHeaderProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const refresh = useCallback(
     () =>
@@ -30,6 +35,10 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff }: GitHeaderProps) {
       }),
     [projectId],
   );
+  const push = usePushFlow(projectId, () => {
+    void refresh();
+    onChanged();
+  });
 
   // Fetch when the Project opens and when the window regains focus. Core
   // throttles, and a failed background fetch (offline) isn't worth showing.
@@ -57,6 +66,8 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff }: GitHeaderProps) {
   }
 
   if (!status) return null;
+  const action = nextAction(status);
+  const pushNow = () => push.start(() => null);
   const disabledReason = status.pickerDisabledReason ?? (busy ? "Working…" : null);
   const dirty = status.changedFiles > 0;
 
@@ -102,10 +113,60 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff }: GitHeaderProps) {
           Pull ↓{status.behind}
         </button>
       )}
-      {error && (
-        <span className="git-error" role="alert" title={error}>
-          <span className="git-error-text">{error}</span>
-          <button aria-label="Dismiss error" onClick={() => setError(null)}>
+      <div className="split-button">
+        <button
+          className="git-primary"
+          disabled={busy || push.busy || action.kind === "up-to-date" || action.blockedReason !== null}
+          title={action.blockedReason ?? undefined}
+          onClick={() => (action.kind === "commit-push" ? onOpenDiff() : void pushNow())}
+        >
+          {action.label}
+        </button>
+        <button
+          className="git-menu-toggle"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="More Git actions"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ▾
+        </button>
+        {menuOpen && (
+          <div
+            className="git-menu"
+            role="menu"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setMenuOpen(false);
+            }}
+          >
+            <button role="menuitem" disabled={!dirty} onClick={() => (setMenuOpen(false), onOpenDiff())}>
+              Commit…
+            </button>
+            <button
+              role="menuitem"
+              disabled={!(status.ahead > 0 || status.unpublished) || pushBlockedReason(status) !== null}
+              title={pushBlockedReason(status) ?? undefined}
+              onClick={() => (setMenuOpen(false), void pushNow())}
+            >
+              Push
+            </button>
+            <button role="menuitem" disabled title="Coming with the pull request ticket">
+              Create PR
+            </button>
+          </div>
+        )}
+      </div>
+      {push.dialog}
+      {(error ?? push.error) && (
+        <span className="git-error" role="alert" title={error ?? push.error ?? undefined}>
+          <span className="git-error-text">{error ?? push.error}</span>
+          <button
+            aria-label="Dismiss error"
+            onClick={() => {
+              setError(null);
+              push.clearError();
+            }}
+          >
             ✕
           </button>
         </span>

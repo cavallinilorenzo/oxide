@@ -519,6 +519,9 @@ button[aria-pressed="true"] { background: #8883; }
 .diff-added { background: #2ea04326; }
 .diff-removed { background: #f8514926; }
 
+.composer-input { resize: none; }
+.thread-link { padding: 4px 16px; font-size: 12px; opacity: 0.8; }
+.thread-link button { background: none; border: 0; padding: 0; color: #0070f3; font: inherit; cursor: pointer; }
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.5); z-index: 100; }
 .modal { background: #202226; border: 1px solid #34363c; border-radius: 8px; padding: 18px 20px; min-width: 320px; display: grid; gap: 12px; }
 .modal h2 { margin: 0; font-size: 14px; }

@@ -30,6 +30,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   // The Project and Thread of the last session: `undefined` until read, `null` once applied.
   const restore = useRef<{ projectId: number; threadId: number | null } | null | undefined>(undefined);
   const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
@@ -245,6 +246,21 @@ export function App() {
                     rememberTerminalContext(selected.id, newThread.id);
                   }}
                   onStatusChange={onThreadStatusChange}
+                  prefill={prefill}
+                  onPrefillUsed={() => setPrefill(null)}
+                  onOpenThread={(id) => {
+                    setSelectedThreadId(id);
+                    rememberTerminalContext(selected.id, id);
+                  }}
+                  onThreadContinued={(continued, from) => {
+                    setThreads((prev) => [
+                      continued.thread,
+                      ...(prev?.map((t) => (t.id === from ? { ...t, continuedIn: continued.thread.id } : t)) ?? []),
+                    ]);
+                    setPrefill({ threadId: continued.thread.id, text: continued.recap });
+                    setSelectedThreadId(continued.thread.id);
+                    rememberTerminalContext(selected.id, continued.thread.id);
+                  }}
                 />
               </DiffOpenContext.Provider>
             </main>

@@ -95,6 +95,11 @@ pub const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
 ",
+    // A Thread whose Provider session is gone, and the Thread that continues it.
+    "
+    ALTER TABLE threads ADD COLUMN session_lost INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE threads ADD COLUMN continued_from INTEGER REFERENCES threads(id);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

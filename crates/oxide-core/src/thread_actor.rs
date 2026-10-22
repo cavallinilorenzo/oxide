@@ -1,7 +1,7 @@
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{
-    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderEvent,
-    StartContext, TurnStatus,
+    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderError,
+    ProviderEvent, StartContext, TurnStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -796,6 +796,15 @@ fn ensure_provider_started(
             *prx = receiver;
             state.provider_live = true;
             Ok(())
+        }
+        Err(ProviderError::SessionNotFound) => {
+            let message = ProviderError::SessionNotFound.to_string();
+            storage.mark_session_lost(state.thread_id);
+            state.broadcast(ThreadEvent::Error {
+                message: message.clone(),
+            });
+            state.broadcast_status(ThreadStatus::Error);
+            Err(Error::Provider(message))
         }
         Err(e) => Err(Error::Io {
             path: PathBuf::from("provider"),

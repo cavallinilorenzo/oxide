@@ -53,7 +53,15 @@ pub struct ThreadSummary {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// Resuming the Provider's session failed because it no longer exists.
+    pub session_lost: bool,
+    /// The Thread this one continues, and the Thread that continues this one.
+    pub continued_from: Option<u32>,
+    pub continued_in: Option<u32>,
 }
+
+/// The `threads` columns [`parse_thread_summary`] reads, in order.
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id)";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,5 +239,8 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         archived: r.get::<_, i64>(7)? != 0,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
+        session_lost: r.get::<_, i64>(10)? != 0,
+        continued_from: r.get(11)?,
+        continued_in: r.get(12)?,
     })
 }

@@ -289,10 +289,10 @@ export type Diff_Serialize = {
 	files: DiffFile_Serialize[],
 };
 
-/**  A task handed off from the Thread Board to a new background Thread. */
+/**  A Board Thread handed off from the Thread Board. */
 export type DispatchRequest = DispatchRequest_Serialize | DispatchRequest_Deserialize;
 
-/**  A task handed off from the Thread Board to a new background Thread. */
+/**  A Board Thread handed off from the Thread Board. */
 export type DispatchRequest_Deserialize = {
 	projectId: number,
 	prompt: string,
@@ -303,7 +303,7 @@ export type DispatchRequest_Deserialize = {
 	baseBranch?: string | null,
 };
 
-/**  A task handed off from the Thread Board to a new background Thread. */
+/**  A Board Thread handed off from the Thread Board. */
 export type DispatchRequest_Serialize = {
 	projectId: number,
 	prompt: string,

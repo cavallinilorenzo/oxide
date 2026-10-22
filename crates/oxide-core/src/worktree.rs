@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 /// Setup output kept in the Thread: the tail of what the command printed.
 const MAX_SETUP_OUTPUT: usize = 64 * 1024;
 
-/// A task handed off from the Board. Unset Model, Effort and Permission mode fall back to the
+/// A Board Thread handed off from the Thread Board. Unset Model, Effort and Permission mode fall back to the
 /// Provider's defaults from Settings, an unset base branch to the main checkout's current branch.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,12 +151,19 @@ impl Core {
         if base.starts_with('-') {
             return Err(Error::Git(format!("`{base}` is not a valid branch.")));
         }
+        // A local branch wins over a tag or remote ref of the same name.
+        let local = format!("refs/heads/{base}");
+        let base = if git::ref_exists(&root, &local) {
+            local
+        } else {
+            base
+        };
 
         let parent = self
             .home
             .join("worktrees")
             .join(slugify(&project.name, "project"));
-        let slug = slugify(&crate::thread::truncate_title(prompt), "task");
+        let slug = slugify(&crate::thread::truncate_title(prompt), "thread");
         let (branch, worktree) = self.git.mutate(&root, || {
             std::fs::create_dir_all(&parent).map_err(|source| Error::Io {
                 path: parent.clone(),
@@ -232,9 +239,9 @@ mod tests {
 
     #[test]
     fn slugs_are_lowercase_dashed_and_never_empty() {
-        assert_eq!(slugify("Fix the login bug!", "task"), "fix-the-login-bug");
-        assert_eq!(slugify("  --Ünï/cødé--  ", "task"), "n-c-d");
-        assert_eq!(slugify("!!!", "task"), "task");
-        assert_eq!(slugify(&"a".repeat(100), "task").len(), 40);
+        assert_eq!(slugify("Fix the login bug!", "thread"), "fix-the-login-bug");
+        assert_eq!(slugify("  --Ünï/cødé--  ", "thread"), "n-c-d");
+        assert_eq!(slugify("!!!", "thread"), "thread");
+        assert_eq!(slugify(&"a".repeat(100), "thread").len(), 40);
     }
 }

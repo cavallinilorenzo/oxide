@@ -1237,7 +1237,7 @@ fn create_thread(
     Ok(convert(&summary))
 }
 
-/// A task handed off from the Thread Board to a new background Thread.
+/// A Board Thread handed off from the Thread Board.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DispatchRequest {

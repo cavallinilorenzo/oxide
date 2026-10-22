@@ -1296,7 +1296,7 @@ impl Core {
         })
     }
 
-    /// Chat Threads work in the main checkout, so switching branches under a
+    /// Threads started from the chat work in the main checkout, so switching branches under a
     /// running Turn would change its files. Board Threads have worktrees of their own.
     fn checkout_blocked_reason(&self, project_id: u32) -> Result<Option<String>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());

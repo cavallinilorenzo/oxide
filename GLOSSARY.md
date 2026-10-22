@@ -53,10 +53,10 @@ _Avoid_: Init script, bootstrap
 
 **Board Thread**:
 A Thread dispatched from the Thread Board. It works in a git worktree of its own at `~/.oxide/worktrees/<project>/<slug>`, on a new `oxide/<slug>` branch cut from the chosen base branch's local commits (uncommitted changes stay behind), and shows a branch icon in the sidebar. A Thread started from the chat works in the Project's main checkout instead.
-_Avoid_: Background agent, task
+_Avoid_: Background agent, background task
 
 **Thread Board**:
-The per-Project view of all its Threads grouped by Thread status into needs input (including error and interrupted), working and completed, from which a task can be dispatched to a new background Thread.
+The per-Project view of all its Threads grouped by Thread status into needs input (including error and interrupted), working and completed, from which a Board Thread can be dispatched.
 _Avoid_: Agent view, dashboard
 
 ## Providers

@@ -231,6 +231,14 @@ pub struct TurnSnapshot {
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    pub error: Option<TurnError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnError {
+    pub message: String,
+    pub stderr_tail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -264,6 +272,7 @@ pub enum ThreadEvent {
     TurnCompleted {
         turn_index: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
     },
     ThreadStatusChanged {
         status: ThreadStatus,
@@ -271,6 +280,9 @@ pub enum ThreadEvent {
     ApprovalRequested {
         id: String,
         description: String,
+    },
+    ProviderRetrying {
+        message: String,
     },
     Error {
         message: String,
@@ -407,4 +419,72 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Oxide");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thread_snapshots_and_events_convert_from_core() {
+        let error = oxide_core::TurnError {
+            message: "The Provider exited unexpectedly".into(),
+            stderr_tail: Some("panicked".into()),
+        };
+        let core = oxide_core::ThreadSnapshot {
+            thread: oxide_core::ThreadSummary {
+                id: 1,
+                project_id: 2,
+                provider: "fake".into(),
+                model: None,
+                effort: None,
+                permission_mode: oxide_core::PermissionMode::Ask,
+                status: oxide_core::ThreadStatus::Error,
+                archived: false,
+                created_at: "a".into(),
+                updated_at: "b".into(),
+            },
+            turns: vec![oxide_core::TurnSnapshot {
+                id: 3,
+                turn_index: 0,
+                prompt: "hi".into(),
+                status: oxide_core::TurnStatus::Error,
+                started_at: "a".into(),
+                completed_at: Some("b".into()),
+                items: vec![oxide_core::ItemSnapshot {
+                    id: 4,
+                    item_index: 0,
+                    kind: oxide_core::ItemKind::AgentMessage,
+                    content: "partial".into(),
+                    created_at: "a".into(),
+                }],
+                error: Some(error.clone()),
+            }],
+            last_seq: 7,
+        };
+        let app: ThreadSnapshot = convert(&core);
+        let turn_error = app.turns[0].error.as_ref().unwrap();
+        assert_eq!(turn_error.stderr_tail.as_deref(), Some("panicked"));
+
+        let event = oxide_core::SequencedThreadEvent {
+            seq: 8,
+            event: oxide_core::ThreadEvent::TurnCompleted {
+                turn_index: 0,
+                status: oxide_core::TurnStatus::Error,
+                error: Some(error),
+            },
+        };
+        let app: SequencedThreadEvent = convert(&event);
+        assert!(matches!(
+            app.event,
+            ThreadEvent::TurnCompleted { error: Some(_), .. }
+        ));
+        let app: SequencedThreadEvent = convert(&oxide_core::SequencedThreadEvent {
+            seq: 9,
+            event: oxide_core::ThreadEvent::ProviderRetrying {
+                message: "rate limited".into(),
+            },
+        });
+        assert!(matches!(app.event, ThreadEvent::ProviderRetrying { .. }));
+    }
 }

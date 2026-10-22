@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::error::{Error, Result};
-use crate::thread::{ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot};
+use crate::thread::{
+    ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnError, TurnSnapshot,
+};
 use oxide_provider::{ItemKind, TurnStatus};
 
 pub enum StorageMsg {
@@ -17,6 +19,7 @@ pub enum StorageMsg {
     UpdateTurnCompleted {
         turn_id: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
         reply: mpsc::Sender<Result<()>>,
     },
     WriteItemCompleted {
@@ -92,11 +95,17 @@ impl StorageHandle {
             .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
-    pub fn update_turn_completed(&self, turn_id: u32, status: TurnStatus) -> Result<()> {
+    pub fn update_turn_completed(
+        &self,
+        turn_id: u32,
+        status: TurnStatus,
+        error: Option<TurnError>,
+    ) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::UpdateTurnCompleted {
             turn_id,
             status,
+            error,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -183,6 +192,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
             StorageMsg::UpdateTurnCompleted {
                 turn_id,
                 status,
+                error,
                 reply,
             } => {
                 let res = (|| -> Result<()> {
@@ -192,9 +202,13 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         TurnStatus::Interrupted => "interrupted",
                         TurnStatus::Error => "error",
                     };
+                    let (error_message, stderr_tail) = match error {
+                        Some(e) => (Some(e.message), e.stderr_tail),
+                        None => (None, None),
+                    };
                     conn.execute(
-                        "UPDATE turns SET status = ?1, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
-                        rusqlite::params![status_str, turn_id],
+                        "UPDATE turns SET status = ?1, error_message = ?2, stderr_tail = ?3, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?4",
+                        rusqlite::params![status_str, error_message, stderr_tail, turn_id],
                     )?;
                     Ok(())
                 })();
@@ -263,7 +277,7 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
     )?;
 
     let mut turn_stmt = conn.prepare(
-        "SELECT id, turn_index, prompt, status, started_at, completed_at
+        "SELECT id, turn_index, prompt, status, started_at, completed_at, error_message, stderr_tail
          FROM turns WHERE thread_id = ?1 ORDER BY turn_index ASC",
     )?;
     let turn_rows = turn_stmt.query_map([thread_id], |r| {
@@ -281,6 +295,14 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
             turn_status,
             r.get::<_, String>(4)?,
             r.get::<_, Option<String>>(5)?,
+            r.get::<_, Option<String>>(6)?
+                .map(|message| -> rusqlite::Result<TurnError> {
+                    Ok(TurnError {
+                        message,
+                        stderr_tail: r.get(7)?,
+                    })
+                })
+                .transpose()?,
         ))
     })?;
 
@@ -291,7 +313,7 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
     )?;
 
     for t in turn_rows {
-        let (t_id, t_idx, prompt, status, started_at, completed_at) = t?;
+        let (t_id, t_idx, prompt, status, started_at, completed_at, error) = t?;
         let item_rows = item_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
             let kind: ItemKind = serde_json::from_value(serde_json::Value::String(kind_str))
@@ -313,6 +335,7 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
             started_at,
             completed_at,
             items,
+            error,
         });
     }
 

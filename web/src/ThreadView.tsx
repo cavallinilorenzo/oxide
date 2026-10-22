@@ -6,9 +6,15 @@ import {
   type SequencedThreadEvent,
   type Thread,
   type ThreadStatus,
-  type TurnSnapshot,
 } from "./bindings";
-import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
+import { stopsTurn } from "./shortcuts";
+import {
+  applyThreadEvent,
+  initialTranscriptState,
+  turnIsRunning,
+  type TranscriptState,
+  type TranscriptTurn,
+} from "./transcript";
 
 interface ThreadViewProps {
   threadId: number | null;
@@ -28,7 +34,7 @@ const ItemView = memo(function ItemView({ item }: { item: ItemSnapshot }) {
   );
 });
 
-const TurnView = memo(function TurnView({ turn }: { turn: TurnSnapshot }) {
+const TurnView = memo(function TurnView({ turn }: { turn: TranscriptTurn }) {
   return (
     <div className="turn">
       <div className="message user">
@@ -38,6 +44,18 @@ const TurnView = memo(function TurnView({ turn }: { turn: TurnSnapshot }) {
       {turn.items.map((item, iIdx) => (
         <ItemView key={item.id || iIdx} item={item} />
       ))}
+      {turn.status === "running" && turn.retryNotice && (
+        <div className="turn-notice" role="status">
+          {turn.retryNotice}
+        </div>
+      )}
+      {turn.status === "interrupted" && <div className="turn-notice">Interrupted</div>}
+      {turn.status === "error" && (
+        <div className="turn-error" role="alert">
+          <div>{turn.error?.message ?? "The Turn failed"}</div>
+          {turn.error?.stderrTail && <pre className="turn-stderr">{turn.error.stderrTail}</pre>}
+        </div>
+      )}
     </div>
   );
 });
@@ -118,7 +136,7 @@ export function ThreadView({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = input.trim();
-    if (!prompt || sending) return;
+    if (!prompt || sending || turnIsRunning(transcript.status)) return;
 
     setSending(true);
     setInput("");
@@ -150,7 +168,11 @@ export function ThreadView({
     }
   };
 
-  const isWorking = transcript.status === "working";
+  const isRunning = turnIsRunning(transcript.status);
+
+  const stop = () => {
+    if (threadId) void commands.interruptThread(threadId);
+  };
 
   return (
     <div className="thread-container">
@@ -171,18 +193,26 @@ export function ThreadView({
         <input
           type="text"
           className="composer-input"
-          placeholder={isWorking ? "Agent is working…" : "Type a prompt…"}
+          placeholder={isRunning ? "Working… (Esc to stop)" : "Type a prompt…"}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={isWorking || sending}
+          onKeyDown={(e) => {
+            if (stopsTurn(e, transcript.status)) {
+              e.preventDefault();
+              stop();
+            }
+          }}
+          disabled={sending}
         />
-        <button
-          type="submit"
-          className="composer-submit"
-          disabled={!input.trim() || isWorking || sending}
-        >
-          Send
-        </button>
+        {isRunning ? (
+          <button type="button" className="composer-submit" onClick={stop}>
+            Stop
+          </button>
+        ) : (
+          <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
+            Send
+          </button>
+        )}
       </form>
     </div>
   );

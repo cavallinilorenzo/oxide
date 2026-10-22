@@ -1,11 +1,11 @@
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{Provider, ProviderEvent, StartContext, TurnStatus};
 use std::collections::HashMap;
 use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
-use crate::thread::{SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus};
+use crate::thread::{SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, TurnError};
 
 pub enum ThreadActorMsg {
     SendPrompt {
@@ -102,21 +102,29 @@ impl ThreadActorHandle {
     }
 }
 
+/// The Turn in flight. Oxide numbers Turns itself; the Provider's own `turn_index` is ignored.
+struct CurrentTurn {
+    index: u32,
+    id: Option<u32>,
+    /// The Provider's own error, kept until the Turn ends.
+    error_message: Option<String>,
+}
+
 struct ActorState {
     thread_id: u32,
-    current_turn_index: u32,
-    current_turn_id: Option<u32>,
+    next_turn_index: u32,
+    current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, String>,
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
 }
 
 impl ActorState {
-    fn new(thread_id: u32) -> Self {
+    fn new(thread_id: u32, next_turn_index: u32) -> Self {
         Self {
             thread_id,
-            current_turn_index: 0,
-            current_turn_id: None,
+            next_turn_index,
+            current_turn: None,
             pending_deltas: HashMap::new(),
             seq: 0,
             subscribers: Vec::new(),
@@ -158,13 +166,20 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::SessionInfo { session_id } => {
             storage.set_provider_session_id(state.thread_id, session_id);
         }
-        ProviderEvent::TurnStarted { turn_index, prompt } => {
-            state.current_turn_index = turn_index;
-            if let Ok(turn_id) =
-                storage.write_turn_started(state.thread_id, turn_index, prompt.clone())
-            {
-                state.current_turn_id = Some(turn_id);
-            }
+        ProviderEvent::TurnStarted {
+            turn_index: _,
+            prompt,
+        } => {
+            let turn_index = state.next_turn_index;
+            state.next_turn_index += 1;
+            let id = storage
+                .write_turn_started(state.thread_id, turn_index, prompt.clone())
+                .ok();
+            state.current_turn = Some(CurrentTurn {
+                index: turn_index,
+                id,
+                error_message: None,
+            });
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
             state.broadcast(ThreadEvent::TurnStarted { turn_index, prompt });
             state.broadcast_status(ThreadStatus::Working);
@@ -185,7 +200,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             content,
         } => {
             state.flush_pending_deltas();
-            if let Some(turn_id) = state.current_turn_id {
+            if let Some(turn_id) = state.current_turn.as_ref().and_then(|t| t.id) {
                 let _ = storage.write_item_completed(turn_id, item_index, kind, content.clone());
             }
             state.broadcast(ThreadEvent::ItemCompleted {
@@ -197,39 +212,102 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::TurnCompleted {
             turn_index: _,
             status,
-        } => {
-            state.flush_pending_deltas();
-            if let Some(turn_id) = state.current_turn_id.take() {
-                let _ = storage.update_turn_completed(turn_id, status);
-            }
-            let final_thread_status = match status {
-                TurnStatus::Completed => ThreadStatus::Completed,
-                TurnStatus::Interrupted => ThreadStatus::Interrupted,
-                TurnStatus::Error => ThreadStatus::Error,
-                TurnStatus::Running => ThreadStatus::Working,
-            };
-            let _ = storage.update_thread_status(state.thread_id, final_thread_status);
-            state.broadcast(ThreadEvent::TurnCompleted {
-                turn_index: state.current_turn_index,
-                status,
-            });
-            state.broadcast_status(final_thread_status);
-            state.current_turn_index += 1;
-        }
+        } => finish_turn(state, storage, status, None),
         ProviderEvent::ApprovalRequested { id, description } => {
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::NeedsInput);
             state.broadcast(ThreadEvent::ApprovalRequested { id, description });
             state.broadcast_status(ThreadStatus::NeedsInput);
         }
-        ProviderEvent::Error { message, code: _ } => {
-            let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Error);
-            state.broadcast(ThreadEvent::Error { message });
-            state.broadcast_status(ThreadStatus::Error);
+        ProviderEvent::Error {
+            message,
+            code: _,
+            retrying: true,
+        } => {
+            state.broadcast(ThreadEvent::ProviderRetrying { message });
+        }
+        ProviderEvent::Error {
+            message,
+            code: _,
+            retrying: false,
+        } => {
+            if let Some(turn) = state.current_turn.as_mut() {
+                turn.error_message = Some(message);
+            } else {
+                let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Error);
+                state.broadcast(ThreadEvent::Error { message });
+                state.broadcast_status(ThreadStatus::Error);
+            }
+        }
+        ProviderEvent::Exited { code, stderr_tail } => {
+            provider_exited(state, storage, code, stderr_tail)
         }
         ProviderEvent::Unknown { raw } => {
             state.broadcast(ThreadEvent::Unknown { raw });
         }
     }
+}
+
+/// Ends the Turn in flight, if any. Never re-sends anything to the Provider.
+/// A failed Turn keeps the Provider's own error message when it sent one, else `exit_error`'s.
+fn finish_turn(
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    status: TurnStatus,
+    exit_error: Option<TurnError>,
+) {
+    state.flush_pending_deltas();
+    let Some(turn) = state.current_turn.take() else {
+        return;
+    };
+    let error = (status == TurnStatus::Error).then(|| {
+        let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
+        let message = turn
+            .error_message
+            .or(exit_error.map(|e| e.message))
+            .unwrap_or_else(|| "The Turn failed".to_string());
+        TurnError {
+            message,
+            stderr_tail,
+        }
+    });
+    if let Some(turn_id) = turn.id {
+        let _ = storage.update_turn_completed(turn_id, status, error.clone());
+    }
+    let final_thread_status = match status {
+        TurnStatus::Completed => ThreadStatus::Completed,
+        TurnStatus::Interrupted => ThreadStatus::Interrupted,
+        TurnStatus::Error => ThreadStatus::Error,
+        TurnStatus::Running => ThreadStatus::Working,
+    };
+    let _ = storage.update_thread_status(state.thread_id, final_thread_status);
+    state.broadcast(ThreadEvent::TurnCompleted {
+        turn_index: turn.index,
+        status,
+        error,
+    });
+    state.broadcast_status(final_thread_status);
+}
+
+/// A Provider ending mid-Turn (or during an Approval) fails that Turn; while idle it's silent.
+fn provider_exited(
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    code: Option<i32>,
+    stderr_tail: Option<String>,
+) {
+    let message = match code {
+        Some(code) => format!("The Provider exited unexpectedly (exit code {code})"),
+        None => "The Provider exited unexpectedly".to_string(),
+    };
+    finish_turn(
+        state,
+        storage,
+        TurnStatus::Error,
+        Some(TurnError {
+            message,
+            stderr_tail,
+        }),
+    );
 }
 
 fn run_thread_actor(
@@ -239,7 +317,12 @@ fn run_thread_actor(
     storage: StorageHandle,
     rx: Receiver<ThreadActorMsg>,
 ) {
-    let mut state = ActorState::new(thread_id);
+    let next_turn_index = storage
+        .get_snapshot(thread_id)
+        .ok()
+        .and_then(|s| s.turns.last().map(|t| t.turn_index + 1))
+        .unwrap_or(0);
+    let mut state = ActorState::new(thread_id, next_turn_index);
 
     // Start provider
     let caps = provider.capabilities();
@@ -253,12 +336,11 @@ fn run_thread_actor(
             .copied()
             .unwrap_or(oxide_provider::PermissionMode::AutoEdit),
     };
-    let prx = match provider.start(&start_ctx) {
+    let mut prx = match provider.start(&start_ctx) {
         Ok(receiver) => receiver,
         Err(e) => {
             eprintln!("failed to start provider for thread {thread_id}: {e}");
-            let (_dummy_tx, dummy_rx) = crossbeam_channel::unbounded();
-            dummy_rx
+            crossbeam_channel::never()
         }
     };
 
@@ -278,8 +360,17 @@ fn run_thread_actor(
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
-                        let _ = provider.interrupt();
-                        let _ = reply.send(Ok(()));
+                        // Stop applies only to a running Turn; the Provider ends it with
+                        // `TurnCompleted { Interrupted }`.
+                        let result = if state.current_turn.is_some() {
+                            provider.interrupt().map_err(|e| Error::Io {
+                                path: std::path::PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
+                        let _ = reply.send(result);
                     }
                     ThreadActorMsg::Subscribe { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
@@ -295,12 +386,15 @@ fn run_thread_actor(
                         let _ = reply.send((snapshot, sub_rx));
                     }
                     ThreadActorMsg::Tick => {
-                        while let Ok(evt) = prx.try_recv() {
-                            handle_provider_event(
-                                evt,
-                                &mut state,
-                                &storage,
-                            );
+                        loop {
+                            match prx.try_recv() {
+                                Ok(evt) => handle_provider_event(evt, &mut state, &storage),
+                                Err(TryRecvError::Empty) => break,
+                                Err(TryRecvError::Disconnected) => {
+                                    provider_channel_closed(&mut prx, &mut state, &storage);
+                                    break;
+                                }
+                            }
                         }
                         state.flush_pending_deltas();
                     }
@@ -310,17 +404,21 @@ fn run_thread_actor(
                     }
                 }
             }
-            recv(prx) -> evt => {
-                let evt = match evt {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-                handle_provider_event(
-                    evt,
-                    &mut state,
-                    &storage,
-                );
+            recv(prx) -> evt => match evt {
+                Ok(evt) => handle_provider_event(evt, &mut state, &storage),
+                Err(_) => provider_channel_closed(&mut prx, &mut state, &storage),
             }
         }
     }
+}
+
+/// The Provider's event channel closed (after `Exited`, or because an adapter's reader died):
+/// treat it as an exit, and stop selecting on the dead channel.
+fn provider_channel_closed(
+    prx: &mut Receiver<ProviderEvent>,
+    state: &mut ActorState,
+    storage: &StorageHandle,
+) {
+    *prx = crossbeam_channel::never();
+    provider_exited(state, storage, None, None);
 }

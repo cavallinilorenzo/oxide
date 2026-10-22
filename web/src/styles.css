@@ -142,6 +142,27 @@ button[aria-pressed="true"] { background: #8883; }
   flex-direction: column;
   gap: 12px;
 }
+.turn-notice {
+  align-self: flex-start;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.turn-error {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 10px 14px;
+  border: 1px solid #ef444466;
+  border-radius: 8px;
+  color: #ef4444;
+}
+.turn-stderr {
+  margin: 8px 0 0;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  opacity: 0.8;
+}
 .message {
   display: flex;
   flex-direction: column;

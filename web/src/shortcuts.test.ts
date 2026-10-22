@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { toggleForKey } from "./shortcuts";
+import { stopsTurn, toggleForKey } from "./shortcuts";
+
+describe("stopsTurn", () => {
+  const esc = { key: "Escape", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+  it("stops on a bare Esc while a Turn is working or waiting on an Approval", () => {
+    expect(stopsTurn(esc, "working")).toBe(true);
+    expect(stopsTurn(esc, "needs-input")).toBe(true);
+  });
+  it("does nothing when no Turn is running, or with modifiers or other keys", () => {
+    expect(stopsTurn(esc, "completed")).toBe(false);
+    expect(stopsTurn(esc, "interrupted")).toBe(false);
+    expect(stopsTurn({ ...esc, shiftKey: true }, "working")).toBe(false);
+    expect(stopsTurn({ ...esc, key: "Enter" }, "working")).toBe(false);
+  });
+});
 
 const key = (key: string, mods: Partial<Parameters<typeof toggleForKey>[0]> = {}) =>
   toggleForKey({ key, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, ...mods });

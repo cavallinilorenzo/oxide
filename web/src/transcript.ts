@@ -7,11 +7,19 @@ import type {
   TurnSnapshot,
 } from "./bindings";
 
+/** A Turn as shown: the stored snapshot plus the live Provider retry notice, if any. */
+export type TranscriptTurn = TurnSnapshot & { retryNotice?: string | null };
+
 export interface TranscriptState {
   thread: Thread | null;
   status: ThreadStatus;
-  turns: TurnSnapshot[];
+  turns: TranscriptTurn[];
   lastSeq: number;
+}
+
+/** A Turn is running (working, or waiting on an Approval), so Stop applies. */
+export function turnIsRunning(status: ThreadStatus): boolean {
+  return status === "working" || status === "needs-input";
 }
 
 export function initialTranscriptState(snapshot: ThreadSnapshot | null): TranscriptState {
@@ -32,7 +40,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
 }
 
 function updateLastTurnItem(
-  turns: TurnSnapshot[],
+  turns: TranscriptTurn[],
   itemIndex: number,
   updater: (existing: ItemSnapshot | undefined) => ItemSnapshot
 ): void {
@@ -68,7 +76,7 @@ export function applyThreadEvent(
     case "TurnStarted": {
       status = "working";
       const existing = turns.findIndex((t) => t.turnIndex === event.payload.turn_index);
-      const newTurn: TurnSnapshot = {
+      const newTurn: TranscriptTurn = {
         id: existing >= 0 ? turns[existing].id : 0,
         turnIndex: event.payload.turn_index,
         prompt: event.payload.prompt,
@@ -76,6 +84,8 @@ export function applyThreadEvent(
         startedAt: new Date().toISOString(),
         completedAt: null,
         items: existing >= 0 ? turns[existing].items : [],
+        error: null,
+        retryNotice: null,
       };
       if (existing >= 0) turns[existing] = newTurn;
       else turns.push(newTurn);
@@ -122,7 +132,17 @@ export function applyThreadEvent(
           ...turns[idx],
           status: event.payload.status,
           completedAt: new Date().toISOString(),
+          error: event.payload.error ?? null,
+          retryNotice: null,
         };
+      }
+      break;
+    }
+
+    case "ProviderRetrying": {
+      const last = turns.length - 1;
+      if (last >= 0) {
+        turns[last] = { ...turns[last], retryNotice: event.payload.message };
       }
       break;
     }

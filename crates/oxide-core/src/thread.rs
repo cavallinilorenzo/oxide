@@ -38,7 +38,10 @@ impl std::str::FromStr for ThreadStatus {
     }
 }
 
+// The serde shapes below are the IPC shapes: the App shell's mirrors convert through JSON.
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
     pub id: u32,
     pub project_id: u32,
@@ -53,6 +56,7 @@ pub struct ThreadSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ItemSnapshot {
     pub id: u32,
     pub item_index: u32,
@@ -62,6 +66,7 @@ pub struct ItemSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
@@ -70,9 +75,19 @@ pub struct TurnSnapshot {
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
+    /// Why the Turn failed; set only when `status` is error.
+    pub error: Option<TurnError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnError {
+    pub message: String,
+    pub stderr_tail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: ThreadSummary,
     pub turns: Vec<TurnSnapshot>,
@@ -80,6 +95,7 @@ pub struct ThreadSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
 pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
@@ -101,6 +117,7 @@ pub enum ThreadEvent {
     TurnCompleted {
         turn_index: u32,
         status: TurnStatus,
+        error: Option<TurnError>,
     },
     ThreadStatusChanged {
         status: ThreadStatus,
@@ -108,6 +125,10 @@ pub enum ThreadEvent {
     ApprovalRequested {
         id: String,
         description: String,
+    },
+    /// The Provider hit a transient failure and is retrying the Turn itself.
+    ProviderRetrying {
+        message: String,
     },
     Error {
         message: String,

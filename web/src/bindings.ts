@@ -19,7 +19,7 @@ export const commands = {
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt })),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
-	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
+	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 };
 
 /* Types */
@@ -82,9 +82,16 @@ export type Providers_Serialize = {
 	antigravity: ProviderSettings_Serialize,
 };
 
-export type SequencedThreadEvent = {
+export type SequencedThreadEvent = SequencedThreadEvent_Serialize | SequencedThreadEvent_Deserialize;
+
+export type SequencedThreadEvent_Deserialize = {
 	seq: number,
-	event: ThreadEvent,
+	event: ThreadEvent_Deserialize,
+};
+
+export type SequencedThreadEvent_Serialize = {
+	seq: number,
+	event: ThreadEvent_Serialize,
 };
 
 export type Settings = Settings_Serialize | Settings_Deserialize;
@@ -119,7 +126,9 @@ export type Settings_Serialize = {
 
 export type Thread = Thread_Serialize | Thread_Deserialize;
 
-export type ThreadEvent = { type: "TurnStarted"; payload: {
+export type ThreadEvent = ThreadEvent_Serialize | ThreadEvent_Deserialize;
+
+export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
 	prompt: string,
 } } | { type: "ItemStarted"; payload: {
@@ -135,11 +144,44 @@ export type ThreadEvent = { type: "TurnStarted"; payload: {
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
+	error?: TurnError_Deserialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	description: string,
+} } | { type: "ProviderRetrying"; payload: {
+	message: string,
+} } | { type: "Error"; payload: {
+	message: string,
+} } | { type: "Unknown"; payload: {
+	raw: string,
+} };
+
+export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
+	turn_index: number,
+	prompt: string,
+} } | { type: "ItemStarted"; payload: {
+	item_index: number,
+	kind: ItemKind,
+} } | { type: "ItemDeltaBatch"; payload: {
+	item_index: number,
+	delta: string,
+} } | { type: "ItemCompleted"; payload: {
+	item_index: number,
+	kind: ItemKind,
+	content: string,
+} } | { type: "TurnCompleted"; payload: {
+	turn_index: number,
+	status: TurnStatus,
+	error: TurnError_Serialize | null,
+} } | { type: "ThreadStatusChanged"; payload: {
+	status: ThreadStatus,
+} } | { type: "ApprovalRequested"; payload: {
+	id: string,
+	description: string,
+} } | { type: "ProviderRetrying"; payload: {
+	message: string,
 } } | { type: "Error"; payload: {
 	message: string,
 } } | { type: "Unknown"; payload: {
@@ -188,6 +230,18 @@ export type Thread_Serialize = {
 	updatedAt: string,
 };
 
+export type TurnError = TurnError_Serialize | TurnError_Deserialize;
+
+export type TurnError_Deserialize = {
+	message: string,
+	stderrTail?: string | null,
+};
+
+export type TurnError_Serialize = {
+	message: string,
+	stderrTail: string | null,
+};
+
 export type TurnSnapshot = TurnSnapshot_Serialize | TurnSnapshot_Deserialize;
 
 export type TurnSnapshot_Deserialize = {
@@ -198,6 +252,7 @@ export type TurnSnapshot_Deserialize = {
 	startedAt: string,
 	completedAt?: string | null,
 	items: ItemSnapshot[],
+	error?: TurnError_Deserialize | null,
 };
 
 export type TurnSnapshot_Serialize = {
@@ -208,6 +263,7 @@ export type TurnSnapshot_Serialize = {
 	startedAt: string,
 	completedAt: string | null,
 	items: ItemSnapshot[],
+	error: TurnError_Serialize | null,
 };
 
 export type TurnStatus = "running" | "completed" | "interrupted" | "error";

@@ -52,6 +52,10 @@ pub const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
 ",
+    "
+    ALTER TABLE turns ADD COLUMN error_message TEXT;
+    ALTER TABLE turns ADD COLUMN stderr_tail TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

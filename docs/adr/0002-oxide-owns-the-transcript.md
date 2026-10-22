@@ -5,5 +5,5 @@ Oxide stores every Thread's Turns and Items, normalized, in its own SQLite datab
 ## Consequences
 
 - A Thread whose Provider session is gone stays readable but can't continue: it goes to error ("Provider session no longer available") and offers **Continue in new Thread**, prefilled with a recap built from Oxide's Transcript. The Thread ↔ Provider session mapping stays one-to-one; Oxide never silently swaps sessions under a Thread.
-- Raw Provider payloads are not persisted (except `Unknown` events), so the stored Transcript is only as good as the adapter's normalization.
+- Raw Provider payloads are not persisted (except `Unknown` events), so the stored Transcript is only as good as the adapter's normalization. A failed Turn keeps its error message and the Provider's stderr tail as diagnostics.
 - Sessions started outside Oxide are not imported.

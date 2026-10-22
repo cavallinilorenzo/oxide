@@ -108,6 +108,20 @@ if args[:2] == ["pr", "checkout"]:
             sys.exit(1)
     sys.exit(0)
 
+if args[:2] == ["repo", "list"]:
+    print(json.dumps([
+        {k: v for k, v in r.items() if k != "source"} for r in state.get("repos", [])
+    ]))
+    sys.exit(0)
+
+if args[:2] == ["repo", "clone"]:
+    name, dest = args[2], args[3]
+    source = next((r["source"] for r in state.get("repos", []) if r["nameWithOwner"] == name), None)
+    if source is None:
+        sys.stderr.write("repository %s not found\n" % name)
+        sys.exit(1)
+    sys.exit(subprocess.run(["git", "clone", "-q", source, dest]).returncode)
+
 if args[:2] == ["pr", "view"]:
     n = number_arg()
     pr = by_number(n) if n else state.get("prs", {}).get(branch())

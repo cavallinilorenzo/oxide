@@ -78,6 +78,39 @@ impl System for MacSystem {
         let _ = std::process::Command::new(opener).arg(url).spawn();
     }
 
+    #[cfg(target_os = "macos")]
+    fn is_app_installed(&self, bundle_id: &str) -> bool {
+        // Core only asks about bundle identifiers from its fixed list; the check keeps
+        // the Spotlight query well-formed regardless.
+        if !bundle_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        {
+            return false;
+        }
+        std::process::Command::new("mdfind")
+            .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
+            .output()
+            .map(|out| !out.stdout.iter().all(u8::is_ascii_whitespace))
+            .unwrap_or(false)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn open_with_app(&self, bundle_id: &str, path: &std::path::Path) {
+        let _ = std::process::Command::new("open")
+            .args(["-b", bundle_id])
+            .arg(path)
+            .spawn();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reveal_in_finder(&self, path: &std::path::Path) {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+    }
+
     fn set_badge(&self, count: u32) {
         if let Some(window) = self.app.get_webview_window("main") {
             let _ = window.set_badge_count((count > 0).then_some(i64::from(count)));

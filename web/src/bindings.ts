@@ -12,6 +12,20 @@ export const commands = {
 	 *  The walk runs on a blocking thread, off the main thread and the async runtime.
 	 */
 	rescanProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("rescan_projects")),
+	/**  Registers an existing folder as a Project. */
+	addProject: (path: string) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path })),
+	/**  Creates `parent/name` with `git init` and registers it as a Project. */
+	createProject: (parent: string, name: string) => typedError<Project, AppError>(__TAURI_INVOKE("create_project", { parent, name })),
+	/**  Clones a Git URL into `parent` and registers the clone as a Project. */
+	cloneProject: (url: string, parent: string) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, parent })),
+	searchGithubRepositories: (query: string) => typedError<GithubRepository[], AppError>(__TAURI_INVOKE("search_github_repositories", { query })),
+	/**  Clones one of the user's GitHub repositories into `parent` and registers it as a Project. */
+	cloneGithubRepository: (nameWithOwner: string, parent: string) => typedError<Project, AppError>(__TAURI_INVOKE("clone_github_repository", { nameWithOwner, parent })),
+	/**  The known editors installed on this machine. */
+	detectedEditors: () => typedError<Editor[], AppError>(__TAURI_INVOKE("detected_editors")),
+	/**  Opens the Project's checkout (or the Thread's) in the editor chosen in Settings. */
+	openInEditor: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("open_in_editor", { projectId, threadId })),
+	revealInFinder: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_finder", { projectId, threadId })),
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
@@ -271,6 +285,11 @@ export type Diff_Serialize = {
 	files: DiffFile_Serialize[],
 };
 
+export type Editor = {
+	name: string,
+	bundleId: string,
+};
+
 export type FieldError = {
 	path: string,
 	message: string,
@@ -333,6 +352,12 @@ export type GitStatus_Serialize = {
 };
 
 export type GithubAvailability = "ready" | "missing" | "loggedOut";
+
+export type GithubRepository = {
+	nameWithOwner: string,
+	description: string,
+	isPrivate: boolean,
+};
 
 export type IssueComment = {
 	author: string,

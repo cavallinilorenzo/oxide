@@ -149,6 +149,15 @@ pub struct PullRequestInput {
     pub draft: bool,
 }
 
+/// One of the user's GitHub repositories, as offered for cloning.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRepository {
+    pub name_with_owner: String,
+    pub description: String,
+    pub is_private: bool,
+}
+
 enum GhError {
     Missing,
     Failed(String),
@@ -655,6 +664,49 @@ fn issue_summary_from(v: &serde_json::Value) -> IssueSummary {
         comments_count: v["comments"].as_array().map(|c| c.len()).unwrap_or(0) as u32,
         created_at: text(&v["createdAt"]),
     }
+}
+
+/// The user's repositories whose name or description contains `query`.
+pub fn search_repositories(gh: &Gh, cwd: &Path, query: &str) -> Result<Vec<GithubRepository>> {
+    gh.require_ready(cwd)?;
+    let list = parse(&gh.run(
+        cwd,
+        &[
+            "repo",
+            "list",
+            "--limit",
+            "200",
+            "--json",
+            "nameWithOwner,description,isPrivate",
+        ],
+    )?)?;
+    let query = query.trim().to_lowercase();
+    Ok(list
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .map(|r| GithubRepository {
+            name_with_owner: r["nameWithOwner"].as_str().unwrap_or_default().into(),
+            description: r["description"].as_str().unwrap_or_default().into(),
+            is_private: r["isPrivate"].as_bool().unwrap_or(false),
+        })
+        .filter(|r| {
+            r.name_with_owner.to_lowercase().contains(&query)
+                || r.description.to_lowercase().contains(&query)
+        })
+        .collect())
+}
+
+/// Clones `name_with_owner` into `dest`, which does not exist yet.
+pub fn clone_repository(gh: &Gh, name_with_owner: &str, dest: &Path) -> Result<()> {
+    let parent = dest.parent().unwrap_or(dest);
+    gh.require_ready(parent)?;
+    gh.run(
+        parent,
+        &["repo", "clone", name_with_owner, &dest.to_string_lossy()],
+    )?;
+    Ok(())
 }
 
 pub fn issues_state(gh: &Gh, cwd: &Path) -> Result<IssuesState> {

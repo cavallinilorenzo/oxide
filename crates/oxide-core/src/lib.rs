@@ -8,11 +8,13 @@ mod clock;
 mod continuation;
 mod db;
 mod discovery;
+mod editor;
 mod error;
 mod files;
 mod git;
 mod git_diff;
 mod github;
+mod project_setup;
 mod settings;
 mod storage_actor;
 mod terminal;
@@ -22,12 +24,13 @@ mod thread_actor;
 pub use activity::{Notification, NotificationKind, System};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
+pub use editor::Editor;
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    CheckState, GithubAvailability, IssueComment, IssueDetail, IssueSummary, IssuesState,
-    MergeMethod, PullRequest, PullRequestCheck, PullRequestComment, PullRequestDetail,
+    CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail, IssueSummary,
+    IssuesState, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment, PullRequestDetail,
     PullRequestDraft, PullRequestInput, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
@@ -369,6 +372,103 @@ impl Core {
             tx.commit()?;
         }
         self.list_projects()
+    }
+
+    /// Registers an existing folder as a Project (and shows it again if it was hidden).
+    /// Opening the same folder twice yields the same Project.
+    pub fn add_project(&self, path: &str) -> Result<ProjectSummary> {
+        let expanded = self.expand_home(path.trim());
+        let canonical = expanded.canonicalize().map_err(|source| Error::Io {
+            path: expanded.clone(),
+            source,
+        })?;
+        if !canonical.is_dir() {
+            return Err(Error::InvalidPath(format!(
+                "{} is not a folder",
+                canonical.display()
+            )));
+        }
+        let name = canonical
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| canonical.to_string_lossy().into_owned());
+        let path = canonical.to_string_lossy();
+        let id = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.execute(
+                "INSERT OR IGNORE INTO projects (name, path) VALUES (?1, ?2)",
+                (&name, &path),
+            )?;
+            db.execute("UPDATE projects SET hidden = 0 WHERE path = ?1", [&path])?;
+            db.query_row("SELECT id FROM projects WHERE path = ?1", [&path], |r| {
+                r.get::<_, u32>(0)
+            })?
+        };
+        self.project(id)
+    }
+
+    /// Creates `parent/name` with `git init` and registers it as a Project.
+    pub fn create_project(&self, parent: &str, name: &str) -> Result<ProjectSummary> {
+        let dest = project_setup::create(&self.expand_home(parent.trim()), name)?;
+        self.add_project(&dest.to_string_lossy())
+    }
+
+    /// Clones a Git URL into `parent/<repository name>` and registers it as a Project.
+    pub fn clone_project(&self, url: &str, parent: &str) -> Result<ProjectSummary> {
+        let dest = project_setup::clone_url(&self.expand_home(parent.trim()), url)?;
+        self.add_project(&dest.to_string_lossy())
+    }
+
+    /// The user's GitHub repositories matching `query`, found through `gh`.
+    pub fn search_github_repositories(&self, query: &str) -> Result<Vec<GithubRepository>> {
+        github::search_repositories(&self.gh, &self.home, query)
+    }
+
+    /// Clones one of the user's GitHub repositories (`owner/name`) into `parent/name`
+    /// through `gh` and registers it as a Project.
+    pub fn clone_github_repository(
+        &self,
+        name_with_owner: &str,
+        parent: &str,
+    ) -> Result<ProjectSummary> {
+        let dest =
+            project_setup::github_clone_target(&self.expand_home(parent.trim()), name_with_owner)?;
+        github::clone_repository(&self.gh, name_with_owner, &dest)?;
+        self.add_project(&dest.to_string_lossy())
+    }
+
+    /// The known editors installed on this machine.
+    pub fn detected_editors(&self) -> Vec<Editor> {
+        let system = self.activity.system();
+        editor::detect(|bundle_id| system.is_app_installed(bundle_id))
+    }
+
+    /// Opens the Project's checkout, or the Thread's, in the editor chosen in Settings.
+    pub fn open_in_editor(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
+        let path = self.checkout_path(project_id, thread_id)?;
+        let detected = self.detected_editors();
+        let configured = self.settings().settings.editor;
+        let editor = editor::choose(&detected, &configured).ok_or_else(|| {
+            Error::Editor("No supported editor is installed. See the list in Settings.".into())
+        })?;
+        self.activity
+            .system()
+            .open_with_app(&editor.bundle_id, Path::new(&path));
+        Ok(())
+    }
+
+    /// Shows the Project's checkout, or the Thread's, in Finder.
+    pub fn reveal_in_finder(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
+        let path = self.checkout_path(project_id, thread_id)?;
+        self.activity.system().reveal_in_finder(Path::new(&path));
+        Ok(())
+    }
+
+    fn project(&self, id: u32) -> Result<ProjectSummary> {
+        self.list_projects()?
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or(Error::Db(rusqlite::Error::QueryReturnedNoRows))
     }
 
     pub fn set_project_hidden(&self, id: u32, hidden: bool) -> Result<()> {

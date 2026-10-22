@@ -70,6 +70,112 @@ async fn rescan_projects(core: State<'_, Arc<Core>>) -> Result<Vec<Project>, App
     Ok(projects.into_iter().map(Project::from).collect())
 }
 
+/// Registers an existing folder as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn add_project(core: State<'_, Arc<Core>>, path: String) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.add_project(&path))
+        .await
+        .map(Project::from)
+}
+
+/// Creates `parent/name` with `git init` and registers it as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn create_project(
+    core: State<'_, Arc<Core>>,
+    parent: String,
+    name: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.create_project(&parent, &name))
+        .await
+        .map(Project::from)
+}
+
+/// Clones a Git URL into `parent` and registers the clone as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn clone_project(
+    core: State<'_, Arc<Core>>,
+    url: String,
+    parent: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.clone_project(&url, &parent))
+        .await
+        .map(Project::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRepository {
+    name_with_owner: String,
+    description: String,
+    is_private: bool,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn search_github_repositories(
+    core: State<'_, Arc<Core>>,
+    query: String,
+) -> Result<Vec<GithubRepository>, AppError> {
+    git_blocking(&core, move |core| core.search_github_repositories(&query))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+/// Clones one of the user's GitHub repositories into `parent` and registers it as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn clone_github_repository(
+    core: State<'_, Arc<Core>>,
+    name_with_owner: String,
+    parent: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| {
+        core.clone_github_repository(&name_with_owner, &parent)
+    })
+    .await
+    .map(Project::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Editor {
+    name: String,
+    bundle_id: String,
+}
+
+/// The known editors installed on this machine.
+#[tauri::command]
+#[specta::specta]
+async fn detected_editors(core: State<'_, Arc<Core>>) -> Result<Vec<Editor>, AppError> {
+    git_blocking(&core, |core| Ok(core.detected_editors()))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+/// Opens the Project's checkout (or the Thread's) in the editor chosen in Settings.
+#[tauri::command]
+#[specta::specta]
+fn open_in_editor(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.open_in_editor(project_id, thread_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn reveal_in_finder(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.reveal_in_finder(project_id, thread_id)?)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn set_project_hidden(core: State<'_, Arc<Core>>, id: u32, hidden: bool) -> Result<(), AppError> {
@@ -1506,6 +1612,14 @@ pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
         rescan_projects,
+        add_project,
+        create_project,
+        clone_project,
+        search_github_repositories,
+        clone_github_repository,
+        detected_editors,
+        open_in_editor,
+        reveal_in_finder,
         set_project_hidden,
         get_settings,
         save_settings,

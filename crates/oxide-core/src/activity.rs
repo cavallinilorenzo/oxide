@@ -2,6 +2,7 @@
 //! notifications and the Dock badge. Core decides when; the shell supplies the [`System`].
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,6 +33,14 @@ pub trait System: Send + Sync + 'static {
     fn set_badge(&self, count: u32);
     /// Opens a web page in the user's browser.
     fn open_url(&self, _url: &str) {}
+    /// Whether the macOS app with this bundle identifier is installed.
+    fn is_app_installed(&self, _bundle_id: &str) -> bool {
+        false
+    }
+    /// Opens a folder in the app with this bundle identifier.
+    fn open_with_app(&self, _bundle_id: &str, _path: &Path) {}
+    /// Shows a file or folder in Finder.
+    fn reveal_in_finder(&self, _path: &Path) {}
 }
 
 struct NoSystem;
@@ -134,7 +143,7 @@ impl Activity {
         self.system().open_url(url);
     }
 
-    fn system(&self) -> Arc<dyn System> {
+    pub(crate) fn system(&self) -> Arc<dyn System> {
         self.system
             .lock()
             .unwrap_or_else(|e| e.into_inner())

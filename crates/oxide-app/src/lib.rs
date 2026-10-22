@@ -244,6 +244,7 @@ pub struct ItemSnapshot {
     pub item_index: u32,
     pub kind: ItemKind,
     pub content: String,
+    pub parent_item_index: Option<u32>,
     pub created_at: String,
 }
 
@@ -267,6 +268,9 @@ pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
     pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub attachments: Vec<String>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
@@ -285,8 +289,16 @@ pub struct UnknownEventSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadCapabilities {
+    pub reasoning_text: bool,
+    pub image_attachments: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: Thread,
+    pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub last_seq: u32,
     pub supported_permission_modes: Vec<PermissionMode>,
@@ -298,10 +310,14 @@ pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
         prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        attachments: Vec<String>,
     },
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        parent_item_index: Option<u32>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -311,6 +327,7 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     },
     TurnCompleted {
         turn_index: u32,
@@ -488,8 +505,40 @@ fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Threa
 
 #[tauri::command]
 #[specta::specta]
-fn send_prompt(core: State<'_, Arc<Core>>, thread_id: u32, prompt: String) -> Result<(), AppError> {
-    Ok(core.send_prompt(thread_id, &prompt)?)
+fn send_prompt(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    prompt: String,
+    attachments: Vec<String>,
+) -> Result<(), AppError> {
+    let paths: Vec<std::path::PathBuf> = attachments.into_iter().map(Into::into).collect();
+    Ok(core.send_prompt_with_attachments(thread_id, &prompt, &paths)?)
+}
+
+/// Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path.
+#[tauri::command]
+#[specta::specta]
+fn save_attachment(
+    core: State<'_, Arc<Core>>,
+    bytes: Vec<u8>,
+    extension: String,
+) -> Result<String, AppError> {
+    let path = core.save_attachment(&bytes, &extension)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Bytes of a stored attachment, for rendering it in the Transcript.
+#[tauri::command]
+#[specta::specta]
+fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, AppError> {
+    Ok(core.read_attachment(std::path::Path::new(&path))?)
+}
+
+/// What a Provider supports, so the composer can offer image attachments before a Thread exists.
+#[tauri::command]
+#[specta::specta]
+fn provider_capabilities(core: State<'_, Arc<Core>>, provider: String) -> ThreadCapabilities {
+    convert(&core.provider_capabilities(&provider))
 }
 
 #[tauri::command]
@@ -558,6 +607,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_provider_capabilities,
         list_threads,
         send_prompt,
+        save_attachment,
+        read_attachment,
+        provider_capabilities,
         interrupt_thread,
         subscribe_thread,
         subscribe_thread_debug,

@@ -1,5 +1,5 @@
 use oxide_core::{Core, ItemKind, PermissionMode, ThreadEvent, ThreadStatus, TurnStatus};
-use oxide_provider::{FakeProvider, ProviderEvent};
+use oxide_provider::{FakeProvider, Provider, ProviderEvent};
 use tempfile::tempdir;
 
 #[test]
@@ -61,6 +61,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
                 prompt,
             });
             let _ = s.send(ProviderEvent::ItemStarted {
+                parent_item_index: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
             });
@@ -73,6 +74,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
                 delta: "world!".into(),
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
+                parent_item_index: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
                 content: "Hello world!".into(),
@@ -162,10 +164,12 @@ fn resubscribing_after_simulated_gap_returns_consistent_snapshot() {
                 prompt,
             });
             let _ = s.send(ProviderEvent::ItemStarted {
+                parent_item_index: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
+                parent_item_index: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
                 content: "First answer".into(),
@@ -246,6 +250,7 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     // Send item started
     sender
         .send(ProviderEvent::ItemStarted {
+            parent_item_index: None,
             item_index: 0,
             kind: oxide_provider::ItemKind::AgentMessage,
         })
@@ -318,6 +323,7 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     // Complete item and turn
     sender
         .send(ProviderEvent::ItemCompleted {
+            parent_item_index: None,
             item_index: 0,
             kind: oxide_provider::ItemKind::AgentMessage,
             content: "foobarbaz".into(),
@@ -338,4 +344,180 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
         }
     }
     assert!(turn_completed);
+}
+
+fn core_with_project() -> (tempfile::TempDir, Core, u32) {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    core.set_real_time_ticker(false);
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
+    core.save_settings(&settings).unwrap();
+    std::fs::create_dir_all(dir.path().join("proj").join(".git")).unwrap();
+    let id = core.rescan_projects().unwrap()[0].id;
+    (dir, core, id)
+}
+
+fn wait_turn_completed(rx: &crossbeam_channel::Receiver<oxide_core::SequencedThreadEvent>) {
+    while let Ok(e) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if matches!(e.event, ThreadEvent::TurnCompleted { .. }) {
+            return;
+        }
+    }
+    panic!("turn never completed");
+}
+
+#[test]
+fn scripted_fake_provider_turn_has_every_item_kind_with_nested_subagent_children() {
+    let (_dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(
+            project_id,
+            "fake",
+            Some("fake-model".into()),
+            Some("high".into()),
+            PermissionMode::AutoEdit,
+        )
+        .unwrap();
+    core.register_fake_provider(thread.id, FakeProvider::scripted());
+    let (_, rx) = core.subscribe_thread(thread.id).unwrap();
+    core.send_prompt(thread.id, "do everything").unwrap();
+    wait_turn_completed(&rx);
+
+    let snap = core.get_thread_snapshot(thread.id).unwrap();
+    let turn = &snap.turns[0];
+    let kinds: std::collections::HashSet<_> = turn.items.iter().map(|i| i.kind).collect();
+    for k in [
+        ItemKind::AgentMessage,
+        ItemKind::Reasoning,
+        ItemKind::ToolCall,
+        ItemKind::FileChange,
+        ItemKind::Subagent,
+    ] {
+        assert!(kinds.contains(&k), "missing {k:?}");
+    }
+    let subagent = turn
+        .items
+        .iter()
+        .find(|i| i.kind == ItemKind::Subagent)
+        .unwrap();
+    assert_eq!(subagent.parent_item_index, None);
+    assert!(
+        turn.items
+            .iter()
+            .any(|i| i.parent_item_index == Some(subagent.item_index)),
+        "subagent has a nested child item"
+    );
+    // The Turn records the Model and Effort it ran with.
+    assert_eq!(turn.model.as_deref(), Some("fake-model"));
+    assert_eq!(turn.effort.as_deref(), Some("high"));
+}
+
+#[test]
+fn reasoning_items_are_dropped_when_provider_lacks_reasoning_text() {
+    let (_dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    let mut fake = FakeProvider::scripted();
+    fake.set_capabilities(oxide_provider::ProviderCapabilities {
+        supports_reasoning: false,
+        ..fake.capabilities()
+    });
+    core.register_fake_provider(thread.id, fake);
+    let (snap0, rx) = core.subscribe_thread(thread.id).unwrap();
+    assert!(!snap0.capabilities.reasoning_text);
+    core.send_prompt(thread.id, "go").unwrap();
+
+    let mut saw_reasoning_event = false;
+    while let Ok(e) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        match e.event {
+            ThreadEvent::ItemStarted {
+                kind: ItemKind::Reasoning,
+                ..
+            }
+            | ThreadEvent::ItemCompleted {
+                kind: ItemKind::Reasoning,
+                ..
+            } => saw_reasoning_event = true,
+            ThreadEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(!saw_reasoning_event);
+    let snap = core.get_thread_snapshot(thread.id).unwrap();
+    assert!(
+        snap.turns[0]
+            .items
+            .iter()
+            .all(|i| i.kind != ItemKind::Reasoning)
+    );
+    assert!(!snap.turns[0].items.is_empty());
+}
+
+#[test]
+fn image_attachments_are_stored_under_home_and_referenced_from_the_turn() {
+    let (dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, FakeProvider::scripted());
+    let (snap0, rx) = core.subscribe_thread(thread.id).unwrap();
+    assert!(snap0.capabilities.image_attachments);
+
+    let path = core.save_attachment(b"\x89PNG fake", "png").unwrap();
+    assert!(path.starts_with(dir.path().join("attachments")));
+    assert_eq!(std::fs::read(&path).unwrap(), b"\x89PNG fake");
+
+    core.send_prompt_with_attachments(thread.id, "look", std::slice::from_ref(&path))
+        .unwrap();
+    wait_turn_completed(&rx);
+    let snap = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(
+        snap.turns[0].attachments,
+        vec![path.to_string_lossy().to_string()]
+    );
+}
+
+#[test]
+fn attachments_are_rejected_when_provider_lacks_image_attachments() {
+    let (_dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    let mut fake = FakeProvider::scripted();
+    fake.set_capabilities(oxide_provider::ProviderCapabilities {
+        image_attachments: false,
+        ..fake.capabilities()
+    });
+    core.register_fake_provider(thread.id, fake);
+    let path = core.save_attachment(b"x", "png").unwrap();
+    assert!(
+        core.send_prompt_with_attachments(thread.id, "look", &[path])
+            .is_err()
+    );
+}
+
+#[test]
+fn save_attachment_rejects_non_image_extensions() {
+    let (_dir, core, _) = core_with_project();
+    assert!(core.save_attachment(b"x", "../evil").is_err());
+    assert!(core.save_attachment(b"x", "sh").is_err());
+}
+
+#[test]
+fn attachments_outside_the_attachments_folder_are_rejected_even_with_dotdot() {
+    let (dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, FakeProvider::scripted());
+    let saved = core.save_attachment(b"x", "png").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), b"s").unwrap();
+    let sneaky = saved.parent().unwrap().join("..").join("secret.txt");
+    assert!(
+        core.send_prompt_with_attachments(thread.id, "x", std::slice::from_ref(&sneaky))
+            .is_err()
+    );
+    assert!(core.read_attachment(&sneaky).is_err());
 }

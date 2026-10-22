@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@primer/octicons-react':
+        specifier: ^19.41.0
+        version: 19.41.0(react@19.3.1)
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
@@ -23,6 +26,9 @@ importers:
       react-dom:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
+      simple-icons:
+        specifier: ^16.35.0
+        version: 16.35.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -222,6 +228,11 @@ packages:
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
+
+  '@primer/octicons-react@19.41.0':
+    resolution: {integrity: sha512-xCZBbQLQ84L4VuLJWH3OC52AyJg7gdbkhcfunIv428HpXxwGceU3XvEuCbufsoyXN7p0UI5PU5i3Pttob9284g==}
+    peerDependencies:
+      react: '>=16.3'
 
   '@rolldown/binding-android-arm-eabi@1.2.14':
     resolution: {integrity: sha512-aWR+XKH9+rW7m5fWq/5360J3mHycrx/o6xZM2DQFdJnTMdyP7/WzxPjhtLbVWdKo2y612/4U1bWqb3HQhiF7vg==}
@@ -956,6 +967,10 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
+  simple-icons@16.35.0:
+    resolution: {integrity: sha512-TCfl/2+GTrx0nCo4pEWGvxhOb8c6NsqOU1OpwjtF4lwJAthB8IYVD0fuIMjLMg6JFuG1YBO0t1iETQqJLqkoJA==}
+    engines: {node: '>=0.12.18'}
+
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -1312,6 +1327,10 @@ snapshots:
   '@keyv/serialize@1.1.1': {}
 
   '@oxc-project/types@0.154.0': {}
+
+  '@primer/octicons-react@19.41.0(react@19.3.1)':
+    dependencies:
+      react: 19.3.1
 
   '@rolldown/binding-android-arm-eabi@1.2.14':
     optional: true
@@ -1929,6 +1948,8 @@ snapshots:
       shebang-regex: 3.0.0
 
   shebang-regex@3.0.0: {}
+
+  simple-icons@16.35.0: {}
 
   source-map-js@1.2.2: {}
 

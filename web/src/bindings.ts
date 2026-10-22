@@ -21,7 +21,13 @@ export const commands = {
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
-	sendPrompt: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt })),
+	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
+	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
+	saveAttachment: (bytes: number[], extension: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { bytes, extension })),
+	/**  Bytes of a stored attachment, for rendering it in the Transcript. */
+	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
+	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
+	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
@@ -109,11 +115,23 @@ export type FieldError = {
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
 
-export type ItemSnapshot = {
+export type ItemSnapshot = ItemSnapshot_Serialize | ItemSnapshot_Deserialize;
+
+export type ItemSnapshot_Deserialize = {
 	id: number,
 	itemIndex: number,
 	kind: ItemKind,
 	content: string,
+	parentItemIndex?: number | null,
+	createdAt: string,
+};
+
+export type ItemSnapshot_Serialize = {
+	id: number,
+	itemIndex: number,
+	kind: ItemKind,
+	content: string,
+	parentItemIndex: number | null,
 	createdAt: string,
 };
 
@@ -214,14 +232,23 @@ export type Terminal = {
 
 export type Thread = Thread_Serialize | Thread_Deserialize;
 
+export type ThreadCapabilities = {
+	reasoningText: boolean,
+	imageAttachments: boolean,
+};
+
 export type ThreadEvent = ThreadEvent_Serialize | ThreadEvent_Deserialize;
 
 export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
 	prompt: string,
+	model?: string | null,
+	effort?: string | null,
+	attachments: string[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
+	parent_item_index?: number | null,
 } } | { type: "ItemDeltaBatch"; payload: {
 	item_index: number,
 	delta: string,
@@ -229,6 +256,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
 	content: string,
+	parent_item_index?: number | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
@@ -250,9 +278,13 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
 	prompt: string,
+	model: string | null,
+	effort: string | null,
+	attachments: string[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
+	parent_item_index: number | null,
 } } | { type: "ItemDeltaBatch"; payload: {
 	item_index: number,
 	delta: string,
@@ -260,6 +292,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
 	content: string,
+	parent_item_index: number | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
@@ -282,6 +315,7 @@ export type ThreadSnapshot = ThreadSnapshot_Serialize | ThreadSnapshot_Deseriali
 
 export type ThreadSnapshot_Deserialize = {
 	thread: Thread_Deserialize,
+	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Deserialize[],
 	lastSeq: number,
 	supportedPermissionModes: PermissionMode[],
@@ -289,6 +323,7 @@ export type ThreadSnapshot_Deserialize = {
 
 export type ThreadSnapshot_Serialize = {
 	thread: Thread_Serialize,
+	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Serialize[],
 	lastSeq: number,
 	supportedPermissionModes: PermissionMode[],
@@ -328,10 +363,13 @@ export type TurnSnapshot_Deserialize = {
 	id: number,
 	turnIndex: number,
 	prompt: string,
+	model?: string | null,
+	effort?: string | null,
+	attachments: string[],
 	status: TurnStatus,
 	startedAt: string,
 	completedAt?: string | null,
-	items: ItemSnapshot[],
+	items: ItemSnapshot_Deserialize[],
 	approvals: ApprovalSnapshot_Deserialize[],
 	unknownEvents: UnknownEventSnapshot[],
 };
@@ -340,10 +378,13 @@ export type TurnSnapshot_Serialize = {
 	id: number,
 	turnIndex: number,
 	prompt: string,
+	model: string | null,
+	effort: string | null,
+	attachments: string[],
 	status: TurnStatus,
 	startedAt: string,
 	completedAt: string | null,
-	items: ItemSnapshot[],
+	items: ItemSnapshot_Serialize[],
 	approvals: ApprovalSnapshot_Serialize[],
 	unknownEvents: UnknownEventSnapshot[],
 };

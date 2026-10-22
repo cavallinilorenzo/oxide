@@ -1,18 +1,18 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { PaperclipIcon, XIcon } from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
-  type ApprovalSnapshot,
   type DebugSequencedThreadEvent,
   type Detection,
-  type ItemSnapshot,
   type PermissionMode,
   type SequencedThreadEvent,
   type Thread,
+  type ThreadCapabilities,
   type ThreadStatus,
-  type TurnSnapshot,
 } from "./bindings";
+import { TurnView } from "./TurnView";
 import { getClaudeCodeHint } from "./providerHints";
 import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
 
@@ -21,6 +21,20 @@ interface ThreadViewProps {
   projectId: number;
   onThreadCreated: (thread: Thread) => void;
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
+}
+
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+interface PendingImage {
+  path: string;
+  previewUrl: string;
 }
 
 export const PERMISSION_CONFIG: Record<
@@ -46,149 +60,6 @@ export function getOfferedPermissionModes(
     }));
 }
 
-const ItemView = memo(function ItemView({ item }: { item: ItemSnapshot }) {
-  return (
-    <div className="message agent">
-      <div className="message-header">
-        Agent {item.kind !== "agent_message" && `(${item.kind})`}
-      </div>
-      <div className="message-content">{item.content}</div>
-    </div>
-  );
-});
-
-const ApprovalView = memo(function ApprovalView({
-  approval,
-  onRespond,
-  disabled,
-}: {
-  approval: ApprovalSnapshot;
-  onRespond: (approvalId: string, decision: ApprovalDecision) => void;
-  disabled?: boolean;
-}) {
-  const isPending = !approval.decision;
-  const kindLabel =
-    approval.kind === "file-change" || approval.kind === "file_change"
-      ? "file change"
-      : approval.kind;
-
-  return (
-    <div
-      className={`approval-card ${isPending ? "pending" : "decided"}`}
-      aria-label="Approval"
-    >
-      <div className="approval-header">
-        <span className="approval-kind-badge">{kindLabel}</span>
-        <span className="approval-title">Approval request</span>
-        {approval.createdAt && (
-          <span className="approval-time">
-            {new Date(approval.createdAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </span>
-        )}
-      </div>
-
-      <div className="approval-summary">{approval.summary}</div>
-
-      {isPending ? (
-        <div className="approval-actions">
-          <button
-            type="button"
-            className="approval-btn allow"
-            disabled={disabled}
-            onClick={() => onRespond(approval.approvalId, "allow")}
-          >
-            Allow
-          </button>
-          <button
-            type="button"
-            className="approval-btn deny"
-            disabled={disabled}
-            onClick={() => onRespond(approval.approvalId, "deny")}
-          >
-            Deny
-          </button>
-          {approval.options?.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className="approval-btn option"
-              disabled={disabled}
-              onClick={() => onRespond(approval.approvalId, "allow")}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="approval-decision-bar">
-          <span className={`approval-decision ${approval.decision}`}>
-            {approval.decision === "allow" ? "Allowed" : "Denied"}
-          </span>
-          {approval.decidedAt && (
-            <span className="approval-decision-time">
-              at{" "}
-              {new Date(approval.decidedAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-
-const TurnView = memo(function TurnView({
-  turn,
-  onRespond,
-  isWorking,
-}: {
-  turn: TurnSnapshot;
-  onRespond: (approvalId: string, decision: ApprovalDecision) => void;
-  isWorking: boolean;
-}) {
-  const entries = [
-    ...(turn.items || []).map((item) => ({
-      type: "item" as const,
-      id: `item-${item.id}-${item.itemIndex}`,
-      time: item.createdAt,
-      data: item,
-    })),
-    ...(turn.approvals || []).map((app) => ({
-      type: "approval" as const,
-      id: `appr-${app.id}-${app.approvalId}`,
-      time: app.createdAt,
-      data: app,
-    })),
-  ].sort((a, b) => a.time.localeCompare(b.time));
-
-  return (
-    <div className="turn">
-      <div className="message user">
-        <div className="message-header">You</div>
-        <div className="message-content">{turn.prompt}</div>
-      </div>
-      {entries.map((entry) =>
-        entry.type === "item" ? (
-          <ItemView key={entry.id} item={entry.data} />
-        ) : (
-          <ApprovalView
-            key={entry.id}
-            approval={entry.data}
-            onRespond={onRespond}
-            disabled={!isWorking && turn.status !== "running"}
-          />
-        )
-      )}
-    </div>
-  );
-});
-
 export function ThreadView({
   threadId,
   projectId,
@@ -198,6 +69,9 @@ export function ThreadView({
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugState, setDebugState] = useState<{
     threadId: number | null;
@@ -300,6 +174,48 @@ export function ThreadView({
 
   const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 
+  // Before a Thread exists, ask what the Provider it will use supports.
+  useEffect(() => {
+    if (threadId) return;
+    let active = true;
+    void commands.providerCapabilities(draftProvider).then((caps) => {
+      if (active) setNewThreadCaps(caps);
+    });
+    return () => {
+      active = false;
+    };
+  }, [threadId, draftProvider]);
+
+  const imagesOffered = (threadId ? transcript.capabilities : newThreadCaps)?.imageAttachments ?? false;
+
+  const addImage = async (file: File) => {
+    const ext = IMAGE_EXTENSIONS[file.type];
+    if (!ext) return;
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+    const saved = await commands.saveAttachment(bytes, ext);
+    if (saved.status !== "ok") {
+      console.error("Failed to store image:", saved.error);
+      return;
+    }
+    setPendingImages((prev) => [...prev, { path: saved.data, previewUrl: URL.createObjectURL(file) }]);
+  };
+
+  const removeImage = (path: string) => {
+    setPendingImages((prev) => {
+      const gone = prev.find((i) => i.path === path);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((i) => i.path !== path);
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (!imagesOffered) return;
+    const files = Array.from(e.clipboardData.files).filter((f) => f.type in IMAGE_EXTENSIONS);
+    if (files.length === 0) return;
+    e.preventDefault();
+    files.forEach((f) => void addImage(f));
+  };
+
   // Auto-scroll to bottom as messages stream in
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -383,7 +299,10 @@ export function ThreadView({
         }
       }
 
-      await commands.sendPrompt(targetThreadId, prompt);
+      const attachments = pendingImages.map((i) => i.path);
+      pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
+      setPendingImages([]);
+      await commands.sendPrompt(targetThreadId, prompt, attachments);
     } finally {
       setSending(false);
     }
@@ -425,6 +344,7 @@ export function ThreadView({
             <TurnView
               key={turn.id || tIdx}
               turn={turn}
+              provider={transcript.thread?.provider ?? draftProvider}
               onRespond={handleRespond}
               isWorking={isTurnActive}
             />
@@ -463,21 +383,64 @@ export function ThreadView({
           </label>
         </div>
 
-        <input
-          type="text"
-          className="composer-input"
-          placeholder={isTurnActive ? "Agent is working…" : "Type a prompt…"}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={isTurnActive || sending}
-        />
-        <button
-          type="submit"
-          className="composer-submit"
-          disabled={!input.trim() || isTurnActive || sending}
-        >
-          Send
-        </button>
+        {pendingImages.length > 0 && (
+          <div className="pending-images">
+            {pendingImages.map((img) => (
+              <div className="pending-image" key={img.path}>
+                <img src={img.previewUrl} alt="Pending attachment" />
+                <button
+                  type="button"
+                  aria-label="Remove image"
+                  onClick={() => removeImage(img.path)}
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          {imagesOffered && (
+            <>
+              <button
+                type="button"
+                className="composer-attach"
+                aria-label="Attach image"
+                disabled={isTurnActive || sending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <PaperclipIcon size={16} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  Array.from(e.target.files ?? []).forEach((f) => void addImage(f));
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
+          <input
+            type="text"
+            className="composer-input"
+            placeholder={isTurnActive ? "Agent is working…" : "Type a prompt…"}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
+            disabled={isTurnActive || sending}
+          />
+          <button
+            type="submit"
+            className="composer-submit"
+            disabled={!input.trim() || isTurnActive || sending}
+          >
+            Send
+          </button>
+        </div>
       </form>
     </div>
   );

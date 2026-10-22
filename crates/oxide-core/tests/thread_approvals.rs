@@ -46,11 +46,13 @@ fn core_runs_approval_end_to_end_and_persists_in_transcript() {
             let _ = s.send(ProviderEvent::ItemStarted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
                 content: "Executed command with approval".into(),
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,
@@ -272,11 +274,13 @@ fn core_runs_approval_deny_end_to_end() {
             let _ = s.send(ProviderEvent::ItemStarted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 item_index: 0,
                 kind: ItemKind::AgentMessage,
                 content: "Action was denied".into(),
+                parent_item_index: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,

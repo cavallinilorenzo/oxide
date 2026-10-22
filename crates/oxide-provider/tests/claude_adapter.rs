@@ -135,7 +135,9 @@ fn claude_provider_runs_against_fake_cli_replaying_stream_json() {
                 assert_eq!(prompt, "Hello test");
                 turn_started_seen = true;
             }
-            ProviderEvent::ItemStarted { item_index, kind } => {
+            ProviderEvent::ItemStarted {
+                item_index, kind, ..
+            } => {
                 assert_eq!(item_index, 0);
                 assert_eq!(kind, ItemKind::AgentMessage);
                 item_started_seen = true;
@@ -148,6 +150,7 @@ fn claude_provider_runs_against_fake_cli_replaying_stream_json() {
                 item_index,
                 kind,
                 content,
+                ..
             } => {
                 assert_eq!(item_index, 0);
                 assert_eq!(kind, ItemKind::AgentMessage);

@@ -254,6 +254,7 @@ impl ClaudeCodeProvider {
                                             let _ = tx.send(ProviderEvent::ItemStarted {
                                                 item_index: index,
                                                 kind,
+                                                parent_item_index: None,
                                             });
                                         }
                                         "content_block_delta" => {
@@ -309,6 +310,7 @@ impl ClaudeCodeProvider {
                                                 item_index: index,
                                                 kind,
                                                 content,
+                                                parent_item_index: None,
                                             });
                                         }
                                         _ => {

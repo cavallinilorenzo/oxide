@@ -131,7 +131,7 @@ function DiffBody({ projectId, scope, onScopeChange, focus, refreshKey, onChange
           />
           <div className="commit-actions">
             <span className="commit-count">
-              {selected.length === 0 ? "No files selected" : `${files.length - unchecked.size} of ${files.length} files`}
+              {selected.length === 0 ? "No files selected" : `${files.filter((f) => !unchecked.has(f.path)).length} of ${files.length} files`}
             </span>
             <button type="submit" disabled={!ready}>
               Commit

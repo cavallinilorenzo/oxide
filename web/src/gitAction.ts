@@ -9,7 +9,7 @@ const DIVERGED = "Behind and ahead of the upstream: Pull (fast-forward) first.";
 
 /** The primary Git action for a status: what one click should do next. */
 export function nextAction(status: GitStatus): NextAction {
-  const blockedReason = status.ahead > 0 && status.behind > 0 ? DIVERGED : null;
+  const blockedReason = pushBlockedReason(status);
   if (status.changedFiles > 0) return { kind: "commit-push", label: "Commit & Push", blockedReason };
   if (status.ahead > 0 || status.unpublished) return { kind: "push", label: "Push", blockedReason };
   return { kind: "up-to-date", label: "✓ up to date", blockedReason: null };

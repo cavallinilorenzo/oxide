@@ -64,6 +64,15 @@ fn fake_provider_passes_shared_contract_suite() {
 }
 
 #[test]
+fn claude_code_provider_passes_shared_contract_suite() {
+    use std::path::PathBuf;
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    verify_provider_contract(|| {
+        oxide_provider::claude::ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap())
+    });
+}
+
+#[test]
 fn fake_provider_handles_approval_and_permission_mode() {
     use oxide_provider::{ApprovalDecision, ApprovalKind};
     use std::sync::{Arc, Mutex};

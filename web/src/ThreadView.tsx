@@ -5,6 +5,7 @@ import {
   type ApprovalDecision,
   type ApprovalSnapshot,
   type DebugSequencedThreadEvent,
+  type Detection,
   type ItemSnapshot,
   type PermissionMode,
   type SequencedThreadEvent,
@@ -12,6 +13,7 @@ import {
   type ThreadStatus,
   type TurnSnapshot,
 } from "./bindings";
+import { getClaudeCodeHint } from "./providerHints";
 import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
 
 interface ThreadViewProps {
@@ -203,6 +205,7 @@ export function ThreadView({
   }>({ threadId: null, events: [] });
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
+  const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pendingEventsRef = useRef<SequencedThreadEvent[]>([]);
   const rafIdRef = useRef<number>(0);
@@ -322,6 +325,27 @@ export function ThreadView({
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
+
+  useEffect(() => {
+    let active = true;
+    if (currentProvider === "claude") {
+      void commands.detectProvider("claude").then((res) => {
+        if (active && res.status === "ok") {
+          setProviderDetection(res.data);
+        }
+      });
+    } else {
+      void Promise.resolve().then(() => {
+        if (active) setProviderDetection(null);
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [currentProvider]);
+
+  const providerHint = currentProvider === "claude" ? getClaudeCodeHint(providerDetection) : null;
+
   const offeredModes = getOfferedPermissionModes(
     transcript.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
     currentProvider
@@ -408,6 +432,15 @@ export function ThreadView({
         )}
         <div ref={bottomRef} />
       </div>
+
+      {providerHint && providerHint.type !== "ok" && (
+        <div className={`provider-hint ${providerHint.type}`} role="alert">
+          <span className="hint-message">{providerHint.message}</span>
+          {providerHint.command && (
+            <code className="hint-command">{providerHint.command}</code>
+          )}
+        </div>
+      )}
 
       <form className="composer" onSubmit={handleSubmit}>
         <div className="permission-chip-wrapper" title="Permission mode">

@@ -190,6 +190,7 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
+    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -396,6 +397,23 @@ fn respond_to_approval(
     Ok(core.respond_to_approval(thread_id, &approval_id, dec)?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Detection {
+    pub available: bool,
+    pub installed: bool,
+    pub version: Option<String>,
+    pub authenticated: bool,
+    pub warning: Option<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn detect_provider(core: State<'_, Arc<Core>>, provider: String) -> Result<Detection, AppError> {
+    let det = core.detect_provider(&provider);
+    Ok(convert(&det))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn get_provider_capabilities(
@@ -481,6 +499,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_thread,
         set_thread_permission_mode,
         respond_to_approval,
+        detect_provider,
         get_provider_capabilities,
         list_threads,
         send_prompt,

@@ -95,7 +95,13 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     assert!(unknown_seen, "unknown events must be passed through");
     assert!(turn_completed_seen, "turn completed must be emitted");
 
-    // 5. Shutdown
+    // 5. Model and Permission mode changes
+    provider.set_model("opus").expect("set_model must succeed");
+    provider
+        .set_permission_mode(caps.supported_permission_modes[0])
+        .expect("set_permission_mode must succeed");
+
+    // 6. Shutdown
     provider.shutdown().expect("shutdown must succeed");
     assert!(
         receiver.recv().is_err(),

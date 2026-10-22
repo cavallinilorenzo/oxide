@@ -23,7 +23,7 @@ use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, TurnStatus};
+pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -230,11 +230,40 @@ impl Core {
         actor.respond_to_approval(approval_id.to_string(), decision)
     }
 
+    pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
+        match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
+                .detect()
+                .unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                }),
+            "fake" => oxide_provider::Detection {
+                available: true,
+                installed: true,
+                version: Some("0.1.0-fake".into()),
+                authenticated: true,
+                warning: None,
+            },
+            _ => oxide_provider::Detection {
+                available: false,
+                installed: false,
+                version: None,
+                authenticated: false,
+                warning: Some(format!("Unknown provider '{provider}'")),
+            },
+        }
+    }
+
     pub fn get_provider_capabilities(
         &self,
         provider: &str,
     ) -> oxide_provider::ProviderCapabilities {
         match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
             "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
                     PermissionMode::AutoEdit,
@@ -242,6 +271,7 @@ impl Core {
                 ],
                 interactive_approvals: false,
                 supports_reasoning: false,
+                image_attachments: false,
             },
             _ => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
@@ -251,6 +281,7 @@ impl Core {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
+                image_attachments: false,
             },
         }
     }
@@ -302,6 +333,19 @@ impl Core {
         let provider: Box<dyn ProviderTrait> =
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
+            } else if snapshot.thread.provider == "claude" {
+                let claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                let detection = claude.detect().unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                });
+                if !detection.installed {
+                    return Err(Error::Provider("Claude Code is not installed".to_string()));
+                }
+                Box::new(claude)
             } else {
                 Box::new(oxide_provider::FakeProvider::default())
             };

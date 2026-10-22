@@ -1,0 +1,342 @@
+use oxide_provider::Provider;
+use oxide_provider::claude::ClaudeCodeProvider;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+
+fn make_fake_cli(dir: &std::path::Path, version: &str, logged_in: bool) -> PathBuf {
+    let script_path = dir.join("fake-claude.sh");
+    let auth_exit = if logged_in { 0 } else { 1 };
+    let content = format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+    echo "claude {version}"
+    exit 0
+elif [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+    if [ {auth_exit} -eq 0 ]; then
+        echo '{{"loggedIn": true}}'
+        exit 0
+    else
+        echo '{{"loggedIn": false}}'
+        exit 1
+    fi
+fi
+exit 0
+"#
+    );
+    fs::write(&script_path, content).unwrap();
+    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).unwrap();
+    script_path
+}
+
+#[test]
+fn claude_detect_missing_cli() {
+    let provider = ClaudeCodeProvider::with_command("nonexistent_binary_xyz_123");
+    let detection = provider
+        .detect()
+        .expect("detect should not error on missing binary");
+    assert!(!detection.installed);
+    assert!(!detection.authenticated);
+    assert!(!detection.available);
+    assert_eq!(detection.version, None);
+    assert_eq!(detection.warning, None);
+}
+
+#[test]
+fn claude_detect_installed_and_authenticated_pinned_version() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cli_path = make_fake_cli(temp_dir.path(), "1.0.0", true);
+
+    let provider = ClaudeCodeProvider::with_command(cli_path.to_str().unwrap());
+    let detection = provider.detect().expect("detect must succeed");
+    assert!(detection.installed);
+    assert!(detection.authenticated);
+    assert!(detection.available);
+    assert_eq!(detection.version.as_deref(), Some("1.0.0"));
+    assert_eq!(detection.warning, None);
+}
+
+#[test]
+fn claude_detect_installed_outside_pinned_range_gives_warning_not_block() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cli_path = make_fake_cli(temp_dir.path(), "2.5.0", true);
+
+    let provider = ClaudeCodeProvider::with_command(cli_path.to_str().unwrap());
+    let detection = provider.detect().expect("detect must succeed");
+    assert!(detection.installed);
+    assert!(detection.authenticated);
+    assert!(
+        detection.available,
+        "out-of-range version should warn, not block"
+    );
+    assert_eq!(detection.version.as_deref(), Some("2.5.0"));
+    assert!(
+        detection.warning.is_some(),
+        "detection warning should be present when version is outside pinned range"
+    );
+    let warning = detection.warning.unwrap();
+    assert!(warning.contains("2.5.0"));
+}
+
+#[test]
+fn claude_detect_installed_but_logged_out() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cli_path = make_fake_cli(temp_dir.path(), "1.0.0", false);
+
+    let provider = ClaudeCodeProvider::with_command(cli_path.to_str().unwrap());
+    let detection = provider.detect().expect("detect must succeed");
+    assert!(detection.installed);
+    assert!(!detection.authenticated);
+    assert!(!detection.available);
+    assert_eq!(detection.version.as_deref(), Some("1.0.0"));
+    assert_eq!(detection.warning, None);
+}
+
+#[test]
+fn claude_provider_runs_against_fake_cli_replaying_stream_json() {
+    use oxide_provider::{ItemKind, PermissionMode, ProviderEvent, StartContext, TurnStatus};
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: Some("claude-3-7-sonnet".into()),
+        effort: Some("high".into()),
+        permission_mode: PermissionMode::AutoEdit,
+    };
+
+    let rx = provider.start(&context).expect("start should succeed");
+
+    provider
+        .send_prompt("Hello test")
+        .expect("send_prompt should succeed");
+
+    let mut session_info_seen = false;
+    let mut turn_started_seen = false;
+    let mut item_started_seen = false;
+    let mut item_deltas = Vec::new();
+    let mut item_completed_seen = false;
+    let mut unknown_seen = false;
+    let mut turn_completed_seen = false;
+
+    let timeout = Duration::from_secs(5);
+    while let Ok(evt) = rx.recv_timeout(timeout) {
+        match evt {
+            ProviderEvent::SessionInfo { session_id } => {
+                assert_eq!(session_id, "claude-session-1234");
+                session_info_seen = true;
+            }
+            ProviderEvent::TurnStarted { turn_index, prompt } => {
+                assert_eq!(turn_index, 0);
+                assert_eq!(prompt, "Hello test");
+                turn_started_seen = true;
+            }
+            ProviderEvent::ItemStarted { item_index, kind } => {
+                assert_eq!(item_index, 0);
+                assert_eq!(kind, ItemKind::AgentMessage);
+                item_started_seen = true;
+            }
+            ProviderEvent::ItemDelta { item_index, delta } => {
+                assert_eq!(item_index, 0);
+                item_deltas.push(delta);
+            }
+            ProviderEvent::ItemCompleted {
+                item_index,
+                kind,
+                content,
+            } => {
+                assert_eq!(item_index, 0);
+                assert_eq!(kind, ItemKind::AgentMessage);
+                assert_eq!(content, "Hello world!");
+                item_completed_seen = true;
+            }
+            ProviderEvent::Unknown { raw } => {
+                assert!(raw.contains("custom_unrecognized_event"));
+                unknown_seen = true;
+            }
+            ProviderEvent::TurnCompleted { turn_index, status } => {
+                assert_eq!(turn_index, 0);
+                assert_eq!(status, TurnStatus::Completed);
+                turn_completed_seen = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(session_info_seen, "session info should be received");
+    assert!(turn_started_seen, "turn started should be received");
+    assert!(item_started_seen, "item started should be received");
+    assert_eq!(item_deltas.concat(), "Hello world!");
+    assert!(item_completed_seen, "item completed should be received");
+    assert!(unknown_seen, "unknown events should be passed through");
+    assert!(turn_completed_seen, "turn completed should be received");
+
+    provider.shutdown().expect("shutdown should succeed");
+}
+
+#[test]
+fn claude_provider_handles_wire_commands_and_approval() {
+    use oxide_provider::{
+        ApprovalDecision, ApprovalKind, PermissionMode, ProviderEvent, StartContext, TurnStatus,
+    };
+    use std::time::Duration;
+
+    let wire_log = tempfile::NamedTempFile::new().unwrap();
+    let wire_log_path = wire_log.path().to_str().unwrap().to_string();
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    provider.set_env("OXIDE_WIRE_LOG", &wire_log_path);
+
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: Some("opus".into()),
+        effort: Some("low".into()),
+        permission_mode: PermissionMode::Ask,
+    };
+
+    let rx = provider.start(&context).expect("start should succeed");
+
+    // Test wire commands for model & permission mode
+    provider.set_model("sonnet").unwrap();
+    provider
+        .set_permission_mode(PermissionMode::FullAccess)
+        .unwrap();
+
+    // Trigger approval test
+    provider.send_prompt("approval_test").unwrap();
+
+    let mut approval_requested_seen = false;
+    let timeout = Duration::from_secs(5);
+
+    while let Ok(evt) = rx.recv_timeout(timeout) {
+        match evt {
+            ProviderEvent::ApprovalRequested {
+                id,
+                kind,
+                summary,
+                options,
+            } => {
+                assert_eq!(id, "appr-42");
+                assert_eq!(kind, ApprovalKind::Command);
+                assert_eq!(summary, "Run cargo test");
+                assert_eq!(options, vec!["allow-once", "allow-always"]);
+                approval_requested_seen = true;
+
+                // Respond to approval
+                provider
+                    .respond_to_approval(&id, ApprovalDecision::Allow)
+                    .unwrap();
+            }
+            ProviderEvent::TurnCompleted { status, .. } => {
+                assert_eq!(status, TurnStatus::Completed);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(approval_requested_seen, "approval request should be seen");
+
+    // Read wire log
+    let wire_contents = std::fs::read_to_string(&wire_log_path).unwrap();
+    assert!(wire_contents.contains("opus"));
+    assert!(wire_contents.contains("model_changed"));
+    assert!(wire_contents.contains("sonnet"));
+    assert!(wire_contents.contains("permission_mode_changed"));
+    assert!(wire_contents.contains("approval_answered"));
+
+    provider.shutdown().unwrap();
+}
+
+#[test]
+fn claude_provider_handles_interrupt() {
+    use oxide_provider::{PermissionMode, ProviderEvent, StartContext, TurnStatus};
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: None,
+        effort: None,
+        permission_mode: PermissionMode::AutoEdit,
+    };
+
+    let rx = provider.start(&context).expect("start should succeed");
+
+    // Wait for SessionInfo to guarantee child process is alive and initialized
+    let evt = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(evt, ProviderEvent::SessionInfo { .. }));
+
+    provider.send_prompt("interrupt_test").unwrap();
+
+    // Wait for TurnStarted
+    let evt = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(evt, ProviderEvent::TurnStarted { .. }));
+
+    provider.interrupt().expect("interrupt should succeed");
+
+    let mut interrupted_seen = false;
+    let timeout = Duration::from_secs(5);
+    while let Ok(evt) = rx.recv_timeout(timeout) {
+        if let ProviderEvent::TurnCompleted {
+            status: TurnStatus::Interrupted,
+            ..
+        } = evt
+        {
+            interrupted_seen = true;
+            break;
+        }
+    }
+
+    assert!(
+        interrupted_seen,
+        "turn should be completed with Interrupted status"
+    );
+    provider.shutdown().unwrap();
+}
+
+#[test]
+fn claude_provider_resume_passes_session_id() {
+    use oxide_provider::{PermissionMode, ProviderEvent, StartContext};
+    use std::time::Duration;
+
+    let wire_log = tempfile::NamedTempFile::new().unwrap();
+    let wire_log_path = wire_log.path().to_str().unwrap().to_string();
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    provider.set_env("OXIDE_WIRE_LOG", &wire_log_path);
+
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: None,
+        effort: None,
+        permission_mode: PermissionMode::AutoEdit,
+    };
+
+    let rx = provider
+        .resume("session-xyz-99", &context)
+        .expect("resume should succeed");
+
+    // Wait for SessionInfo to guarantee child process has started and logged argv
+    let evt = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(evt, ProviderEvent::SessionInfo { .. }));
+
+    provider.shutdown().unwrap();
+
+    let wire_contents = std::fs::read_to_string(&wire_log_path).unwrap();
+    assert!(
+        wire_contents.contains("--resume") && wire_contents.contains("session-xyz-99"),
+        "argv should contain --resume session-xyz-99"
+    );
+}

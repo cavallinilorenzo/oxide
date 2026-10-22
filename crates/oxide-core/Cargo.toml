@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 crossbeam-channel = "0.5.17"
+ignore = "0.4.33"
 libc = "0.2.191"
 notify = "8"
 oxide-provider = { path = "../oxide-provider" }

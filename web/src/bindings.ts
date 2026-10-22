@@ -40,6 +40,13 @@ export const commands = {
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
 	closeTerminal: (terminalId: number) => typedError<null, AppError>(__TAURI_INVOKE("close_terminal", { terminalId })),
+	/**
+	 *  Lists one directory of a Thread's checkout (`""` is the root), minus
+	 *  `.git` and gitignored entries.
+	 */
+	listDir: (projectId: number, threadId: number | null, path: string) => typedError<FileEntry[], AppError>(__TAURI_INVOKE("list_dir", { projectId, threadId, path })),
+	/**  Reads a file of a Thread's checkout, capped at 1 MiB. */
+	readFile: (projectId: number, threadId: number | null, path: string) => typedError<FileContent, AppError>(__TAURI_INVOKE("read_file", { projectId, threadId, path })),
 };
 
 /* Types */
@@ -116,6 +123,20 @@ export type Detection_Serialize = {
 export type FieldError = {
 	path: string,
 	message: string,
+};
+
+export type FileContent = {
+	content: string,
+	/**  Saturates at 4 GiB. */
+	size: number,
+	truncated: boolean,
+	binary: boolean,
+};
+
+export type FileEntry = {
+	name: string,
+	path: string,
+	isDir: boolean,
 };
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";

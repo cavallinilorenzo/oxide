@@ -12,11 +12,13 @@ type TerminalContext = { key: string; projectId: number; threadId: number | null
 const terminalContextKey = (projectId: number, threadId: number | null) =>
   `${projectId}:${threadId ?? "draft"}`;
 
+const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
 export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
+  const [activeTool, setActiveTool] = useState<string | null>("Files");
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -193,11 +195,22 @@ export function App() {
           <aside className="tools" aria-label="Tools panel">
             <nav className="tool-tabs">
               {TOOL_TABS.map((t) => (
-                <button key={t} title={t} aria-label={t}>
+                <button
+                  key={t}
+                  title={t}
+                  aria-label={t}
+                  aria-pressed={activeTool === t}
+                  onClick={() => setActiveTool(t)}
+                >
                   {t[0]}
                 </button>
               ))}
             </nav>
+            {activeTool === "Files" && selected && (
+              <Suspense fallback={null}>
+                <FilesPanel projectId={selected.id} threadId={currentThreadId} />
+              </Suspense>
+            )}
           </aside>
         )}
       </div>

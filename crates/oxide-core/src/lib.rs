@@ -24,8 +24,9 @@ pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    CheckState, GithubAvailability, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment,
-    PullRequestDetail, PullRequestDraft, PullRequestInput, PullRequestState,
+    CheckState, GithubAvailability, IssueComment, IssueDetail, IssueSummary, IssuesState,
+    MergeMethod, PullRequest, PullRequestCheck, PullRequestComment, PullRequestDetail,
+    PullRequestDraft, PullRequestInput, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -47,7 +48,10 @@ use serde::Serialize;
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
+pub use oxide_provider::{
+    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, ProviderCapabilities,
+    TurnStatus,
+};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -104,6 +108,7 @@ pub struct Core {
     git: git::GitState,
     gh: github::Gh,
     activity: Arc<activity::Activity>,
+    model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
 }
 
 impl Core {
@@ -155,6 +160,7 @@ impl Core {
             git: git::GitState::default(),
             gh: github::Gh::default(),
             activity: Arc::new(activity::Activity::new()),
+            model_catalogs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -511,7 +517,7 @@ impl Core {
     }
 
     pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
-        match provider {
+        let det = match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
                 .detect()
                 .unwrap_or(oxide_provider::Detection {
@@ -553,7 +559,11 @@ impl Core {
                 authenticated: false,
                 warning: Some(format!("Unknown provider '{provider}'")),
             },
+        };
+        if det.available || det.installed {
+            let _ = self.get_model_catalog(provider, false);
         }
+        det
     }
 
     pub fn get_provider_capabilities(
@@ -573,8 +583,84 @@ impl Core {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: false,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             },
         }
+    }
+
+    pub fn get_model_catalog(
+        &self,
+        provider: &str,
+        refresh: bool,
+    ) -> Result<Vec<oxide_provider::ModelInfo>> {
+        if !refresh {
+            let cache = self.model_catalogs.lock().unwrap();
+            if let Some(models) = cache.get(provider) {
+                return Ok(models.clone());
+            }
+        }
+
+        let models = match provider {
+            "claude" => {
+                let p = oxide_provider::claude::ClaudeCodeProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            "codex" => {
+                let p = oxide_provider::codex::CodexProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            "agy" | "antigravity" => {
+                let p = oxide_provider::agy::AgyProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            _ => {
+                let fake = oxide_provider::FakeProvider::default();
+                ProviderTrait::models(&fake).unwrap_or_default()
+            }
+        };
+
+        self.model_catalogs
+            .lock()
+            .unwrap()
+            .insert(provider.to_string(), models.clone());
+        Ok(models)
+    }
+
+    pub fn get_favourite_models(&self) -> Result<Vec<String>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let res: std::result::Result<String, rusqlite::Error> = db.query_row(
+            "SELECT value FROM app_state WHERE key = 'favourite_models'",
+            [],
+            |r| r.get(0),
+        );
+        match res {
+            Ok(json_str) => Ok(serde_json::from_str(&json_str).unwrap_or_default()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(vec![]),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    pub fn set_favourite_models(&self, favourites: &[String]) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let json_str =
+            serde_json::to_string(favourites).map_err(|e| Error::Provider(e.to_string()))?;
+        db.execute(
+            "INSERT INTO app_state (key, value) VALUES ('favourite_models', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![json_str],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_thread_model_and_effort(
+        &self,
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.set_model_and_effort(model, effort)
     }
 
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {
@@ -965,7 +1051,43 @@ impl Core {
             .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, input))
     }
 
-    /// Opens the current branch's pull request in the browser.
+    /// Availability of GitHub CLI for issues, and guidance if missing/logged out.
+    pub fn issues_state(&self, project_id: u32) -> Result<IssuesState> {
+        github::issues_state(&self.gh, &self.main_checkout(project_id)?)
+    }
+
+    /// Open issues of the repository, optionally narrowed by a search query.
+    pub fn list_issues(&self, project_id: u32, search: &str) -> Result<Vec<IssueSummary>> {
+        github::list_issues(&self.gh, &self.main_checkout(project_id)?, search)
+    }
+
+    /// Detailed issue with its description, status and comments.
+    pub fn issue_detail(&self, project_id: u32, number: u32) -> Result<IssueDetail> {
+        github::issue_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Creates an issue with title and body.
+    pub fn create_issue(&self, project_id: u32, title: &str, body: &str) -> Result<IssueSummary> {
+        github::create_issue(&self.gh, &self.main_checkout(project_id)?, title, body)
+    }
+
+    /// Adds a comment to an issue.
+    pub fn comment_issue(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
+        github::comment_issue(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Closes an issue.
+    pub fn close_issue(&self, project_id: u32, number: u32) -> Result<()> {
+        github::close_issue(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Opens an issue in the system browser.
+    pub fn open_issue(&self, project_id: u32, number: u32) -> Result<()> {
+        let url = github::issue_url(&self.gh, &self.main_checkout(project_id)?, number)?;
+        self.activity.open_url(&url);
+        Ok(())
+    }
+
     pub fn open_pull_request(&self, project_id: u32) -> Result<()> {
         let url = github::pull_request_url(&self.gh, &self.main_checkout(project_id)?)?;
         self.activity.open_url(&url);

@@ -22,6 +22,9 @@ const PullRequestPanel = lazy(() =>
   import("./PullRequestPanel").then((module) => ({ default: module.PullRequestPanel })),
 );
 const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
+const IssuesSurface = lazy(() =>
+  import("./IssuesSurface").then((module) => ({ default: module.IssuesSurface })),
+);
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
 export function App() {
@@ -414,6 +417,11 @@ export function App() {
             {activeTool === "Files" && selected && (
               <Suspense fallback={null}>
                 <FilesPanel projectId={selected.id} threadId={currentThreadId} />
+              </Suspense>
+            )}
+            {activeTool === "Issues" && selected && (
+              <Suspense fallback={null}>
+                <IssuesSurface projectId={selected.id} />
               </Suspense>
             )}
           </aside>

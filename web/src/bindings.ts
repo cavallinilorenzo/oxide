@@ -24,6 +24,10 @@ export const commands = {
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
+	getModelCatalog: (provider: string, refresh: boolean) => typedError<ModelInfo_Serialize[], AppError>(__TAURI_INVOKE("get_model_catalog", { provider, refresh })),
+	getFavouriteModels: () => typedError<string[], AppError>(__TAURI_INVOKE("get_favourite_models")),
+	setFavouriteModels: (favourites: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_favourite_models", { favourites })),
+	setThreadModelAndEffort: (threadId: number, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_model_and_effort", { threadId, model, effort })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
 	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
@@ -79,7 +83,6 @@ export const commands = {
 	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
 	/**  Pushes the branch if needed, then opens a pull request for it. */
 	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
-	/**  Opens the branch's pull request on GitHub. */
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
 	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
 	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
@@ -89,6 +92,14 @@ export const commands = {
 	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch })),
 	/**  Checks the pull request's branch out in the main checkout. */
 	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
+	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
+	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
+	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
+	issueDetail: (projectId: number, number: number) => typedError<IssueDetail, AppError>(__TAURI_INVOKE("issue_detail", { projectId, number })),
+	createIssue: (projectId: number, title: string, body: string) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body })),
+	commentIssue: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_issue", { projectId, number, body })),
+	closeIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("close_issue", { projectId, number })),
+	openIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("open_issue", { projectId, number })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
@@ -299,6 +310,45 @@ export type GitStatus_Serialize = {
 
 export type GithubAvailability = "ready" | "missing" | "loggedOut";
 
+export type IssueComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type IssueDetail = {
+	number: number,
+	title: string,
+	body: string,
+	state: string,
+	author: string,
+	url: string,
+	createdAt: string,
+	comments: IssueComment[],
+};
+
+export type IssueSummary = {
+	number: number,
+	title: string,
+	state: string,
+	author: string,
+	url: string,
+	commentsCount: number,
+	createdAt: string,
+};
+
+export type IssuesState = IssuesState_Serialize | IssuesState_Deserialize;
+
+export type IssuesState_Deserialize = {
+	availability: GithubAvailability,
+	guidance?: string | null,
+};
+
+export type IssuesState_Serialize = {
+	availability: GithubAvailability,
+	guidance: string | null,
+};
+
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
 
 export type ItemSnapshot = ItemSnapshot_Serialize | ItemSnapshot_Deserialize;
@@ -323,6 +373,26 @@ export type ItemSnapshot_Serialize = {
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+export type ModelInfo = ModelInfo_Serialize | ModelInfo_Deserialize;
+
+export type ModelInfo_Deserialize = {
+	id: string,
+	name: string,
+	description?: string | null,
+	supportedEfforts: string[],
+	defaultEffort?: string | null,
+	isLegacy: boolean,
+};
+
+export type ModelInfo_Serialize = {
+	id: string,
+	name: string,
+	description: string | null,
+	supportedEfforts: string[],
+	defaultEffort: string | null,
+	isLegacy: boolean,
+};
+
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
 
 export type Project = {
@@ -340,6 +410,8 @@ export type ProviderCapabilities = {
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
 	imageAttachments: boolean,
+	midThreadModelSwitch: boolean,
+	slashCommandPassthrough: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;

@@ -3,8 +3,9 @@
 //! user asked: there is no polling.
 
 use crate::git;
+use crate::git_diff::{Diff, parse_patch};
 use crate::{Error, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -37,6 +38,83 @@ pub struct PullRequest {
     pub draft: bool,
     pub base: String,
     pub head: String,
+    pub author: String,
+}
+
+/// How `gh pr merge` combines the commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl MergeMethod {
+    fn flag(self) -> &'static str {
+        match self {
+            MergeMethod::Merge => "--merge",
+            MergeMethod::Squash => "--squash",
+            MergeMethod::Rebase => "--rebase",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            MergeMethod::Merge => "merge",
+            MergeMethod::Squash => "squash",
+            MergeMethod::Rebase => "rebase",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckState {
+    Success,
+    Failure,
+    Pending,
+}
+
+impl CheckState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CheckState::Success => "success",
+            CheckState::Failure => "failure",
+            CheckState::Pending => "pending",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub state: CheckState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+/// Everything the Pull request Surface shows for one pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetail {
+    pub pull_request: PullRequest,
+    pub body: String,
+    pub checks: Vec<PullRequestCheck>,
+    pub comments: Vec<PullRequestComment>,
+    /// The merge methods the repository allows.
+    pub merge_methods: Vec<MergeMethod>,
+    /// Whether the repository deletes merged branches on its own.
+    pub delete_branch_on_merge: bool,
+    /// The changed files, for the Diff Surface.
+    pub diff: Diff,
 }
 
 /// What the Pull request Surface shows for the current branch.
@@ -169,15 +247,7 @@ impl Gh {
 
     /// The open pull request of the checked-out branch.
     fn current_pull_request(&self, cwd: &Path) -> Result<Option<PullRequest>> {
-        let json = match self.run(
-            cwd,
-            &[
-                "pr",
-                "view",
-                "--json",
-                "number,title,url,state,isDraft,baseRefName,headRefName",
-            ],
-        ) {
+        let json = match self.run(cwd, &["pr", "view", "--json", PR_FIELDS]) {
             Ok(json) => json,
             Err(GhError::Failed(m)) if m.contains("no pull requests found") => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -186,15 +256,55 @@ impl Gh {
         if v["state"].as_str() != Some("OPEN") {
             return Ok(None);
         }
-        let text = |key: &str| v[key].as_str().unwrap_or_default().to_string();
-        Ok(Some(PullRequest {
-            number: v["number"].as_u64().unwrap_or(0) as u32,
-            title: text("title"),
-            url: text("url"),
-            draft: v["isDraft"].as_bool().unwrap_or(false),
-            base: text("baseRefName"),
-            head: text("headRefName"),
-        }))
+        Ok(Some(pull_request_from(&v)))
+    }
+}
+
+const PR_FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,author";
+
+/// Most pull requests the list shows.
+const MAX_LISTED: &str = "100";
+
+fn text(value: &serde_json::Value) -> String {
+    value.as_str().unwrap_or_default().to_string()
+}
+
+fn pull_request_from(v: &serde_json::Value) -> PullRequest {
+    PullRequest {
+        number: v["number"].as_u64().unwrap_or(0) as u32,
+        title: text(&v["title"]),
+        url: text(&v["url"]),
+        draft: v["isDraft"].as_bool().unwrap_or(false),
+        base: text(&v["baseRefName"]),
+        head: text(&v["headRefName"]),
+        author: text(&v["author"]["login"]),
+    }
+}
+
+/// A check run or a commit status, as `statusCheckRollup` lists them.
+fn check_from(v: &serde_json::Value) -> PullRequestCheck {
+    let state = if v["__typename"].as_str() == Some("StatusContext") {
+        match v["state"].as_str() {
+            Some("SUCCESS") => CheckState::Success,
+            Some("PENDING" | "EXPECTED") => CheckState::Pending,
+            _ => CheckState::Failure,
+        }
+    } else if v["status"].as_str() != Some("COMPLETED") {
+        CheckState::Pending
+    } else {
+        match v["conclusion"].as_str() {
+            Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => CheckState::Success,
+            _ => CheckState::Failure,
+        }
+    };
+    PullRequestCheck {
+        // Check runs have a `name`, commit statuses a `context`.
+        name: v["name"]
+            .as_str()
+            .or_else(|| v["context"].as_str())
+            .unwrap_or_default()
+            .to_string(),
+        state,
     }
 }
 
@@ -374,6 +484,133 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
     Ok(pr.url)
 }
 
+/// Open pull requests of the repository, optionally only the user's own and
+/// narrowed by a GitHub search query.
+pub fn list_pull_requests(
+    gh: &Gh,
+    cwd: &Path,
+    mine: bool,
+    search: &str,
+) -> Result<Vec<PullRequest>> {
+    gh.require_ready(cwd)?;
+    let mut args = vec![
+        "pr", "list", "--state", "open", "--limit", MAX_LISTED, "--json", PR_FIELDS,
+    ];
+    if mine {
+        args.extend(["--author", "@me"]);
+    }
+    let search = search.trim();
+    if !search.is_empty() {
+        args.extend(["--search", search]);
+    }
+    let list = parse(&gh.run(cwd, &args)?)?;
+    Ok(list
+        .as_array()
+        .map(|prs| prs.iter().map(pull_request_from).collect())
+        .unwrap_or_default())
+}
+
+/// One pull request with its description, checks, conversation, the merge
+/// methods the repository allows and its changed files.
+pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullRequestDetail> {
+    gh.require_ready(cwd)?;
+    let n = number.to_string();
+    let fields = format!("{PR_FIELDS},body,comments,statusCheckRollup");
+    let v = parse(&gh.run(cwd, &["pr", "view", &n, "--json", &fields])?)?;
+    let (merge_methods, delete_branch_on_merge) = merge_settings(gh, cwd)?;
+    let patch = gh.run(cwd, &["pr", "diff", &n, "--color=never"])?;
+
+    let pull_request = pull_request_from(&v);
+    let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
+    Ok(PullRequestDetail {
+        body: text(&v["body"]),
+        checks: list("statusCheckRollup").iter().map(check_from).collect(),
+        comments: list("comments")
+            .iter()
+            .map(|c| PullRequestComment {
+                author: text(&c["author"]["login"]),
+                body: text(&c["body"]),
+                created_at: text(&c["createdAt"]),
+            })
+            .collect(),
+        merge_methods,
+        delete_branch_on_merge,
+        diff: Diff {
+            base: Some(pull_request.base.clone()),
+            files: parse_patch(&patch),
+        },
+        pull_request,
+    })
+}
+
+/// Adds a conversation comment.
+pub fn comment_pull_request(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Result<()> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(Error::Github("Write a comment first.".into()));
+    }
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["pr", "comment", &number.to_string(), "--body", body])?;
+    Ok(())
+}
+
+/// The merge methods the repository allows, and whether it deletes merged
+/// branches on its own.
+fn merge_settings(gh: &Gh, cwd: &Path) -> Result<(Vec<MergeMethod>, bool)> {
+    let repo = parse(&gh.run(
+        cwd,
+        &[
+            "repo",
+            "view",
+            "--json",
+            "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge",
+        ],
+    )?)?;
+    let allowed = |key: &str| repo[key].as_bool().unwrap_or(false);
+    let methods = [
+        ("mergeCommitAllowed", MergeMethod::Merge),
+        ("squashMergeAllowed", MergeMethod::Squash),
+        ("rebaseMergeAllowed", MergeMethod::Rebase),
+    ]
+    .into_iter()
+    .filter(|(key, _)| allowed(key))
+    .map(|(_, method)| method)
+    .collect();
+    Ok((methods, allowed("deleteBranchOnMerge")))
+}
+
+/// Merges with a method the repository allows. The caller holds the
+/// checkout's Git lock: deleting the branch may move the checkout off it.
+pub fn merge_pull_request(
+    gh: &Gh,
+    cwd: &Path,
+    number: u32,
+    method: MergeMethod,
+    delete_branch: bool,
+) -> Result<()> {
+    gh.require_ready(cwd)?;
+    if !merge_settings(gh, cwd)?.0.contains(&method) {
+        return Err(Error::Github(format!(
+            "The repository does not allow {} merges.",
+            method.name()
+        )));
+    }
+    let n = number.to_string();
+    let mut args = vec!["pr", "merge", &n, method.flag()];
+    if delete_branch {
+        args.push("--delete-branch");
+    }
+    gh.run(cwd, &args)?;
+    Ok(())
+}
+
+/// Checks the pull request's branch out in `cwd`. Git's refusal is the error.
+pub fn checkout_pull_request(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["pr", "checkout", &number.to_string()])?;
+    Ok(())
+}
+
 const ISSUE_FIELDS: &str = "number,title,state,author,url,createdAt,comments";
 const ISSUE_DETAIL_FIELDS: &str = "number,title,body,state,author,url,createdAt,comments";
 
@@ -415,10 +652,6 @@ pub struct IssueDetail {
 pub struct IssuesState {
     pub availability: GithubAvailability,
     pub guidance: Option<String>,
-}
-
-fn text(v: &serde_json::Value) -> String {
-    v.as_str().unwrap_or_default().to_string()
 }
 
 fn issue_summary_from(v: &serde_json::Value) -> IssueSummary {

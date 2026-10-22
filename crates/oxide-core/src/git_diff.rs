@@ -193,6 +193,57 @@ pub(crate) fn diff_against(cwd: &Path, revs: &[&str]) -> Result<Vec<DiffFile>> {
     Ok(files)
 }
 
+/// Files of a unified diff that did not come from our own `git diff` call,
+/// such as `gh pr diff`'s, with the default `a/` and `b/` path prefixes.
+pub(crate) fn parse_patch(patch: &str) -> Vec<DiffFile> {
+    split_patch(patch)
+        .into_iter()
+        .map(|section| {
+            let header = section.lines().next().unwrap_or_default();
+            let meta = |prefix: &str| {
+                section
+                    .lines()
+                    .take_while(|l| !l.starts_with("@@"))
+                    .find_map(|l| l.strip_prefix(prefix))
+            };
+            let side = |prefix: &str| meta(prefix).filter(|p| *p != "/dev/null");
+            let old_path = meta("rename from ").map(str::to_string);
+            let path = meta("rename to ")
+                .or_else(|| side("+++ b/"))
+                .or_else(|| side("--- a/"))
+                .or_else(|| header.split_once(" b/").map(|(_, path)| path))
+                .unwrap_or_default()
+                .to_string();
+            let status = if old_path.is_some() {
+                DiffStatus::Renamed
+            } else if meta("new file mode ").is_some() {
+                DiffStatus::Added
+            } else if meta("deleted file mode ").is_some() {
+                DiffStatus::Deleted
+            } else {
+                DiffStatus::Modified
+            };
+            let (hunks, binary) = parse_hunks(section);
+            let count = |kind| {
+                hunks
+                    .iter()
+                    .flat_map(|h| &h.lines)
+                    .filter(|l| l.kind == kind)
+                    .count() as u32
+            };
+            DiffFile {
+                path,
+                old_path,
+                status,
+                added: count(DiffKind::Added),
+                removed: count(DiffKind::Removed),
+                binary,
+                hunks,
+            }
+        })
+        .collect()
+}
+
 /// One slice of the patch per file, in Git's order. A line starting with
 /// `diff --git ` is always a file header: hunk lines are prefixed.
 fn split_patch(patch: &str) -> Vec<&str> {

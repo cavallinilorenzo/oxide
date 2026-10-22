@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::board::BoardHub;
 use crate::thread::ThreadStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,14 +64,16 @@ pub struct Activity {
     tracked: Mutex<Tracked>,
     system: Mutex<Arc<dyn System>>,
     window_active: AtomicBool,
+    board: Arc<BoardHub>,
 }
 
 impl Activity {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(board: Arc<BoardHub>) -> Self {
         Self {
             tracked: Mutex::default(),
             system: Mutex::new(Arc::new(NoSystem)),
             window_active: AtomicBool::new(true),
+            board,
         }
     }
 
@@ -92,6 +95,8 @@ impl Activity {
         let mut tracked = self.tracked.lock().unwrap_or_else(|e| e.into_inner());
         let previous = tracked.statuses.insert(thread_id, status);
         self.sync(&mut tracked);
+        drop(tracked);
+        self.board.publish(thread_id);
         let kind = match status {
             ThreadStatus::NeedsInput => NotificationKind::NeedsInput,
             ThreadStatus::Completed => NotificationKind::Completed,

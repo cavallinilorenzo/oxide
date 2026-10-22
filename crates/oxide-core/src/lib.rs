@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod activity;
+mod board;
 mod checkpoint;
 mod clock;
 mod continuation;
@@ -21,14 +22,16 @@ pub mod thread;
 mod thread_actor;
 
 pub use activity::{Notification, NotificationKind, System};
+pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use editor::Editor;
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    GithubAvailability, GithubRepository, IssueComment, IssueDetail, IssueSummary, IssuesState,
-    PullRequest, PullRequestDraft, PullRequestInput, PullRequestState,
+    CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail, IssueSummary,
+    IssuesState, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment, PullRequestDetail,
+    PullRequestDraft, PullRequestInput, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -110,6 +113,7 @@ pub struct Core {
     git: git::GitState,
     gh: github::Gh,
     activity: Arc<activity::Activity>,
+    board: Arc<board::BoardHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
 }
 
@@ -143,6 +147,7 @@ impl Core {
         processes.reap_stale();
         mark_unfinished_work_interrupted(&db)?;
         let storage = StorageHandle::new(home.join(DB_FILE))?;
+        let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
         Ok(Self {
             home,
             user_home: std::env::var_os("HOME")
@@ -161,7 +166,8 @@ impl Core {
             next_terminal_id: AtomicU32::new(1),
             git: git::GitState::default(),
             gh: github::Gh::default(),
-            activity: Arc::new(activity::Activity::new()),
+            activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
+            board,
             model_catalogs: Mutex::new(HashMap::new()),
         })
     }
@@ -567,7 +573,10 @@ impl Core {
             rusqlite::params![project_id, provider, model, effort, mode_str, continued_from],
         )?;
         let id = db.last_insert_rowid() as u32;
-        self.get_thread_by_id(&db, id)
+        let thread = self.get_thread_by_id(&db, id)?;
+        drop(db);
+        self.board.publish(id);
+        Ok(thread)
     }
 
     pub fn set_thread_provider(&self, thread_id: u32, provider: &str) -> Result<ThreadSummary> {
@@ -597,7 +606,23 @@ impl Core {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&thread_id);
-        self.get_thread_by_id(&db, thread_id)
+        let thread = self.get_thread_by_id(&db, thread_id)?;
+        drop(db);
+        self.board.publish(thread_id);
+        Ok(thread)
+    }
+
+    /// Archives or unarchives a Thread. Threads are archived, never deleted:
+    /// an Archived Thread keeps its history and stays listed.
+    pub fn set_thread_archived(&self, thread_id: u32, archived: bool) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE threads SET archived = ?2 WHERE id = ?1",
+            (thread_id, archived),
+        )?;
+        drop(db);
+        self.board.publish(thread_id);
+        Ok(())
     }
 
     pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
@@ -799,6 +824,7 @@ impl Core {
         {
             actor.rename(title.to_string());
         }
+        self.board.publish(thread_id);
         Ok(())
     }
 
@@ -903,6 +929,7 @@ impl Core {
             });
         }
         let actor = self.get_or_create_thread_actor(thread_id)?;
+        self.set_thread_archived(thread_id, false)?;
         actor.send_prompt(prompt.to_string(), attachments.to_vec())
     }
 
@@ -970,6 +997,15 @@ impl Core {
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.interrupt()
+    }
+
+    /// The Project's Thread Board: a card per Thread, newest activity first, and the changes
+    /// that follow. Derived from Thread rows; the Board stores nothing of its own.
+    pub fn subscribe_board(
+        &self,
+        project_id: u32,
+    ) -> Result<(Vec<BoardCard>, crossbeam_channel::Receiver<BoardEvent>)> {
+        self.board.subscribe(project_id)
     }
 
     pub fn subscribe_thread(
@@ -1191,6 +1227,57 @@ impl Core {
         let url = github::pull_request_url(&self.gh, &self.main_checkout(project_id)?)?;
         self.activity.open_url(&url);
         Ok(())
+    }
+
+    /// Open pull requests of the Project's repository: only the user's own, if
+    /// `mine`, and matching the GitHub search query, if not empty.
+    pub fn list_pull_requests(
+        &self,
+        project_id: u32,
+        mine: bool,
+        search: &str,
+    ) -> Result<Vec<PullRequest>> {
+        github::list_pull_requests(&self.gh, &self.main_checkout(project_id)?, mine, search)
+    }
+
+    /// A pull request's description, checks, conversation, allowed merge
+    /// methods and changed files.
+    pub fn pull_request_detail(&self, project_id: u32, number: u32) -> Result<PullRequestDetail> {
+        github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Adds a conversation comment to a pull request.
+    pub fn comment_pull_request(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
+        github::comment_pull_request(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Merges a pull request with one of the methods its repository allows,
+    /// optionally deleting the branch.
+    pub fn merge_pull_request(
+        &self,
+        project_id: u32,
+        number: u32,
+        method: MergeMethod,
+        delete_branch: bool,
+    ) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || {
+            // Deleting the branch may move the checkout off it, which a
+            // working Thread must not see.
+            if delete_branch && let Some(reason) = self.checkout_blocked_reason(project_id)? {
+                return Err(Error::Git(reason));
+            }
+            github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch)
+        })
+    }
+
+    /// Checks a pull request's branch out in the main checkout, under the
+    /// branch picker's rules: Git's refusal is the error, and it is refused
+    /// while a Thread is working.
+    pub fn checkout_pull_request(&self, project_id: u32, number: u32) -> Result<()> {
+        self.switch_branch(project_id, |cwd| {
+            github::checkout_pull_request(&self.gh, cwd, number)
+        })
     }
 
     /// Runs a command that changes the main checkout's files, serialized per

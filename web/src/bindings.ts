@@ -32,6 +32,7 @@ export const commands = {
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
+	setThreadArchived: (threadId: number, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
 	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
@@ -58,6 +59,8 @@ export const commands = {
 	listTurns: (threadId: number, offset: number, limit: number) => typedError<TurnPage_Serialize, AppError>(__TAURI_INVOKE("list_turns", { threadId, offset, limit })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
+	/**  The Project's Thread Board: its cards now, then every change on `on_event`. */
+	subscribeBoard: (projectId: number, onEvent: Channel<BoardEvent_Deserialize>) => typedError<BoardCard_Serialize[], AppError>(__TAURI_INVOKE("subscribe_board", { projectId, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
@@ -98,6 +101,14 @@ export const commands = {
 	/**  Pushes the branch if needed, then opens a pull request for it. */
 	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
+	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
+	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
+	/**  One pull request's description, checks, conversation and changed files. */
+	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
+	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
+	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch })),
+	/**  Checks the pull request's branch out in the main checkout. */
+	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
 	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
 	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
 	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
@@ -151,6 +162,29 @@ export type ApprovalSnapshot_Serialize = {
 	createdAt: string,
 	decidedAt: string | null,
 };
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Deserialize = {
+	thread: Thread_Deserialize,
+	pendingApprovals: PendingApproval_Deserialize[],
+};
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Serialize = {
+	thread: Thread_Serialize,
+	pendingApprovals: PendingApproval_Serialize[],
+};
+
+export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
+
+export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize };
+
+export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize };
+
+export type CheckState = "success" | "failure" | "pending";
 
 /**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
 export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
@@ -386,6 +420,8 @@ export type ItemSnapshot_Serialize = {
 	createdAt: string,
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
 export type ModelInfo = ModelInfo_Serialize | ModelInfo_Deserialize;
 
 export type ModelInfo_Deserialize = {
@@ -404,6 +440,25 @@ export type ModelInfo_Serialize = {
 	supportedEfforts: string[],
 	defaultEffort: string | null,
 	isLegacy: boolean,
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval = PendingApproval_Serialize | PendingApproval_Deserialize;
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Deserialize = {
+	approvalId: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Serialize = {
+	approvalId: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
 };
 
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
@@ -462,6 +517,46 @@ export type PullRequest = {
 	draft: boolean,
 	base: string,
 	head: string,
+	author: string,
+};
+
+export type PullRequestCheck = {
+	name: string,
+	state: CheckState,
+};
+
+export type PullRequestComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type PullRequestDetail = PullRequestDetail_Serialize | PullRequestDetail_Deserialize;
+
+export type PullRequestDetail_Deserialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Deserialize,
+};
+
+export type PullRequestDetail_Serialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Serialize,
 };
 
 export type PullRequestDraft = {

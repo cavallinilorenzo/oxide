@@ -1,7 +1,7 @@
 import type { DiffScope } from "./bindings";
 
-/** The scopes the Diff Surface offers: Git's two, and a Turn between its Checkpoints. */
-export type PanelScope = DiffScope | "turn";
+/** The scopes the Diff Surface offers: Git's two, a Turn between its Checkpoints, and a pull request under review. */
+export type PanelScope = DiffScope | "turn" | "pr";
 
 /** What kind of Thread the Diff Surface is showing. Board Threads get their own worktree. */
 export interface DiffThreadKind {

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { BoardView } from "./BoardView";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
@@ -10,6 +11,7 @@ import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
+import { splitThreads, threadTitle } from "./threadList";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -40,6 +42,7 @@ export function App() {
   const [openError, setOpenError] = useState<string | null>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
+  const [showBoard, setShowBoard] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
@@ -111,6 +114,16 @@ export function App() {
     setDiffFocus(hint ?? null);
   }, []);
 
+  // The pull request whose files the Diff Surface's PR scope shows.
+  const [reviewedPr, setReviewedPr] = useState<{ projectId: number; number: number } | null>(null);
+  const reviewPullRequestFiles = useCallback((projectId: number, number: number) => {
+    setReviewedPr({ projectId, number });
+    setShowTools(true);
+    setActiveTool("Diff");
+    setChosenDiffScope({ threadId: currentThreadRef.current, scope: "pr" });
+    setDiffFocus(null);
+  }, []);
+
   const openPullRequest = useCallback(() => {
     setShowTools(true);
     setActiveTool("Pull request");
@@ -147,6 +160,7 @@ export function App() {
   useEffect(() => {
     const unlisten = listen("new-thread", () => {
       setShowSettings(false);
+      setShowBoard(false);
       setSelectedThreadId(null);
     });
     return () => {
@@ -194,6 +208,7 @@ export function App() {
     if (!selected) return;
     const created = await createThreadIn(selected.id);
     if (created) {
+      setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
       rememberTerminalContext(selected.id, created.id);
@@ -203,6 +218,7 @@ export function App() {
   const openProject = useCallback((project: Project) => {
     restore.current = null;
     setShowSettings(false);
+    setShowBoard(false);
     setProjects((prev) => [project, ...(prev?.filter((p) => p.id !== project.id) ?? [])]);
     if (project.id !== selectedId) {
       setSelectedId(project.id);
@@ -230,6 +246,18 @@ export function App() {
     setOpenError(res.status === "error" ? res.error.message : null);
   }, [selected, currentThreadId]);
 
+  const onPromptSent = useCallback((threadId: number) => {
+    setThreads((prev) =>
+      prev?.map((t) => (t.id === threadId && t.archived ? { ...t, archived: false } : t)) ?? null);
+  }, []);
+
+  const setThreadArchived = useCallback(async (threadId: number, archived: boolean) => {
+    const res = await commands.setThreadArchived(threadId, archived);
+    if (res.status === "ok") {
+      setThreads((prev) => prev?.map((t) => (t.id === threadId ? { ...t, archived } : t)) ?? null);
+    }
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isProjectPaletteShortcut(e)) {
@@ -249,6 +277,7 @@ export function App() {
       e.preventDefault();
       if (toggle === "tools") setShowTools((v) => !v);
       else if (toggle === "terminal") setShowTerminal((v) => !v);
+      else if (toggle === "board") setShowBoard((v) => !v);
       else setShowSettings(true);
     };
     window.addEventListener("keydown", onKey);
@@ -355,6 +384,16 @@ export function App() {
               </button>
             </>
           )}
+          {selected && (
+            <span role="group" aria-label="View" className="view-toggle">
+              <button aria-pressed={!showBoard} title="Chat (⌘B)" onClick={() => setShowBoard(false)}>
+                Chat
+              </button>
+              <button aria-pressed={showBoard} title="Board (⌘B)" onClick={() => setShowBoard(true)}>
+                Board
+              </button>
+            </span>
+          )}
           <button aria-pressed={showTools} title="Toggle tools panel (⌘\)" onClick={() => setShowTools((v) => !v)}>
             Tools
           </button>
@@ -377,9 +416,11 @@ export function App() {
           threads={threads}
           selectedThreadId={selectedThreadId}
           onSelectThread={(threadId) => {
+            setShowBoard(false);
             setSelectedThreadId(threadId);
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
+          onArchiveThread={(threadId, archived) => void setThreadArchived(threadId, archived)}
           onNewThread={() => {
             void startNewThread();
           }}
@@ -388,6 +429,17 @@ export function App() {
         <div className="centre-column">
           {showSettings ? (
             <SettingsView onClose={() => setShowSettings(false)} />
+          ) : selected && showBoard ? (
+            <BoardView
+              key={selected.id}
+              projectId={selected.id}
+              onOpenThread={(id) => {
+                setShowBoard(false);
+                setSelectedThreadId(id);
+                rememberTerminalContext(selected.id, id);
+              }}
+              onArchiveThread={(id) => void setThreadArchived(id, true)}
+            />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
@@ -408,6 +460,7 @@ export function App() {
                   }}
                   onThreadUpdated={onThreadUpdated}
                   onStatusChange={onThreadStatusChange}
+                  onPromptSent={onPromptSent}
                   onThreadTitleChange={onThreadTitleChange}
                   prefill={prefill}
                   onPrefillUsed={() => setPrefill(null)}
@@ -465,6 +518,7 @@ export function App() {
                   threadId={currentThreadId}
                   board={diffThread.board}
                   scope={diffScope}
+                  reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}
                   onScopeChange={(scope) => {
                     setChosenDiffScope({ threadId: currentThreadId, scope });
                     setDiffFocus(null);
@@ -478,7 +532,12 @@ export function App() {
             )}
             {activeTool === "Pull request" && selected && (
               <Suspense fallback={null}>
-                <PullRequestPanel projectId={selected.id} refreshKey={gitRevision} onChanged={onGitChanged} />
+                <PullRequestPanel
+                  projectId={selected.id}
+                  refreshKey={gitRevision}
+                  onChanged={onGitChanged}
+                  onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
+                />
               </Suspense>
             )}
             {activeTool === "Files" && selected && (
@@ -506,6 +565,7 @@ interface SidebarProps {
   threads: Thread[] | null;
   selectedThreadId: number | null;
   onSelectThread: (threadId: number) => void;
+  onArchiveThread: (threadId: number, archived: boolean) => void;
   onNewThread: () => void;
   onRenameThread?: (threadId: number, newTitle: string) => void;
 }
@@ -518,9 +578,12 @@ function Sidebar({
   threads,
   selectedThreadId,
   onSelectThread,
+  onArchiveThread,
   onNewThread,
   onRenameThread,
 }: SidebarProps) {
+  const [threadQuery, setThreadQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
@@ -570,6 +633,52 @@ function Sidebar({
 
   const visible = projects?.filter((p) => !p.hidden) ?? [];
   const hidden = projects?.filter((p) => p.hidden) ?? [];
+  const { active: activeThreads, archived: archivedThreads } = splitThreads(threads ?? [], threadQuery);
+  const renderThread = (t: Thread, archived: boolean) => (
+    <li key={t.id}>
+      {editingThreadId === t.id ? (
+        <input
+          className="thread-rename-input"
+          value={renameText}
+          onChange={(e) => setRenameText(e.target.value)}
+          onBlur={() => void finishRename(t.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void finishRename(t.id);
+            if (e.key === "Escape") setEditingThreadId(null);
+          }}
+          autoFocus
+          aria-label={`Rename thread ${threadTitle(t)}`}
+        />
+      ) : (
+        <button
+          className="thread-item"
+          aria-current={t.id === selectedThreadId}
+          onClick={() => onSelectThread(t.id)}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            setEditingThreadId(t.id);
+            setRenameText(threadTitle(t));
+          }}
+          title={`${threadTitle(t)} (${t.status})`}
+        >
+          <span
+            className={`status-dot ${t.status}`}
+            aria-label={`Status: ${t.status}`}
+            title={`Status: ${t.status}`}
+          />
+          <span className="thread-item-title">{threadTitle(t)}</span>
+        </button>
+      )}
+      <button
+        className="row-action"
+        onClick={() => onArchiveThread(t.id, !archived)}
+        aria-label={`${archived ? "Unarchive" : "Archive"} ${threadTitle(t)}`}
+        title={archived ? "Unarchive" : "Archive"}
+      >
+        {archived ? "Unarchive" : "Archive"}
+      </button>
+    </li>
+  );
 
   return (
     <nav className="sidebar" aria-label="Projects">
@@ -623,50 +732,30 @@ function Sidebar({
               + New
             </button>
           </div>
-          {threads && threads.length === 0 && (
+          <input
+            type="search"
+            className="thread-search"
+            placeholder="Search Threads"
+            aria-label="Search Threads by title"
+            value={threadQuery}
+            onChange={(e) => setThreadQuery(e.target.value)}
+          />
+          {threads && activeThreads.length === 0 && (
             <p className="empty" style={{ padding: "4px 6px", margin: 0 }}>
-              No threads yet
+              {threads.length === 0 ? "No threads yet" : "No matching threads"}
             </p>
           )}
-          <ul aria-label="Thread list">
-            {threads?.map((t) => (
-              <li key={t.id}>
-                {editingThreadId === t.id ? (
-                  <input
-                    className="thread-rename-input"
-                    value={renameText}
-                    onChange={(e) => setRenameText(e.target.value)}
-                    onBlur={() => void finishRename(t.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void finishRename(t.id);
-                      if (e.key === "Escape") setEditingThreadId(null);
-                    }}
-                    autoFocus
-                    aria-label={`Rename thread ${t.title || `Thread #${t.id}`}`}
-                  />
-                ) : (
-                  <button
-                    className="thread-item"
-                    aria-current={t.id === selectedThreadId}
-                    onClick={() => onSelectThread(t.id)}
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
-                      setEditingThreadId(t.id);
-                      setRenameText(t.title || `Thread #${t.id}`);
-                    }}
-                    title={`${t.title || `Thread #${t.id}`} (${t.status})`}
-                  >
-                    <span
-                      className={`status-dot ${t.status}`}
-                      aria-label={`Status: ${t.status}`}
-                      title={`Status: ${t.status}`}
-                    />
-                    <span className="thread-item-title">{t.title || `Thread #${t.id}`}</span>
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <ul aria-label="Thread list">{activeThreads.map((t) => renderThread(t, false))}</ul>
+          {archivedThreads.length > 0 && (
+            <>
+              <button className="hidden-toggle" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+                Archived ({archivedThreads.length})
+              </button>
+              {showArchived && (
+                <ul aria-label="Archived threads">{archivedThreads.map((t) => renderThread(t, true))}</ul>
+              )}
+            </>
+          )}
         </section>
       )}
     </nav>

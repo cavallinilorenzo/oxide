@@ -29,6 +29,10 @@ describe("toggleForKey", () => {
     expect(key("\\")).toBe("tools");
     expect(key("j")).toBe("terminal");
   });
+  it("maps ⌘B to the Chat / Board toggle", () => {
+    expect(key("b")).toBe("board");
+    expect(key("b", { shiftKey: true })).toBeNull();
+  });
   it("maps ⌘, to the Settings view", () => {
     expect(key(",")).toBe("settings");
     expect(key(",", { shiftKey: true })).toBeNull();

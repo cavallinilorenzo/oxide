@@ -257,6 +257,30 @@ pub struct Thread {
     pub continued_in: Option<u32>,
 }
 
+/// An Approval the Provider is still waiting on.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApproval {
+    pub approval_id: String,
+    pub kind: ApprovalKind,
+    pub summary: String,
+    pub options: Vec<String>,
+}
+
+/// A Thread on the Thread Board with the Approvals it is waiting on.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardCard {
+    pub thread: Thread,
+    pub pending_approvals: Vec<PendingApproval>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", content = "payload")]
+pub enum BoardEvent {
+    ThreadChanged(BoardCard),
+}
+
 /// A new Thread continuing one whose Provider session is gone, and the recap to prefill.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1330,6 +1354,25 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+/// The Project's Thread Board: its cards now, then every change on `on_event`.
+#[tauri::command]
+#[specta::specta]
+fn subscribe_board(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    on_event: tauri::ipc::Channel<BoardEvent>,
+) -> Result<Vec<BoardCard>, AppError> {
+    let (cards, rx) = core.subscribe_board(project_id)?;
+    std::thread::spawn(move || {
+        while let Ok(evt) = rx.recv() {
+            if on_event.send(convert(&evt)).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&cards))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn subscribe_thread_debug(
@@ -1488,6 +1531,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_turns,
         subscribe_thread,
         subscribe_thread_debug,
+        subscribe_board,
         start_terminal,
         write_terminal,
         resize_terminal,

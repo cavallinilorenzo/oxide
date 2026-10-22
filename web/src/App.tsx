@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { BoardView } from "./BoardView";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
@@ -36,6 +37,7 @@ export function App() {
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showBoard, setShowBoard] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
@@ -145,6 +147,7 @@ export function App() {
   useEffect(() => {
     const unlisten = listen("new-thread", () => {
       setShowSettings(false);
+      setShowBoard(false);
       setSelectedThreadId(null);
     });
     return () => {
@@ -186,6 +189,7 @@ export function App() {
       provSettings?.permissionMode ?? null
     );
     if (created.status === "ok") {
+      setShowBoard(false);
       setThreads((prev) => [created.data, ...(prev || [])]);
       setSelectedThreadId(created.data.id);
       rememberTerminalContext(selected.id, created.data.id);
@@ -218,6 +222,7 @@ export function App() {
       e.preventDefault();
       if (toggle === "tools") setShowTools((v) => !v);
       else if (toggle === "terminal") setShowTerminal((v) => !v);
+      else if (toggle === "board") setShowBoard((v) => !v);
       else setShowSettings(true);
     };
     window.addEventListener("keydown", onKey);
@@ -295,6 +300,16 @@ export function App() {
           />
         )}
         <div className="toggles">
+          {selected && (
+            <span role="group" aria-label="View" className="view-toggle">
+              <button aria-pressed={!showBoard} title="Chat (⌘B)" onClick={() => setShowBoard(false)}>
+                Chat
+              </button>
+              <button aria-pressed={showBoard} title="Board (⌘B)" onClick={() => setShowBoard(true)}>
+                Board
+              </button>
+            </span>
+          )}
           <button aria-pressed={showTools} title="Toggle tools panel (⌘\)" onClick={() => setShowTools((v) => !v)}>
             Tools
           </button>
@@ -317,6 +332,7 @@ export function App() {
           threads={threads}
           selectedThreadId={selectedThreadId}
           onSelectThread={(threadId) => {
+            setShowBoard(false);
             setSelectedThreadId(threadId);
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
@@ -329,6 +345,17 @@ export function App() {
         <div className="centre-column">
           {showSettings ? (
             <SettingsView onClose={() => setShowSettings(false)} />
+          ) : selected && showBoard ? (
+            <BoardView
+              key={selected.id}
+              projectId={selected.id}
+              onOpenThread={(id) => {
+                setShowBoard(false);
+                setSelectedThreadId(id);
+                rememberTerminalContext(selected.id, id);
+              }}
+              onArchiveThread={(id) => void setThreadArchived(id, true)}
+            />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>

@@ -1,13 +1,14 @@
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{
-    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderEvent,
-    StartContext, TurnStatus,
+    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderError,
+    ProviderEvent, StartContext, TurnStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
+use crate::activity::Activity;
 use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
@@ -62,6 +63,7 @@ impl ThreadActorHandle {
         storage: StorageHandle,
         real_time_ticker: bool,
         clock: Arc<dyn Clock>,
+        activity: Arc<Activity>,
     ) -> Result<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -80,7 +82,15 @@ impl ThreadActorHandle {
         std::thread::Builder::new()
             .name(format!("thread-actor-{thread_id}"))
             .spawn(move || {
-                run_thread_actor(thread_id, working_dir, provider, storage, clock, rx);
+                run_thread_actor(
+                    thread_id,
+                    working_dir,
+                    provider,
+                    storage,
+                    clock,
+                    activity,
+                    rx,
+                );
             })
             .map_err(|e| Error::Io {
                 path: std::path::PathBuf::from(format!("thread-{thread_id}")),
@@ -204,6 +214,7 @@ struct ActorState {
     subscribers: Vec<Sender<SequencedThreadEvent>>,
     debug_subscribers: Vec<Sender<DebugSequencedThreadEvent>>,
     clock: Arc<dyn Clock>,
+    activity: Arc<Activity>,
     /// A Provider process is running for this Thread.
     provider_live: bool,
     /// The Provider ended on its own; its adapter still has to be shut down before a restart.
@@ -224,10 +235,12 @@ impl ActorState {
         next_turn_index: u32,
         capabilities: ProviderCapabilities,
         clock: Arc<dyn Clock>,
+        activity: Arc<Activity>,
     ) -> Self {
         let idle_since = Some(clock.now());
         Self {
             clock,
+            activity,
             provider_live: false,
             provider_exited: false,
             idle_since,
@@ -284,6 +297,7 @@ impl ActorState {
     }
 
     fn broadcast_status(&mut self, status: ThreadStatus) {
+        self.activity.set_status(self.thread_id, status);
         self.broadcast(ThreadEvent::ThreadStatusChanged { status });
     }
 
@@ -581,6 +595,7 @@ fn run_thread_actor(
     mut provider: Box<dyn Provider>,
     storage: StorageHandle,
     clock: Arc<dyn Clock>,
+    activity: Arc<Activity>,
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
@@ -590,7 +605,7 @@ fn run_thread_actor(
 
     // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
-    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock);
+    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock, activity);
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {
@@ -750,6 +765,7 @@ fn run_thread_actor(
         }
     }
     stop_provider(&mut *provider, &mut state, &mut prx);
+    state.activity.forget(thread_id);
 }
 
 /// Starts the Provider if none is running: resumes the Thread's stored session when it has one,
@@ -795,6 +811,15 @@ fn ensure_provider_started(
             *prx = receiver;
             state.provider_live = true;
             Ok(())
+        }
+        Err(ProviderError::SessionNotFound) => {
+            let message = ProviderError::SessionNotFound.to_string();
+            storage.mark_session_lost(state.thread_id);
+            state.broadcast(ThreadEvent::Error {
+                message: message.clone(),
+            });
+            state.broadcast_status(ThreadStatus::Error);
+            Err(Error::Provider(message))
         }
         Err(e) => Err(Error::Io {
             path: PathBuf::from("provider"),

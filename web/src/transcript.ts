@@ -29,6 +29,9 @@ export interface TranscriptState {
   supportedPermissionModes: PermissionMode[];
 }
 
+/** The error Core reports when a Thread's Provider session can no longer be resumed. */
+export const SESSION_LOST_MESSAGE = "Provider session no longer available";
+
 /** A Turn is running (working, or waiting on an Approval), so Stop applies. */
 export function turnIsRunning(status: ThreadStatus): boolean {
   return status === "working" || status === "needs-input";
@@ -92,6 +95,7 @@ export function applyThreadEvent(
   const turns = [...state.turns];
   let status = state.status;
   const thread = state.thread ? { ...state.thread } : null;
+  let sessionLost = state.thread?.sessionLost ?? false;
 
   switch (event.type) {
     case "TurnStarted": {
@@ -249,6 +253,7 @@ export function applyThreadEvent(
 
     case "Error": {
       status = "error";
+      sessionLost ||= event.payload.message === SESSION_LOST_MESSAGE;
       break;
     }
 
@@ -259,6 +264,7 @@ export function applyThreadEvent(
 
   if (thread) {
     thread.status = status;
+    thread.sessionLost = sessionLost;
   }
 
   return {

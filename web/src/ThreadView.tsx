@@ -5,6 +5,7 @@ import { PaperclipIcon, XIcon } from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
+  type ContinuedThread,
   type DebugSequencedThreadEvent,
   type Detection,
   type PermissionMode,
@@ -22,6 +23,7 @@ import { ProviderMark } from "./ProviderMark";
 import {
   applyThreadEvent,
   initialTranscriptState,
+  SESSION_LOST_MESSAGE,
   turnIsRunning,
   type TranscriptState,
 } from "./transcript";
@@ -41,6 +43,11 @@ interface ThreadViewProps {
   onThreadUpdated?: (thread: Thread) => void;
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
   onThreadTitleChange?: (threadId: number, title: string) => void;
+  /** Text to put in this Thread's composer once, e.g. the recap of a continued Thread. */
+  prefill: { threadId: number; text: string } | null;
+  onPrefillUsed: () => void;
+  onOpenThread: (threadId: number) => void;
+  onThreadContinued: (continued: ContinuedThread, from: number) => void;
 }
 
 
@@ -90,6 +97,10 @@ export function ThreadView({
   onThreadUpdated,
   onStatusChange,
   onThreadTitleChange,
+  prefill,
+  onPrefillUsed,
+  onOpenThread,
+  onThreadContinued,
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
@@ -230,6 +241,14 @@ export function ThreadView({
       batcher.cancel();
     };
   }, [threadId, onStatusChange, debugOpen, onThreadTitleChange]);
+
+  // A continued Thread opens with its recap in the composer.
+  useEffect(() => {
+    if (prefill && prefill.threadId === threadId) {
+      setInput(prefill.text);
+      onPrefillUsed();
+    }
+  }, [prefill, threadId, onPrefillUsed]);
 
   const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 
@@ -484,6 +503,14 @@ export function ThreadView({
   };
 
   const isTurnActive = turnIsRunning(transcript.status);
+  const thread = transcript.thread;
+
+  const continueInNewThread = async () => {
+    if (!threadId) return;
+    const res = await commands.continueThread(threadId);
+    if (res.status === "ok") onThreadContinued(res.data, threadId);
+    else console.error("Failed to continue thread:", res.error);
+  };
 
   const stop = () => {
     if (threadId) void commands.interruptThread(threadId);
@@ -580,6 +607,28 @@ export function ThreadView({
         )}
       </div>
 
+      {thread?.continuedFrom != null && (
+        <div className="thread-link">
+          Continued from{" "}
+          <button type="button" onClick={() => onOpenThread(thread.continuedFrom!)}>
+            Thread #{thread.continuedFrom}
+          </button>
+        </div>
+      )}
+      {thread?.sessionLost && (
+        <div className="provider-hint missing" role="alert">
+          <span className="hint-message">{SESSION_LOST_MESSAGE}</span>
+          {thread.continuedIn != null && (
+            <span className="thread-link">
+              Continued in{" "}
+              <button type="button" onClick={() => onOpenThread(thread.continuedIn!)}>
+                Thread #{thread.continuedIn}
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
       {providerHint && providerHint.type !== "ok" && (
         <div className={`provider-hint ${providerHint.type}`} role="alert">
           <span className="hint-message">{providerHint.message}</span>
@@ -589,6 +638,18 @@ export function ThreadView({
         </div>
       )}
 
+      {thread?.sessionLost ? (
+        <div className="composer">
+          <button
+            type="button"
+            className="composer-submit"
+            disabled={thread.continuedIn != null}
+            onClick={() => void continueInNewThread()}
+          >
+            Continue in new Thread
+          </button>
+        </div>
+      ) : (
       <form className="composer" onSubmit={handleSubmit}>
         <div className="composer-controls-row">
           <div className="provider-chip-wrapper" title="Provider">
@@ -672,9 +733,9 @@ export function ThreadView({
               />
             </>
           )}
-          <input
-            type="text"
+          <textarea
             className="composer-input"
+            rows={Math.min(8, input.split("\n").length)}
             placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
@@ -683,6 +744,9 @@ export function ThreadView({
               if (stopsTurn(e, transcript.status)) {
                 e.preventDefault();
                 stop();
+              } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
               }
             }}
             disabled={sending}
@@ -698,6 +762,7 @@ export function ThreadView({
           )}
         </div>
       </form>
+      )}
       <div className="composer-footer" aria-label="Thread checkout and branch">
         <span className="checkout-badge">main checkout</span>
         <span className="branch-badge">⎇ {gitBranch ?? "main"}</span>

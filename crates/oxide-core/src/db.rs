@@ -88,6 +88,18 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX turns_by_thread ON turns(thread_id, id);
     CREATE INDEX items_by_turn ON items(turn_id, item_index);
 ",
+    // Small app-level facts, such as the Project and Thread last open.
+    "
+    CREATE TABLE app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+",
+    // A Thread whose Provider session is gone, and the Thread that continues it.
+    "
+    ALTER TABLE threads ADD COLUMN session_lost INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE threads ADD COLUMN continued_from INTEGER REFERENCES threads(id);
+",
     "
     ALTER TABLE threads ADD COLUMN title TEXT;
 ",

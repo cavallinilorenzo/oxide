@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyThreadEvent, initialTranscriptState } from "./transcript";
+import { applyThreadEvent, initialTranscriptState, SESSION_LOST_MESSAGE } from "./transcript";
 import { getOfferedPermissionModes } from "./ThreadView";
-import type { SequencedThreadEvent, ThreadSnapshot } from "./bindings";
+import type { SequencedThreadEvent, Thread, ThreadSnapshot } from "./bindings";
 
 describe("transcript reducer", () => {
   it("initializes state from a snapshot", () => {
@@ -17,6 +17,9 @@ describe("transcript reducer", () => {
         archived: false,
         createdAt: "2026-10-22T10:00:00Z",
         updatedAt: "2026-10-22T10:00:00Z",
+        sessionLost: false,
+        continuedFrom: null,
+        continuedIn: null,
       },
       capabilities: { reasoningText: true, imageAttachments: false },
       turns: [
@@ -377,19 +380,7 @@ describe("transcript reducer", () => {
 
   it("updates thread title on ThreadRenamed event", () => {
     let state = initialTranscriptState({
-      thread: {
-        id: 1,
-        projectId: 1,
-        provider: "fake",
-        model: null,
-        effort: null,
-        permissionMode: "auto-edit",
-        status: "completed",
-        archived: false,
-        createdAt: "2026-10-22T10:00:00Z",
-        updatedAt: "2026-10-22T10:00:00Z",
-        title: null,
-      },
+      thread: sampleThread(),
       capabilities: { reasoningText: true, imageAttachments: false },
       turns: [],
       turnOffset: 0,
@@ -412,7 +403,44 @@ describe("transcript reducer", () => {
 
     expect(state.thread?.title).toBe("New Custom Title");
   });
+
+  it("marks the Thread's session lost when the Provider session is gone", () => {
+    const thread = { ...initialTranscriptState(null), thread: sampleThread() };
+
+    const other = applyThreadEvent(thread, {
+      seq: 1,
+      event: { type: "Error", payload: { message: "boom" } },
+    });
+    expect(other.status).toBe("error");
+    expect(other.thread?.sessionLost).toBe(false);
+
+    const gone = applyThreadEvent(thread, {
+      seq: 1,
+      event: { type: "Error", payload: { message: SESSION_LOST_MESSAGE } },
+    });
+    expect(gone.status).toBe("error");
+    expect(gone.thread?.sessionLost).toBe(true);
+  });
 });
+
+function sampleThread(): Thread {
+  return {
+    id: 1,
+    projectId: 1,
+    provider: "fake",
+    model: null,
+    effort: null,
+    permissionMode: "auto-edit",
+    status: "completed",
+    archived: false,
+    createdAt: "a",
+    updatedAt: "b",
+    title: null,
+    sessionLost: false,
+    continuedFrom: null,
+    continuedIn: null,
+  };
+}
 
 function startTurn(seq: number, prompt: string): SequencedThreadEvent {
   return { seq, event: { type: "TurnStarted", payload: { turn_index: 0, prompt, attachments: [] } } };

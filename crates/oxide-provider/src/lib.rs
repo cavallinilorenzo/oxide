@@ -1,6 +1,7 @@
 //! The Provider contract: the seam between Core and the agent CLI adapters
 //! (Claude Code, Codex, Antigravity CLI). Adapters implement it; Core depends only on it.
 
+pub mod agy;
 pub mod claude;
 pub mod codex;
 pub mod contract_suite;
@@ -95,6 +96,9 @@ pub enum ProviderError {
     StartFailed(String),
     #[error("command failed: {0}")]
     CommandFailed(String),
+    /// Resuming failed because the Provider no longer has the session (e.g. it was pruned).
+    #[error("Provider session no longer available")]
+    SessionNotFound,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -325,6 +329,7 @@ pub struct FakeProvider {
     approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
     current_permission_mode: Arc<Mutex<PermissionMode>>,
     reusable: bool,
+    session_not_found: bool,
 }
 
 impl Default for FakeProvider {
@@ -355,6 +360,7 @@ impl Default for FakeProvider {
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
             reusable: false,
+            session_not_found: false,
         }
     }
 }
@@ -372,6 +378,7 @@ impl FakeProvider {
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
             reusable: false,
+            session_not_found: false,
         }
     }
 
@@ -410,6 +417,11 @@ impl FakeProvider {
     pub fn reusable(mut self) -> Self {
         self.reusable = true;
         self
+    }
+
+    /// Makes every `resume` fail as if the Provider had lost the session.
+    pub fn fail_resume_with_session_not_found(&mut self) {
+        self.session_not_found = true;
     }
 
     pub fn set_capabilities(&mut self, capabilities: ProviderCapabilities) {
@@ -457,6 +469,9 @@ impl Provider for FakeProvider {
         session_id: &str,
         _context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError> {
+        if self.session_not_found {
+            return Err(ProviderError::SessionNotFound);
+        }
         *self.recorder.starts.lock().unwrap() += 1;
         self.recorder
             .resumes

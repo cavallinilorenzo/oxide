@@ -90,6 +90,9 @@ pub enum StorageMsg {
         thread_id: u32,
         reply: mpsc::Sender<Option<String>>,
     },
+    MarkSessionLost {
+        thread_id: u32,
+    },
     WriteUnknownEvent {
         turn_id: u32,
         raw: String,
@@ -303,6 +306,11 @@ impl StorageHandle {
             thread_id,
             session_id,
         });
+    }
+
+    /// Records that the Provider no longer has the Thread's session and puts the Thread in error.
+    pub fn mark_session_lost(&self, thread_id: u32) {
+        let _ = self.sender.send(StorageMsg::MarkSessionLost { thread_id });
     }
 
     /// The Provider's own session id for the Thread, once the Provider has reported one.
@@ -567,6 +575,12 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     rusqlite::params![session_id, thread_id],
                 );
             }
+            StorageMsg::MarkSessionLost { thread_id } => {
+                let _ = conn.execute(
+                    "UPDATE threads SET session_lost = 1, status = 'error', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                    [thread_id],
+                );
+            }
             StorageMsg::GetProviderSessionId { thread_id, reply } => {
                 let session_id = conn
                     .query_row(
@@ -599,8 +613,10 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
 
 pub fn query_snapshot(conn: &Connection, thread_id: u32, tail: u32) -> Result<ThreadSnapshot> {
     let thread: ThreadSummary = conn.query_row(
-        "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, title
-         FROM threads WHERE id = ?1",
+        &format!(
+            "SELECT {} FROM threads WHERE id = ?1",
+            crate::thread::THREAD_COLUMNS
+        ),
         [thread_id],
         crate::thread::parse_thread_summary,
     )?;

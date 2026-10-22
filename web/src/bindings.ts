@@ -16,6 +16,8 @@ export const commands = {
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	/**  Starts a new Thread that continues one whose Provider session is gone. */
+	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
 	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
@@ -52,6 +54,8 @@ export const commands = {
 	/**  Branch, ahead/behind and uncommitted-change counts of the main checkout. */
 	gitStatus: (projectId: number) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId })),
 	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
+	/**  The changes of the main checkout in one scope, from Git. */
+	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -60,6 +64,11 @@ export const commands = {
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
+	/**  The Project and Thread to reopen on launch. */
+	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
+	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
+	/**  The user confirmed quitting: interrupt every Thread and exit. */
+	confirmQuit: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("confirm_quit", { dontAskAgain })),
 };
 
 /* Types */
@@ -101,6 +110,21 @@ export type ApprovalSnapshot_Serialize = {
 	decidedAt: string | null,
 };
 
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Deserialize = {
+	thread: Thread_Deserialize,
+	recap: string,
+};
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Serialize = {
+	thread: Thread_Serialize,
+	recap: string,
+};
+
 export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
 
 export type DebugSequencedThreadEvent_Deserialize = {
@@ -131,6 +155,58 @@ export type Detection_Serialize = {
 	version: string | null,
 	authenticated: boolean,
 	warning: string | null,
+};
+
+export type Diff = Diff_Serialize | Diff_Deserialize;
+
+export type DiffFile = DiffFile_Serialize | DiffFile_Deserialize;
+
+export type DiffFile_Deserialize = {
+	path: string,
+	oldPath?: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffFile_Serialize = {
+	path: string,
+	oldPath: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffHunk = {
+	header: string,
+	lines: DiffLine[],
+};
+
+export type DiffKind = "context" | "added" | "removed";
+
+export type DiffLine = {
+	kind: DiffKind,
+	text: string,
+};
+
+export type DiffScope = "uncommitted" | "branch";
+
+export type DiffStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
+
+export type Diff_Deserialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base?: string | null,
+	files: DiffFile_Deserialize[],
+};
+
+export type Diff_Serialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base: string | null,
+	files: DiffFile_Serialize[],
 };
 
 export type FieldError = {
@@ -253,6 +329,18 @@ export type Providers_Serialize = {
 	claude: ProviderSettings_Serialize,
 	codex: ProviderSettings_Serialize,
 	antigravity: ProviderSettings_Serialize,
+};
+
+export type Selection = Selection_Serialize | Selection_Deserialize;
+
+export type Selection_Deserialize = {
+	projectId: number,
+	threadId?: number | null,
+};
+
+export type Selection_Serialize = {
+	projectId: number,
+	threadId: number | null,
 };
 
 export type SequencedThreadEvent = SequencedThreadEvent_Serialize | SequencedThreadEvent_Deserialize;
@@ -430,6 +518,9 @@ export type Thread_Deserialize = {
 	createdAt: string,
 	updatedAt: string,
 	title?: string | null,
+	sessionLost: boolean,
+	continuedFrom?: number | null,
+	continuedIn?: number | null,
 };
 
 export type Thread_Serialize = {
@@ -444,6 +535,9 @@ export type Thread_Serialize = {
 	createdAt: string,
 	updatedAt: string,
 	title: string | null,
+	sessionLost: boolean,
+	continuedFrom: number | null,
+	continuedIn: number | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

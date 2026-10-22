@@ -1,12 +1,15 @@
 //! The App shell: a thin Tauri layer that exposes [`oxide_core::Core`] to the webview.
 //! The webview talks only to the TypeScript bindings generated from here.
 
+mod system;
+
 use std::sync::Arc;
 
 use oxide_core::{Core, ProjectSummary};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 use tauri_specta::{Builder, collect_commands};
 
 #[derive(Debug, Serialize, Type)]
@@ -236,6 +239,17 @@ pub struct Thread {
     pub created_at: String,
     pub updated_at: String,
     pub title: Option<String>,
+    pub session_lost: bool,
+    pub continued_from: Option<u32>,
+    pub continued_in: Option<u32>,
+}
+
+/// A new Thread continuing one whose Provider session is gone, and the recap to prefill.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuedThread {
+    pub thread: Thread,
+    pub recap: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -576,6 +590,78 @@ async fn list_branches(
         .map(|branches| branches.iter().map(convert).collect())
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffScope {
+    Uncommitted,
+    Branch,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    pub kind: DiffKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: DiffStatus,
+    pub added: u32,
+    pub removed: u32,
+    pub binary: bool,
+    pub hunks: Vec<DiffHunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Diff {
+    /// What the Branch scope compares against, if a base branch exists.
+    pub base: Option<String>,
+    pub files: Vec<DiffFile>,
+}
+
+/// The changes of the main checkout in one scope, from Git.
+#[tauri::command]
+#[specta::specta]
+async fn git_diff(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    scope: DiffScope,
+) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.diff(project_id, convert(&scope)))
+        .await
+        .map(|diff| convert(&diff))
+}
+
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
 #[tauri::command]
 #[specta::specta]
@@ -625,6 +711,16 @@ fn create_thread(
     let mode: Option<oxide_core::PermissionMode> = permission_mode.map(|m| convert(&m));
     let summary = core.create_thread(project_id, &provider, model, effort, mode)?;
     Ok(convert(&summary))
+}
+
+/// Starts a new Thread that continues one whose Provider session is gone.
+#[tauri::command]
+#[specta::specta]
+fn continue_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<ContinuedThread, AppError> {
+    Ok(convert(&core.continue_thread(thread_id)?))
 }
 
 #[tauri::command]
@@ -815,6 +911,116 @@ fn subscribe_thread_debug(
     Ok(convert(&snapshot))
 }
 
+/// Emitted when ⌘N is pressed (even with the window hidden): start a new Thread.
+pub const NEW_THREAD: &str = "new-thread";
+
+/// Emitted when Oxide is asked to quit while Threads are running; payload is how many.
+pub const QUIT_REQUESTED: &str = "quit-requested";
+
+const MAIN_WINDOW: &str = "main";
+
+#[derive(Debug, Clone, Copy, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    project_id: u32,
+    thread_id: Option<u32>,
+}
+
+/// The Project and Thread to reopen on launch.
+#[tauri::command]
+#[specta::specta]
+fn last_selection(core: State<'_, Arc<Core>>) -> Result<Option<Selection>, AppError> {
+    Ok(core.last_selection()?.map(|s| Selection {
+        project_id: s.project_id,
+        thread_id: s.thread_id,
+    }))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn remember_selection(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.remember_selection(project_id, thread_id)?)
+}
+
+/// The user confirmed quitting: interrupt every Thread and exit.
+#[tauri::command]
+#[specta::specta]
+fn confirm_quit(
+    core: State<'_, Arc<Core>>,
+    app: tauri::AppHandle,
+    dont_ask_again: bool,
+) -> Result<(), AppError> {
+    if dont_ask_again {
+        // A failed save must not trap the user in the dialog.
+        let _ = core.disable_quit_confirmation();
+    }
+    app.exit(0);
+    Ok(())
+}
+
+/// Brings the window back from hidden (Dock icon, ⌘N) and focuses it.
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn window_is_active(window: &WebviewWindow) -> bool {
+    window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
+}
+
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let new_thread = MenuItem::with_id(app, "new-thread", "New Thread", true, Some("CmdOrCtrl+N"))?;
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                "Oxide",
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(app, "File", true, &[&new_thread])?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
@@ -823,6 +1029,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_settings,
         save_settings,
         create_thread,
+        continue_thread,
         set_thread_permission_mode,
         set_thread_provider,
         rename_thread,
@@ -846,10 +1053,14 @@ pub fn builder() -> Builder<tauri::Wry> {
         read_file,
         git_status,
         list_branches,
+        git_diff,
         checkout_branch,
         create_branch,
         fetch_project,
-        pull
+        pull,
+        last_selection,
+        remember_selection,
+        confirm_quit
     ])
 }
 
@@ -872,7 +1083,37 @@ pub fn run() {
     export_bindings();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(builder.invoke_handler())
+        .menu(build_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == "new-thread" {
+                show_main_window(app);
+                let _ = app.emit(NEW_THREAD, ());
+            }
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW {
+                return;
+            }
+            match event {
+                // Closing only hides the window: Threads keep running in the background.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(false);
+                    }
+                }
+                tauri::WindowEvent::Focused(focused) => {
+                    let active = *focused && window.is_visible().unwrap_or(false);
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(active);
+                    }
+                }
+                _ => {}
+            }
+        })
         .setup(|app| {
             let home = app
                 .path()
@@ -884,16 +1125,34 @@ pub fn run() {
             core.subscribe_settings(move |state| {
                 let _ = handle.emit(SETTINGS_CHANGED, SettingsState::from(state));
             });
+            core.set_system(Arc::new(system::MacSystem::new(app.handle().clone())));
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                core.set_window_active(window_is_active(&window));
+            }
             app.manage(Arc::new(core));
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app.notification().request_permission();
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Oxide")
-        .run(|app, event| {
-            // Managed state is not dropped on exit, so stop every Provider and shell by hand.
-            if let tauri::RunEvent::Exit = event {
-                app.state::<Arc<Core>>().shutdown();
+        .run(|app, event| match event {
+            // The Dock icon was clicked while the window was hidden.
+            tauri::RunEvent::Reopen { .. } => show_main_window(app),
+            // ⌘Q: ask first when Threads are running.
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
+                if let Some(running) = app.state::<Arc<Core>>().quit_confirmation() {
+                    api.prevent_exit();
+                    show_main_window(app);
+                    let _ = app.emit(QUIT_REQUESTED, running);
+                }
             }
+            // Managed state is not dropped on exit: interrupt every Turn, then stop every
+            // Provider and shell by hand.
+            tauri::RunEvent::Exit => app.state::<Arc<Core>>().quit(),
+            _ => {}
         });
 }
 
@@ -920,6 +1179,9 @@ mod tests {
                 created_at: "a".into(),
                 updated_at: "b".into(),
                 title: None,
+                session_lost: false,
+                continued_from: None,
+                continued_in: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

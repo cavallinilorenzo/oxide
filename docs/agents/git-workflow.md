@@ -39,9 +39,9 @@ git fetch origin && git switch -c feat/<id>-<slug> origin/dev
 git push -u origin HEAD
 gh pr create --base dev
 # after merge into dev:
-gh issue close <id>
+# the issue closes by itself via `Closes #<id>` in the PR body
 ```
 
-## Why issues are closed by hand
+## Issue auto-close
 
-GitHub only auto-closes issues (`Closes #n`) when a PR merges into the **default branch** (`main`). Since feature PRs target `dev`, close the issue yourself once the PR is merged.
+`dev` is the repository's **default branch**, so `Closes #<id>` in a PR body links the PR to the issue and closes it when the PR merges into `dev`. The promotion PR `dev` → `main` closes nothing; do not put closing keywords in it.

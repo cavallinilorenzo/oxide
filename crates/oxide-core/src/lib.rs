@@ -291,17 +291,22 @@ impl Core {
 
     /// Reads a stored attachment; refuses paths outside the attachments folder.
     pub fn read_attachment(&self, path: &Path) -> Result<Vec<u8>> {
-        let dir = self.attachments_dir();
         let io = |source| Error::Io {
             path: path.to_path_buf(),
             source,
         };
-        let canonical = path.canonicalize().map_err(io)?;
-        let dir = dir.canonicalize().map_err(io)?;
-        if !canonical.starts_with(&dir) {
+        if !self.is_stored_attachment(path) {
             return Err(io(std::io::Error::other("not stored under the Oxide home")));
         }
-        fs::read(&canonical).map_err(io)
+        fs::read(path).map_err(io)
+    }
+
+    /// Whether `path` resolves (symlinks and `..` included) to a file inside the attachments folder.
+    fn is_stored_attachment(&self, path: &Path) -> bool {
+        match (path.canonicalize(), self.attachments_dir().canonicalize()) {
+            (Ok(path), Ok(dir)) => path.starts_with(dir),
+            _ => false,
+        }
     }
 
     /// Capabilities of a Provider, before any Thread of it exists.

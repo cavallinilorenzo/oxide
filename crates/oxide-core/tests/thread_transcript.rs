@@ -516,7 +516,7 @@ fn attachments_outside_the_attachments_folder_are_rejected_even_with_dotdot() {
     std::fs::write(dir.path().join("secret.txt"), b"s").unwrap();
     let sneaky = saved.parent().unwrap().join("..").join("secret.txt");
     assert!(
-        core.send_prompt_with_attachments(thread.id, "x", &[sneaky.clone()])
+        core.send_prompt_with_attachments(thread.id, "x", std::slice::from_ref(&sneaky))
             .is_err()
     );
     assert!(core.read_attachment(&sneaky).is_err());

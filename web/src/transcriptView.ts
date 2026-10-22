@@ -41,6 +41,7 @@ function toBlocks(
         blocks.push({ type: "message", item: it, final: false });
         break;
       case "reasoning":
+        if (!it.content.trim()) break; // no empty reasoning UI
         blocks.push({ type: "reasoning", item: it });
         break;
       case "file_change":

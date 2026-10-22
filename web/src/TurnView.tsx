@@ -97,7 +97,8 @@ function BlockView({ block }: { block: Block }) {
         <button
           type="button"
           className="file-change"
-          onClick={() => openDiff(block.item.content)}
+          onClick={() => openDiff(splitHeadline(block.item.content).headline)}
+          aria-label={`Open diff for ${splitHeadline(block.item.content).headline}`}
         >
           <FileDiffIcon size={12} />
           <span>{splitHeadline(block.item.content).headline}</span>

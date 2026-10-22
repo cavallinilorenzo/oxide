@@ -2,6 +2,7 @@
 //! (Claude Code, Codex, Antigravity CLI). Adapters implement it; Core depends only on it.
 
 pub mod claude;
+pub mod codex;
 pub mod contract_suite;
 
 use crossbeam_channel::Receiver;

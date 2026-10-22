@@ -17,6 +17,14 @@ fn core_detects_claude_provider() {
 }
 
 #[test]
+fn core_detects_codex_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let core = Core::open(tmp.path()).unwrap();
+    let det = core.detect_provider("codex");
+    assert_eq!(det.available, det.installed && det.authenticated);
+}
+
+#[test]
 fn creates_home_and_lists_no_projects() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join(".oxide");

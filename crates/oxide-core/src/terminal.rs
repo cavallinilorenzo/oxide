@@ -4,6 +4,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -102,8 +103,8 @@ impl TerminalSession {
 
     pub fn close(&self) {
         #[cfg(unix)]
-        unsafe {
-            libc::kill(-self.process_group, libc::SIGKILL);
+        {
+            kill_session_processes(self.process_group);
             let _ = self.child.lock().unwrap_or_else(|e| e.into_inner()).wait();
         }
         #[cfg(not(unix))]
@@ -113,6 +114,21 @@ impl TerminalSession {
             let _ = child.wait();
         }
     }
+}
+
+#[cfg(unix)]
+fn kill_session_processes(session_id: i32) {
+    if let Ok(output) = Command::new("ps").args(["-A", "-o", "pid="]).output() {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Ok(pid) = line.trim().parse::<i32>() {
+                let sid = unsafe { libc::getsid(pid) };
+                if sid == session_id {
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                }
+            }
+        }
+    }
+    unsafe { libc::kill(-session_id, libc::SIGKILL) };
 }
 
 impl Drop for TerminalSession {

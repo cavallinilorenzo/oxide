@@ -107,17 +107,25 @@ fn terminal_session_accepts_input_streams_output_and_shuts_down_its_process_grou
 
     core.write_terminal(
         terminal.id,
-        b"printf 'terminal-ready\\n'; read value; printf 'received:%s\\n' \"$value\"\n",
+        b"sleep 60 & echo CHILD=$!; echo READY$((6*7))\n",
     )
     .unwrap();
     let mut output = String::new();
-    while !output.contains("terminal-ready") {
+    while !output.contains("READY42") {
         let chunk = rx
             .recv_timeout(Duration::from_secs(5))
-            .expect("terminal output");
+            .unwrap_or_else(|error| panic!("terminal output: {error}; received {output:?}"));
         output.push_str(&String::from_utf8_lossy(&chunk));
     }
-    assert!(output.contains("terminal-ready"));
+    assert!(output.contains("READY42"));
+    let child_pid = output
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("CHILD="))
+        .unwrap_or_else(|| panic!("background child pid in {output:?}"))
+        .parse::<i32>()
+        .unwrap();
+    core.write_terminal(terminal.id, b"read value; echo received:$value\n")
+        .unwrap();
     core.write_terminal(terminal.id, b"hello\n").unwrap();
     while !output.contains("received:hello") {
         let chunk = rx
@@ -130,7 +138,11 @@ fn terminal_session_accepts_input_streams_output_and_shuts_down_its_process_grou
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let result = unsafe { libc::kill(-(pid as i32), 0) };
-        if result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        let child_result = unsafe { libc::kill(child_pid, 0) };
+        let missing = |result| {
+            result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        };
+        if missing(result) && missing(child_result) {
             break;
         }
         assert!(

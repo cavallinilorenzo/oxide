@@ -453,6 +453,62 @@ fn close_terminal(core: State<'_, Arc<Core>>, terminal_id: u32) -> Result<(), Ap
     Ok(core.close_terminal(terminal_id)?)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    pub content: String,
+    pub size: f64,
+    pub truncated: bool,
+    pub binary: bool,
+}
+
+/// Lists one directory of a Thread's checkout (`""` is the root), minus
+/// `.git` and gitignored entries.
+#[tauri::command]
+#[specta::specta]
+async fn list_dir(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+) -> Result<Vec<FileEntry>, AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.list_dir(project_id, thread_id, &path))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map(|entries| entries.iter().map(convert).collect())
+        .map_err(AppError::from)
+}
+
+/// Reads a file of a Thread's checkout, capped at 1 MiB.
+#[tauri::command]
+#[specta::specta]
+async fn read_file(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+) -> Result<FileContent, AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.read_file(project_id, thread_id, &path))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map(|file| convert(&file))
+        .map_err(AppError::from)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -659,7 +715,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         start_terminal,
         write_terminal,
         resize_terminal,
-        close_terminal
+        close_terminal,
+        list_dir,
+        read_file
     ])
 }
 

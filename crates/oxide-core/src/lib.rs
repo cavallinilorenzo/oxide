@@ -4,12 +4,14 @@
 mod db;
 mod discovery;
 mod error;
+mod files;
 mod settings;
 mod storage_actor;
 mod terminal;
 pub mod thread;
 mod thread_actor;
 
+pub use files::{FileContent, FileEntry};
 use oxide_provider::Provider as ProviderTrait;
 use std::collections::HashMap;
 use std::fs;
@@ -498,16 +500,7 @@ impl Core {
         project_id: u32,
         thread_id: Option<u32>,
     ) -> Result<TerminalSummary> {
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let cwd: String = match thread_id {
-            Some(thread_id) => db.query_row(
-                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
-                rusqlite::params![project_id, thread_id],
-                |r| r.get(0),
-            )?,
-            None => db.query_row("SELECT path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?,
-        };
-        drop(db);
+        let cwd = self.checkout_path(project_id, thread_id)?;
         let id = next_id(&self.next_terminal_id);
         let session = Arc::new(TerminalSession::start(id, Path::new(&cwd))?);
         let summary = session.summary.clone();
@@ -516,6 +509,40 @@ impl Core {
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, session);
         Ok(summary)
+    }
+
+    /// The children of one directory of a Thread's checkout (`""` is the
+    /// root), without `.git` or gitignored entries.
+    pub fn list_dir(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        path: &str,
+    ) -> Result<Vec<FileEntry>> {
+        files::list_dir(Path::new(&self.checkout_path(project_id, thread_id)?), path)
+    }
+
+    /// A file of a Thread's checkout, read by Core so the webview never
+    /// touches the filesystem. Capped at 1 MiB.
+    pub fn read_file(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        path: &str,
+    ) -> Result<FileContent> {
+        files::read_file(Path::new(&self.checkout_path(project_id, thread_id)?), path)
+    }
+
+    fn checkout_path(&self, project_id: u32, thread_id: Option<u32>) -> Result<String> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(match thread_id {
+            Some(thread_id) => db.query_row(
+                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
+                rusqlite::params![project_id, thread_id],
+                |r| r.get(0),
+            )?,
+            None => db.query_row("SELECT path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?,
+        })
     }
 
     pub fn subscribe_terminal(

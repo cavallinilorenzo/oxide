@@ -11,7 +11,12 @@ button[aria-pressed="true"] { background: #8883; }
 .sidebar ul { list-style: none; margin: 0; padding: 0; }
 .centre-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .centre { flex: 1; }
-.terminal { height: 220px; border-top: 1px solid #8884; }
+.terminal { height: 220px; min-height: 140px; border-top: 1px solid #8884; display: flex; flex-direction: column; }
+.terminal.terminal-hidden { display: none; }
+.terminal-toolbar { height: 28px; flex: 0 0 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid #8883; font-size: 11px; opacity: .8; }
+.terminal-error { color: #e66; }
+.terminal-host { flex: 1; min-height: 0; padding: 6px 8px; background: #111; }
+.terminal-host .xterm { height: 100%; }
 .tools { width: 320px; border-left: 1px solid #8884; }
 .tool-tabs { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid #8884; }
 .empty { opacity: 0.6; }

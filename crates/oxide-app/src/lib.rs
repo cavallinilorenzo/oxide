@@ -359,6 +359,61 @@ pub struct ThreadStatusChangedPayload {
 
 pub const THREAD_STATUS_CHANGED: &str = "thread-status-changed";
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Terminal {
+    pub id: u32,
+    pub pid: u32,
+    pub cwd: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn start_terminal(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    on_output: tauri::ipc::Channel<Vec<u8>>,
+) -> Result<Terminal, AppError> {
+    let terminal = core.start_terminal(project_id, thread_id)?;
+    let rx = core.subscribe_terminal(terminal.id)?;
+    std::thread::spawn(move || {
+        while let Ok(chunk) = rx.recv() {
+            if on_output.send(chunk).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&terminal))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn write_terminal(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    input: Vec<u8>,
+) -> Result<(), AppError> {
+    Ok(core.write_terminal(terminal_id, &input)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn resize_terminal(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    rows: u16,
+    cols: u16,
+) -> Result<(), AppError> {
+    Ok(core.resize_terminal(terminal_id, rows, cols)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn close_terminal(core: State<'_, Arc<Core>>, terminal_id: u32) -> Result<(), AppError> {
+    Ok(core.close_terminal(terminal_id)?)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -505,7 +560,11 @@ pub fn builder() -> Builder<tauri::Wry> {
         send_prompt,
         interrupt_thread,
         subscribe_thread,
-        subscribe_thread_debug
+        subscribe_thread_debug,
+        start_terminal,
+        write_terminal,
+        resize_terminal,
+        close_terminal
     ])
 }
 

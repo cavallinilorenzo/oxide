@@ -6,6 +6,7 @@ mod discovery;
 mod error;
 mod settings;
 mod storage_actor;
+mod terminal;
 pub mod thread;
 mod thread_actor;
 
@@ -13,9 +14,12 @@ use oxide_provider::Provider as ProviderTrait;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use storage_actor::StorageHandle;
+pub use terminal::TerminalSummary;
+use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
 
 use rusqlite::Connection;
@@ -56,6 +60,8 @@ pub struct Core {
     thread_actors: Mutex<HashMap<u32, ThreadActorHandle>>,
     fake_providers: Mutex<HashMap<u32, Box<dyn ProviderTrait>>>,
     real_time_ticker: AtomicBool,
+    terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
+    next_terminal_id: AtomicU32,
 }
 
 impl Core {
@@ -96,6 +102,8 @@ impl Core {
             thread_actors: Mutex::new(HashMap::new()),
             fake_providers: Mutex::new(HashMap::new()),
             real_time_ticker: AtomicBool::new(true),
+            terminals: Mutex::new(HashMap::new()),
+            next_terminal_id: AtomicU32::new(1),
         })
     }
 
@@ -397,6 +405,68 @@ impl Core {
     )> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.subscribe_debug()
+    }
+
+    /// Starts a shell PTY in the Project's checkout. A terminal actor owns the
+    /// PTY process until it is explicitly closed or Core shuts down.
+    pub fn start_terminal(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<TerminalSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let cwd: String = match thread_id {
+            Some(thread_id) => db.query_row(
+                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
+                rusqlite::params![project_id, thread_id],
+                |r| r.get(0),
+            )?,
+            None => db.query_row("SELECT path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?,
+        };
+        drop(db);
+        let id = next_id(&self.next_terminal_id);
+        let session = Arc::new(TerminalSession::start(id, Path::new(&cwd))?);
+        let summary = session.summary.clone();
+        self.terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, session);
+        Ok(summary)
+    }
+
+    pub fn subscribe_terminal(
+        &self,
+        terminal_id: u32,
+    ) -> Result<crossbeam_channel::Receiver<Vec<u8>>> {
+        Ok(self.terminal(terminal_id)?.subscribe())
+    }
+
+    pub fn write_terminal(&self, terminal_id: u32, bytes: &[u8]) -> Result<()> {
+        self.terminal(terminal_id)?.write(bytes)
+    }
+
+    pub fn resize_terminal(&self, terminal_id: u32, rows: u16, cols: u16) -> Result<()> {
+        self.terminal(terminal_id)?.resize(rows, cols)
+    }
+
+    pub fn close_terminal(&self, terminal_id: u32) -> Result<()> {
+        let session = self
+            .terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&terminal_id)
+            .ok_or_else(|| Error::Terminal(format!("unknown terminal {terminal_id}")))?;
+        session.close();
+        Ok(())
+    }
+
+    fn terminal(&self, id: u32) -> Result<Arc<TerminalSession>> {
+        self.terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::Terminal(format!("unknown terminal {id}")))
     }
 
     pub fn tick_thread(&self, thread_id: u32) {

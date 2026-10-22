@@ -11,6 +11,8 @@ pub enum Error {
     },
     #[error("database is at version {found}, newer than this build supports ({supported})")]
     DatabaseTooNew { found: u32, supported: u32 },
+    #[error("terminal error: {0}")]
+    Terminal(String),
     #[error("provider error: {0}")]
     Provider(String),
 }

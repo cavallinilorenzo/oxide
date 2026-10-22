@@ -1,6 +1,7 @@
 //! Oxide Core: all application logic, with no dependency on Tauri.
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
+mod activity;
 mod clock;
 mod db;
 mod discovery;
@@ -14,6 +15,7 @@ mod terminal;
 pub mod thread;
 mod thread_actor;
 
+pub use activity::{Notification, NotificationKind, System};
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
@@ -25,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use storage_actor::StorageHandle;
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
@@ -66,6 +69,16 @@ pub struct ProjectSummary {
     pub missing: bool,
 }
 
+/// The Project and Thread Oxide reopens on launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Selection {
+    pub project_id: u32,
+    pub thread_id: Option<u32>,
+}
+
+/// How long quitting waits for interrupted Turns to wind down before killing their processes.
+const QUIT_INTERRUPT_GRACE: Duration = Duration::from_secs(2);
+
 pub struct Core {
     home: PathBuf,
     user_home: PathBuf,
@@ -81,6 +94,7 @@ pub struct Core {
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
     git: git::GitState,
+    activity: Arc<activity::Activity>,
 }
 
 impl Core {
@@ -130,6 +144,7 @@ impl Core {
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
             git: git::GitState::default(),
+            activity: Arc::new(activity::Activity::new()),
         })
     }
 
@@ -168,6 +183,102 @@ impl Core {
         for session in terminals {
             session.close();
         }
+    }
+
+    /// Installs the operating-system side of Core's activity: the App Nap assertion
+    /// (held while any Turn is working), notifications and the Dock badge.
+    pub fn set_system(&self, system: Arc<dyn System>) {
+        self.activity.set_system(system);
+    }
+
+    /// Tells Core whether the window is visible and focused. Notifications fire only when it is not.
+    pub fn set_window_active(&self, active: bool) {
+        self.activity.set_window_active(active);
+    }
+
+    /// How many Threads quitting would interrupt, when Oxide should ask first: some are
+    /// working or need input and the quit-confirmation Setting is on.
+    pub fn quit_confirmation(&self) -> Option<u32> {
+        let active = self.activity.active_count();
+        (active > 0 && self.settings().settings.confirm_quit).then_some(active)
+    }
+
+    /// Turns the quit-confirmation Setting off ("don't ask again").
+    pub fn disable_quit_confirmation(&self) -> Result<()> {
+        let mut settings = self.settings().settings;
+        settings.confirm_quit = false;
+        self.save_settings(&settings)
+    }
+
+    /// Interrupts every running Turn, then stops every Provider and shell. Returns once their
+    /// processes are gone.
+    pub fn quit(&self) {
+        let actors: Vec<_> = self
+            .thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for actor in &actors {
+            let _ = actor.interrupt();
+        }
+        // The Providers report the interruption asynchronously; give them a moment to.
+        let deadline = std::time::Instant::now() + QUIT_INTERRUPT_GRACE;
+        while self.activity.active_count() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.shutdown();
+    }
+
+    /// Remembers the Project and Thread the user is looking at, to reopen on next launch.
+    pub fn remember_selection(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "INSERT INTO app_state (key, value) VALUES ('selection', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [serde_json::to_string(&(project_id, thread_id)).unwrap_or_default()],
+        )?;
+        Ok(())
+    }
+
+    /// The Project and Thread last remembered, if they still exist.
+    pub fn last_selection(&self) -> Result<Option<Selection>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let stored: Option<String> = db
+            .query_row(
+                "SELECT value FROM app_state WHERE key = 'selection'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        let Some((project_id, thread_id)) =
+            stored.and_then(|v| serde_json::from_str::<(u32, Option<u32>)>(&v).ok())
+        else {
+            return Ok(None);
+        };
+        let project_exists: bool = db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM projects WHERE id = ?1)",
+            [project_id],
+            |r| r.get(0),
+        )?;
+        if !project_exists {
+            return Ok(None);
+        }
+        let thread_id = match thread_id {
+            Some(id) => db
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM threads WHERE id = ?1 AND project_id = ?2)",
+                    [id, project_id],
+                    |r| r.get::<_, bool>(0),
+                )?
+                .then_some(id),
+            None => None,
+        };
+        Ok(Some(Selection {
+            project_id,
+            thread_id,
+        }))
     }
 
     pub fn home(&self) -> &Path {
@@ -459,6 +570,7 @@ impl Core {
             self.storage.clone(),
             real_time,
             self.clock.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            Arc::clone(&self.activity),
         )?;
 
         actors.insert(thread_id, actor.clone());

@@ -1,8 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type DiffScope, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { DiffOpenContext } from "./diffOpen";
 import { GitHeader } from "./GitHeader";
+import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
@@ -29,6 +30,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  // The Project and Thread of the last session: `undefined` until read, `null` once applied.
+  const restore = useRef<{ projectId: number; threadId: number | null } | null | undefined>(undefined);
   const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
   const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
     const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
@@ -67,6 +70,44 @@ export function App() {
     setActiveTool("Diff");
     setDiffScope("uncommitted");
     setDiffFocus(hint ?? null);
+  }, []);
+
+  useEffect(() => {
+    void commands.lastSelection().then((res) => {
+      const last = res.status === "ok" ? res.data : null;
+      restore.current = last && { projectId: last.projectId, threadId: last.threadId };
+      // Projects may have loaded first.
+      if (last) setSelectedId((current) => current ?? last.projectId);
+    });
+  }, []);
+
+  useEffect(() => {
+    const target = restore.current;
+    if (target && selectedId === null && projects?.some((p) => p.id === target.projectId && !p.hidden)) {
+      setSelectedId(target.projectId);
+    }
+  }, [projects, selectedId]);
+
+  // Remember what is open, once the last session has been restored.
+  useEffect(() => {
+    const pending = restore.current;
+    if (pending === undefined || !selected || threads === null) return;
+    if (pending !== null) {
+      if (pending.projectId !== selected.id) return;
+      restore.current = null;
+    }
+    void commands.rememberSelection(selected.id, currentThreadId);
+  }, [selected, threads, currentThreadId]);
+
+  // ⌘N, even from a hidden window: start a new Thread.
+  useEffect(() => {
+    const unlisten = listen("new-thread", () => {
+      setShowSettings(false);
+      setSelectedThreadId(null);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   // Stable, since ThreadView resubscribes whenever it changes.
@@ -123,7 +164,12 @@ export function App() {
       const res = await commands.listThreads(selected.id);
       if (active && res.status === "ok") {
         setThreads(res.data);
-        const initialThreadId = res.data[0]?.id ?? null;
+        const wanted = restore.current;
+        const restored =
+          wanted?.projectId === selected.id && res.data.some((t) => t.id === wanted.threadId)
+            ? wanted.threadId
+            : null;
+        const initialThreadId = restored ?? res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
         rememberTerminalContext(selected.id, initialThreadId);
       }
@@ -136,6 +182,7 @@ export function App() {
 
   return (
     <div className="window">
+      <QuitDialog />
       <header className="header">
         {selected ? (
           <span className="title">
@@ -167,6 +214,7 @@ export function App() {
           onProjects={setProjects}
           selected={selected}
           onSelect={(p) => {
+            restore.current = null;
             setSelectedId(p.id);
             setThreads(null);
             setSelectedThreadId(null);

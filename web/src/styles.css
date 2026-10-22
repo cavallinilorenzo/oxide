@@ -518,3 +518,8 @@ button[aria-pressed="true"] { background: #8883; }
 .diff-line { display: block; padding: 0 8px; white-space: pre; }
 .diff-added { background: #2ea04326; }
 .diff-removed { background: #f8514926; }
+
+.modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.5); z-index: 100; }
+.modal { background: #202226; border: 1px solid #34363c; border-radius: 8px; padding: 18px 20px; min-width: 320px; display: grid; gap: 12px; }
+.modal h2 { margin: 0; font-size: 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }

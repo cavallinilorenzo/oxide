@@ -14,6 +14,7 @@ import {
   type ApprovalSnapshot,
   type ItemSnapshot,
 } from "./bindings";
+import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
 import type { TranscriptTurn } from "./transcript";
 import {
@@ -89,7 +90,7 @@ function BlockView({ block }: { block: Block }) {
     case "message":
       return (
         <div className={block.final ? "agent-message final" : "agent-message"}>
-          {block.item.content}
+          <ItemContent content={block.item.content} />
         </div>
       );
     case "reasoning":

@@ -51,6 +51,14 @@ export function App() {
     ? [...terminalContexts, currentTerminalContext]
     : terminalContexts;
 
+  // Stable, since ThreadView resubscribes whenever it changes.
+  const onThreadStatusChange = useCallback((threadId: number, status: ThreadStatus) => {
+    setThreads(
+      (prev) =>
+        prev?.map((t) => (t.id === threadId && t.status !== status ? { ...t, status } : t)) ?? null
+    );
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const toggle = toggleForKey(e);
@@ -162,11 +170,7 @@ export function App() {
                   setSelectedThreadId(newThread.id);
                   rememberTerminalContext(selected.id, newThread.id);
                 }}
-                onStatusChange={(threadId, status) => {
-                  setThreads((prev) =>
-                    prev?.map((t) => (t.id === threadId ? { ...t, status } : t)) ?? null
-                  );
-                }}
+                onStatusChange={onThreadStatusChange}
               />
             </main>
           ) : (

@@ -29,6 +29,11 @@ export const commands = {
 	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
 	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
+	/**
+	 *  Up to `limit` Turns of a Thread from position `offset`, for paging in
+	 *  Turns older than what `subscribe_thread` returned.
+	 */
+	listTurns: (threadId: number, offset: number, limit: number) => typedError<TurnPage_Serialize, AppError>(__TAURI_INVOKE("list_turns", { threadId, offset, limit })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
@@ -323,6 +328,8 @@ export type ThreadSnapshot_Deserialize = {
 	thread: Thread_Deserialize,
 	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Deserialize[],
+	turnOffset: number,
+	turnCount: number,
 	lastSeq: number,
 	supportedPermissionModes: PermissionMode[],
 };
@@ -331,6 +338,8 @@ export type ThreadSnapshot_Serialize = {
 	thread: Thread_Serialize,
 	capabilities: ThreadCapabilities,
 	turns: TurnSnapshot_Serialize[],
+	turnOffset: number,
+	turnCount: number,
 	lastSeq: number,
 	supportedPermissionModes: PermissionMode[],
 };
@@ -373,6 +382,20 @@ export type TurnError_Deserialize = {
 export type TurnError_Serialize = {
 	message: string,
 	stderrTail: string | null,
+};
+
+export type TurnPage = TurnPage_Serialize | TurnPage_Deserialize;
+
+export type TurnPage_Deserialize = {
+	offset: number,
+	turns: TurnSnapshot_Deserialize[],
+	turnCount: number,
+};
+
+export type TurnPage_Serialize = {
+	offset: number,
+	turns: TurnSnapshot_Serialize[],
+	turnCount: number,
 };
 
 export type TurnSnapshot = TurnSnapshot_Serialize | TurnSnapshot_Deserialize;

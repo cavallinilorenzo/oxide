@@ -308,8 +308,18 @@ pub struct ThreadSnapshot {
     pub thread: Thread,
     pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
+    pub turn_offset: u32,
+    pub turn_count: u32,
     pub last_seq: u32,
     pub supported_permission_modes: Vec<PermissionMode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnPage {
+    pub offset: u32,
+    pub turns: Vec<TurnSnapshot>,
+    pub turn_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -559,6 +569,26 @@ fn interrupt_thread(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<(), Ap
     Ok(core.interrupt_thread(thread_id)?)
 }
 
+/// Up to `limit` Turns of a Thread from position `offset`, for paging in
+/// Turns older than what `subscribe_thread` returned.
+#[tauri::command]
+#[specta::specta]
+async fn list_turns(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    offset: u32,
+    limit: u32,
+) -> Result<TurnPage, AppError> {
+    let core = Arc::clone(&core);
+    let page =
+        tauri::async_runtime::spawn_blocking(move || core.list_turns(thread_id, offset, limit))
+            .await
+            .map_err(|e| AppError {
+                message: e.to_string(),
+            })??;
+    Ok(convert(&page))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn subscribe_thread(
@@ -623,6 +653,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         read_attachment,
         provider_capabilities,
         interrupt_thread,
+        list_turns,
         subscribe_thread,
         subscribe_thread_debug,
         start_terminal,
@@ -716,6 +747,8 @@ mod tests {
                 unknown_events: vec![],
             }],
             capabilities: oxide_core::ThreadCapabilities::default(),
+            turn_offset: 0,
+            turn_count: 1,
             last_seq: 7,
             supported_permission_modes: vec![],
         };

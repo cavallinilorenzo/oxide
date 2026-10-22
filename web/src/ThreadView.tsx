@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { PaperclipIcon, XIcon } from "@primer/octicons-react";
 import {
   commands,
@@ -14,6 +15,8 @@ import {
 } from "./bindings";
 import { TurnView } from "./TurnView";
 import { getClaudeCodeHint } from "./providerHints";
+import { createFrameBatcher } from "./frameBatcher";
+import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { stopsTurn } from "./shortcuts";
 import {
   applyThreadEvent,
@@ -21,6 +24,11 @@ import {
   turnIsRunning,
   type TranscriptState,
 } from "./transcript";
+
+/** How close to the bottom (px) still counts as following the stream. */
+const STICK_TO_BOTTOM = 48;
+/** How long (ms) the visible range must hold still before paging older Turns in. */
+const PAGE_LOAD_DELAY = 80;
 
 interface ThreadViewProps {
   threadId: number | null;
@@ -73,6 +81,7 @@ export function ThreadView({
   onStatusChange,
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
+  const [pages, setPages] = useState<TranscriptPages>(new Map());
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -86,9 +95,11 @@ export function ThreadView({
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const pendingEventsRef = useRef<SequencedThreadEvent[]>([]);
-  const rafIdRef = useRef<number>(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+  /** Where the view was last pinned to the bottom; null before the first pin. */
+  const pinnedAtRef = useRef<number | null>(null);
+  const requestedPagesRef = useRef(new Set<number>());
 
   // Load defaults from settings for a fresh thread
   useEffect(() => {
@@ -118,16 +129,36 @@ export function ThreadView({
   // Subscribe to the thread when threadId changes
   useEffect(() => {
     let active = true;
+    followRef.current = true;
+    pinnedAtRef.current = null;
+    requestedPagesRef.current = new Set();
 
     if (!threadId) {
       void Promise.resolve().then(() => {
-        if (active) setTranscript(initialTranscriptState(null));
+        if (active) {
+          setTranscript(initialTranscriptState(null));
+          setPages(new Map());
+        }
       });
       return () => {
         active = false;
       };
     }
 
+    // Per-token deltas never reach React directly: at most one update per frame.
+    const batcher = createFrameBatcher<SequencedThreadEvent>((batch) => {
+      if (!active) return;
+      setTranscript((prev) => {
+        let next = prev;
+        for (const evt of batch) {
+          next = applyThreadEvent(next, evt);
+        }
+        if (next.status !== prev.status) {
+          onStatusChange(threadId, next.status);
+        }
+        return next;
+      });
+    });
     const channel = new Channel<SequencedThreadEvent | DebugSequencedThreadEvent>();
     channel.onmessage = (event) => {
       if ("rawPayload" in event) {
@@ -136,25 +167,7 @@ export function ThreadView({
           events: [...(previous.threadId === threadId ? previous.events : []).slice(-199), event],
         }));
       }
-      pendingEventsRef.current.push(event as SequencedThreadEvent);
-      if (!rafIdRef.current) {
-        rafIdRef.current = requestAnimationFrame(() => {
-          rafIdRef.current = 0;
-          const batch = pendingEventsRef.current;
-          pendingEventsRef.current = [];
-          if (!active || batch.length === 0) return;
-          setTranscript((prev) => {
-            let next = prev;
-            for (const evt of batch) {
-              next = applyThreadEvent(next, evt);
-            }
-            if (next.status !== prev.status) {
-              onStatusChange(threadId, next.status);
-            }
-            return next;
-          });
-        });
-      }
+      batcher.push(event as SequencedThreadEvent);
     };
 
     void (async () => {
@@ -164,17 +177,14 @@ export function ThreadView({
       if (active && res.status === "ok") {
         const initial = initialTranscriptState(res.data);
         setTranscript(initial);
+        setPages(new Map());
         onStatusChange(threadId, initial.status);
       }
     })();
 
     return () => {
       active = false;
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = 0;
-      }
-      pendingEventsRef.current = [];
+      batcher.cancel();
     };
   }, [threadId, onStatusChange, debugOpen]);
 
@@ -222,15 +232,73 @@ export function ThreadView({
     files.forEach((f) => void addImage(f));
   };
 
-  // Auto-scroll to bottom as messages stream in
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript.turns]);
+  const turnCount = transcript.turnOffset + transcript.turns.length;
+  const virtualizer = useVirtualizer({
+    count: turnCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 160,
+    overscan: 6,
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const firstVisible = virtualRows[0]?.index ?? 0;
+  const lastVisible = virtualRows[virtualRows.length - 1]?.index ?? -1;
 
-  const handleRespond = async (approvalId: string, decision: ApprovalDecision) => {
-    if (!threadId) return;
-    await commands.respondToApproval(threadId, approvalId, decision);
+  // Page in older Turns under the visible rows, however far back the jump.
+  // Waits for the range to settle, so dragging the scrollbar across thousands
+  // of Turns only loads where it stops.
+  useEffect(() => {
+    if (!threadId || lastVisible < 0) return;
+    const requested = requestedPagesRef.current;
+    const timer = setTimeout(() => {
+      const missing = pagesToLoad(firstVisible, lastVisible, transcript.turnOffset, (page) =>
+        requested.has(page)
+      );
+      for (const page of missing) {
+        requested.add(page);
+        const { offset, limit } = pageRequest(page, transcript.turnOffset);
+        void commands.listTurns(threadId, offset, limit).then((res) => {
+          if (requestedPagesRef.current !== requested) return; // Thread changed.
+          if (res.status === "ok") {
+            setPages((prev) => new Map(prev).set(page, res.data.turns));
+          } else {
+            requested.delete(page);
+          }
+        });
+      }
+    }, PAGE_LOAD_DELAY);
+    return () => clearTimeout(timer);
+  }, [threadId, firstVisible, lastVisible, transcript.turnOffset]);
+
+  // Open on the newest Turn and follow the stream while scrolled to the
+  // bottom, including when measuring rows changes the total height.
+  const totalSize = virtualizer.getTotalSize();
+  // The virtualizer re-renders synchronously inside its own scroll listener,
+  // possibly before `onScroll` runs, so a moved scrollTop also means the user
+  // scrolled away.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !followRef.current) return;
+    const pinnedAt = pinnedAtRef.current;
+    if (pinnedAt !== null && Math.abs(el.scrollTop - pinnedAt) > 1) return;
+    el.scrollTop = el.scrollHeight;
+    pinnedAtRef.current = el.scrollTop;
+  }, [transcript.turns, totalSize]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM;
+    if (followRef.current) pinnedAtRef.current = el.scrollTop;
   };
+
+  // Stable, so memoized TurnViews skip re-rendering while another Turn streams.
+  const handleRespond = useCallback(
+    async (approvalId: string, decision: ApprovalDecision) => {
+      if (!threadId) return;
+      await commands.respondToApproval(threadId, approvalId, decision);
+    },
+    [threadId]
+  );
 
   const handlePermissionChange = async (newMode: PermissionMode) => {
     if (threadId) {
@@ -344,23 +412,38 @@ export function ThreadView({
           )}
         </section>
       )}
-      <div className="transcript" aria-label="Transcript">
-        {transcript.turns.length === 0 ? (
+      <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
+        {turnCount === 0 ? (
           <div className="empty-thread">
             <p>Pick a Project, type a prompt, and watch the agent message stream in.</p>
           </div>
         ) : (
-          transcript.turns.map((turn, tIdx) => (
-            <TurnView
-              key={turn.id || tIdx}
-              turn={turn}
-              provider={transcript.thread?.provider ?? draftProvider}
-              onRespond={handleRespond}
-              isWorking={isTurnActive}
-            />
-          ))
+          <div className="transcript-rows" style={{ height: totalSize }}>
+            {virtualRows.map((row) => {
+              const turn = turnAt(row.index, transcript, pages);
+              return (
+                <div
+                  key={row.key}
+                  data-index={row.index}
+                  ref={virtualizer.measureElement}
+                  className="transcript-row"
+                  style={{ transform: `translateY(${row.start}px)` }}
+                >
+                  {turn ? (
+                    <TurnView
+                      turn={turn}
+                      provider={transcript.thread?.provider ?? draftProvider}
+                      onRespond={handleRespond}
+                      isWorking={isTurnActive}
+                    />
+                  ) : (
+                    <div className="turn-placeholder" aria-busy />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {providerHint && providerHint.type !== "ok" && (

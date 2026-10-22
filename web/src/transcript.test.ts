@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyThreadEvent, initialTranscriptState } from "./transcript";
 import { getOfferedPermissionModes } from "./ThreadView";
-import type { ThreadSnapshot } from "./bindings";
+import type { SequencedThreadEvent, ThreadSnapshot } from "./bindings";
 
 describe("transcript reducer", () => {
   it("initializes state from a snapshot", () => {
@@ -44,11 +44,14 @@ describe("transcript reducer", () => {
           unknownEvents: [],
         },
       ],
+      turnOffset: 41,
+      turnCount: 42,
       lastSeq: 5,
       supportedPermissionModes: ["ask", "auto-edit", "full-access"],
     };
 
     const state = initialTranscriptState(snapshot);
+    expect(state.turnOffset).toBe(41);
     expect(state.thread?.id).toBe(1);
     expect(state.turns.length).toBe(1);
     expect(state.turns[0].items[0].content).toBe("Hi there!");
@@ -338,4 +341,45 @@ describe("transcript reducer", () => {
       { mode: "auto-edit", label: "Auto-edit", icon: "🛡️" },
     ]);
   });
+
+  it("appends a Turn on every TurnStarted, even when the Provider repeats its turn index", () => {
+    let state = initialTranscriptState(null);
+    state = applyThreadEvent(state, startTurn(1, "first"));
+    state = applyThreadEvent(state, completeTurn(2));
+    state = applyThreadEvent(state, startTurn(3, "second"));
+    state = applyThreadEvent(state, completeTurn(4));
+
+    expect(state.turns.map((t) => [t.prompt, t.status])).toEqual([
+      ["first", "completed"],
+      ["second", "completed"],
+    ]);
+  });
+
+  it("keeps finalized Turns and Items as the same objects while another Item streams", () => {
+    let state = initialTranscriptState(null);
+    state = applyThreadEvent(state, startTurn(1, "earlier"));
+    state = applyThreadEvent(state, completeTurn(2));
+    state = applyThreadEvent(state, startTurn(3, "now"));
+    state = applyThreadEvent(state, {
+      seq: 4,
+      event: { type: "ItemCompleted", payload: { item_index: 0, kind: "agent_message", content: "done" } },
+    });
+    const before = state;
+    state = applyThreadEvent(state, {
+      seq: 5,
+      event: { type: "ItemDeltaBatch", payload: { item_index: 1, delta: "stream" } },
+    });
+
+    expect(state.turns[0]).toBe(before.turns[0]);
+    expect(state.turns[1].items[0]).toBe(before.turns[1].items[0]);
+    expect(state.turns[1].items[1].content).toBe("stream");
+  });
 });
+
+function startTurn(seq: number, prompt: string): SequencedThreadEvent {
+  return { seq, event: { type: "TurnStarted", payload: { turn_index: 0, prompt, attachments: [] } } };
+}
+
+function completeTurn(seq: number): SequencedThreadEvent {
+  return { seq, event: { type: "TurnCompleted", payload: { turn_index: 0, status: "completed", error: null } } };
+}

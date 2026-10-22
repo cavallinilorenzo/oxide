@@ -122,14 +122,27 @@ pub struct TurnError {
     pub stderr_tail: Option<String>,
 }
 
+/// A Thread as of `last_seq`. `turns` holds the Turns at positions
+/// `turn_offset..turn_count`, in order; earlier ones are paged in on demand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: ThreadSummary,
     pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
+    pub turn_offset: u32,
+    pub turn_count: u32,
     pub last_seq: u32,
     pub supported_permission_modes: Vec<PermissionMode>,
+}
+
+/// The Turns at positions `offset..offset + turns.len()` of a Thread holding
+/// `turn_count` Turns. A Turn's position is its place in the Thread, from 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnPage {
+    pub offset: u32,
+    pub turns: Vec<TurnSnapshot>,
+    pub turn_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

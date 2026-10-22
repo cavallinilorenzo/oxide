@@ -83,6 +83,11 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE turns ADD COLUMN error_message TEXT;
     ALTER TABLE turns ADD COLUMN stderr_tail TEXT;
 ",
+    // Transcript paging reads Turns by position and Items by Turn.
+    "
+    CREATE INDEX turns_by_thread ON turns(thread_id, id);
+    CREATE INDEX items_by_turn ON items(turn_id, item_index);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

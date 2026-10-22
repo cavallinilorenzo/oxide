@@ -537,16 +537,15 @@ fn run_thread_actor(
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
-        .get_snapshot(thread_id)
-        .ok()
-        .and_then(|s| s.turns.last().map(|t| t.turn_index + 1))
+        .get_snapshot(thread_id, 0)
+        .map(|s| s.turn_count)
         .unwrap_or(0);
 
     // Start provider
     let caps = provider.capabilities();
     let mut state = ActorState::new(thread_id, next_turn_index, caps.clone());
     let initial_mode = storage
-        .get_snapshot(thread_id)
+        .get_snapshot(thread_id, 0)
         .map(|s| s.thread.permission_mode)
         .unwrap_or_else(|_| {
             caps.supported_permission_modes
@@ -647,7 +646,7 @@ fn run_thread_actor(
                     }
                     ThreadActorMsg::Subscribe { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
-                        let mut snapshot = match storage.get_snapshot(thread_id) {
+                        let mut snapshot = match storage.get_snapshot(thread_id, crate::SNAPSHOT_TURNS) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("failed to get snapshot for thread {thread_id}: {e}");
@@ -668,7 +667,7 @@ fn run_thread_actor(
                     }
                     ThreadActorMsg::SubscribeDebug { reply } => {
                         let (sub_tx, sub_rx) = crossbeam_channel::unbounded();
-                        let mut snapshot = match storage.get_snapshot(thread_id) {
+                        let mut snapshot = match storage.get_snapshot(thread_id, u32::MAX) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("failed to get snapshot for thread {thread_id}: {e}");

@@ -34,8 +34,8 @@ pub use settings::{
 };
 pub use thread::{
     ApprovalSnapshot, DebugSequencedThreadEvent, ItemSnapshot, SequencedThreadEvent,
-    ThreadCapabilities, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot,
-    UnknownEventSnapshot,
+    ThreadCapabilities, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnError,
+    TurnSnapshot, UnknownEventSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";

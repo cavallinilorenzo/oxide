@@ -11,13 +11,21 @@ import type {
   TurnSnapshot,
 } from "./bindings";
 
+/** A Turn as shown: the stored snapshot plus the live Provider retry notice, if any. */
+export type TranscriptTurn = TurnSnapshot & { retryNotice?: string | null };
+
 export interface TranscriptState {
   thread: Thread | null;
   status: ThreadStatus;
-  turns: TurnSnapshot[];
+  turns: TranscriptTurn[];
   capabilities: ThreadCapabilities;
   lastSeq: number;
   supportedPermissionModes: PermissionMode[];
+}
+
+/** A Turn is running (working, or waiting on an Approval), so Stop applies. */
+export function turnIsRunning(status: ThreadStatus): boolean {
+  return status === "working" || status === "needs-input";
 }
 
 const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false, imageAttachments: false };
@@ -44,7 +52,7 @@ export function initialTranscriptState(snapshot: ThreadSnapshot | null): Transcr
 }
 
 function updateLastTurnItem(
-  turns: TurnSnapshot[],
+  turns: TranscriptTurn[],
   itemIndex: number,
   updater: (existing: ItemSnapshot | undefined) => ItemSnapshot
 ): void {
@@ -80,7 +88,7 @@ export function applyThreadEvent(
     case "TurnStarted": {
       status = "working";
       const existing = turns.findIndex((t) => t.turnIndex === event.payload.turn_index);
-      const newTurn: TurnSnapshot = {
+      const newTurn: TranscriptTurn = {
         id: existing >= 0 ? turns[existing].id : 0,
         turnIndex: event.payload.turn_index,
         prompt: event.payload.prompt,
@@ -91,6 +99,8 @@ export function applyThreadEvent(
         startedAt: new Date().toISOString(),
         completedAt: null,
         items: existing >= 0 ? turns[existing].items : [],
+        error: null,
+        retryNotice: null,
         approvals: existing >= 0 ? turns[existing].approvals : [],
         unknownEvents: existing >= 0 ? turns[existing].unknownEvents : [],
       };
@@ -146,8 +156,18 @@ export function applyThreadEvent(
           ...turn,
           status: event.payload.status,
           completedAt: new Date().toISOString(),
+          error: event.payload.error ?? null,
+          retryNotice: null,
           approvals,
         };
+      }
+      break;
+    }
+
+    case "ProviderRetrying": {
+      const last = turns.length - 1;
+      if (last >= 0) {
+        turns[last] = { ...turns[last], retryNotice: event.payload.message };
       }
       break;
     }

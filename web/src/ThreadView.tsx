@@ -14,7 +14,13 @@ import {
 } from "./bindings";
 import { TurnView } from "./TurnView";
 import { getClaudeCodeHint } from "./providerHints";
-import { applyThreadEvent, initialTranscriptState, type TranscriptState } from "./transcript";
+import { stopsTurn } from "./shortcuts";
+import {
+  applyThreadEvent,
+  initialTranscriptState,
+  turnIsRunning,
+  type TranscriptState,
+} from "./transcript";
 
 interface ThreadViewProps {
   threadId: number | null;
@@ -271,7 +277,7 @@ export function ThreadView({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = input.trim();
-    if (!prompt || sending) return;
+    if (!prompt || sending || turnIsRunning(transcript.status)) return;
 
     setSending(true);
     setInput("");
@@ -308,7 +314,11 @@ export function ThreadView({
     }
   };
 
-  const isTurnActive = transcript.status === "working" || transcript.status === "needs-input";
+  const isTurnActive = turnIsRunning(transcript.status);
+
+  const stop = () => {
+    if (threadId) void commands.interruptThread(threadId);
+  };
 
   return (
     <div className="thread-container">
@@ -427,19 +437,27 @@ export function ThreadView({
           <input
             type="text"
             className="composer-input"
-            placeholder={isTurnActive ? "Agent is working…" : "Type a prompt…"}
+            placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onPaste={handlePaste}
-            disabled={isTurnActive || sending}
+            onKeyDown={(e) => {
+              if (stopsTurn(e, transcript.status)) {
+                e.preventDefault();
+                stop();
+              }
+            }}
+            disabled={sending}
           />
-          <button
-            type="submit"
-            className="composer-submit"
-            disabled={!input.trim() || isTurnActive || sending}
-          >
-            Send
-          </button>
+          {isTurnActive ? (
+            <button type="button" className="composer-submit" onClick={stop}>
+              Stop
+            </button>
+          ) : (
+            <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
+              Send
+            </button>
+          )}
         </div>
       </form>
     </div>

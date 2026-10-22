@@ -160,6 +160,55 @@ describe("transcript reducer", () => {
     expect(state.status).toBe("completed");
   });
 
+  const startedTurn = () =>
+    applyThreadEvent(initialTranscriptState(null), {
+      seq: 1,
+      event: { type: "TurnStarted", payload: { turn_index: 0, prompt: "Go", model: null, effort: null, attachments: [] } },
+    });
+
+  it("keeps a failed Turn's error message and stderr tail", () => {
+    let state = startedTurn();
+    state = applyThreadEvent(state, {
+      seq: 2,
+      event: {
+        type: "TurnCompleted",
+        payload: {
+          turn_index: 0,
+          status: "error",
+          error: { message: "The Provider exited unexpectedly (exit code 1)", stderrTail: "boom" },
+        },
+      },
+    });
+    state = applyThreadEvent(state, {
+      seq: 3,
+      event: { type: "ThreadStatusChanged", payload: { status: "error" } },
+    });
+
+    expect(state.status).toBe("error");
+    expect(state.turns[0].status).toBe("error");
+    expect(state.turns[0].error).toEqual({
+      message: "The Provider exited unexpectedly (exit code 1)",
+      stderrTail: "boom",
+    });
+  });
+
+  it("shows a Provider retry as a notice on the running Turn without changing status", () => {
+    let state = startedTurn();
+    state = applyThreadEvent(state, {
+      seq: 2,
+      event: { type: "ProviderRetrying", payload: { message: "Rate limited, retrying in 5s" } },
+    });
+
+    expect(state.status).toBe("working");
+    expect(state.turns[0].retryNotice).toBe("Rate limited, retrying in 5s");
+
+    state = applyThreadEvent(state, {
+      seq: 3,
+      event: { type: "TurnCompleted", payload: { turn_index: 0, status: "completed", error: null } },
+    });
+    expect(state.turns[0].retryNotice).toBeNull();
+  });
+
   it("handles approval requested, responded, and auto-resolution on turn completion", () => {
     let state = initialTranscriptState(null);
 
@@ -253,6 +302,7 @@ describe("transcript reducer", () => {
         payload: {
           turn_index: 1,
           status: "interrupted",
+          error: null,
         },
       },
     });

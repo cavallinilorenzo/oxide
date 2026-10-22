@@ -187,6 +187,12 @@ fn unanswered_approval_waits_indefinitely_and_resolves_when_interrupted() {
 
     // Now interrupt the thread
     core.interrupt_thread(thread.id).unwrap();
+    // The Provider ends the Turn; wait for it.
+    while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        if let ThreadEvent::TurnCompleted { .. } = seq_evt.event {
+            break;
+        }
+    }
 
     // Must be resolved and status Interrupted
     let snapshot_after_interrupt = core.get_thread_snapshot(thread.id).unwrap();

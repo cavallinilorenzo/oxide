@@ -13,9 +13,9 @@ import {
   type ApprovalDecision,
   type ApprovalSnapshot,
   type ItemSnapshot,
-  type TurnSnapshot,
 } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
+import type { TranscriptTurn } from "./transcript";
 import {
   formatTime,
   groupTurnItems,
@@ -242,7 +242,7 @@ export const TurnView = memo(function TurnView({
   onRespond,
   isWorking,
 }: {
-  turn: TurnSnapshot;
+  turn: TranscriptTurn;
   provider: string;
   onRespond: (approvalId: string, decision: ApprovalDecision) => void;
   isWorking: boolean;
@@ -283,6 +283,18 @@ export const TurnView = memo(function TurnView({
               disabled={!isWorking && turn.status !== "running"}
             />
           ))}
+        </div>
+      )}
+      {turn.status === "running" && turn.retryNotice && (
+        <div className="turn-notice" role="status">
+          {turn.retryNotice}
+        </div>
+      )}
+      {turn.status === "interrupted" && <div className="turn-notice">Interrupted</div>}
+      {turn.status === "error" && (
+        <div className="turn-error" role="alert">
+          <div>{turn.error?.message ?? "The Turn failed"}</div>
+          {turn.error?.stderrTail && <pre className="turn-stderr">{turn.error.stderrTail}</pre>}
         </div>
       )}
     </section>

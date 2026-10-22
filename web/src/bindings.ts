@@ -260,6 +260,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
+	error?: TurnError_Deserialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
@@ -271,6 +272,8 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	id: string,
 	decision: ApprovalDecision,
 	decided_at: string,
+} } | { type: "ProviderRetrying"; payload: {
+	message: string,
 } } | { type: "Error"; payload: {
 	message: string,
 } } | { type: "Unknown" };
@@ -296,6 +299,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
+	error: TurnError_Serialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
 } } | { type: "ApprovalRequested"; payload: {
@@ -307,6 +311,8 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	id: string,
 	decision: ApprovalDecision,
 	decided_at: string,
+} } | { type: "ProviderRetrying"; payload: {
+	message: string,
 } } | { type: "Error"; payload: {
 	message: string,
 } } | { type: "Unknown" };
@@ -357,6 +363,18 @@ export type Thread_Serialize = {
 	updatedAt: string,
 };
 
+export type TurnError = TurnError_Serialize | TurnError_Deserialize;
+
+export type TurnError_Deserialize = {
+	message: string,
+	stderrTail?: string | null,
+};
+
+export type TurnError_Serialize = {
+	message: string,
+	stderrTail: string | null,
+};
+
 export type TurnSnapshot = TurnSnapshot_Serialize | TurnSnapshot_Deserialize;
 
 export type TurnSnapshot_Deserialize = {
@@ -370,6 +388,7 @@ export type TurnSnapshot_Deserialize = {
 	startedAt: string,
 	completedAt?: string | null,
 	items: ItemSnapshot_Deserialize[],
+	error?: TurnError_Deserialize | null,
 	approvals: ApprovalSnapshot_Deserialize[],
 	unknownEvents: UnknownEventSnapshot[],
 };
@@ -385,6 +404,7 @@ export type TurnSnapshot_Serialize = {
 	startedAt: string,
 	completedAt: string | null,
 	items: ItemSnapshot_Serialize[],
+	error: TurnError_Serialize | null,
 	approvals: ApprovalSnapshot_Serialize[],
 	unknownEvents: UnknownEventSnapshot[],
 };

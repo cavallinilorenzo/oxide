@@ -135,12 +135,23 @@ pub enum ProviderEvent {
         #[serde(default)]
         options: Vec<String>,
     },
+    /// A Provider-side failure. With `retrying` the Provider is retrying on its own (e.g. a rate
+    /// limit); otherwise the Turn in flight has failed and must still end with `TurnCompleted`
+    /// or `Exited`.
     Error {
         message: String,
         code: Option<String>,
+        #[serde(default)]
+        retrying: bool,
     },
     SessionInfo {
         session_id: String,
+    },
+    /// The Provider process ended on its own. Adapters send it once, then drop the channel.
+    Exited {
+        code: Option<i32>,
+        /// The last lines the Provider wrote to stderr, if it wrote any.
+        stderr_tail: Option<String>,
     },
     Unknown {
         raw: String,
@@ -271,12 +282,32 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
 type PromptHandler = Box<dyn Fn(&str) + Send + Sync>;
 type ApprovalHandler = Box<dyn Fn(&str, ApprovalDecision) + Send + Sync>;
 
+/// What a [`FakeProvider`] was asked to do, readable after the Fake is handed to Core.
+#[derive(Clone, Default)]
+pub struct FakeRecorder {
+    starts: Arc<Mutex<u32>>,
+    prompts: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeRecorder {
+    /// How many times a session was started or resumed.
+    pub fn starts(&self) -> u32 {
+        *self.starts.lock().unwrap()
+    }
+
+    /// Every prompt sent, in order.
+    pub fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().unwrap().clone()
+    }
+}
+
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
     detection: Detection,
     event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
     event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
     prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
+    recorder: FakeRecorder,
     approval_handler: Arc<Mutex<Option<ApprovalHandler>>>,
     current_permission_mode: Arc<Mutex<PermissionMode>>,
 }
@@ -305,6 +336,7 @@ impl Default for FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
@@ -320,6 +352,7 @@ impl FakeProvider {
             event_sender: Some(event_sender),
             event_receiver,
             prompt_handler: Arc::new(Mutex::new(None)),
+            recorder: FakeRecorder::default(),
             approval_handler: Arc::new(Mutex::new(None)),
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
         }
@@ -351,6 +384,10 @@ impl FakeProvider {
             .clone()
     }
 
+    pub fn recorder(&self) -> FakeRecorder {
+        self.recorder.clone()
+    }
+
     pub fn on_prompt(&self, handler: impl Fn(&str) + Send + Sync + 'static) {
         *self.prompt_handler.lock().unwrap() = Some(Box::new(handler));
     }
@@ -370,6 +407,7 @@ impl Provider for FakeProvider {
     }
 
     fn start(&mut self, _context: &StartContext) -> Result<Receiver<ProviderEvent>, ProviderError> {
+        *self.recorder.starts.lock().unwrap() += 1;
         Ok(self.event_receiver.clone())
     }
 
@@ -378,10 +416,16 @@ impl Provider for FakeProvider {
         _session_id: &str,
         _context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError> {
+        *self.recorder.starts.lock().unwrap() += 1;
         Ok(self.event_receiver.clone())
     }
 
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+        self.recorder
+            .prompts
+            .lock()
+            .unwrap()
+            .push(prompt.to_string());
         if let Some(ref handler) = *self.prompt_handler.lock().unwrap() {
             handler(prompt);
         } else if let Some(ref sender) = self.event_sender {

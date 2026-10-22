@@ -1,5 +1,8 @@
-use oxide_core::{Core, ItemKind, PermissionMode, ThreadEvent, ThreadStatus, TurnStatus};
-use oxide_provider::{FakeProvider, Provider, ProviderEvent};
+use oxide_core::{
+    Core, ItemKind, PermissionMode, SequencedThreadEvent, ThreadEvent, ThreadStatus, TurnError,
+    TurnStatus,
+};
+use oxide_provider::{ApprovalKind, FakeProvider, Provider, ProviderEvent};
 use tempfile::tempdir;
 
 #[test]
@@ -344,6 +347,317 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
         }
     }
     assert!(turn_completed);
+}
+
+fn open_core_with_project(dir: &std::path::Path) -> (Core, u32) {
+    let core = Core::open(dir).unwrap();
+    core.set_real_time_ticker(false);
+    let mut settings = core.settings().settings;
+    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
+    core.save_settings(&settings).unwrap();
+    std::fs::create_dir_all(dir.join("my-project").join(".git")).unwrap();
+    let project_id = core.rescan_projects().unwrap()[0].id;
+    (core, project_id)
+}
+
+/// A Fake whose every prompt starts a Turn (always reporting turn_index 0, as a
+/// naive Provider might) and leaves it running for the test to finish.
+fn fake_that_starts_turns() -> FakeProvider {
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+    fake.on_prompt(move |prompt| {
+        let _ = sender.send(ProviderEvent::TurnStarted {
+            turn_index: 0,
+            prompt: prompt.to_string(),
+        });
+    });
+    fake
+}
+
+/// Waits for `wanted`, returning every event seen up to and including it.
+fn wait_for_status(
+    rx: &crossbeam_channel::Receiver<SequencedThreadEvent>,
+    wanted: ThreadStatus,
+) -> Vec<ThreadEvent> {
+    let mut seen = Vec::new();
+    loop {
+        let evt = rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap_or_else(|_| panic!("timed out waiting for {wanted}; saw {seen:?}"));
+        let done = evt.event == ThreadEvent::ThreadStatusChanged { status: wanted };
+        seen.push(evt.event);
+        if done {
+            return seen;
+        }
+    }
+}
+
+#[test]
+fn stop_interrupts_the_turn_and_the_next_prompt_reuses_the_session() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+    let fake = fake_that_starts_turns();
+    let sender = fake.sender();
+    let recorder = fake.recorder();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    let (_snapshot, rx) = core.subscribe_thread(thread.id).unwrap();
+
+    core.send_prompt(thread.id, "first").unwrap();
+    wait_for_status(&rx, ThreadStatus::Working);
+    core.interrupt_thread(thread.id).unwrap();
+    wait_for_status(&rx, ThreadStatus::Interrupted);
+
+    core.send_prompt(thread.id, "second").unwrap();
+    wait_for_status(&rx, ThreadStatus::Working);
+    sender
+        .send(ProviderEvent::TurnCompleted {
+            turn_index: 0,
+            status: TurnStatus::Completed,
+        })
+        .unwrap();
+    wait_for_status(&rx, ThreadStatus::Completed);
+
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.thread.status, ThreadStatus::Completed);
+    let turns: Vec<_> = snapshot
+        .turns
+        .iter()
+        .map(|t| (t.turn_index, t.prompt.as_str(), t.status))
+        .collect();
+    assert_eq!(
+        turns,
+        vec![
+            (0, "first", TurnStatus::Interrupted),
+            (1, "second", TurnStatus::Completed),
+        ]
+    );
+    assert_eq!(recorder.starts(), 1, "the session must not be restarted");
+    assert_eq!(recorder.prompts(), vec!["first", "second"]);
+}
+
+#[test]
+fn provider_crash_mid_turn_fails_only_that_thread_and_keeps_the_stderr_tail() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+
+    let crashing = fake_that_starts_turns();
+    let crashing_sender = crashing.sender();
+    let crashing_recorder = crashing.recorder();
+    let crashing_thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(crashing_thread.id, crashing);
+
+    let healthy = fake_that_starts_turns();
+    let healthy_sender = healthy.sender();
+    let healthy_thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(healthy_thread.id, healthy);
+
+    let (_, crashing_rx) = core.subscribe_thread(crashing_thread.id).unwrap();
+    let (_, healthy_rx) = core.subscribe_thread(healthy_thread.id).unwrap();
+    core.send_prompt(crashing_thread.id, "will crash").unwrap();
+    core.send_prompt(healthy_thread.id, "keeps going").unwrap();
+    wait_for_status(&crashing_rx, ThreadStatus::Working);
+    wait_for_status(&healthy_rx, ThreadStatus::Working);
+
+    crashing_sender
+        .send(ProviderEvent::Exited {
+            code: Some(101),
+            stderr_tail: Some("thread 'main' panicked at src/main.rs:1:1".into()),
+        })
+        .unwrap();
+    let seen = wait_for_status(&crashing_rx, ThreadStatus::Error);
+    let expected_error = TurnError {
+        message: "The Provider exited unexpectedly (exit code 101)".into(),
+        stderr_tail: Some("thread 'main' panicked at src/main.rs:1:1".into()),
+    };
+    assert!(
+        seen.contains(&ThreadEvent::TurnCompleted {
+            turn_index: 0,
+            status: TurnStatus::Error,
+            error: Some(expected_error.clone()),
+        }),
+        "the failed Turn is broadcast with its error; saw {seen:?}"
+    );
+
+    healthy_sender
+        .send(ProviderEvent::TurnCompleted {
+            turn_index: 0,
+            status: TurnStatus::Completed,
+        })
+        .unwrap();
+    wait_for_status(&healthy_rx, ThreadStatus::Completed);
+
+    let snapshot = core.get_thread_snapshot(crashing_thread.id).unwrap();
+    assert_eq!(snapshot.thread.status, ThreadStatus::Error);
+    assert_eq!(snapshot.turns[0].status, TurnStatus::Error);
+    assert_eq!(snapshot.turns[0].error, Some(expected_error));
+    assert_eq!(
+        core.get_thread_snapshot(healthy_thread.id)
+            .unwrap()
+            .thread
+            .status,
+        ThreadStatus::Completed
+    );
+
+    // A subscribe round trip drains the actor, so any automatic re-send would have happened.
+    core.subscribe_thread(crashing_thread.id).unwrap();
+    assert_eq!(crashing_recorder.prompts(), vec!["will crash"]);
+}
+
+#[test]
+fn provider_crash_during_an_approval_fails_the_turn() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+    let fake = fake_that_starts_turns();
+    let sender = fake.sender();
+    let recorder = fake.recorder();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::Ask)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    let (_, rx) = core.subscribe_thread(thread.id).unwrap();
+
+    core.send_prompt(thread.id, "edit a file").unwrap();
+    wait_for_status(&rx, ThreadStatus::Working);
+    sender
+        .send(ProviderEvent::ApprovalRequested {
+            id: "approval-1".into(),
+            kind: ApprovalKind::FileChange,
+            summary: "Write src/lib.rs".into(),
+            options: vec![],
+        })
+        .unwrap();
+    wait_for_status(&rx, ThreadStatus::NeedsInput);
+    sender
+        .send(ProviderEvent::Exited {
+            code: None,
+            stderr_tail: Some("killed by signal 9".into()),
+        })
+        .unwrap();
+    wait_for_status(&rx, ThreadStatus::Error);
+
+    let turn = &core.get_thread_snapshot(thread.id).unwrap().turns[0];
+    assert_eq!(turn.status, TurnStatus::Error);
+    assert_eq!(
+        turn.error,
+        Some(TurnError {
+            message: "The Provider exited unexpectedly".into(),
+            stderr_tail: Some("killed by signal 9".into()),
+        })
+    );
+    core.subscribe_thread(thread.id).unwrap();
+    assert_eq!(recorder.prompts(), vec!["edit a file"]);
+}
+
+#[test]
+fn provider_retry_is_a_notice_and_a_fatal_error_is_kept_on_the_turn() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+    let fake = fake_that_starts_turns();
+    let sender = fake.sender();
+    let recorder = fake.recorder();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    let (_, rx) = core.subscribe_thread(thread.id).unwrap();
+
+    core.send_prompt(thread.id, "hello").unwrap();
+    wait_for_status(&rx, ThreadStatus::Working);
+    sender
+        .send(ProviderEvent::Error {
+            message: "Rate limited, retrying in 5s".into(),
+            code: Some("rate_limit".into()),
+            retrying: true,
+        })
+        .unwrap();
+    let notice = rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    assert_eq!(
+        notice.event,
+        ThreadEvent::ProviderRetrying {
+            message: "Rate limited, retrying in 5s".into()
+        }
+    );
+    assert_eq!(
+        core.get_thread_snapshot(thread.id).unwrap().thread.status,
+        ThreadStatus::Working
+    );
+
+    sender
+        .send(ProviderEvent::Error {
+            message: "API error: overloaded".into(),
+            code: None,
+            retrying: false,
+        })
+        .unwrap();
+    sender
+        .send(ProviderEvent::TurnCompleted {
+            turn_index: 0,
+            status: TurnStatus::Error,
+        })
+        .unwrap();
+    let seen = wait_for_status(&rx, ThreadStatus::Error);
+    let expected_error = TurnError {
+        message: "API error: overloaded".into(),
+        stderr_tail: None,
+    };
+    assert!(
+        !seen
+            .iter()
+            .any(|e| matches!(e, ThreadEvent::ThreadStatusChanged { .. })
+                && *e
+                    != ThreadEvent::ThreadStatusChanged {
+                        status: ThreadStatus::Error
+                    }),
+        "the retry never changed status; saw {seen:?}"
+    );
+
+    let turn = &core.get_thread_snapshot(thread.id).unwrap().turns[0];
+    assert_eq!(turn.status, TurnStatus::Error);
+    assert_eq!(turn.error, Some(expected_error));
+    core.subscribe_thread(thread.id).unwrap();
+    assert_eq!(recorder.prompts(), vec!["hello"]);
+}
+
+#[test]
+fn provider_exiting_while_idle_is_silent() {
+    let dir = tempdir().unwrap();
+    let (core, project_id) = open_core_with_project(dir.path());
+    let fake = fake_that_starts_turns();
+    let sender = fake.sender();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, fake);
+    let (_, rx) = core.subscribe_thread(thread.id).unwrap();
+
+    sender
+        .send(ProviderEvent::Exited {
+            code: Some(0),
+            stderr_tail: None,
+        })
+        .unwrap();
+    // Provider events are handled in order, so seeing the marker means Exited was handled.
+    sender
+        .send(ProviderEvent::Unknown {
+            raw: "marker".into(),
+        })
+        .unwrap();
+
+    let first = rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+    assert_eq!(
+        first.event,
+        ThreadEvent::Unknown,
+        "nothing is broadcast for the exit"
+    );
+    let snapshot = core.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.thread.status, ThreadStatus::Completed);
 }
 
 fn core_with_project() -> (tempfile::TempDir, Core, u32) {

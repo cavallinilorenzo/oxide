@@ -204,7 +204,43 @@ fn two_threads_share_one_app_server_process_each_with_its_own_cwd() {
         "wire log should show cwd2 used"
     );
 
+    // Shut down p1 while p2 is still alive
     p1.shutdown().expect("p1 shutdown should succeed");
+
+    // Send prompt to p2 and verify it completes (shared app-server still alive!)
+    p2.send_prompt("Hello test on p2")
+        .expect("p2 send_prompt should succeed");
+    let mut p2_turn_completed = false;
+    while let Ok(evt) = rx2.recv_timeout(Duration::from_secs(5)) {
+        if let ProviderEvent::TurnCompleted { turn_index, status } = evt {
+            assert_eq!(status, TurnStatus::Completed);
+            assert_eq!(turn_index, 0);
+            p2_turn_completed = true;
+            break;
+        }
+    }
+    assert!(
+        p2_turn_completed,
+        "p2 turn should complete after p1 shutdown"
+    );
+
+    // Second turn on p2: verifies turn_index is 1
+    p2.send_prompt("Second prompt on p2")
+        .expect("p2 second prompt should succeed");
+    let mut p2_second_turn_completed = false;
+    while let Ok(evt) = rx2.recv_timeout(Duration::from_secs(5)) {
+        if let ProviderEvent::TurnCompleted { turn_index, status } = evt {
+            assert_eq!(status, TurnStatus::Completed);
+            assert_eq!(turn_index, 1);
+            p2_second_turn_completed = true;
+            break;
+        }
+    }
+    assert!(
+        p2_second_turn_completed,
+        "p2 second turn should report turn_index 1"
+    );
+
     p2.shutdown().expect("p2 shutdown should succeed");
 }
 

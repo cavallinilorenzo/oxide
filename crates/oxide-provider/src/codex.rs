@@ -29,10 +29,43 @@ pub struct CodexModelEntry {
     pub is_default: bool,
 }
 
+#[derive(Default)]
+struct ThreadItemState {
+    item_ids: HashMap<String, u32>,
+    next_index: u32,
+}
+
+impl ThreadItemState {
+    fn resolve_index(&mut self, item_id: &str) -> u32 {
+        if let Some(&idx) = self.item_ids.get(item_id) {
+            idx
+        } else {
+            let idx = self.next_index;
+            self.next_index += 1;
+            self.item_ids.insert(item_id.to_string(), idx);
+            idx
+        }
+    }
+}
+
 type PendingRequestsMap = Arc<Mutex<HashMap<u64, Sender<Result<serde_json::Value, String>>>>>;
-type ThreadItemsMap = Arc<Mutex<HashMap<String, (HashMap<String, u32>, u32)>>>;
+type ThreadItemsMap = Arc<Mutex<HashMap<String, ThreadItemState>>>;
 type ServerRequestsMap = Arc<Mutex<HashMap<String, (serde_json::Value, String)>>>;
 type ThreadsMap = Arc<Mutex<HashMap<String, Sender<ProviderEvent>>>>;
+type ActiveTurnsMap = Arc<Mutex<HashMap<String, u32>>>;
+
+fn dispatch_to_thread(threads: &ThreadsMap, thread_id: Option<&str>, event: ProviderEvent) {
+    let threads_guard = threads.lock().unwrap();
+    if let Some(tid) = thread_id {
+        if let Some(tx) = threads_guard.get(tid) {
+            let _ = tx.send(event);
+        }
+    } else {
+        for tx in threads_guard.values() {
+            let _ = tx.send(event.clone());
+        }
+    }
+}
 
 struct AppServerProcess {
     child: Child,
@@ -48,6 +81,7 @@ struct AppServerInner {
     pending_server_requests: ServerRequestsMap,
     threads: ThreadsMap,
     thread_items: ThreadItemsMap,
+    active_turns: ActiveTurnsMap,
 }
 
 pub struct CodexAppServer {
@@ -119,11 +153,13 @@ impl CodexAppServer {
         let pending_server_requests: ServerRequestsMap = Arc::new(Mutex::new(HashMap::new()));
         let threads: ThreadsMap = Arc::new(Mutex::new(HashMap::new()));
         let thread_items: ThreadItemsMap = Arc::new(Mutex::new(HashMap::new()));
+        let active_turns: ActiveTurnsMap = Arc::new(Mutex::new(HashMap::new()));
 
         let pending_requests_clone = pending_requests.clone();
         let pending_server_requests_clone = pending_server_requests.clone();
         let threads_clone = threads.clone();
         let thread_items_clone = thread_items.clone();
+        let active_turns_clone = active_turns.clone();
 
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
@@ -141,10 +177,11 @@ impl CodexAppServer {
                 let val = match parsed {
                     Ok(v) => v,
                     Err(_) => {
-                        let threads = threads_clone.lock().unwrap();
-                        for tx in threads.values() {
-                            let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
-                        }
+                        dispatch_to_thread(
+                            &threads_clone,
+                            None,
+                            ProviderEvent::Unknown { raw: line.clone() },
+                        );
                         continue;
                     }
                 };
@@ -215,14 +252,7 @@ impl CodexAppServer {
                         options,
                     };
 
-                    let threads = threads_clone.lock().unwrap();
-                    if let Some(ref tid) = thread_id {
-                        if let Some(tx) = threads.get(tid) {
-                            let _ = tx.send(event);
-                        }
-                    } else if let Some(tx) = threads.values().next() {
-                        let _ = tx.send(event);
-                    }
+                    dispatch_to_thread(&threads_clone, thread_id.as_deref(), event);
                 } else if has_method {
                     // Server notification
                     let method = val.get("method").and_then(|m| m.as_str()).unwrap_or("");
@@ -240,7 +270,7 @@ impl CodexAppServer {
 
                     match method {
                         "turn/started" => {
-                            // Server confirmed turn started. The TurnStarted event was already emitted on send_prompt.
+                            // TurnStarted event already emitted immediately on send_prompt
                         }
                         "thread/started"
                         | "thread/status/changed"
@@ -273,28 +303,18 @@ impl CodexAppServer {
 
                             let t_key = thread_id.clone().unwrap_or_default();
                             let mut item_map_guard = thread_items_clone.lock().unwrap();
-                            let entry = item_map_guard
-                                .entry(t_key)
-                                .or_insert_with(|| (HashMap::new(), 0));
-                            let next_idx = entry.1;
-                            let idx = *entry.0.entry(item_id.to_string()).or_insert_with(|| {
-                                entry.1 += 1;
-                                next_idx
-                            });
+                            let state = item_map_guard.entry(t_key).or_default();
+                            let idx = state.resolve_index(item_id);
 
-                            let threads = threads_clone.lock().unwrap();
-                            let target_txs: Vec<_> = if let Some(ref tid) = thread_id {
-                                threads.get(tid).cloned().into_iter().collect()
-                            } else {
-                                threads.values().cloned().collect()
-                            };
-                            for tx in target_txs {
-                                let _ = tx.send(ProviderEvent::ItemStarted {
+                            dispatch_to_thread(
+                                &threads_clone,
+                                thread_id.as_deref(),
+                                ProviderEvent::ItemStarted {
                                     item_index: idx,
                                     kind,
                                     parent_item_index: None,
-                                });
-                            }
+                                },
+                            );
                         }
                         "item/agentMessage/delta"
                         | "item/reasoning/textDelta"
@@ -309,27 +329,17 @@ impl CodexAppServer {
 
                             let t_key = thread_id.clone().unwrap_or_default();
                             let mut item_map_guard = thread_items_clone.lock().unwrap();
-                            let entry = item_map_guard
-                                .entry(t_key)
-                                .or_insert_with(|| (HashMap::new(), 0));
-                            let next_idx = entry.1;
-                            let idx = *entry.0.entry(item_id.to_string()).or_insert_with(|| {
-                                entry.1 += 1;
-                                next_idx
-                            });
+                            let state = item_map_guard.entry(t_key).or_default();
+                            let idx = state.resolve_index(item_id);
 
-                            let threads = threads_clone.lock().unwrap();
-                            let target_txs: Vec<_> = if let Some(ref tid) = thread_id {
-                                threads.get(tid).cloned().into_iter().collect()
-                            } else {
-                                threads.values().cloned().collect()
-                            };
-                            for tx in target_txs {
-                                let _ = tx.send(ProviderEvent::ItemDelta {
+                            dispatch_to_thread(
+                                &threads_clone,
+                                thread_id.as_deref(),
+                                ProviderEvent::ItemDelta {
                                     item_index: idx,
                                     delta: delta.to_string(),
-                                });
-                            }
+                                },
+                            );
                         }
                         "item/completed" => {
                             let item = params.get("item").cloned().unwrap_or_default();
@@ -377,29 +387,19 @@ impl CodexAppServer {
 
                             let t_key = thread_id.clone().unwrap_or_default();
                             let mut item_map_guard = thread_items_clone.lock().unwrap();
-                            let entry = item_map_guard
-                                .entry(t_key)
-                                .or_insert_with(|| (HashMap::new(), 0));
-                            let next_idx = entry.1;
-                            let idx = *entry.0.entry(item_id.to_string()).or_insert_with(|| {
-                                entry.1 += 1;
-                                next_idx
-                            });
+                            let state = item_map_guard.entry(t_key).or_default();
+                            let idx = state.resolve_index(item_id);
 
-                            let threads = threads_clone.lock().unwrap();
-                            let target_txs: Vec<_> = if let Some(ref tid) = thread_id {
-                                threads.get(tid).cloned().into_iter().collect()
-                            } else {
-                                threads.values().cloned().collect()
-                            };
-                            for tx in target_txs {
-                                let _ = tx.send(ProviderEvent::ItemCompleted {
+                            dispatch_to_thread(
+                                &threads_clone,
+                                thread_id.as_deref(),
+                                ProviderEvent::ItemCompleted {
                                     item_index: idx,
                                     kind,
-                                    content: content.clone(),
+                                    content,
                                     parent_item_index: None,
-                                });
-                            }
+                                },
+                            );
                         }
                         "turn/completed" => {
                             let turn = params.get("turn").cloned().unwrap_or_default();
@@ -413,18 +413,20 @@ impl CodexAppServer {
                                 _ => TurnStatus::Error,
                             };
 
-                            let threads = threads_clone.lock().unwrap();
-                            let target_txs: Vec<_> = if let Some(ref tid) = thread_id {
-                                threads.get(tid).cloned().into_iter().collect()
+                            let turn_idx = if let Some(ref tid) = thread_id {
+                                active_turns_clone.lock().unwrap().remove(tid).unwrap_or(0)
                             } else {
-                                threads.values().cloned().collect()
+                                0
                             };
-                            for tx in target_txs {
-                                let _ = tx.send(ProviderEvent::TurnCompleted {
-                                    turn_index: 0,
+
+                            dispatch_to_thread(
+                                &threads_clone,
+                                thread_id.as_deref(),
+                                ProviderEvent::TurnCompleted {
+                                    turn_index: turn_idx,
                                     status,
-                                });
-                            }
+                                },
+                            );
 
                             // Clear thread item indexing for next turn
                             if let Some(ref tid) = thread_id {
@@ -433,17 +435,20 @@ impl CodexAppServer {
                         }
                         _ => {
                             // Unrecognized notification -> emit Unknown
-                            let threads = threads_clone.lock().unwrap();
-                            let target_txs: Vec<_> = if let Some(ref tid) = thread_id {
-                                threads.get(tid).cloned().into_iter().collect()
-                            } else {
-                                threads.values().cloned().collect()
-                            };
-                            for tx in target_txs {
-                                let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
-                            }
+                            dispatch_to_thread(
+                                &threads_clone,
+                                thread_id.as_deref(),
+                                ProviderEvent::Unknown { raw: line.clone() },
+                            );
                         }
                     }
+                } else {
+                    // Unrecognized JSON without id or method
+                    dispatch_to_thread(
+                        &threads_clone,
+                        None,
+                        ProviderEvent::Unknown { raw: line.clone() },
+                    );
                 }
             }
 
@@ -466,6 +471,7 @@ impl CodexAppServer {
             pending_server_requests,
             threads,
             thread_items,
+            active_turns,
         };
 
         *guard = Some(app_inner);
@@ -698,6 +704,18 @@ impl CodexAppServer {
         if let Some(ref inner) = *guard {
             inner.threads.lock().unwrap().remove(thread_id);
             inner.thread_items.lock().unwrap().remove(thread_id);
+            inner.active_turns.lock().unwrap().remove(thread_id);
+        }
+    }
+
+    fn record_active_turn(&self, thread_id: String, turn_index: u32) {
+        let guard = self.inner.lock().unwrap();
+        if let Some(ref inner) = *guard {
+            inner
+                .active_turns
+                .lock()
+                .unwrap()
+                .insert(thread_id, turn_index);
         }
     }
 
@@ -779,6 +797,10 @@ impl CodexProvider {
 
     pub fn app_server(&self) -> Arc<CodexAppServer> {
         self.app_server.clone()
+    }
+
+    pub fn models(&self) -> Vec<CodexModelEntry> {
+        self.app_server.models()
     }
 
     pub fn parse_version_string(raw: &str) -> Option<String> {
@@ -995,6 +1017,7 @@ impl Provider for CodexProvider {
             .ok_or_else(|| ProviderError::CommandFailed("Thread not started".into()))?;
 
         let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
+        self.app_server.record_active_turn(tid.clone(), turn_index);
 
         if let Some(ref sender) = *self.event_sender.lock().unwrap() {
             let _ = sender.send(ProviderEvent::TurnStarted {
@@ -1042,6 +1065,7 @@ impl Provider for CodexProvider {
             .ok_or_else(|| ProviderError::CommandFailed("Thread not started".into()))?;
 
         let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
+        self.app_server.record_active_turn(tid.clone(), turn_index);
 
         if let Some(ref sender) = *self.event_sender.lock().unwrap() {
             let _ = sender.send(ProviderEvent::TurnStarted {
@@ -1122,7 +1146,6 @@ impl Provider for CodexProvider {
             self.app_server.unregister_thread(&tid);
         }
         self.event_sender.lock().unwrap().take();
-        self.app_server.shutdown()?;
         Ok(())
     }
 

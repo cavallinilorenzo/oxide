@@ -11,7 +11,11 @@ export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [selected, setSelected] = useState<Project | null>(null);
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Derived, so it always reflects the latest list (missing badge) and
+  // disappears when the Project is hidden.
+  const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,7 +51,7 @@ export function App() {
         </div>
       </header>
       <div className="body">
-        <Sidebar selected={selected} onSelect={setSelected} />
+        <Sidebar projects={projects} onProjects={setProjects} selected={selected} onSelect={(p) => setSelectedId(p.id)} />
         <div className="centre-column">
           {showSettings ? (
             <SettingsView onClose={() => setShowSettings(false)} />
@@ -72,18 +76,22 @@ export function App() {
   );
 }
 
-function Sidebar({ selected, onSelect }: { selected: Project | null; onSelect: (p: Project | null) => void }) {
-  const [projects, setProjects] = useState<Project[] | null>(null);
+interface SidebarProps {
+  projects: Project[] | null;
+  onProjects: (projects: Project[]) => void;
+  selected: Project | null;
+  onSelect: (p: Project) => void;
+}
+
+function Sidebar({ projects, onProjects, selected, onSelect }: SidebarProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
 
   const apply = (r: Result<Project[], AppError>) => {
     if (r.status === "ok") {
-      setProjects(r.data);
+      onProjects(r.data);
       setError(null);
-      // Keep the selection current, and drop it if the Project got hidden.
-      onSelect(r.data.find((p) => p.id === selected?.id && !p.hidden) ?? null);
     } else setError(r.error.message);
   };
 
@@ -93,13 +101,17 @@ function Sidebar({ selected, onSelect }: { selected: Project | null; onSelect: (
     setScanning(false);
   };
 
-  // Show what's known right away, then scan on launch.
+  // Show what's known right away, then scan on launch. Sequential, so the
+  // scan result can't be overwritten by the earlier, staler list.
   useEffect(() => {
-    void commands.listProjects().then((r) => r.status === "ok" && setProjects(r.data));
-    void commands.rescanProjects().then((r) => {
-      apply(r);
+    void (async () => {
+      const known = await commands.listProjects();
+      if (known.status === "ok") onProjects(known.data);
+      const scanned = await commands.rescanProjects();
+      if (scanned.status === "ok") onProjects(scanned.data);
+      else setError(scanned.error.message);
       setScanning(false);
-    });
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

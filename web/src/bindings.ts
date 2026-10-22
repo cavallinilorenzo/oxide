@@ -9,7 +9,7 @@ export const commands = {
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	/**
 	 *  Scans the scan roots for new repositories, then lists all Projects.
-	 *  Async so the walk runs off the main thread.
+	 *  The walk runs on a blocking thread, off the main thread and the async runtime.
 	 */
 	rescanProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("rescan_projects")),
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),

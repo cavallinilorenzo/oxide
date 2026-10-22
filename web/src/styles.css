@@ -106,6 +106,20 @@ button[aria-pressed="true"] { background: #8883; }
 .new-thread-btn:hover {
   background: #8882;
 }
+.thread-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: none;
+  border: 1px solid #8884;
+  border-radius: 4px;
+}
+.sidebar li .thread-item { flex: 1; width: auto; min-width: 0; }
+.sidebar ul[aria-label="Archived threads"] .row-action { opacity: 0.7; }
 .thread-item {
   display: flex;
   align-items: center;

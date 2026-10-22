@@ -9,6 +9,7 @@ import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { isNewThreadShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
+import { splitThreads, threadTitle } from "./threadList";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -181,6 +182,18 @@ export function App() {
     }
   }, [selected, rememberTerminalContext]);
 
+  const onPromptSent = useCallback((threadId: number) => {
+    setThreads((prev) =>
+      prev?.map((t) => (t.id === threadId && t.archived ? { ...t, archived: false } : t)) ?? null);
+  }, []);
+
+  const setThreadArchived = useCallback(async (threadId: number, archived: boolean) => {
+    const res = await commands.setThreadArchived(threadId, archived);
+    if (res.status === "ok") {
+      setThreads((prev) => prev?.map((t) => (t.id === threadId ? { ...t, archived } : t)) ?? null);
+    }
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isNewThreadShortcut(e)) {
@@ -297,6 +310,7 @@ export function App() {
             setSelectedThreadId(threadId);
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
+          onArchiveThread={(threadId, archived) => void setThreadArchived(threadId, archived)}
           onNewThread={() => {
             void startNewThread();
           }}
@@ -325,6 +339,7 @@ export function App() {
                   }}
                   onThreadUpdated={onThreadUpdated}
                   onStatusChange={onThreadStatusChange}
+                  onPromptSent={onPromptSent}
                   onThreadTitleChange={onThreadTitleChange}
                   prefill={prefill}
                   onPrefillUsed={() => setPrefill(null)}
@@ -423,6 +438,7 @@ interface SidebarProps {
   threads: Thread[] | null;
   selectedThreadId: number | null;
   onSelectThread: (threadId: number) => void;
+  onArchiveThread: (threadId: number, archived: boolean) => void;
   onNewThread: () => void;
   onRenameThread?: (threadId: number, newTitle: string) => void;
 }
@@ -435,9 +451,12 @@ function Sidebar({
   threads,
   selectedThreadId,
   onSelectThread,
+  onArchiveThread,
   onNewThread,
   onRenameThread,
 }: SidebarProps) {
+  const [threadQuery, setThreadQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
@@ -487,6 +506,52 @@ function Sidebar({
 
   const visible = projects?.filter((p) => !p.hidden) ?? [];
   const hidden = projects?.filter((p) => p.hidden) ?? [];
+  const { active: activeThreads, archived: archivedThreads } = splitThreads(threads ?? [], threadQuery);
+  const renderThread = (t: Thread, archived: boolean) => (
+    <li key={t.id}>
+      {editingThreadId === t.id ? (
+        <input
+          className="thread-rename-input"
+          value={renameText}
+          onChange={(e) => setRenameText(e.target.value)}
+          onBlur={() => void finishRename(t.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void finishRename(t.id);
+            if (e.key === "Escape") setEditingThreadId(null);
+          }}
+          autoFocus
+          aria-label={`Rename thread ${threadTitle(t)}`}
+        />
+      ) : (
+        <button
+          className="thread-item"
+          aria-current={t.id === selectedThreadId}
+          onClick={() => onSelectThread(t.id)}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            setEditingThreadId(t.id);
+            setRenameText(threadTitle(t));
+          }}
+          title={`${threadTitle(t)} (${t.status})`}
+        >
+          <span
+            className={`status-dot ${t.status}`}
+            aria-label={`Status: ${t.status}`}
+            title={`Status: ${t.status}`}
+          />
+          <span className="thread-item-title">{threadTitle(t)}</span>
+        </button>
+      )}
+      <button
+        className="row-action"
+        onClick={() => onArchiveThread(t.id, !archived)}
+        aria-label={`${archived ? "Unarchive" : "Archive"} ${threadTitle(t)}`}
+        title={archived ? "Unarchive" : "Archive"}
+      >
+        {archived ? "Unarchive" : "Archive"}
+      </button>
+    </li>
+  );
 
   return (
     <nav className="sidebar" aria-label="Projects">
@@ -540,50 +605,30 @@ function Sidebar({
               + New
             </button>
           </div>
-          {threads && threads.length === 0 && (
+          <input
+            type="search"
+            className="thread-search"
+            placeholder="Search Threads"
+            aria-label="Search Threads by title"
+            value={threadQuery}
+            onChange={(e) => setThreadQuery(e.target.value)}
+          />
+          {threads && activeThreads.length === 0 && (
             <p className="empty" style={{ padding: "4px 6px", margin: 0 }}>
-              No threads yet
+              {threads.length === 0 ? "No threads yet" : "No matching threads"}
             </p>
           )}
-          <ul aria-label="Thread list">
-            {threads?.map((t) => (
-              <li key={t.id}>
-                {editingThreadId === t.id ? (
-                  <input
-                    className="thread-rename-input"
-                    value={renameText}
-                    onChange={(e) => setRenameText(e.target.value)}
-                    onBlur={() => void finishRename(t.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void finishRename(t.id);
-                      if (e.key === "Escape") setEditingThreadId(null);
-                    }}
-                    autoFocus
-                    aria-label={`Rename thread ${t.title || `Thread #${t.id}`}`}
-                  />
-                ) : (
-                  <button
-                    className="thread-item"
-                    aria-current={t.id === selectedThreadId}
-                    onClick={() => onSelectThread(t.id)}
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
-                      setEditingThreadId(t.id);
-                      setRenameText(t.title || `Thread #${t.id}`);
-                    }}
-                    title={`${t.title || `Thread #${t.id}`} (${t.status})`}
-                  >
-                    <span
-                      className={`status-dot ${t.status}`}
-                      aria-label={`Status: ${t.status}`}
-                      title={`Status: ${t.status}`}
-                    />
-                    <span className="thread-item-title">{t.title || `Thread #${t.id}`}</span>
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <ul aria-label="Thread list">{activeThreads.map((t) => renderThread(t, false))}</ul>
+          {archivedThreads.length > 0 && (
+            <>
+              <button className="hidden-toggle" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+                Archived ({archivedThreads.length})
+              </button>
+              {showArchived && (
+                <ul aria-label="Archived threads">{archivedThreads.map((t) => renderThread(t, true))}</ul>
+              )}
+            </>
+          )}
         </section>
       )}
     </nav>

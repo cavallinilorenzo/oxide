@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
-import { commands, type Diff, type DiffFile, type DiffScope } from "./bindings";
+import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
+import { showsConcurrencyNote, type PanelScope } from "./diffScope";
 
 interface DiffPanelProps {
   projectId: number;
-  scope: DiffScope;
-  onScopeChange: (scope: DiffScope) => void;
+  /** The selected Thread: the Turn scope diffs its latest Turn. */
+  threadId: number | null;
+  /** Board Threads work in their own worktree, so nothing else edits it. */
+  board: boolean;
+  scope: PanelScope;
+  onScopeChange: (scope: PanelScope) => void;
   /** A file hint from the chat to scroll to and highlight. */
   focus: string | null;
   /** Changes whenever a Thread's status does, so the diff stays current. */
   refreshKey: string;
 }
 
-const SCOPES: { scope: DiffScope; label: string }[] = [
+const SCOPES: { scope: PanelScope; label: string }[] = [
+  { scope: "turn", label: "Turn" },
   { scope: "uncommitted", label: "Uncommitted" },
   { scope: "branch", label: "Branch" },
 ];
@@ -32,13 +38,18 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}`} {...props} />;
 }
 
-function DiffBody({ projectId, scope, onScopeChange, focus, refreshKey }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey }: DiffPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
 
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const result = await commands.gitDiff(projectId, scope);
+      if (scope === "turn" && threadId === null) {
+        setLoaded({ state: "ready", diff: { base: null, files: [] } });
+        return;
+      }
+      const result =
+        scope === "turn" ? await commands.gitTurnDiff(threadId!) : await commands.gitDiff(projectId, scope);
       if (!active) return;
       setLoaded(
         result.status === "ok"
@@ -53,7 +64,7 @@ function DiffBody({ projectId, scope, onScopeChange, focus, refreshKey }: DiffPa
       active = false;
       window.removeEventListener("focus", reload);
     };
-  }, [projectId, scope, refreshKey]);
+  }, [projectId, threadId, scope, refreshKey]);
 
   const files = loaded.state === "ready" ? loaded.diff.files : [];
   const focused = matchDiffFile(files, focus);
@@ -80,12 +91,19 @@ function DiffBody({ projectId, scope, onScopeChange, focus, refreshKey }: DiffPa
           <span className="diff-base">vs {loaded.diff.base}</span>
         )}
       </div>
+      {showsConcurrencyNote(scope, { board }) && (
+        <div className="diff-note">May include concurrent changes from other Threads in this checkout.</div>
+      )}
       <div className="diff-body">
         {loaded.state === "loading" && <div className="files-note">Loading…</div>}
         {loaded.state === "error" && <div className="files-note error">{loaded.message}</div>}
         {loaded.state === "ready" && files.length === 0 && (
           <div className="files-note">
-            {scope === "branch" && !loaded.diff.base ? "No base branch found." : "No changes."}
+            {scope === "branch" && !loaded.diff.base
+              ? "No base branch found."
+              : scope === "turn" && threadId === null
+                ? "Select a Thread to see its Turn."
+                : "No changes."}
           </div>
         )}
         {files.map((file) => (

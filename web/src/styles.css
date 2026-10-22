@@ -506,6 +506,7 @@ button[aria-pressed="true"] { background: #8883; }
 .diff-scopes button { font: inherit; padding: 2px 8px; border: 1px solid #8884; border-radius: 4px; background: none; color: inherit; cursor: pointer; }
 .diff-scopes button[aria-selected="true"] { background: #8883; font-weight: 600; }
 .diff-base { margin-left: auto; opacity: .7; }
+.diff-note { padding: 4px 8px; font-size: .85em; opacity: .6; border-bottom: 1px solid #8883; }
 .diff-body { flex: 1; min-height: 0; overflow: auto; }
 .diff-file { border-bottom: 1px solid #8883; }
 .diff-file-focused { outline: 2px solid #4a90e2; outline-offset: -2px; }

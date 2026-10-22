@@ -9,6 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use crate::activity::Activity;
+use crate::checkpoint::{self, Phase};
 use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
@@ -194,6 +195,8 @@ struct CurrentTurn {
 
 struct ActorState {
     thread_id: u32,
+    /// Where Checkpoints are taken.
+    checkout: std::path::PathBuf,
     next_turn_index: u32,
     current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
@@ -238,6 +241,7 @@ impl ActorState {
             provider_exited: false,
             idle_since,
             thread_id,
+            checkout: std::path::PathBuf::new(),
             next_turn_index,
             current_turn: None,
             pending_deltas: HashMap::new(),
@@ -337,6 +341,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             let turn_index = state.next_turn_index;
             state.next_turn_index += 1;
             state.dropped_items.clear();
+            checkpoint::take(&state.checkout, state.thread_id, turn_index, Phase::Start);
             let attachments = std::mem::take(&mut state.pending_attachments);
             let (mut model, mut effort) = (None, None);
             let mut id = None;
@@ -519,6 +524,7 @@ fn finish_turn(
         return;
     };
     state.idle_since = Some(state.clock.now());
+    checkpoint::take(&state.checkout, state.thread_id, turn.index, Phase::End);
     let error = (status == TurnStatus::Error).then(|| {
         let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
         let message = turn
@@ -594,6 +600,7 @@ fn run_thread_actor(
     // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
     let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock, activity);
+    state.checkout = working_dir.clone();
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {

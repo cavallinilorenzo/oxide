@@ -139,7 +139,7 @@ pub fn diff(cwd: &Path, scope: DiffScope) -> Result<Diff> {
 }
 
 /// Tracked changes between the given revisions (one: against the working tree).
-fn diff_against(cwd: &Path, revs: &[&str]) -> Result<Vec<DiffFile>> {
+pub(crate) fn diff_against(cwd: &Path, revs: &[&str]) -> Result<Vec<DiffFile>> {
     let base_args = [
         "--no-optional-locks",
         "diff",

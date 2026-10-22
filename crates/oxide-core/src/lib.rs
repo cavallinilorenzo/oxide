@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod activity;
+mod checkpoint;
 mod clock;
 mod continuation;
 mod db;
@@ -791,6 +792,27 @@ impl Core {
     /// The changes of a Project's main checkout in one scope, straight from Git.
     pub fn diff(&self, project_id: u32, scope: DiffScope) -> Result<Diff> {
         git_diff::diff(&self.main_checkout(project_id)?, scope)
+    }
+
+    /// What one Turn changed: the diff between its two Checkpoints.
+    pub fn turn_diff(&self, thread_id: u32, turn_index: u32) -> Result<Diff> {
+        let project_id = self.storage.get_snapshot(thread_id, 0)?.thread.project_id;
+        checkpoint::turn_diff(&self.main_checkout(project_id)?, thread_id, turn_index)
+    }
+
+    /// [`Core::turn_diff`] of the Thread's latest Turn; empty before the first.
+    pub fn latest_turn_diff(&self, thread_id: u32) -> Result<Diff> {
+        let snapshot = self.storage.get_snapshot(thread_id, 0)?;
+        match snapshot.turn_count.checked_sub(1) {
+            Some(latest) => {
+                let cwd = self.main_checkout(snapshot.thread.project_id)?;
+                checkpoint::turn_diff(&cwd, thread_id, latest)
+            }
+            None => Ok(Diff {
+                base: None,
+                files: Vec::new(),
+            }),
+        }
     }
 
     /// Local and remote branches of a Project's main checkout.

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type AppError, type DiffScope, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { DiffOpenContext } from "./diffOpen";
+import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
@@ -23,7 +24,11 @@ export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
-  const [diffScope, setDiffScope] = useState<DiffScope>("uncommitted");
+  // `null`: the user hasn't chosen, so the Thread's default applies.
+  const [chosenDiffScope, setDiffScope] = useState<PanelScope | null>(null);
+  // Board Threads (own worktree) don't exist yet: every Thread is a chat Thread.
+  const diffThread = { board: false };
+  const diffScope = chosenDiffScope ?? defaultDiffScope(diffThread);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -299,6 +304,8 @@ export function App() {
               <Suspense fallback={null}>
                 <DiffPanel
                   projectId={selected.id}
+                  threadId={currentThreadId}
+                  board={diffThread.board}
                   scope={diffScope}
                   onScopeChange={(scope) => {
                     setDiffScope(scope);

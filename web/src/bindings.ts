@@ -54,6 +54,8 @@ export const commands = {
 	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
 	/**  The changes of the main checkout in one scope, from Git. */
 	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
+	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
+	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
 	/**  Creates a branch from HEAD and checks it out. */

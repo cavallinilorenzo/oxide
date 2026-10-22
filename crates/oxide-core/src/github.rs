@@ -58,6 +58,14 @@ impl MergeMethod {
             MergeMethod::Rebase => "--rebase",
         }
     }
+
+    fn name(self) -> &'static str {
+        match self {
+            MergeMethod::Merge => "merge",
+            MergeMethod::Squash => "squash",
+            MergeMethod::Rebase => "rebase",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -487,28 +495,10 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     let n = number.to_string();
     let fields = format!("{PR_FIELDS},body,comments,statusCheckRollup");
     let v = parse(&gh.run(cwd, &["pr", "view", &n, "--json", &fields])?)?;
-    let repo = parse(&gh.run(
-        cwd,
-        &[
-            "repo",
-            "view",
-            "--json",
-            "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge",
-        ],
-    )?)?;
+    let (merge_methods, delete_branch_on_merge) = merge_settings(gh, cwd)?;
     let patch = gh.run(cwd, &["pr", "diff", &n, "--color=never"])?;
 
     let pull_request = pull_request_from(&v);
-    let allowed = |key: &str| repo[key].as_bool().unwrap_or(false);
-    let merge_methods = [
-        ("mergeCommitAllowed", MergeMethod::Merge),
-        ("squashMergeAllowed", MergeMethod::Squash),
-        ("rebaseMergeAllowed", MergeMethod::Rebase),
-    ]
-    .into_iter()
-    .filter(|(key, _)| allowed(key))
-    .map(|(_, method)| method)
-    .collect();
     let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
     Ok(PullRequestDetail {
         body: text(&v["body"]),
@@ -522,7 +512,7 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
             })
             .collect(),
         merge_methods,
-        delete_branch_on_merge: allowed("deleteBranchOnMerge"),
+        delete_branch_on_merge,
         diff: Diff {
             base: Some(pull_request.base.clone()),
             files: parse_patch(&patch),
@@ -542,6 +532,31 @@ pub fn comment_pull_request(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Res
     Ok(())
 }
 
+/// The merge methods the repository allows, and whether it deletes merged
+/// branches on its own.
+fn merge_settings(gh: &Gh, cwd: &Path) -> Result<(Vec<MergeMethod>, bool)> {
+    let repo = parse(&gh.run(
+        cwd,
+        &[
+            "repo",
+            "view",
+            "--json",
+            "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge",
+        ],
+    )?)?;
+    let allowed = |key: &str| repo[key].as_bool().unwrap_or(false);
+    let methods = [
+        ("mergeCommitAllowed", MergeMethod::Merge),
+        ("squashMergeAllowed", MergeMethod::Squash),
+        ("rebaseMergeAllowed", MergeMethod::Rebase),
+    ]
+    .into_iter()
+    .filter(|(key, _)| allowed(key))
+    .map(|(_, method)| method)
+    .collect();
+    Ok((methods, allowed("deleteBranchOnMerge")))
+}
+
 /// Merges with a method the repository allows. The caller holds the
 /// checkout's Git lock: deleting the branch may move the checkout off it.
 pub fn merge_pull_request(
@@ -551,11 +566,11 @@ pub fn merge_pull_request(
     method: MergeMethod,
     delete_branch: bool,
 ) -> Result<()> {
-    let detail = pull_request_detail(gh, cwd, number)?;
-    if !detail.merge_methods.contains(&method) {
+    gh.require_ready(cwd)?;
+    if !merge_settings(gh, cwd)?.0.contains(&method) {
         return Err(Error::Github(format!(
             "The repository does not allow {} merges.",
-            &method.flag()[2..]
+            method.name()
         )));
     }
     let n = number.to_string();

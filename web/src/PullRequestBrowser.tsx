@@ -225,8 +225,8 @@ function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, o
       <section aria-label="Checks">
         <h4>Checks · {summarizeChecks(detail.checks)}</h4>
         <ul className="pr-checks">
-          {detail.checks.map((check) => (
-            <li key={check.name} className={`pr-check pr-check-${check.state}`}>
+          {detail.checks.map((check, i) => (
+            <li key={`${i}:${check.name}`} className={`pr-check pr-check-${check.state}`}>
               <span aria-hidden>{check.state === "success" ? "✓" : check.state === "failure" ? "✗" : "…"}</span>{" "}
               {check.name} <span className="pr-check-state">{check.state}</span>
             </li>

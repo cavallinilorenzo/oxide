@@ -2276,7 +2276,9 @@ dependencies = [
 name = "oxide-core"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-channel",
  "notify",
+ "oxide-provider",
  "rayon",
  "rusqlite",
  "serde",
@@ -2288,6 +2290,12 @@ dependencies = [
 [[package]]
 name = "oxide-provider"
 version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "pango"

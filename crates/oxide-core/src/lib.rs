@@ -5,10 +5,18 @@ mod db;
 mod discovery;
 mod error;
 mod settings;
+pub mod thread;
+mod storage_actor;
+mod thread_actor;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use storage_actor::StorageHandle;
+use thread_actor::ThreadActorHandle;
+use oxide_provider::Provider as ProviderTrait;
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -16,6 +24,11 @@ use serde::Serialize;
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 use settings::SettingsStore;
+pub use thread::{
+    ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary,
+    TurnSnapshot,
+};
+pub use oxide_provider::{ItemKind, TurnStatus};
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
@@ -39,6 +52,10 @@ pub struct Core {
     db: Mutex<Connection>,
     settings: Arc<SettingsStore>,
     _settings_watcher: notify::RecommendedWatcher,
+    storage: StorageHandle,
+    thread_actors: Mutex<HashMap<u32, ThreadActorHandle>>,
+    fake_providers: Mutex<HashMap<u32, Box<dyn ProviderTrait>>>,
+    real_time_ticker: AtomicBool,
 }
 
 impl Core {
@@ -66,6 +83,7 @@ impl Core {
         })?;
         let db = db::open(&home.join(DB_FILE), migrations)?;
         let (settings, _settings_watcher) = SettingsStore::open(&home)?;
+        let storage = StorageHandle::new(home.join(DB_FILE))?;
         Ok(Self {
             home,
             user_home: std::env::var_os("HOME")
@@ -74,7 +92,15 @@ impl Core {
             db: Mutex::new(db),
             settings,
             _settings_watcher,
+            storage,
+            thread_actors: Mutex::new(HashMap::new()),
+            fake_providers: Mutex::new(HashMap::new()),
+            real_time_ticker: AtomicBool::new(true),
         })
+    }
+
+    pub fn set_real_time_ticker(&self, enabled: bool) {
+        self.real_time_ticker.store(enabled, Ordering::Relaxed);
     }
 
     pub fn home(&self) -> &Path {
@@ -153,6 +179,115 @@ impl Core {
             (id, hidden),
         )?;
         Ok(())
+    }
+
+    pub fn create_thread(
+        &self,
+        project_id: u32,
+        provider: &str,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: PermissionMode,
+    ) -> Result<ThreadSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let mode_str = serde_json::to_string(&permission_mode).unwrap_or_default().trim_matches('"').to_string();
+        db.execute(
+            "INSERT INTO threads (project_id, provider, model, effort, permission_mode, status) VALUES (?1, ?2, ?3, ?4, ?5, 'completed')",
+            rusqlite::params![project_id, provider, model, effort, mode_str],
+        )?;
+        let id = db.last_insert_rowid() as u32;
+        self.get_thread_by_id(&db, id)
+    }
+
+    pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = db.prepare(
+            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
+             FROM threads WHERE project_id = ?1 ORDER BY id DESC"
+        )?;
+        let rows = stmt.query_map([project_id], thread::parse_thread_summary)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    fn get_thread_by_id(&self, db: &Connection, id: u32) -> Result<ThreadSummary> {
+        db.query_row(
+            "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
+             FROM threads WHERE id = ?1",
+            [id],
+            thread::parse_thread_summary,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn register_fake_provider(&self, thread_id: u32, provider: impl ProviderTrait) {
+        self.fake_providers
+            .lock()
+            .unwrap()
+            .insert(thread_id, Box::new(provider));
+    }
+
+    pub fn get_or_create_thread_actor(&self, thread_id: u32) -> Result<ThreadActorHandle> {
+        let mut actors = self.thread_actors.lock().unwrap();
+        if let Some(actor) = actors.get(&thread_id) {
+            return Ok(actor.clone());
+        }
+
+        let snapshot = self.storage.get_snapshot(thread_id)?;
+        let project_path = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let path_str: String = db.query_row(
+                "SELECT path FROM projects WHERE id = ?1",
+                [snapshot.thread.project_id],
+                |r| r.get(0),
+            )?;
+            PathBuf::from(path_str)
+        };
+
+        let provider: Box<dyn ProviderTrait> = if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
+            p
+        } else {
+            Box::new(oxide_provider::FakeProvider::default())
+        };
+
+        let real_time = self.real_time_ticker.load(Ordering::Relaxed);
+        let actor = ThreadActorHandle::new(
+            thread_id,
+            project_path,
+            provider,
+            self.storage.clone(),
+            real_time,
+        )?;
+
+        actors.insert(thread_id, actor.clone());
+        Ok(actor)
+    }
+
+    pub fn send_prompt(&self, thread_id: u32, prompt: &str) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.send_prompt(prompt.to_string())
+    }
+
+    pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.interrupt()
+    }
+
+    pub fn subscribe_thread(
+        &self,
+        thread_id: u32,
+    ) -> Result<(ThreadSnapshot, crossbeam_channel::Receiver<SequencedThreadEvent>)> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.subscribe()
+    }
+
+    pub fn tick_thread(&self, thread_id: u32) {
+        if let Some(actor) = self.thread_actors.lock().unwrap().get(&thread_id) {
+            actor.tick();
+        }
+    }
+
+    pub fn get_thread_snapshot(&self, thread_id: u32) -> Result<ThreadSnapshot> {
+        self.storage.get_snapshot(thread_id)
     }
 
     fn expand_home(&self, root: &str) -> PathBuf {

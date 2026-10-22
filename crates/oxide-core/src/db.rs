@@ -18,6 +18,40 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
 ",
+    "
+    CREATE TABLE threads (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        provider TEXT NOT NULL,
+        provider_session_id TEXT,
+        model TEXT,
+        effort TEXT,
+        permission_mode TEXT NOT NULL,
+        status TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE TABLE turns (
+        id INTEGER PRIMARY KEY,
+        thread_id INTEGER NOT NULL REFERENCES threads(id),
+        turn_index INTEGER NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        completed_at TEXT
+    );
+
+    CREATE TABLE items (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL REFERENCES turns(id),
+        item_index INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

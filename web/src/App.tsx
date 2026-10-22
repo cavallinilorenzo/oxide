@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { commands, type AppError, type Project } from "./bindings";
-
-type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
+import { listen } from "@tauri-apps/api/event";
+import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
+
+type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
@@ -13,6 +15,9 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
@@ -29,6 +34,52 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Listen for low-rate thread status changes from backend
+  useEffect(() => {
+    const unlisten = listen<{ threadId: number; status: ThreadStatus }>(
+      "thread-status-changed",
+      (event) => {
+        setThreads((prev) =>
+          prev?.map((t) =>
+            t.id === event.payload.threadId ? { ...t, status: event.payload.status } : t
+          ) ?? null
+        );
+      }
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // When selected project changes, fetch its threads
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      if (!selected) {
+        if (active) {
+          setThreads(null);
+          setSelectedThreadId(null);
+        }
+        return;
+      }
+
+      const res = await commands.listThreads(selected.id);
+      if (active && res.status === "ok") {
+        setThreads(res.data);
+        if (res.data.length > 0) {
+          setSelectedThreadId(res.data[0].id);
+        } else {
+          setSelectedThreadId(null);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [selected]);
 
   return (
     <div className="window">
@@ -51,12 +102,39 @@ export function App() {
         </div>
       </header>
       <div className="body">
-        <Sidebar projects={projects} onProjects={setProjects} selected={selected} onSelect={(p) => setSelectedId(p.id)} />
+        <Sidebar
+          projects={projects}
+          onProjects={setProjects}
+          selected={selected}
+          onSelect={(p) => setSelectedId(p.id)}
+          threads={threads}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={setSelectedThreadId}
+          onNewThread={() => setSelectedThreadId(null)}
+        />
         <div className="centre-column">
           {showSettings ? (
             <SettingsView onClose={() => setShowSettings(false)} />
+          ) : selected ? (
+            <main className="centre" aria-label="Thread">
+              <ThreadView
+                threadId={selectedThreadId}
+                projectId={selected.id}
+                onThreadCreated={(newThread) => {
+                  setThreads((prev) => [newThread, ...(prev || [])]);
+                  setSelectedThreadId(newThread.id);
+                }}
+                onStatusChange={(threadId, status) => {
+                  setThreads((prev) =>
+                    prev?.map((t) => (t.id === threadId ? { ...t, status } : t)) ?? null
+                  );
+                }}
+              />
+            </main>
           ) : (
-            <main className="centre" aria-label="Thread" />
+            <main className="centre empty-thread" aria-label="Thread">
+              <p>Pick a Project to begin.</p>
+            </main>
           )}
           {showTerminal && <section className="terminal" aria-label="Terminal" />}
         </div>
@@ -81,9 +159,22 @@ interface SidebarProps {
   onProjects: (projects: Project[]) => void;
   selected: Project | null;
   onSelect: (p: Project) => void;
+  threads: Thread[] | null;
+  selectedThreadId: number | null;
+  onSelectThread: (threadId: number) => void;
+  onNewThread: () => void;
 }
 
-function Sidebar({ projects, onProjects, selected, onSelect }: SidebarProps) {
+function Sidebar({
+  projects,
+  onProjects,
+  selected,
+  onSelect,
+  threads,
+  selectedThreadId,
+  onSelectThread,
+  onNewThread,
+}: SidebarProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
@@ -165,6 +256,41 @@ function Sidebar({ projects, onProjects, selected, onSelect }: SidebarProps) {
               ))}
             </ul>
           )}
+        </section>
+      )}
+
+      {selected && (
+        <section className="threads-section" aria-label="Threads">
+          <div className="threads-header">
+            <span>Threads</span>
+            <button className="new-thread-btn" onClick={onNewThread} title="Start a new Thread">
+              + New
+            </button>
+          </div>
+          {threads && threads.length === 0 && (
+            <p className="empty" style={{ padding: "4px 6px", margin: 0 }}>
+              No threads yet
+            </p>
+          )}
+          <ul aria-label="Thread list">
+            {threads?.map((t) => (
+              <li key={t.id}>
+                <button
+                  className="thread-item"
+                  aria-current={t.id === selectedThreadId}
+                  onClick={() => onSelectThread(t.id)}
+                  title={`Thread #${t.id} (${t.status})`}
+                >
+                  <span
+                    className={`status-dot ${t.status}`}
+                    aria-label={`Status: ${t.status}`}
+                    title={`Status: ${t.status}`}
+                  />
+                  <span>Thread #{t.id}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </nav>

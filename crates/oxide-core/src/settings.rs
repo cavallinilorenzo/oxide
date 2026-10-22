@@ -26,13 +26,7 @@ pub enum Provider {
     Antigravity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PermissionMode {
-    Ask,
-    AutoEdit,
-    FullAccess,
-}
+pub use oxide_provider::PermissionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

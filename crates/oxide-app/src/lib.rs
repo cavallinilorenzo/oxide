@@ -167,13 +167,186 @@ fn save_settings(core: State<'_, Arc<Core>>, settings: Settings) -> Result<(), A
     Ok(core.save_settings(&convert(&settings))?)
 }
 
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThreadStatus {
+    Working,
+    NeedsInput,
+    Completed,
+    Error,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    AgentMessage,
+    Reasoning,
+    ToolCall,
+    FileChange,
+    Subagent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnStatus {
+    Running,
+    Completed,
+    Interrupted,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Thread {
+    pub id: u32,
+    pub project_id: u32,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: PermissionMode,
+    pub status: ThreadStatus,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSnapshot {
+    pub id: u32,
+    pub item_index: u32,
+    pub kind: ItemKind,
+    pub content: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnSnapshot {
+    pub id: u32,
+    pub turn_index: u32,
+    pub prompt: String,
+    pub status: TurnStatus,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub items: Vec<ItemSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSnapshot {
+    pub thread: Thread,
+    pub turns: Vec<TurnSnapshot>,
+    pub last_seq: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", content = "payload")]
+pub enum ThreadEvent {
+    TurnStarted { turn_index: u32, prompt: String },
+    ItemStarted { item_index: u32, kind: ItemKind },
+    ItemDeltaBatch { item_index: u32, delta: String },
+    ItemCompleted { item_index: u32, kind: ItemKind, content: String },
+    TurnCompleted { turn_index: u32, status: TurnStatus },
+    ThreadStatusChanged { status: ThreadStatus },
+    ApprovalRequested { id: String, description: String },
+    Error { message: String },
+    Unknown { raw: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SequencedThreadEvent {
+    pub seq: u32,
+    pub event: ThreadEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadStatusChangedPayload {
+    pub thread_id: u32,
+    pub status: ThreadStatus,
+}
+
+pub const THREAD_STATUS_CHANGED: &str = "thread-status-changed";
+
+#[tauri::command]
+#[specta::specta]
+fn create_thread(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    provider: String,
+    model: Option<String>,
+    effort: Option<String>,
+    permission_mode: PermissionMode,
+) -> Result<Thread, AppError> {
+    let mode: oxide_core::PermissionMode = convert(&permission_mode);
+    let summary = core.create_thread(project_id, &provider, model, effort, mode)?;
+    Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Thread>, AppError> {
+    let list = core.list_threads(project_id)?;
+    Ok(convert(&list))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn send_prompt(core: State<'_, Arc<Core>>, thread_id: u32, prompt: String) -> Result<(), AppError> {
+    Ok(core.send_prompt(thread_id, &prompt)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn interrupt_thread(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<(), AppError> {
+    Ok(core.interrupt_thread(thread_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn subscribe_thread(
+    core: State<'_, Arc<Core>>,
+    app: tauri::AppHandle,
+    thread_id: u32,
+    on_event: tauri::ipc::Channel<SequencedThreadEvent>,
+) -> Result<ThreadSnapshot, AppError> {
+    let (snapshot, rx) = core.subscribe_thread(thread_id)?;
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        while let Ok(evt) = rx.recv() {
+            let app_evt: SequencedThreadEvent = convert(&evt);
+            if let ThreadEvent::ThreadStatusChanged { status } = app_evt.event {
+                let _ = app_clone.emit(
+                    THREAD_STATUS_CHANGED,
+                    ThreadStatusChangedPayload {
+                        thread_id,
+                        status,
+                    },
+                );
+            }
+            if on_event.send(app_evt).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&snapshot))
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
         rescan_projects,
         set_project_hidden,
         get_settings,
-        save_settings
+        save_settings,
+        create_thread,
+        list_threads,
+        send_prompt,
+        interrupt_thread,
+        subscribe_thread
     ])
 }
 

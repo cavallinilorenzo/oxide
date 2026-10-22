@@ -39,6 +39,7 @@ interface ThreadViewProps {
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
   /** Text to put in this Thread's composer once, e.g. the recap of a continued Thread. */
   prefill: { threadId: number; text: string } | null;
+  onPrefillUsed: () => void;
   onOpenThread: (threadId: number) => void;
   onThreadContinued: (continued: ContinuedThread, from: number) => void;
 }
@@ -86,6 +87,7 @@ export function ThreadView({
   onThreadCreated,
   onStatusChange,
   prefill,
+  onPrefillUsed,
   onOpenThread,
   onThreadContinued,
 }: ThreadViewProps) {
@@ -199,8 +201,11 @@ export function ThreadView({
 
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {
-    if (prefill && prefill.threadId === threadId) setInput(prefill.text);
-  }, [prefill, threadId]);
+    if (prefill && prefill.threadId === threadId) {
+      setInput(prefill.text);
+      onPrefillUsed();
+    }
+  }, [prefill, threadId, onPrefillUsed]);
 
   const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 

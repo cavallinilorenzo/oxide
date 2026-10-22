@@ -70,11 +70,6 @@ export function App() {
     setDiffFocus(hint ?? null);
   }, []);
 
-  // A recap is prefilled once, when its Thread opens.
-  useEffect(() => {
-    if (prefill && prefill.threadId !== selectedThreadId) setPrefill(null);
-  }, [prefill, selectedThreadId]);
-
   // Stable, since ThreadView resubscribes whenever it changes.
   const onThreadStatusChange = useCallback((threadId: number, status: ThreadStatus) => {
     setThreads(
@@ -204,6 +199,7 @@ export function App() {
                   }}
                   onStatusChange={onThreadStatusChange}
                   prefill={prefill}
+                  onPrefillUsed={() => setPrefill(null)}
                   onOpenThread={(id) => {
                     setSelectedThreadId(id);
                     rememberTerminalContext(selected.id, id);

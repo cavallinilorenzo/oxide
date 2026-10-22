@@ -909,7 +909,8 @@ fn confirm_quit(
     dont_ask_again: bool,
 ) -> Result<(), AppError> {
     if dont_ask_again {
-        core.disable_quit_confirmation()?;
+        // A failed save must not trap the user in the dialog.
+        let _ = core.disable_quit_confirmation();
     }
     app.exit(0);
     Ok(())
@@ -1051,17 +1052,15 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
-                    window
-                        .app_handle()
-                        .state::<Arc<Core>>()
-                        .set_window_active(false);
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(false);
+                    }
                 }
                 tauri::WindowEvent::Focused(focused) => {
                     let active = *focused && window.is_visible().unwrap_or(false);
-                    window
-                        .app_handle()
-                        .state::<Arc<Core>>()
-                        .set_window_active(active);
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(active);
+                    }
                 }
                 _ => {}
             }

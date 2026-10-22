@@ -2,9 +2,9 @@
 //! The webview talks only to the TypeScript bindings generated from here.
 
 use oxide_core::{Core, ProjectSummary};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tauri_specta::{Builder, collect_commands};
 
 #[derive(Debug, Serialize, Type)]
@@ -47,8 +47,106 @@ fn list_projects(core: State<'_, Core>) -> Result<Vec<Project>, AppError> {
         .collect())
 }
 
+// Settings cross the boundary as the same JSON shape as `settings.json`, so
+// these mirror the Core types field for field (Core stays free of specta).
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum Provider {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionMode {
+    Ask,
+    AutoEdit,
+    FullAccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSettings {
+    model: Option<String>,
+    effort: Option<String>,
+    permission_mode: PermissionMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct Providers {
+    claude: ProviderSettings,
+    codex: ProviderSettings,
+    antigravity: ProviderSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    default_provider: Provider,
+    providers: Providers,
+    scan_roots: Vec<String>,
+    confirm_quit: bool,
+    editor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct FieldError {
+    path: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct SettingsState {
+    settings: Settings,
+    errors: Vec<FieldError>,
+}
+
+/// Mirrors are identical in shape to the Core types; converting through JSON
+/// keeps the field lists in one place (the serde derives on each side).
+fn convert<A: Serialize, B: serde::de::DeserializeOwned>(a: &A) -> B {
+    serde_json::from_value(serde_json::to_value(a).expect("serialize"))
+        .expect("App and Core settings types out of sync")
+}
+
+impl From<&oxide_core::SettingsState> for SettingsState {
+    fn from(s: &oxide_core::SettingsState) -> Self {
+        Self {
+            settings: convert(&s.settings),
+            errors: s
+                .errors
+                .iter()
+                .map(|e| FieldError {
+                    path: e.path.clone(),
+                    message: e.message.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Event emitted whenever the Settings state changes; payload is [`SettingsState`].
+pub const SETTINGS_CHANGED: &str = "settings-changed";
+
+#[tauri::command]
+#[specta::specta]
+fn get_settings(core: State<'_, Core>) -> SettingsState {
+    (&core.settings()).into()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn save_settings(core: State<'_, Core>, settings: Settings) -> Result<(), AppError> {
+    Ok(core.save_settings(&convert(&settings))?)
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![list_projects])
+    Builder::<tauri::Wry>::new().commands(collect_commands![
+        list_projects,
+        get_settings,
+        save_settings
+    ])
 }
 
 /// Path of the generated TypeScript bindings, anchored to this crate.
@@ -77,7 +175,12 @@ pub fn run() {
                 .home_dir()
                 .expect("no home directory")
                 .join(".oxide");
-            app.manage(Core::open(home)?);
+            let core = Core::open(home)?;
+            let handle = app.handle().clone();
+            core.subscribe_settings(move |state| {
+                let _ = handle.emit(SETTINGS_CHANGED, SettingsState::from(state));
+            });
+            app.manage(core);
             Ok(())
         })
         .run(tauri::generate_context!())

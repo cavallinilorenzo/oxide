@@ -3,7 +3,7 @@ fn bindings_are_up_to_date() {
     // Regenerates the file; CI fails on `git diff --exit-code` if it was stale.
     oxide_app_lib::export_bindings();
     let ts = std::fs::read_to_string(oxide_app_lib::BINDINGS_PATH).unwrap();
-    assert!(ts.contains("listProjects"));
+    assert!(ts.contains("listProjects") && ts.contains("saveSettings"));
 }
 
 #[test]

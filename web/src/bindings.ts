@@ -7,6 +7,8 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
+	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
+	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 };
 
 /* Types */
@@ -14,10 +16,77 @@ export type AppError = {
 	message: string,
 };
 
+export type FieldError = {
+	path: string,
+	message: string,
+};
+
+export type PermissionMode = "ask" | "auto-edit" | "full-access";
+
 export type Project = {
 	id: number,
 	name: string,
 	path: string,
+};
+
+export type Provider = "claude" | "codex" | "antigravity";
+
+export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;
+
+export type ProviderSettings_Deserialize = {
+	model?: string | null,
+	effort?: string | null,
+	permissionMode: PermissionMode,
+};
+
+export type ProviderSettings_Serialize = {
+	model: string | null,
+	effort: string | null,
+	permissionMode: PermissionMode,
+};
+
+export type Providers = Providers_Serialize | Providers_Deserialize;
+
+export type Providers_Deserialize = {
+	claude: ProviderSettings_Deserialize,
+	codex: ProviderSettings_Deserialize,
+	antigravity: ProviderSettings_Deserialize,
+};
+
+export type Providers_Serialize = {
+	claude: ProviderSettings_Serialize,
+	codex: ProviderSettings_Serialize,
+	antigravity: ProviderSettings_Serialize,
+};
+
+export type Settings = Settings_Serialize | Settings_Deserialize;
+
+export type SettingsState = SettingsState_Serialize | SettingsState_Deserialize;
+
+export type SettingsState_Deserialize = {
+	settings: Settings_Deserialize,
+	errors: FieldError[],
+};
+
+export type SettingsState_Serialize = {
+	settings: Settings_Serialize,
+	errors: FieldError[],
+};
+
+export type Settings_Deserialize = {
+	defaultProvider: Provider,
+	providers: Providers_Deserialize,
+	scanRoots: string[],
+	confirmQuit: boolean,
+	editor: string,
+};
+
+export type Settings_Serialize = {
+	defaultProvider: Provider,
+	providers: Providers_Serialize,
+	scanRoots: string[],
+	confirmQuit: boolean,
+	editor: string,
 };
 
 /* Tauri Specta runtime */

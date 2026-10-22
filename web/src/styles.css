@@ -16,3 +16,12 @@ button[aria-pressed="true"] { background: #8883; }
 .tool-tabs { display: flex; gap: 2px; padding: 4px; border-bottom: 1px solid #8884; }
 .empty { opacity: 0.6; }
 .error { color: #c33; }
+.settings { flex: 1; overflow: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+.settings h1 { font-size: 16px; margin: 0; }
+.settings label { display: flex; flex-direction: column; gap: 4px; }
+.settings label.inline { flex-direction: row; align-items: center; gap: 6px; flex-wrap: wrap; }
+.settings fieldset { display: flex; flex-direction: column; gap: 8px; border: 1px solid #8884; border-radius: 6px; }
+.settings .actions { display: flex; gap: 8px; }
+.settings .error { margin: 0; }
+.error-summary { border: 1px solid #c33; border-radius: 6px; padding: 8px 12px; color: #c33; }
+.error-summary p { margin: 0; }

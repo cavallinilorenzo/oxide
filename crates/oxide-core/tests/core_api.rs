@@ -104,3 +104,139 @@ fn lists_projects_most_recent_first() {
 
     assert_eq!(names, ["second", "first"]);
 }
+
+mod settings {
+    use oxide_core::{Core, PermissionMode, Provider, SettingsState};
+
+    #[test]
+    fn fresh_home_gets_a_default_settings_file() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let core = Core::open(tmp.path()).unwrap();
+
+        let state = core.settings();
+        assert!(state.errors.is_empty());
+        assert_eq!(state.settings.default_provider, Provider::Claude);
+        assert_eq!(
+            state.settings.providers.claude.permission_mode,
+            PermissionMode::Ask
+        );
+        assert!(!state.settings.scan_roots.is_empty());
+        assert!(state.settings.confirm_quit);
+
+        let on_disk = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+        assert!(
+            on_disk.contains("\"defaultProvider\": \"claude\""),
+            "{on_disk}"
+        );
+        assert!(on_disk.contains('\n'), "file should be pretty-printed");
+    }
+
+    fn watch(core: &Core) -> std::sync::mpsc::Receiver<SettingsState> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        core.subscribe_settings(move |s| {
+            let _ = tx.lock().unwrap().send(s.clone());
+        });
+        rx
+    }
+
+    fn next(rx: &std::sync::mpsc::Receiver<SettingsState>) -> SettingsState {
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("no settings change within 5s")
+    }
+
+    #[test]
+    fn editing_the_file_on_disk_is_picked_up_and_published() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "defaultProvider": "codex", "confirmQuit": false,
+                 "providers": { "codex": { "model": "gpt-x", "permissionMode": "auto-edit" } } }"#,
+        )
+        .unwrap();
+
+        let state = next(&rx);
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert_eq!(state.settings.default_provider, Provider::Codex);
+        assert!(!state.settings.confirm_quit);
+        assert_eq!(
+            state.settings.providers.codex.model.as_deref(),
+            Some("gpt-x")
+        );
+        assert_eq!(
+            state.settings.providers.codex.permission_mode,
+            PermissionMode::AutoEdit
+        );
+        assert_eq!(core.settings(), state);
+    }
+
+    #[test]
+    fn invalid_edit_reports_field_errors_and_keeps_last_valid_settings_until_fixed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("settings.json");
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+
+        std::fs::write(&file, r#"{ "defaultProvider": "codex" }"#).unwrap();
+        assert_eq!(next(&rx).settings.default_provider, Provider::Codex);
+
+        std::fs::write(
+            &file,
+            r#"{ "defaultProvider": "gemini", "confirmQuit": "yes",
+                 "providers": { "claude": { "permissionMode": "yolo" } }, "colour": 1 }"#,
+        )
+        .unwrap();
+        let bad = next(&rx);
+        let mut paths: Vec<_> = bad.errors.iter().map(|e| e.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "colour",
+                "confirmQuit",
+                "defaultProvider",
+                "providers.claude.permissionMode"
+            ]
+        );
+        assert_eq!(
+            bad.settings.default_provider,
+            Provider::Codex,
+            "last valid stays"
+        );
+        assert!(bad.settings.confirm_quit);
+
+        std::fs::write(&file, "{ not json").unwrap();
+        let broken = next(&rx);
+        assert_eq!(broken.errors.len(), 1);
+        assert_eq!(broken.errors[0].path, "");
+        assert_eq!(broken.settings.default_provider, Provider::Codex);
+
+        std::fs::write(&file, r#"{ "defaultProvider": "antigravity" }"#).unwrap();
+        let fixed = next(&rx);
+        assert!(fixed.errors.is_empty());
+        assert_eq!(fixed.settings.default_provider, Provider::Antigravity);
+    }
+
+    #[test]
+    fn saved_settings_apply_immediately_and_survive_reopening() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let mut settings = core.settings().settings;
+        settings.editor = "zed".into();
+        settings.providers.claude.effort = Some("high".into());
+        settings.scan_roots = vec!["~/src".into()];
+
+        core.save_settings(&settings).unwrap();
+
+        assert_eq!(core.settings().settings, settings);
+        drop(core);
+        assert_eq!(
+            Core::open(tmp.path()).unwrap().settings().settings,
+            settings
+        );
+    }
+}

@@ -3,16 +3,21 @@
 
 mod db;
 mod error;
+mod settings;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
+use settings::SettingsStore;
+pub use settings::{
+    FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
+};
 
 const DB_FILE: &str = "oxide.db";
 
@@ -26,6 +31,8 @@ pub struct ProjectSummary {
 pub struct Core {
     home: PathBuf,
     db: Mutex<Connection>,
+    settings: Arc<SettingsStore>,
+    _settings_watcher: notify::RecommendedWatcher,
 }
 
 impl Core {
@@ -41,14 +48,33 @@ impl Core {
             source,
         })?;
         let db = db::open(&home.join(DB_FILE), migrations)?;
+        let (settings, _settings_watcher) = SettingsStore::open(&home)?;
         Ok(Self {
             home,
             db: Mutex::new(db),
+            settings,
+            _settings_watcher,
         })
     }
 
     pub fn home(&self) -> &Path {
         &self.home
+    }
+
+    /// The Settings in effect, plus any validation errors in `settings.json`.
+    pub fn settings(&self) -> SettingsState {
+        self.settings.get()
+    }
+
+    /// Writes `settings.json` (pretty-printed) and applies it.
+    pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        self.settings.save(settings)
+    }
+
+    /// Calls `f` whenever the Settings state changes, whether through
+    /// [`Core::save_settings`] or an edit of the file on disk.
+    pub fn subscribe_settings(&self, f: impl Fn(&SettingsState) + Send + Sync + 'static) {
+        self.settings.subscribe(Box::new(f));
     }
 
     /// All Projects known to Oxide, most recently added first.

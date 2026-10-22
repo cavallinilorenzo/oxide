@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { commands, type Project } from "./bindings";
+import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
 
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
@@ -7,6 +8,7 @@ const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -14,7 +16,8 @@ export function App() {
       if (!toggle) return;
       e.preventDefault();
       if (toggle === "tools") setShowTools((v) => !v);
-      else setShowTerminal((v) => !v);
+      else if (toggle === "terminal") setShowTerminal((v) => !v);
+      else setShowSettings(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -36,7 +39,11 @@ export function App() {
       <div className="body">
         <Sidebar />
         <div className="centre-column">
-          <main className="centre" aria-label="Thread" />
+          {showSettings ? (
+            <SettingsView onClose={() => setShowSettings(false)} />
+          ) : (
+            <main className="centre" aria-label="Thread" />
+          )}
           {showTerminal && <section className="terminal" aria-label="Terminal" />}
         </div>
         {showTools && (

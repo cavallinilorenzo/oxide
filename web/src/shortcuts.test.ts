@@ -9,6 +9,10 @@ describe("toggleForKey", () => {
     expect(key("\\")).toBe("tools");
     expect(key("j")).toBe("terminal");
   });
+  it("maps ⌘, to the Settings view", () => {
+    expect(key(",")).toBe("settings");
+    expect(key(",", { shiftKey: true })).toBeNull();
+  });
   it("ignores keys without ⌘ or with extra modifiers", () => {
     expect(key("j", { metaKey: false })).toBeNull();
     expect(key("j", { shiftKey: true })).toBeNull();

@@ -3,6 +3,5 @@
 node_modules
 dist
 /crates/oxide-app/gen
-.agents/
-skills-lock.json
+.claude/worktrees/
 

@@ -51,8 +51,8 @@ pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![list_projects])
 }
 
-/// Path of the generated TypeScript bindings, relative to this crate.
-pub const BINDINGS_PATH: &str = "../../web/src/bindings.ts";
+/// Path of the generated TypeScript bindings, anchored to this crate.
+pub const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src/bindings.ts");
 
 pub fn export_bindings() {
     builder()

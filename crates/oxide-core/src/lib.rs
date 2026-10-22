@@ -9,14 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 
 const DB_FILE: &str = "oxide.db";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectSummary {
     pub id: u32,
     pub name: String,

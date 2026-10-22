@@ -82,3 +82,25 @@ fn refuses_a_database_from_a_newer_build() {
         }
     ));
 }
+
+#[test]
+fn lists_projects_most_recent_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    drop(Core::open(tmp.path()).unwrap());
+    let conn = Connection::open(tmp.path().join("oxide.db")).unwrap();
+    conn.execute_batch(
+        "INSERT INTO projects (name, path) VALUES ('first', '/a'), ('second', '/b');",
+    )
+    .unwrap();
+    drop(conn);
+
+    let names: Vec<_> = Core::open(tmp.path())
+        .unwrap()
+        .list_projects()
+        .unwrap()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+
+    assert_eq!(names, ["second", "first"]);
+}

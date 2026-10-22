@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use oxide_provider::process::{ProcessRegistry, SHUTDOWN_GRACE, terminate_group};
+use oxide_provider::process::ProcessRegistry;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};

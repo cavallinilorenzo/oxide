@@ -3,10 +3,14 @@
 //! disk so a crashed Oxide's orphans can be killed on the next launch.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(unix)]
+use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 /// How long a process group gets between SIGTERM and SIGKILL.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -177,6 +181,7 @@ fn leader_runs(_pid: i32, _executable: &str) -> bool {
     false
 }
 
+#[cfg(unix)]
 fn base_name(token: &str) -> &str {
     let name = Path::new(token)
         .file_name()

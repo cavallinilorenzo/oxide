@@ -66,6 +66,10 @@ export const commands = {
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
+	/**  Commits exactly the given files; other staged state is untouched. */
+	commit: (projectId: number, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, paths, message })),
+	/**  Pushes the current branch; never forced. */
+	push: (projectId: number, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, allowProtected })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
@@ -249,6 +253,10 @@ export type GitStatus_Deserialize = {
 	changedFiles: number,
 	/**  Why the branch picker is disabled, if it is. */
 	pickerDisabledReason?: string | null,
+	/**  Pushing this branch (`main`, `master`) needs the user's consent. */
+	protected: boolean,
+	/**  A branch with commits and no upstream yet; the first push publishes it. */
+	unpublished: boolean,
 };
 
 export type GitStatus_Serialize = {
@@ -262,6 +270,10 @@ export type GitStatus_Serialize = {
 	changedFiles: number,
 	/**  Why the branch picker is disabled, if it is. */
 	pickerDisabledReason: string | null,
+	/**  Pushing this branch (`main`, `master`) needs the user's consent. */
+	protected: boolean,
+	/**  A branch with commits and no upstream yet; the first push publishes it. */
+	unpublished: boolean,
 };
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";

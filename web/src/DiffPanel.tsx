@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, type PanelScope } from "./diffScope";
+import { commitPaths } from "./gitAction";
+import { usePushFlow } from "./usePushFlow";
 
 interface DiffPanelProps {
   projectId: number;
@@ -15,6 +17,8 @@ interface DiffPanelProps {
   focus: string | null;
   /** Changes whenever a Thread's status does, so the diff stays current. */
   refreshKey: string;
+  /** Called after a commit or push, so other Git views reload. */
+  onChanged: () => void;
 }
 
 const SCOPES: { scope: PanelScope; label: string }[] = [
@@ -38,8 +42,14 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, refreshKey, onChanged }: DiffPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
+  // Files the user took out of the commit; everything starts checked.
+  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
+  const [message, setMessage] = useState("");
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const push = usePushFlow(projectId, onChanged);
 
   useEffect(() => {
     let active = true;
@@ -68,6 +78,29 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
 
   const files = loaded.state === "ready" ? loaded.diff.files : [];
   const focused = matchDiffFile(files, focus);
+  const canCommit = scope === "uncommitted" && files.length > 0;
+  const selected = commitPaths(files, unchecked);
+  const ready = selected.length > 0 && message.trim() !== "" && !committing && !push.busy;
+
+  const commit = () => commands.commit(projectId, selected, message);
+  async function runCommit(andPush: boolean) {
+    setCommitError(null);
+    if (andPush) {
+      // The message is kept if the commit or push fails; clear it only once committed.
+      await push.start(async () => {
+        const result = await commit();
+        if (result.status === "ok") setMessage("");
+        return result;
+      });
+      return;
+    }
+    setCommitting(true);
+    const result = await commit();
+    setCommitting(false);
+    if (result.status === "error") return setCommitError(result.error.message);
+    setMessage("");
+    onChanged();
+  }
 
   useEffect(() => {
     if (!focused) return;
@@ -94,6 +127,41 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
       {showsConcurrencyNote(scope, { board }) && (
         <div className="diff-note">May include concurrent changes from other Threads in this checkout.</div>
       )}
+      {canCommit && (
+        <form
+          className="commit-form"
+          aria-label="Commit"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ready) void runCommit(false);
+          }}
+        >
+          <textarea
+            aria-label="Commit message"
+            placeholder="Commit message"
+            rows={2}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+          <div className="commit-actions">
+            <span className="commit-count">
+              {selected.length === 0 ? "No files selected" : `${files.filter((f) => !unchecked.has(f.path)).length} of ${files.length} files`}
+            </span>
+            <button type="submit" disabled={!ready}>
+              Commit
+            </button>
+            <button type="button" disabled={!ready} onClick={() => void runCommit(true)}>
+              Commit &amp; Push
+            </button>
+          </div>
+          {(commitError ?? push.error) && (
+            <div className="files-note error" role="alert">
+              {commitError ?? push.error}
+            </div>
+          )}
+        </form>
+      )}
+      {push.dialog}
       <div className="diff-body">
         {loaded.state === "loading" && <div className="files-note">Loading…</div>}
         {loaded.state === "error" && <div className="files-note error">{loaded.message}</div>}
@@ -107,7 +175,25 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
           </div>
         )}
         {files.map((file) => (
-          <FileDiff key={file.path} file={file} focused={file.path === focused?.path} />
+          <FileDiff
+            key={file.path}
+            file={file}
+            focused={file.path === focused?.path}
+            checkbox={
+              canCommit
+                ? {
+                    checked: !unchecked.has(file.path),
+                    onChange: (checked) =>
+                      setUnchecked((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.delete(file.path);
+                        else next.add(file.path);
+                        return next;
+                      }),
+                  }
+                : null
+            }
+          />
         ))}
       </div>
     </section>
@@ -116,10 +202,26 @@ function DiffBody({ projectId, threadId, board, scope, onScopeChange, focus, ref
 
 const fileAnchor = (path: string) => `diff-file-${path}`;
 
-function FileDiff({ file, focused }: { file: DiffFile; focused: boolean }) {
+function FileDiff({
+  file,
+  focused,
+  checkbox,
+}: {
+  file: DiffFile;
+  focused: boolean;
+  checkbox: { checked: boolean; onChange: (checked: boolean) => void } | null;
+}) {
   return (
     <div id={fileAnchor(file.path)} className={`diff-file${focused ? " diff-file-focused" : ""}`} aria-label={`Changes to ${file.path}`}>
       <div className="diff-file-title">
+        {checkbox && (
+          <input
+            type="checkbox"
+            aria-label={`Include ${file.path} in the commit`}
+            checked={checkbox.checked}
+            onChange={(e) => checkbox.onChange(e.target.checked)}
+          />
+        )}
         <span className={`diff-status diff-status-${file.status}`} title={file.status}>
           {STATUS_LABEL[file.status]}
         </span>

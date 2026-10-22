@@ -33,7 +33,15 @@ pub struct GitStatus {
     pub changed_files: u32,
     /// Why the branch picker is disabled, if it is.
     pub picker_disabled_reason: Option<String>,
+    /// A branch pushing to which needs the user's explicit consent.
+    pub protected: bool,
+    /// On a branch with commits that has no upstream yet, while an `origin`
+    /// exists: the first push will publish it.
+    pub unpublished: bool,
 }
+
+/// Branches that Oxide never pushes to without being told to.
+const PROTECTED_BRANCHES: [&str; 2] = ["main", "master"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +168,8 @@ pub fn status(cwd: &Path) -> Result<GitStatus> {
         removed: 0,
         changed_files: 0,
         picker_disabled_reason: None,
+        protected: false,
+        unpublished: false,
     };
     let mut untracked = Vec::new();
     let mut tracked = 0;
@@ -190,7 +200,17 @@ pub fn status(cwd: &Path) -> Result<GitStatus> {
     }
     status.changed_files = tracked + untracked.len() as u32;
 
-    let base = if succeeds(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+    let has_head = succeeds(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]);
+    status.protected = status
+        .branch
+        .as_deref()
+        .is_some_and(|b| PROTECTED_BRANCHES.contains(&b));
+    status.unpublished = has_head
+        && status.branch.is_some()
+        && status.upstream.is_none()
+        && succeeds(cwd, &["config", "--get", "remote.origin.url"]);
+
+    let base = if has_head {
         "HEAD".to_string()
     } else {
         // No commits yet: diff against the empty tree.
@@ -325,5 +345,84 @@ pub fn create_branch(cwd: &Path, name: &str) -> Result<()> {
 /// Fast-forward only: never creates a merge or rebases.
 pub fn pull(cwd: &Path) -> Result<()> {
     run(cwd, &["pull", "--ff-only"])?;
+    Ok(())
+}
+
+/// Commits exactly `paths` (modified, deleted, renamed or untracked), leaving
+/// everything else the user has staged, or not, as it was. A rename needs both
+/// its old and new path.
+pub fn commit(cwd: &Path, paths: &[String], message: &str) -> Result<()> {
+    if paths.is_empty() {
+        return Err(Error::Git("Select at least one file to commit.".into()));
+    }
+    if message.trim().is_empty() {
+        return Err(Error::Git("Write a commit message.".into()));
+    }
+    // Pathspecs are file names, never patterns; `--` keeps them from being options.
+    let mut listing = vec![
+        "--literal-pathspecs",
+        "ls-files",
+        "-z",
+        "--others",
+        "--exclude-standard",
+        "--",
+    ];
+    listing.extend(paths.iter().map(String::as_str));
+    let untracked: Vec<String> = run(cwd, &listing)?
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    // `--only` commits tracked paths; a new file must be known to the index first.
+    if !untracked.is_empty() {
+        let mut add = vec!["--literal-pathspecs", "add", "--intent-to-add", "--"];
+        add.extend(untracked.iter().map(String::as_str));
+        run(cwd, &add)?;
+    }
+    let mut commit = vec![
+        "--literal-pathspecs",
+        "commit",
+        "--quiet",
+        "--only",
+        "-m",
+        message,
+        "--",
+    ];
+    commit.extend(paths.iter().map(String::as_str));
+    let result = run(cwd, &commit);
+    if result.is_err() && !untracked.is_empty() {
+        let mut undo = vec!["--literal-pathspecs", "reset", "--quiet", "--"];
+        undo.extend(untracked.iter().map(String::as_str));
+        let _ = run(cwd, &undo);
+    }
+    result.map(|_| ())
+}
+
+/// Pushes the current branch, setting its upstream the first time. There is
+/// no force: a rejected push stays rejected. Protected branches need
+/// `allow_protected`.
+pub fn push(cwd: &Path, allow_protected: bool) -> Result<()> {
+    let status = status(cwd)?;
+    let Some(branch) = status.branch else {
+        return Err(Error::Git(
+            "HEAD is detached; switch to a branch to push.".into(),
+        ));
+    };
+    if status.protected && !allow_protected {
+        return Err(Error::Git(format!(
+            "`{branch}` is protected; confirm pushing to it, or push a new branch instead."
+        )));
+    }
+    if status.ahead > 0 && status.behind > 0 {
+        return Err(Error::Git(
+            "The branch is behind and ahead of its upstream. Pull (fast-forward) before pushing."
+                .into(),
+        ));
+    }
+    if status.upstream.is_some() {
+        run(cwd, &["push"])?;
+    } else {
+        run(cwd, &["push", "-u", "origin", "HEAD"])?;
+    }
     Ok(())
 }

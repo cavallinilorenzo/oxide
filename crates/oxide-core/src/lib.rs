@@ -916,6 +916,20 @@ impl Core {
         self.switch_branch(project_id, git::pull)
     }
 
+    /// Commits exactly the given files of the main checkout with `message`,
+    /// leaving other staged state alone.
+    pub fn commit(&self, project_id: u32, paths: &[String], message: &str) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || git::commit(&cwd, paths, message))
+    }
+
+    /// Pushes the current branch (upstream set on the first push, never
+    /// forced). Pushing `main`/`master` needs `allow_protected`.
+    pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || git::push(&cwd, allow_protected))
+    }
+
     /// Runs a command that changes the main checkout's files, serialized per
     /// checkout and refused while a Thread is working in it.
     fn switch_branch(&self, project_id: u32, f: impl FnOnce(&Path) -> Result<()>) -> Result<()> {

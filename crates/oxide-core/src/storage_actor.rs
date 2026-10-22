@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use crate::error::{Error, Result};
 use crate::thread::{
     ApprovalSnapshot, ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot,
+    UnknownEventSnapshot,
 };
 use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
 
@@ -66,6 +67,11 @@ pub enum StorageMsg {
     SetProviderSessionId {
         thread_id: u32,
         session_id: String,
+    },
+    WriteUnknownEvent {
+        turn_id: u32,
+        raw: String,
+        reply: mpsc::Sender<Result<u32>>,
     },
     Shutdown,
 }
@@ -250,6 +256,18 @@ impl StorageHandle {
             thread_id,
             session_id,
         });
+    }
+
+    pub fn write_unknown_event(&self, turn_id: u32, raw: String) -> Result<u32> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::WriteUnknownEvent {
+            turn_id,
+            raw,
+            reply: reply_tx,
+        });
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn shutdown(&self) {
@@ -446,6 +464,20 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     rusqlite::params![session_id, thread_id],
                 );
             }
+            StorageMsg::WriteUnknownEvent {
+                turn_id,
+                raw,
+                reply,
+            } => {
+                let res = (|| -> Result<u32> {
+                    conn.execute(
+                        "INSERT INTO unknown_events (turn_id, raw) VALUES (?1, ?2)",
+                        rusqlite::params![turn_id, raw],
+                    )?;
+                    Ok(conn.last_insert_rowid() as u32)
+                })();
+                let _ = reply.send(res);
+            }
             StorageMsg::Shutdown => break,
         }
     }
@@ -490,6 +522,9 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
         "SELECT id, approval_id, kind, summary, options, decision, created_at, decided_at
          FROM approvals WHERE turn_id = ?1 ORDER BY id ASC",
     )?;
+    let mut unknown_stmt = conn.prepare(
+        "SELECT id, raw, created_at FROM unknown_events WHERE turn_id = ?1 ORDER BY id ASC",
+    )?;
 
     for t in turn_rows {
         let (t_id, t_idx, prompt, status, started_at, completed_at) = t?;
@@ -530,6 +565,16 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
         })?;
         let approvals: Vec<ApprovalSnapshot> = app_rows.collect::<std::result::Result<_, _>>()?;
 
+        let unk_rows = unknown_stmt.query_map([t_id], |r| {
+            Ok(UnknownEventSnapshot {
+                id: r.get(0)?,
+                raw: r.get(1)?,
+                created_at: r.get(2)?,
+            })
+        })?;
+        let unknown_events: Vec<UnknownEventSnapshot> =
+            unk_rows.collect::<std::result::Result<_, _>>()?;
+
         turns.push(TurnSnapshot {
             id: t_id,
             turn_index: t_idx,
@@ -539,6 +584,7 @@ pub fn query_snapshot(conn: &Connection, thread_id: u32) -> Result<ThreadSnapsho
             completed_at,
             items,
             approvals,
+            unknown_events,
         });
     }
 

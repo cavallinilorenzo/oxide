@@ -36,6 +36,7 @@ describe("transcript reducer", () => {
             },
           ],
           approvals: [],
+          unknownEvents: [],
         },
       ],
       lastSeq: 5,

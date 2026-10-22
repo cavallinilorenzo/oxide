@@ -83,6 +83,7 @@ export function applyThreadEvent(
         completedAt: null,
         items: existing >= 0 ? turns[existing].items : [],
         approvals: existing >= 0 ? turns[existing].approvals : [],
+        unknownEvents: existing >= 0 ? turns[existing].unknownEvents : [],
       };
       if (existing >= 0) turns[existing] = newTurn;
       else turns.push(newTurn);

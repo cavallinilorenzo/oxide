@@ -271,6 +271,15 @@ pub struct TurnSnapshot {
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
     pub approvals: Vec<ApprovalSnapshot>,
+    pub unknown_events: Vec<UnknownEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownEventSnapshot {
+    pub id: u32,
+    pub raw: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -323,15 +332,21 @@ pub enum ThreadEvent {
     Error {
         message: String,
     },
-    Unknown {
-        raw: String,
-    },
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SequencedThreadEvent {
     pub seq: u32,
     pub event: ThreadEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSequencedThreadEvent {
+    pub seq: u32,
+    pub event: ThreadEvent,
+    pub raw_payload: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -437,6 +452,25 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+#[tauri::command]
+#[specta::specta]
+fn subscribe_thread_debug(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    on_event: tauri::ipc::Channel<DebugSequencedThreadEvent>,
+) -> Result<ThreadSnapshot, AppError> {
+    let (snapshot, rx) = core.subscribe_thread_debug(thread_id)?;
+    std::thread::spawn(move || {
+        while let Ok(evt) = rx.recv() {
+            let app_evt: DebugSequencedThreadEvent = convert(&evt);
+            if on_event.send(app_evt).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&snapshot))
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
@@ -451,7 +485,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_threads,
         send_prompt,
         interrupt_thread,
-        subscribe_thread
+        subscribe_thread,
+        subscribe_thread_debug
     ])
 }
 

@@ -504,3 +504,20 @@ fn save_attachment_rejects_non_image_extensions() {
     assert!(core.save_attachment(b"x", "../evil").is_err());
     assert!(core.save_attachment(b"x", "sh").is_err());
 }
+
+#[test]
+fn attachments_outside_the_attachments_folder_are_rejected_even_with_dotdot() {
+    let (dir, core, project_id) = core_with_project();
+    let thread = core
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+        .unwrap();
+    core.register_fake_provider(thread.id, FakeProvider::scripted());
+    let saved = core.save_attachment(b"x", "png").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), b"s").unwrap();
+    let sneaky = saved.parent().unwrap().join("..").join("secret.txt");
+    assert!(
+        core.send_prompt_with_attachments(thread.id, "x", &[sneaky.clone()])
+            .is_err()
+    );
+    assert!(core.read_attachment(&sneaky).is_err());
+}

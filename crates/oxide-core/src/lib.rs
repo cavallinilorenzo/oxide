@@ -279,8 +279,7 @@ impl Core {
         prompt: &str,
         attachments: &[PathBuf],
     ) -> Result<()> {
-        let dir = self.attachments_dir();
-        if let Some(bad) = attachments.iter().find(|p| !p.starts_with(&dir)) {
+        if let Some(bad) = attachments.iter().find(|p| !self.is_stored_attachment(p)) {
             return Err(Error::Io {
                 path: bad.clone(),
                 source: std::io::Error::other("attachment is not stored under the Oxide home"),

@@ -82,3 +82,9 @@ describe("labels", () => {
     expect(formatTime("2026-10-22T10:05:00Z")).toMatch(/\d{1,2}:05/);
   });
 });
+
+describe("empty reasoning", () => {
+  it("renders nothing for a reasoning Item without text", () => {
+    expect(groupTurnItems([item(0, "reasoning", "  ")])).toEqual([]);
+  });
+});

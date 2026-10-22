@@ -30,6 +30,10 @@ export const commands = {
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	/**  Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn. */
+	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
+	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
+	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	setThreadArchived: (threadId: number, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived })),
@@ -283,6 +287,31 @@ export type Diff_Serialize = {
 	/**  What the Branch scope compares against, if a base branch exists. */
 	base: string | null,
 	files: DiffFile_Serialize[],
+};
+
+/**  A task handed off from the Thread Board to a new background Thread. */
+export type DispatchRequest = DispatchRequest_Serialize | DispatchRequest_Deserialize;
+
+/**  A task handed off from the Thread Board to a new background Thread. */
+export type DispatchRequest_Deserialize = {
+	projectId: number,
+	prompt: string,
+	provider: string,
+	model?: string | null,
+	effort?: string | null,
+	permissionMode?: PermissionMode | null,
+	baseBranch?: string | null,
+};
+
+/**  A task handed off from the Thread Board to a new background Thread. */
+export type DispatchRequest_Serialize = {
+	projectId: number,
+	prompt: string,
+	provider: string,
+	model: string | null,
+	effort: string | null,
+	permissionMode: PermissionMode | null,
+	baseBranch: string | null,
 };
 
 export type Editor = {
@@ -776,6 +805,9 @@ export type Thread_Deserialize = {
 	sessionLost: boolean,
 	continuedFrom?: number | null,
 	continuedIn?: number | null,
+	branch?: string | null,
+	worktreePath?: string | null,
+	setupOutput?: string | null,
 };
 
 export type Thread_Serialize = {
@@ -793,6 +825,9 @@ export type Thread_Serialize = {
 	sessionLost: boolean,
 	continuedFrom: number | null,
 	continuedIn: number | null,
+	branch: string | null,
+	worktreePath: string | null,
+	setupOutput: string | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

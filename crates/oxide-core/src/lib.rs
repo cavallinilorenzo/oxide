@@ -20,6 +20,7 @@ mod storage_actor;
 mod terminal;
 pub mod thread;
 mod thread_actor;
+mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
@@ -46,6 +47,7 @@ use storage_actor::StorageHandle;
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
+pub use worktree::DispatchRequest;
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -845,8 +847,8 @@ impl Core {
         let project_path = {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             let path_str: String = db.query_row(
-                "SELECT path FROM projects WHERE id = ?1",
-                [snapshot.thread.project_id],
+                "SELECT COALESCE(t.worktree_path, p.path) FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1",
+                [thread_id],
                 |r| r.get(0),
             )?;
             PathBuf::from(path_str)
@@ -1093,7 +1095,8 @@ impl Core {
     /// What one Turn changed: the diff between its two Checkpoints.
     pub fn turn_diff(&self, thread_id: u32, turn_index: u32) -> Result<Diff> {
         let project_id = self.storage.get_snapshot(thread_id, 0)?.thread.project_id;
-        checkpoint::turn_diff(&self.main_checkout(project_id)?, thread_id, turn_index)
+        let cwd = PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
+        checkpoint::turn_diff(&cwd, thread_id, turn_index)
     }
 
     /// [`Core::turn_diff`] of the Thread's latest Turn; empty before the first.
@@ -1101,7 +1104,8 @@ impl Core {
         let snapshot = self.storage.get_snapshot(thread_id, 0)?;
         match snapshot.turn_count.checked_sub(1) {
             Some(latest) => {
-                let cwd = self.main_checkout(snapshot.thread.project_id)?;
+                let cwd =
+                    PathBuf::from(self.checkout_path(snapshot.thread.project_id, Some(thread_id))?);
                 checkpoint::turn_diff(&cwd, thread_id, latest)
             }
             None => Ok(Diff {
@@ -1292,12 +1296,12 @@ impl Core {
         })
     }
 
-    /// Threads work in the main checkout, so switching branches under a
-    /// running Turn would change its files.
+    /// Chat Threads work in the main checkout, so switching branches under a
+    /// running Turn would change its files. Board Threads have worktrees of their own.
     fn checkout_blocked_reason(&self, project_id: u32) -> Result<Option<String>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let working: u32 = db.query_row(
-            "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working'",
+            "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path IS NULL",
             [project_id],
             |r| r.get(0),
         )?;
@@ -1314,7 +1318,7 @@ impl Core {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(match thread_id {
             Some(thread_id) => db.query_row(
-                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
+                "SELECT COALESCE(t.worktree_path, p.path) FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
                 rusqlite::params![project_id, thread_id],
                 |r| r.get(0),
             )?,

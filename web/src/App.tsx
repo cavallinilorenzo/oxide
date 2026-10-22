@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { GitBranchIcon } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
+import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
@@ -73,8 +75,9 @@ export function App() {
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
-  // Board Threads (own worktree) don't exist yet: every Thread is a chat Thread.
-  const diffThread = { board: false };
+  const diffThread = {
+    board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
+  };
   const diffScope =
     chosenDiffScope && chosenDiffScope.threadId === currentThreadId
       ? chosenDiffScope.scope
@@ -439,6 +442,9 @@ export function App() {
                 rememberTerminalContext(selected.id, id);
               }}
               onArchiveThread={(id) => void setThreadArchived(id, true)}
+              onDispatched={(thread) =>
+                setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
+              }
             />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
@@ -666,6 +672,11 @@ function Sidebar({
             aria-label={`Status: ${t.status}`}
             title={`Status: ${t.status}`}
           />
+          {isBoardThread(t) && (
+            <span className="thread-item-branch" title={`Worktree on ${t.branch}`} aria-label="Board Thread">
+              <GitBranchIcon size={12} />
+            </span>
+          )}
           <span className="thread-item-title">{threadTitle(t)}</span>
         </button>
       )}

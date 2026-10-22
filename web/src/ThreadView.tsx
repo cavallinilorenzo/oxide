@@ -656,6 +656,14 @@ export function ThreadView({
           )}
         </section>
       )}
+      {transcript.thread?.setupOutput != null && (
+        <details className="setup-output" open={transcript.thread.status === "needs-input" && turnCount === 0}>
+          <summary>
+            Setup command{transcript.thread.status === "needs-input" && turnCount === 0 ? " failed" : ""}
+          </summary>
+          <pre>{transcript.thread.setupOutput || "(no output)"}</pre>
+        </details>
+      )}
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
         {turnCount === 0 ? (
           <div className="empty-thread">

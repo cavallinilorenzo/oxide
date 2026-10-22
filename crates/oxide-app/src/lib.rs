@@ -361,6 +361,9 @@ pub struct Thread {
     pub session_lost: bool,
     pub continued_from: Option<u32>,
     pub continued_in: Option<u32>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub setup_output: Option<String>,
 }
 
 /// An Approval the Provider is still waiting on.
@@ -1234,6 +1237,51 @@ fn create_thread(
     Ok(convert(&summary))
 }
 
+/// A task handed off from the Thread Board to a new background Thread.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchRequest {
+    pub project_id: u32,
+    pub prompt: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
+    pub base_branch: Option<String>,
+}
+
+/// Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn.
+#[tauri::command]
+#[specta::specta]
+async fn dispatch_thread(
+    core: State<'_, Arc<Core>>,
+    request: DispatchRequest,
+) -> Result<Thread, AppError> {
+    let request: oxide_core::DispatchRequest = convert(&request);
+    git_blocking(&core, move |core| core.dispatch_thread(request))
+        .await
+        .map(|thread| convert(&thread))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_project_setup_command(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Option<String>, AppError> {
+    Ok(core.project_setup_command(project_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_project_setup_command(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    command: Option<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_project_setup_command(project_id, command.as_deref())?)
+}
+
 /// Starts a new Thread that continues one whose Provider session is gone.
 #[tauri::command]
 #[specta::specta]
@@ -1624,6 +1672,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_settings,
         save_settings,
         create_thread,
+        dispatch_thread,
+        get_project_setup_command,
+        set_project_setup_command,
         continue_thread,
         set_thread_archived,
         set_thread_permission_mode,
@@ -1803,6 +1854,9 @@ mod tests {
                 session_lost: false,
                 continued_from: None,
                 continued_in: None,
+                branch: None,
+                worktree_path: None,
+                setup_output: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

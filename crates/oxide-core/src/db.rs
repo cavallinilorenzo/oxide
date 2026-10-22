@@ -103,6 +103,14 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE threads ADD COLUMN title TEXT;
 ",
+    // Board Threads: a worktree of their own, and the output of the Project's Setup command
+    // that ran in it. The Setup command itself lives with the Project, never in its repository.
+    "
+    ALTER TABLE threads ADD COLUMN branch TEXT;
+    ALTER TABLE threads ADD COLUMN worktree_path TEXT;
+    ALTER TABLE threads ADD COLUMN setup_output TEXT;
+    ALTER TABLE projects ADD COLUMN setup_command TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

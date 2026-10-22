@@ -209,11 +209,12 @@ pub fn status(cwd: &Path) -> Result<GitStatus> {
 /// or unreadable files.
 fn count_lines(path: &Path) -> u32 {
     let read = || -> std::io::Result<Option<u32>> {
-        let file = File::open(path)?;
-        let meta = file.metadata()?;
+        // Symlinks may point outside the checkout; never read through them.
+        let meta = std::fs::symlink_metadata(path)?;
         if !meta.is_file() || meta.len() > MAX_COUNTED_BYTES {
             return Ok(None);
         }
+        let file = File::open(path)?;
         let mut bytes = Vec::new();
         file.take(MAX_COUNTED_BYTES).read_to_end(&mut bytes)?;
         if bytes[..bytes.len().min(8000)].contains(&0) {

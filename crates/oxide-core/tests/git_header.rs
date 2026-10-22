@@ -292,4 +292,5 @@ fn picker_is_disabled_with_a_reason_while_a_thread_turn_is_working() {
     assert!(reason.contains("Thread"), "{reason}");
     assert!(f.core.create_branch(f.project.id, "blocked").is_err());
     assert!(f.core.checkout_branch(f.project.id, "main").is_err());
+    assert!(f.core.pull(f.project.id).is_err());
 }

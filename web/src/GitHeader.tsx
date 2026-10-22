@@ -127,7 +127,7 @@ function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProp
 
   useEffect(() => {
     void commands.listBranches(projectId).then((result) => {
-      if (result.status === "ok") setBranches(result.data);
+      setBranches(result.status === "ok" ? result.data : []);
     });
   }, [projectId]);
 
@@ -153,7 +153,9 @@ function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProp
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
-          if (shown.length === 1) choose(() => onCheckout(shown[0].name));
+          // Only an exact name checks out, so "feat" never lands on "feature".
+          const exact = shown.find((b) => b.name === name);
+          if (exact) choose(() => onCheckout(exact.name));
           else if (shown.length === 0 && name) choose(() => onCreate(name));
         }}
       />

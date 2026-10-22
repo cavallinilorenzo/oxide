@@ -573,10 +573,12 @@ impl Core {
 
     /// `git pull --ff-only`; a diverged branch fails with Git's message.
     pub fn pull(&self, project_id: u32) -> Result<()> {
-        let cwd = self.main_checkout(project_id)?;
-        self.git.mutate(&cwd, || git::pull(&cwd))
+        // Pulling rewrites files like a checkout does, so it takes the same guard.
+        self.switch_branch(project_id, git::pull)
     }
 
+    /// Runs a command that changes the main checkout's files, serialized per
+    /// checkout and refused while a Thread is working in it.
     fn switch_branch(&self, project_id: u32, f: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
         let cwd = self.main_checkout(project_id)?;
         self.git.mutate(&cwd, || {

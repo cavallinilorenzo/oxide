@@ -1,19 +1,25 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { PaperclipIcon, XIcon } from "@primer/octicons-react";
 import {
   commands,
-  type ItemSnapshot,
+  type ApprovalDecision,
+  type DebugSequencedThreadEvent,
+  type Detection,
+  type PermissionMode,
   type SequencedThreadEvent,
   type Thread,
+  type ThreadCapabilities,
   type ThreadStatus,
 } from "./bindings";
+import { TurnView } from "./TurnView";
+import { getClaudeCodeHint } from "./providerHints";
 import { stopsTurn } from "./shortcuts";
 import {
   applyThreadEvent,
   initialTranscriptState,
   turnIsRunning,
   type TranscriptState,
-  type TranscriptTurn,
 } from "./transcript";
 
 interface ThreadViewProps {
@@ -23,42 +29,42 @@ interface ThreadViewProps {
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
 }
 
-const ItemView = memo(function ItemView({ item }: { item: ItemSnapshot }) {
-  return (
-    <div className="message agent">
-      <div className="message-header">
-        Agent {item.kind !== "agent_message" && `(${item.kind})`}
-      </div>
-      <div className="message-content">{item.content}</div>
-    </div>
-  );
-});
 
-const TurnView = memo(function TurnView({ turn }: { turn: TranscriptTurn }) {
-  return (
-    <div className="turn">
-      <div className="message user">
-        <div className="message-header">You</div>
-        <div className="message-content">{turn.prompt}</div>
-      </div>
-      {turn.items.map((item, iIdx) => (
-        <ItemView key={item.id || iIdx} item={item} />
-      ))}
-      {turn.status === "running" && turn.retryNotice && (
-        <div className="turn-notice" role="status">
-          {turn.retryNotice}
-        </div>
-      )}
-      {turn.status === "interrupted" && <div className="turn-notice">Interrupted</div>}
-      {turn.status === "error" && (
-        <div className="turn-error" role="alert">
-          <div>{turn.error?.message ?? "The Turn failed"}</div>
-          {turn.error?.stderrTail && <pre className="turn-stderr">{turn.error.stderrTail}</pre>}
-        </div>
-      )}
-    </div>
-  );
-});
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+interface PendingImage {
+  path: string;
+  previewUrl: string;
+}
+
+export const PERMISSION_CONFIG: Record<
+  PermissionMode,
+  { icon: string; label: string; softDenyLabel: string }
+> = {
+  ask: { icon: "🔒", label: "Ask", softDenyLabel: "Ask" },
+  "auto-edit": { icon: "🛡️", label: "Auto-edit", softDenyLabel: "Auto-edit (soft-deny)" },
+  "full-access": { icon: "🔓", label: "Full access", softDenyLabel: "Full access" },
+};
+
+export function getOfferedPermissionModes(
+  supportedModes: PermissionMode[],
+  provider: string
+): { mode: PermissionMode; label: string; icon: string }[] {
+  const isAgy = provider === "antigravity" || provider === "agy";
+  return supportedModes
+    .filter((m) => PERMISSION_CONFIG[m])
+    .map((m) => ({
+      mode: m,
+      label: isAgy ? PERMISSION_CONFIG[m].softDenyLabel : PERMISSION_CONFIG[m].label,
+      icon: PERMISSION_CONFIG[m].icon,
+    }));
+}
 
 export function ThreadView({
   threadId,
@@ -69,9 +75,45 @@ export function ThreadView({
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugState, setDebugState] = useState<{
+    threadId: number | null;
+    events: DebugSequencedThreadEvent[];
+  }>({ threadId: null, events: [] });
+  const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
+  const [draftProvider, setDraftProvider] = useState<string>("claude");
+  const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pendingEventsRef = useRef<SequencedThreadEvent[]>([]);
   const rafIdRef = useRef<number>(0);
+
+  // Load defaults from settings for a fresh thread
+  useEffect(() => {
+    if (threadId) return;
+    let active = true;
+    void (async () => {
+      const s = await commands.getSettings();
+      if (!active) return;
+      const defProvider = s.settings.defaultProvider;
+      setDraftProvider(defProvider);
+      const defMode = s.settings.providers[defProvider]?.permissionMode || "auto-edit";
+      setDraftMode(defMode);
+
+      const capsRes = await commands.getProviderCapabilities(defProvider);
+      if (active && capsRes.status === "ok") {
+        setTranscript((prev) => ({
+          ...prev,
+          supportedPermissionModes: capsRes.data.supportedPermissionModes,
+        }));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [threadId]);
 
   // Subscribe to the thread when threadId changes
   useEffect(() => {
@@ -86,9 +128,15 @@ export function ThreadView({
       };
     }
 
-    const channel = new Channel<SequencedThreadEvent>();
+    const channel = new Channel<SequencedThreadEvent | DebugSequencedThreadEvent>();
     channel.onmessage = (event) => {
-      pendingEventsRef.current.push(event);
+      if ("rawPayload" in event) {
+        setDebugState((previous) => ({
+          threadId,
+          events: [...(previous.threadId === threadId ? previous.events : []).slice(-199), event],
+        }));
+      }
+      pendingEventsRef.current.push(event as SequencedThreadEvent);
       if (!rafIdRef.current) {
         rafIdRef.current = requestAnimationFrame(() => {
           rafIdRef.current = 0;
@@ -110,7 +158,9 @@ export function ThreadView({
     };
 
     void (async () => {
-      const res = await commands.subscribeThread(threadId, channel);
+      const res = debugOpen
+        ? await commands.subscribeThreadDebug(threadId, channel as Channel<DebugSequencedThreadEvent>)
+        : await commands.subscribeThread(threadId, channel as Channel<SequencedThreadEvent>);
       if (active && res.status === "ok") {
         const initial = initialTranscriptState(res.data);
         setTranscript(initial);
@@ -126,12 +176,103 @@ export function ThreadView({
       }
       pendingEventsRef.current = [];
     };
-  }, [threadId, onStatusChange]);
+  }, [threadId, onStatusChange, debugOpen]);
+
+  const debugEvents = debugState.threadId === threadId ? debugState.events : [];
+
+  // Before a Thread exists, ask what the Provider it will use supports.
+  useEffect(() => {
+    if (threadId) return;
+    let active = true;
+    void commands.providerCapabilities(draftProvider).then((caps) => {
+      if (active) setNewThreadCaps(caps);
+    });
+    return () => {
+      active = false;
+    };
+  }, [threadId, draftProvider]);
+
+  const imagesOffered = (threadId ? transcript.capabilities : newThreadCaps)?.imageAttachments ?? false;
+
+  const addImage = async (file: File) => {
+    const ext = IMAGE_EXTENSIONS[file.type];
+    if (!ext) return;
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+    const saved = await commands.saveAttachment(bytes, ext);
+    if (saved.status !== "ok") {
+      console.error("Failed to store image:", saved.error);
+      return;
+    }
+    setPendingImages((prev) => [...prev, { path: saved.data, previewUrl: URL.createObjectURL(file) }]);
+  };
+
+  const removeImage = (path: string) => {
+    setPendingImages((prev) => {
+      const gone = prev.find((i) => i.path === path);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((i) => i.path !== path);
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (!imagesOffered) return;
+    const files = Array.from(e.clipboardData.files).filter((f) => f.type in IMAGE_EXTENSIONS);
+    if (files.length === 0) return;
+    e.preventDefault();
+    files.forEach((f) => void addImage(f));
+  };
 
   // Auto-scroll to bottom as messages stream in
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript.turns]);
+
+  const handleRespond = async (approvalId: string, decision: ApprovalDecision) => {
+    if (!threadId) return;
+    await commands.respondToApproval(threadId, approvalId, decision);
+  };
+
+  const handlePermissionChange = async (newMode: PermissionMode) => {
+    if (threadId) {
+      await commands.setThreadPermissionMode(threadId, newMode);
+      setTranscript((prev) =>
+        prev.thread
+          ? { ...prev, thread: { ...prev.thread, permissionMode: newMode } }
+          : prev
+      );
+    } else {
+      setDraftMode(newMode);
+    }
+  };
+
+  const currentMode = transcript.thread?.permissionMode || draftMode;
+  const currentProvider = transcript.thread?.provider || draftProvider;
+
+  useEffect(() => {
+    let active = true;
+    if (currentProvider === "claude") {
+      void commands.detectProvider("claude").then((res) => {
+        if (active && res.status === "ok") {
+          setProviderDetection(res.data);
+        }
+      });
+    } else {
+      void Promise.resolve().then(() => {
+        if (active) setProviderDetection(null);
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [currentProvider]);
+
+  const providerHint = currentProvider === "claude" ? getClaudeCodeHint(providerDetection) : null;
+
+  const offeredModes = getOfferedPermissionModes(
+    transcript.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
+    currentProvider
+  );
+  const currentModeConfig = PERMISSION_CONFIG[currentMode] || PERMISSION_CONFIG["auto-edit"];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,13 +285,15 @@ export function ThreadView({
     try {
       let targetThreadId = threadId;
       if (!targetThreadId) {
-        // Create new thread for this project
+        // Create new thread for this project with selected permission mode
+        const settings = await commands.getSettings();
+        const providerName = settings.settings.defaultProvider || "fake";
         const created = await commands.createThread(
           projectId,
-          "fake",
+          providerName,
           null,
           null,
-          "auto-edit"
+          draftMode
         );
         if (created.status === "ok") {
           targetThreadId = created.data.id;
@@ -162,13 +305,16 @@ export function ThreadView({
         }
       }
 
-      await commands.sendPrompt(targetThreadId, prompt);
+      const attachments = pendingImages.map((i) => i.path);
+      pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
+      setPendingImages([]);
+      await commands.sendPrompt(targetThreadId, prompt, attachments);
     } finally {
       setSending(false);
     }
   };
 
-  const isRunning = turnIsRunning(transcript.status);
+  const isTurnActive = turnIsRunning(transcript.status);
 
   const stop = () => {
     if (threadId) void commands.interruptThread(threadId);
@@ -176,6 +322,28 @@ export function ThreadView({
 
   return (
     <div className="thread-container">
+      <div className="thread-debug-toolbar">
+        <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
+          {debugOpen ? "Close raw event debug" : "Open raw event debug"}
+        </button>
+      </div>
+      {debugOpen && (
+        <section className="thread-debug-view" aria-label="Raw event debug view">
+          <h3>Raw provider events</h3>
+          {transcript.turns.flatMap((turn) => turn.unknownEvents ?? []).map((unknown) => (
+            <pre key={`persisted-${unknown.id}`}><strong>Persisted Unknown</strong>{"\n"}{unknown.raw}</pre>
+          ))}
+          {debugEvents.map((entry) => (
+            <pre key={entry.seq}>
+              <strong>#{entry.seq} {entry.event.type}</strong>{"\n"}
+              {entry.rawPayload ?? "No provider payload (synthetic event)"}
+            </pre>
+          ))}
+          {debugEvents.length === 0 && transcript.turns.every((turn) => !(turn.unknownEvents?.length)) && (
+            <p>Raw provider events will appear while a Turn is running.</p>
+          )}
+        </section>
+      )}
       <div className="transcript" aria-label="Transcript">
         {transcript.turns.length === 0 ? (
           <div className="empty-thread">
@@ -183,36 +351,114 @@ export function ThreadView({
           </div>
         ) : (
           transcript.turns.map((turn, tIdx) => (
-            <TurnView key={turn.id || tIdx} turn={turn} />
+            <TurnView
+              key={turn.id || tIdx}
+              turn={turn}
+              provider={transcript.thread?.provider ?? draftProvider}
+              onRespond={handleRespond}
+              isWorking={isTurnActive}
+            />
           ))
         )}
         <div ref={bottomRef} />
       </div>
 
+      {providerHint && providerHint.type !== "ok" && (
+        <div className={`provider-hint ${providerHint.type}`} role="alert">
+          <span className="hint-message">{providerHint.message}</span>
+          {providerHint.command && (
+            <code className="hint-command">{providerHint.command}</code>
+          )}
+        </div>
+      )}
+
       <form className="composer" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          className="composer-input"
-          placeholder={isRunning ? "Working… (Esc to stop)" : "Type a prompt…"}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (stopsTurn(e, transcript.status)) {
-              e.preventDefault();
-              stop();
-            }
-          }}
-          disabled={sending}
-        />
-        {isRunning ? (
-          <button type="button" className="composer-submit" onClick={stop}>
-            Stop
-          </button>
-        ) : (
-          <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
-            Send
-          </button>
+        <div className="permission-chip-wrapper" title="Permission mode">
+          <label className="permission-chip" htmlFor="permission-mode-select">
+            <span className="permission-chip-icon">{currentModeConfig.icon}</span>
+            <select
+              id="permission-mode-select"
+              className="permission-chip-select"
+              value={currentMode}
+              disabled={isTurnActive || sending}
+              onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
+              aria-label="Permission mode"
+            >
+              {offeredModes.map((item) => (
+                <option key={item.mode} value={item.mode}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {pendingImages.length > 0 && (
+          <div className="pending-images">
+            {pendingImages.map((img) => (
+              <div className="pending-image" key={img.path}>
+                <img src={img.previewUrl} alt="Pending attachment" />
+                <button
+                  type="button"
+                  aria-label="Remove image"
+                  onClick={() => removeImage(img.path)}
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
         )}
+        <div className="composer-row">
+          {imagesOffered && (
+            <>
+              <button
+                type="button"
+                className="composer-attach"
+                aria-label="Attach image"
+                disabled={isTurnActive || sending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <PaperclipIcon size={16} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  Array.from(e.target.files ?? []).forEach((f) => void addImage(f));
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
+          <input
+            type="text"
+            className="composer-input"
+            placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
+            onKeyDown={(e) => {
+              if (stopsTurn(e, transcript.status)) {
+                e.preventDefault();
+                stop();
+              }
+            }}
+            disabled={sending}
+          />
+          {isTurnActive ? (
+            <button type="button" className="composer-submit" onClick={stop}>
+              Stop
+            </button>
+          ) : (
+            <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
+              Send
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );

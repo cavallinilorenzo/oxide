@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
 
+const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
+
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
+type TerminalContext = { key: string; projectId: number; threadId: number | null };
+const terminalContextKey = (projectId: number, threadId: number | null) =>
+  `${projectId}:${threadId ?? "draft"}`;
 
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
@@ -17,10 +22,34 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
+  const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
+    const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
+    setTerminalContexts((previous) => previous.some((item) => item.key === context.key)
+      ? previous
+      : [...previous, context]);
+  }, []);
 
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
+  const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
+    ? selectedThreadId
+    : null;
+  const currentTerminalContext = useMemo<TerminalContext | null>(
+    () => selected && threads !== null
+      ? {
+          key: terminalContextKey(selected.id, currentThreadId),
+          projectId: selected.id,
+          threadId: currentThreadId,
+        }
+      : null,
+    [selected, threads, currentThreadId],
+  );
+  const terminalContextsToRender = currentTerminalContext &&
+      !terminalContexts.some((context) => context.key === currentTerminalContext.key)
+    ? [...terminalContexts, currentTerminalContext]
+    : terminalContexts;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -68,18 +97,16 @@ export function App() {
       const res = await commands.listThreads(selected.id);
       if (active && res.status === "ok") {
         setThreads(res.data);
-        if (res.data.length > 0) {
-          setSelectedThreadId(res.data[0].id);
-        } else {
-          setSelectedThreadId(null);
-        }
+        const initialThreadId = res.data[0]?.id ?? null;
+        setSelectedThreadId(initialThreadId);
+        rememberTerminalContext(selected.id, initialThreadId);
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [selected]);
+  }, [selected, rememberTerminalContext]);
 
   return (
     <div className="window">
@@ -106,11 +133,21 @@ export function App() {
           projects={projects}
           onProjects={setProjects}
           selected={selected}
-          onSelect={(p) => setSelectedId(p.id)}
+          onSelect={(p) => {
+            setSelectedId(p.id);
+            setThreads(null);
+            setSelectedThreadId(null);
+          }}
           threads={threads}
           selectedThreadId={selectedThreadId}
-          onSelectThread={setSelectedThreadId}
-          onNewThread={() => setSelectedThreadId(null)}
+          onSelectThread={(threadId) => {
+            setSelectedThreadId(threadId);
+            if (selected) rememberTerminalContext(selected.id, threadId);
+          }}
+          onNewThread={() => {
+            setSelectedThreadId(null);
+            if (selected) rememberTerminalContext(selected.id, null);
+          }}
         />
         <div className="centre-column">
           {showSettings ? (
@@ -123,6 +160,7 @@ export function App() {
                 onThreadCreated={(newThread) => {
                   setThreads((prev) => [newThread, ...(prev || [])]);
                   setSelectedThreadId(newThread.id);
+                  rememberTerminalContext(selected.id, newThread.id);
                 }}
                 onStatusChange={(threadId, status) => {
                   setThreads((prev) =>
@@ -136,7 +174,16 @@ export function App() {
               <p>Pick a Project to begin.</p>
             </main>
           )}
-          {showTerminal && <section className="terminal" aria-label="Terminal" />}
+          {terminalContextsToRender.map((context) => (
+            <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal ? <section className="terminal" aria-label="Terminal" /> : null}>
+              <TerminalPanel
+                projectId={context.projectId}
+                threadId={context.threadId}
+                contextKey={context.key}
+                visible={showTerminal && context.key === currentTerminalContext?.key}
+              />
+            </Suspense>
+          ))}
         </div>
         {showTools && (
           <aside className="tools" aria-label="Tools panel">

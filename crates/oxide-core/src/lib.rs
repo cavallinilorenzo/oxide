@@ -6,6 +6,7 @@ mod discovery;
 mod error;
 mod settings;
 mod storage_actor;
+mod terminal;
 pub mod thread;
 mod thread_actor;
 
@@ -13,9 +14,12 @@ use oxide_provider::Provider as ProviderTrait;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use storage_actor::StorageHandle;
+pub use terminal::TerminalSummary;
+use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
 
 use rusqlite::Connection;
@@ -23,17 +27,19 @@ use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ItemKind, TurnStatus};
+pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
 pub use thread::{
-    ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary,
-    TurnError, TurnSnapshot,
+    ApprovalSnapshot, DebugSequencedThreadEvent, ItemSnapshot, SequencedThreadEvent,
+    ThreadCapabilities, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnError,
+    TurnSnapshot, UnknownEventSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";
+static ATTACHMENT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectSummary {
@@ -56,6 +62,8 @@ pub struct Core {
     thread_actors: Mutex<HashMap<u32, ThreadActorHandle>>,
     fake_providers: Mutex<HashMap<u32, Box<dyn ProviderTrait>>>,
     real_time_ticker: AtomicBool,
+    terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
+    next_terminal_id: AtomicU32,
 }
 
 impl Core {
@@ -96,6 +104,8 @@ impl Core {
             thread_actors: Mutex::new(HashMap::new()),
             fake_providers: Mutex::new(HashMap::new()),
             real_time_ticker: AtomicBool::new(true),
+            terminals: Mutex::new(HashMap::new()),
+            next_terminal_id: AtomicU32::new(1),
         })
     }
 
@@ -181,14 +191,27 @@ impl Core {
         Ok(())
     }
 
+    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+        let settings = self.settings().settings;
+        match provider {
+            "claude" => settings.providers.claude.permission_mode,
+            "codex" => settings.providers.codex.permission_mode,
+            "agy" | "antigravity" => settings.providers.antigravity.permission_mode,
+            _ => PermissionMode::Ask,
+        }
+    }
+
     pub fn create_thread(
         &self,
         project_id: u32,
         provider: &str,
         model: Option<String>,
         effort: Option<String>,
-        permission_mode: PermissionMode,
+        permission_mode: impl Into<Option<PermissionMode>>,
     ) -> Result<ThreadSummary> {
+        let permission_mode = permission_mode
+            .into()
+            .unwrap_or_else(|| self.default_permission_mode_for(provider));
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let mode_str = serde_json::to_string(&permission_mode)
             .unwrap_or_default()
@@ -200,6 +223,77 @@ impl Core {
         )?;
         let id = db.last_insert_rowid() as u32;
         self.get_thread_by_id(&db, id)
+    }
+
+    pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.set_permission_mode(mode)
+    }
+
+    pub fn respond_to_approval(
+        &self,
+        thread_id: u32,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.respond_to_approval(approval_id.to_string(), decision)
+    }
+
+    pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
+        match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
+                .detect()
+                .unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                }),
+            "fake" => oxide_provider::Detection {
+                available: true,
+                installed: true,
+                version: Some("0.1.0-fake".into()),
+                authenticated: true,
+                warning: None,
+            },
+            _ => oxide_provider::Detection {
+                available: false,
+                installed: false,
+                version: None,
+                authenticated: false,
+                warning: Some(format!("Unknown provider '{provider}'")),
+            },
+        }
+    }
+
+    pub fn get_provider_capabilities(
+        &self,
+        provider: &str,
+    ) -> oxide_provider::ProviderCapabilities {
+        match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
+            "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
+                supported_permission_modes: vec![
+                    PermissionMode::AutoEdit,
+                    PermissionMode::FullAccess,
+                ],
+                interactive_approvals: false,
+                supports_reasoning: false,
+                image_attachments: false,
+            },
+            _ => oxide_provider::ProviderCapabilities {
+                supported_permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AutoEdit,
+                    PermissionMode::FullAccess,
+                ],
+                interactive_approvals: true,
+                supports_reasoning: true,
+                image_attachments: false,
+            },
+        }
     }
 
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {
@@ -249,8 +343,21 @@ impl Core {
         let provider: Box<dyn ProviderTrait> =
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
+            } else if snapshot.thread.provider == "claude" {
+                let claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                let detection = claude.detect().unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                });
+                if !detection.installed {
+                    return Err(Error::Provider("Claude Code is not installed".to_string()));
+                }
+                Box::new(claude)
             } else {
-                Box::new(oxide_provider::FakeProvider::default())
+                Box::new(oxide_provider::FakeProvider::scripted())
             };
 
         let real_time = self.real_time_ticker.load(Ordering::Relaxed);
@@ -267,8 +374,86 @@ impl Core {
     }
 
     pub fn send_prompt(&self, thread_id: u32, prompt: &str) -> Result<()> {
+        self.send_prompt_with_attachments(thread_id, prompt, &[])
+    }
+
+    /// Sends a prompt with image attachments previously stored by [`Core::save_attachment`].
+    /// Fails if the Provider doesn't accept images or a path is outside the attachments folder.
+    pub fn send_prompt_with_attachments(
+        &self,
+        thread_id: u32,
+        prompt: &str,
+        attachments: &[PathBuf],
+    ) -> Result<()> {
+        if let Some(bad) = attachments.iter().find(|p| !self.is_stored_attachment(p)) {
+            return Err(Error::Io {
+                path: bad.clone(),
+                source: std::io::Error::other("attachment is not stored under the Oxide home"),
+            });
+        }
         let actor = self.get_or_create_thread_actor(thread_id)?;
-        actor.send_prompt(prompt.to_string())
+        actor.send_prompt(prompt.to_string(), attachments.to_vec())
+    }
+
+    /// Reads a stored attachment; refuses paths outside the attachments folder.
+    pub fn read_attachment(&self, path: &Path) -> Result<Vec<u8>> {
+        let io = |source| Error::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        if !self.is_stored_attachment(path) {
+            return Err(io(std::io::Error::other("not stored under the Oxide home")));
+        }
+        fs::read(path).map_err(io)
+    }
+
+    /// Whether `path` resolves (symlinks and `..` included) to a file inside the attachments folder.
+    fn is_stored_attachment(&self, path: &Path) -> bool {
+        match (path.canonicalize(), self.attachments_dir().canonicalize()) {
+            (Ok(path), Ok(dir)) => path.starts_with(dir),
+            _ => false,
+        }
+    }
+
+    /// Capabilities of a Provider, before any Thread of it exists.
+    pub fn provider_capabilities(&self, provider: &str) -> ThreadCapabilities {
+        let caps = self.get_provider_capabilities(provider);
+        ThreadCapabilities {
+            reasoning_text: caps.supports_reasoning,
+            image_attachments: caps.image_attachments,
+        }
+    }
+
+    fn attachments_dir(&self) -> PathBuf {
+        self.home.join("attachments")
+    }
+
+    /// Stores an image under `<home>/attachments/` and returns its path.
+    pub fn save_attachment(&self, bytes: &[u8], extension: &str) -> Result<PathBuf> {
+        const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+        let ext = extension.to_ascii_lowercase();
+        let dir = self.attachments_dir();
+        if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(Error::Io {
+                path: dir,
+                source: std::io::Error::other(format!("unsupported image type `{extension}`")),
+            });
+        }
+        fs::create_dir_all(&dir).map_err(|source| Error::Io {
+            path: dir.clone(),
+            source,
+        })?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let seq = ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("{nanos}-{seq}.{ext}"));
+        fs::write(&path, bytes).map_err(|source| Error::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(path)
     }
 
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
@@ -287,6 +472,83 @@ impl Core {
         actor.subscribe()
     }
 
+    /// Like [`subscribe_thread`] but returns a debug channel where each event
+    /// is paired with the raw Provider payload that produced it.  Only open
+    /// this when the debug view is visible; raw payloads are never sent when
+    /// no debug subscriber is registered.
+    pub fn subscribe_thread_debug(
+        &self,
+        thread_id: u32,
+    ) -> Result<(
+        ThreadSnapshot,
+        crossbeam_channel::Receiver<DebugSequencedThreadEvent>,
+    )> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.subscribe_debug()
+    }
+
+    /// Starts a shell PTY in the Project's checkout. A terminal actor owns the
+    /// PTY process until it is explicitly closed or Core shuts down.
+    pub fn start_terminal(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<TerminalSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let cwd: String = match thread_id {
+            Some(thread_id) => db.query_row(
+                "SELECT p.path FROM projects p JOIN threads t ON t.project_id = p.id WHERE p.id = ?1 AND t.id = ?2",
+                rusqlite::params![project_id, thread_id],
+                |r| r.get(0),
+            )?,
+            None => db.query_row("SELECT path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?,
+        };
+        drop(db);
+        let id = next_id(&self.next_terminal_id);
+        let session = Arc::new(TerminalSession::start(id, Path::new(&cwd))?);
+        let summary = session.summary.clone();
+        self.terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, session);
+        Ok(summary)
+    }
+
+    pub fn subscribe_terminal(
+        &self,
+        terminal_id: u32,
+    ) -> Result<crossbeam_channel::Receiver<Vec<u8>>> {
+        Ok(self.terminal(terminal_id)?.subscribe())
+    }
+
+    pub fn write_terminal(&self, terminal_id: u32, bytes: &[u8]) -> Result<()> {
+        self.terminal(terminal_id)?.write(bytes)
+    }
+
+    pub fn resize_terminal(&self, terminal_id: u32, rows: u16, cols: u16) -> Result<()> {
+        self.terminal(terminal_id)?.resize(rows, cols)
+    }
+
+    pub fn close_terminal(&self, terminal_id: u32) -> Result<()> {
+        let session = self
+            .terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&terminal_id)
+            .ok_or_else(|| Error::Terminal(format!("unknown terminal {terminal_id}")))?;
+        session.close();
+        Ok(())
+    }
+
+    fn terminal(&self, id: u32) -> Result<Arc<TerminalSession>> {
+        self.terminals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::Terminal(format!("unknown terminal {id}")))
+    }
+
     pub fn tick_thread(&self, thread_id: u32) {
         if let Some(actor) = self.thread_actors.lock().unwrap().get(&thread_id) {
             actor.tick();
@@ -294,7 +556,11 @@ impl Core {
     }
 
     pub fn get_thread_snapshot(&self, thread_id: u32) -> Result<ThreadSnapshot> {
-        self.storage.get_snapshot(thread_id)
+        let mut snapshot = self.storage.get_snapshot(thread_id)?;
+        for turn in &mut snapshot.turns {
+            turn.unknown_events.clear();
+        }
+        Ok(snapshot)
     }
 
     fn expand_home(&self, root: &str) -> PathBuf {

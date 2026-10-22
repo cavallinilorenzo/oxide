@@ -1,4 +1,4 @@
-use oxide_provider::{ItemKind, PermissionMode, TurnStatus};
+use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +62,28 @@ pub struct ItemSnapshot {
     pub item_index: u32,
     pub kind: ItemKind,
     pub content: String,
+    /// The Subagent Item this Item is nested under.
+    pub parent_item_index: Option<u32>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalSnapshot {
+    pub id: u32,
+    pub turn_id: u32,
+    pub approval_id: String,
+    pub kind: ApprovalKind,
+    pub summary: String,
+    pub options: Vec<String>,
+    pub decision: Option<ApprovalDecision>,
+    pub created_at: String,
+    pub decided_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnknownEventSnapshot {
+    pub id: u32,
+    pub raw: String,
     pub created_at: String,
 }
 
@@ -71,12 +93,26 @@ pub struct TurnSnapshot {
     pub id: u32,
     pub turn_index: u32,
     pub prompt: String,
+    /// The Model and Effort the Turn ran with.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// Paths of image attachments, stored under the Oxide home.
+    pub attachments: Vec<String>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
     pub items: Vec<ItemSnapshot>,
     /// Why the Turn failed; set only when `status` is error.
     pub error: Option<TurnError>,
+    pub approvals: Vec<ApprovalSnapshot>,
+    pub unknown_events: Vec<UnknownEventSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCapabilities {
+    pub reasoning_text: bool,
+    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,8 +126,10 @@ pub struct TurnError {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub thread: ThreadSummary,
+    pub capabilities: ThreadCapabilities,
     pub turns: Vec<TurnSnapshot>,
     pub last_seq: u32,
+    pub supported_permission_modes: Vec<PermissionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,10 +138,14 @@ pub enum ThreadEvent {
     TurnStarted {
         turn_index: u32,
         prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+        attachments: Vec<String>,
     },
     ItemStarted {
         item_index: u32,
         kind: ItemKind,
+        parent_item_index: Option<u32>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -113,6 +155,7 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         content: String,
+        parent_item_index: Option<u32>,
     },
     TurnCompleted {
         turn_index: u32,
@@ -124,7 +167,14 @@ pub enum ThreadEvent {
     },
     ApprovalRequested {
         id: String,
-        description: String,
+        kind: ApprovalKind,
+        summary: String,
+        options: Vec<String>,
+    },
+    ApprovalResponded {
+        id: String,
+        decision: ApprovalDecision,
+        decided_at: String,
     },
     /// The Provider hit a transient failure and is retrying the Turn itself.
     ProviderRetrying {
@@ -133,15 +183,24 @@ pub enum ThreadEvent {
     Error {
         message: String,
     },
-    Unknown {
-        raw: String,
-    },
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequencedThreadEvent {
     pub seq: u32,
     pub event: ThreadEvent,
+}
+
+/// A sequenced event on the debug subscriber channel, paired with the raw
+/// Provider payload that produced it.  `raw_payload` is `None` only for
+/// synthesised events (e.g. `ThreadStatusChanged`) that have no backing
+/// Provider event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugSequencedThreadEvent {
+    pub seq: u32,
+    pub event: ThreadEvent,
+    pub raw_payload: Option<String>,
 }
 
 pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary> {

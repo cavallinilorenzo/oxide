@@ -53,6 +53,33 @@ pub const MIGRATIONS: &[&str] = &[
     );
 ",
     "
+    CREATE TABLE approvals (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL REFERENCES turns(id),
+        approval_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        options TEXT NOT NULL DEFAULT '[]',
+        decision TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        decided_at TEXT
+    );
+",
+    "
+    CREATE TABLE unknown_events (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL REFERENCES turns(id),
+        raw TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+",
+    "
+    ALTER TABLE items ADD COLUMN parent_item_index INTEGER;
+    ALTER TABLE turns ADD COLUMN model TEXT;
+    ALTER TABLE turns ADD COLUMN effort TEXT;
+    ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+",
+    "
     ALTER TABLE turns ADD COLUMN error_message TEXT;
     ALTER TABLE turns ADD COLUMN stderr_tail TEXT;
 ",

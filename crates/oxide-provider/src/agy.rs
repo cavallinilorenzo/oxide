@@ -8,8 +8,8 @@
 use crate::claude::ClaudeCodeProvider;
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider, ProviderCapabilities,
-    ProviderError, ProviderEvent, StartContext, TurnStatus,
+    ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
+    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
@@ -367,7 +367,9 @@ impl Provider for AgyProvider {
         if let Some(_pgid) = *self.group.lock().unwrap() {
             self.interrupted.store(true, Ordering::SeqCst);
             #[cfg(unix)]
-            unsafe { libc::kill(-_pgid, libc::SIGINT) };
+            unsafe {
+                libc::kill(-_pgid, libc::SIGINT)
+            };
         }
         Ok(())
     }

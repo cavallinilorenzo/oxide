@@ -818,12 +818,12 @@ fn run_thread_actor(
                         }
 
                         let p_res = if state.provider_live && state.current_turn.is_none() {
-                            let m_res = if let Some(ref m) = model.as_deref() {
+                            let m_res = if let Some(m) = model.as_deref() {
                                 provider.set_model(m)
                             } else {
                                 Ok(())
                             };
-                            let e_res = if let Some(ref e) = effort.as_deref() {
+                            let e_res = if let Some(e) = effort.as_deref() {
                                 provider.set_effort(e)
                             } else {
                                 Ok(())

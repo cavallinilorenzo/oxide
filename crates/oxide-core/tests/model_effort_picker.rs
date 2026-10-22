@@ -170,12 +170,8 @@ fn turn_records_model_and_effort_used() {
     assert_eq!(page1.turns[0].effort.as_deref(), Some("low"));
 
     // Switch model and effort for next turn
-    core.set_thread_model_and_effort(
-        thread.id,
-        Some("model-v2".into()),
-        Some("high".into()),
-    )
-    .unwrap();
+    core.set_thread_model_and_effort(thread.id, Some("model-v2".into()), Some("high".into()))
+        .unwrap();
 
     // Turn 2
     core.send_prompt(thread.id, "Turn 2").unwrap();
@@ -212,7 +208,8 @@ fn slash_commands_model_and_effort_intercepted_and_not_sent_to_provider() {
     // Sending /model without args
     core.send_prompt(thread.id, "/model").unwrap();
     // Sending /model with model arg
-    core.send_prompt(thread.id, "/model new-cool-model").unwrap();
+    core.send_prompt(thread.id, "/model new-cool-model")
+        .unwrap();
     // Sending /effort with effort arg
     core.send_prompt(thread.id, "/effort high").unwrap();
 
@@ -240,13 +237,7 @@ fn slash_command_passthrough_gated() {
     let rec1 = fake1.recorder();
 
     let t1 = core
-        .create_thread(
-            project_id,
-            "fake",
-            None,
-            None,
-            PermissionMode::AutoEdit,
-        )
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
         .unwrap();
     core.register_fake_provider(t1.id, fake1);
 
@@ -263,13 +254,7 @@ fn slash_command_passthrough_gated() {
     let rec2 = fake2.recorder();
 
     let t2 = core
-        .create_thread(
-            project_id,
-            "fake",
-            None,
-            None,
-            PermissionMode::AutoEdit,
-        )
+        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
         .unwrap();
     core.register_fake_provider(t2.id, fake2);
 

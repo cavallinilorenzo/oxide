@@ -229,7 +229,9 @@ fn next_launch_leaves_a_reused_pid_alone() {
 
     assert!(group_alive(pgid), "an unrelated process must not be killed");
     #[cfg(unix)]
-    unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL)
+    };
     #[cfg(not(unix))]
     let _ = bystander.kill();
     assert!(wait_group_gone(&mut bystander));

@@ -1180,7 +1180,8 @@ impl Provider for CodexProvider {
         Ok(entries
             .into_iter()
             .map(|e| {
-                let is_legacy = (e.id.contains("gpt-4") && !e.id.contains("gpt-4.5")) || e.id.contains("gpt-3.5");
+                let is_legacy = (e.id.contains("gpt-4") && !e.id.contains("gpt-4.5"))
+                    || e.id.contains("gpt-3.5");
                 let default_effort = e.supported_reasoning_efforts.first().cloned();
                 ModelInfo {
                     name: e.display_name.unwrap_or_else(|| e.id.clone()),

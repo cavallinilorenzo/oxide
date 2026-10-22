@@ -3,9 +3,9 @@
 //! disk so a crashed Oxide's orphans can be killed on the next launch.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 #[cfg(unix)]
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;

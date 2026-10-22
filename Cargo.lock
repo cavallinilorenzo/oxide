@@ -2335,8 +2335,10 @@ name = "oxide-provider"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

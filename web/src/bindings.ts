@@ -18,6 +18,7 @@ export const commands = {
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
+	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt })),
@@ -83,6 +84,24 @@ export type DebugSequencedThreadEvent_Serialize = {
 	rawPayload: string | null,
 };
 
+export type Detection = Detection_Serialize | Detection_Deserialize;
+
+export type Detection_Deserialize = {
+	available: boolean,
+	installed: boolean,
+	version?: string | null,
+	authenticated: boolean,
+	warning?: string | null,
+};
+
+export type Detection_Serialize = {
+	available: boolean,
+	installed: boolean,
+	version: string | null,
+	authenticated: boolean,
+	warning: string | null,
+};
+
 export type FieldError = {
 	path: string,
 	message: string,
@@ -114,6 +133,7 @@ export type ProviderCapabilities = {
 	supportedPermissionModes: PermissionMode[],
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
+	imageAttachments: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;

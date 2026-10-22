@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type SettingsState, type Settings_Deserialize as Settings } from "./bindings";
+import {
+  commands,
+  type Detection,
+  type SettingsState,
+  type Settings_Deserialize as Settings,
+} from "./bindings";
+import {
+  getClaudeCodeHint,
+  CLAUDE_30_DAY_RETENTION_WARNING,
+} from "./providerHints";
 
 type Provider = Settings["defaultProvider"];
 type PermissionMode = Settings["providers"]["claude"]["permissionMode"];
@@ -23,6 +32,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [claudeDetection, setClaudeDetection] = useState<Detection | null>(null);
 
   useEffect(() => {
     // A valid change on disk replaces the draft (the file is the source of
@@ -32,6 +42,11 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       setDraft((d) => (d && s.errors.length > 0 ? d : s.settings));
     };
     commands.getSettings().then(apply);
+    commands.detectProvider("claude").then((res) => {
+      if (res.status === "ok") {
+        setClaudeDetection(res.data);
+      }
+    });
     const unlisten = listen<SettingsState>("settings-changed", (e) => apply(e.payload));
     return () => void unlisten.then((f) => f());
   }, []);
@@ -86,43 +101,57 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         {fieldErrors("defaultProvider")}
       </label>
 
-      {PROVIDERS.map((p) => (
-        <fieldset key={p.id}>
-          <legend>{p.label}</legend>
-          <label>
-            Model
-            <input
-              value={draft.providers[p.id].model ?? ""}
-              placeholder="Provider default"
-              onChange={(e) => setProvider(p.id, { model: orNull(e.target.value) })}
-            />
-            {fieldErrors(`providers.${p.id}.model`)}
-          </label>
-          <label>
-            Effort
-            <input
-              value={draft.providers[p.id].effort ?? ""}
-              placeholder="Provider default"
-              onChange={(e) => setProvider(p.id, { effort: orNull(e.target.value) })}
-            />
-            {fieldErrors(`providers.${p.id}.effort`)}
-          </label>
-          <label>
-            Permission mode
-            <select
-              value={draft.providers[p.id].permissionMode}
-              onChange={(e) => setProvider(p.id, { permissionMode: e.target.value as PermissionMode })}
-            >
-              {MODES.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            {fieldErrors(`providers.${p.id}.permissionMode`)}
-          </label>
-        </fieldset>
-      ))}
+      {PROVIDERS.map((p) => {
+        const hint = p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
+        return (
+          <fieldset key={p.id}>
+            <legend>{p.label}</legend>
+            {p.id === "claude" && hint && hint.type !== "ok" && (
+              <div className={`provider-hint ${hint.type}`} role="alert">
+                <span>{hint.message}</span>
+                {hint.command && <code>{hint.command}</code>}
+              </div>
+            )}
+            {p.id === "claude" && (
+              <div className="provider-warning" role="note" aria-label="Retention warning">
+                <strong>Session retention warning:</strong> {CLAUDE_30_DAY_RETENTION_WARNING}
+              </div>
+            )}
+            <label>
+              Model
+              <input
+                value={draft.providers[p.id].model ?? ""}
+                placeholder="Provider default"
+                onChange={(e) => setProvider(p.id, { model: orNull(e.target.value) })}
+              />
+              {fieldErrors(`providers.${p.id}.model`)}
+            </label>
+            <label>
+              Effort
+              <input
+                value={draft.providers[p.id].effort ?? ""}
+                placeholder="Provider default"
+                onChange={(e) => setProvider(p.id, { effort: orNull(e.target.value) })}
+              />
+              {fieldErrors(`providers.${p.id}.effort`)}
+            </label>
+            <label>
+              Permission mode
+              <select
+                value={draft.providers[p.id].permissionMode}
+                onChange={(e) => setProvider(p.id, { permissionMode: e.target.value as PermissionMode })}
+              >
+                {MODES.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors(`providers.${p.id}.permissionMode`)}
+            </label>
+          </fieldset>
+        );
+      })}
 
       <label>
         Scan roots (one per line)

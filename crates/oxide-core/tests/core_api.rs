@@ -9,6 +9,14 @@ fn user_version(path: &std::path::Path) -> u32 {
 }
 
 #[test]
+fn core_detects_claude_provider() {
+    let tmp = tempfile::tempdir().unwrap();
+    let core = Core::open(tmp.path()).unwrap();
+    let det = core.detect_provider("claude");
+    assert_eq!(det.available, det.installed && det.authenticated);
+}
+
+#[test]
 fn creates_home_and_lists_no_projects() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join(".oxide");

@@ -1,6 +1,7 @@
 //! The Provider contract: the seam between Core and the agent CLI adapters
 //! (Claude Code, Codex, Antigravity CLI). Adapters implement it; Core depends only on it.
 
+pub mod claude;
 pub mod contract_suite;
 
 use crossbeam_channel::Receiver;
@@ -56,7 +57,13 @@ pub enum TurnStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Detection {
     pub available: bool,
+    #[serde(default)]
+    pub installed: bool,
     pub version: Option<String>,
+    #[serde(default)]
+    pub authenticated: bool,
+    #[serde(default)]
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +71,8 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
+    #[serde(default)]
+    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,10 +186,14 @@ impl Default for FakeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
+                image_attachments: false,
             },
             detection: Detection {
                 available: true,
+                installed: true,
                 version: Some("0.1.0-fake".to_string()),
+                authenticated: true,
+                warning: None,
             },
             event_sender: Some(event_sender),
             event_receiver,

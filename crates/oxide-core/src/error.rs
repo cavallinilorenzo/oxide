@@ -13,6 +13,8 @@ pub enum Error {
     DatabaseTooNew { found: u32, supported: u32 },
     #[error("terminal error: {0}")]
     Terminal(String),
+    #[error("provider error: {0}")]
+    Provider(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

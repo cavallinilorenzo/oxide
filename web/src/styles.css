@@ -28,6 +28,42 @@ button[aria-pressed="true"] { background: #8883; }
 .settings fieldset { display: flex; flex-direction: column; gap: 8px; border: 1px solid #8884; border-radius: 6px; }
 .settings .actions { display: flex; gap: 8px; }
 .settings .error { margin: 0; }
+.provider-warning {
+  border: 1px solid #d97706;
+  background-color: #fef3c715;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #f59e0b;
+}
+.provider-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin: 0 16px 8px 16px;
+}
+.provider-hint.missing,
+.provider-hint.unauthenticated {
+  border: 1px solid #3b82f6;
+  background-color: #3b82f615;
+  color: #60a5fa;
+}
+.provider-hint.warning {
+  border: 1px solid #d97706;
+  background-color: #fef3c715;
+  color: #f59e0b;
+}
+.provider-hint code {
+  font-family: monospace;
+  background-color: #ffffff15;
+  padding: 2px 6px;
+  border-radius: 4px;
+  align-self: flex-start;
+}
 .error-summary { border: 1px solid #c33; border-radius: 6px; padding: 8px 12px; color: #c33; }
 .error-summary p { margin: 0; }
 .title .path { opacity: 0.6; margin-left: 6px; }

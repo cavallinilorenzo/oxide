@@ -50,6 +50,8 @@ export const commands = {
 	/**  Branch, ahead/behind and uncommitted-change counts of the main checkout. */
 	gitStatus: (projectId: number) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId })),
 	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
+	/**  The changes of the main checkout in one scope, from Git. */
+	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -129,6 +131,58 @@ export type Detection_Serialize = {
 	version: string | null,
 	authenticated: boolean,
 	warning: string | null,
+};
+
+export type Diff = Diff_Serialize | Diff_Deserialize;
+
+export type DiffFile = DiffFile_Serialize | DiffFile_Deserialize;
+
+export type DiffFile_Deserialize = {
+	path: string,
+	oldPath?: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffFile_Serialize = {
+	path: string,
+	oldPath: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffHunk = {
+	header: string,
+	lines: DiffLine[],
+};
+
+export type DiffKind = "context" | "added" | "removed";
+
+export type DiffLine = {
+	kind: DiffKind,
+	text: string,
+};
+
+export type DiffScope = "uncommitted" | "branch";
+
+export type DiffStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
+
+export type Diff_Deserialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base?: string | null,
+	files: DiffFile_Deserialize[],
+};
+
+export type Diff_Serialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base: string | null,
+	files: DiffFile_Serialize[],
 };
 
 export type FieldError = {

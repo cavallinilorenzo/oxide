@@ -74,3 +74,11 @@ _Avoid_: Permission prompt, confirmation
 **Surface**:
 A panel docked to the side or bottom of the window showing one tool for the current Project: Terminal, Files, Diff, Pull request, Issues.
 _Avoid_: Tab, pane, widget
+
+**Diff scope**:
+What the Diff Surface compares, always straight from Git: Uncommitted (staged, unstaged and untracked changes against HEAD) or Branch (commits since the merge-base with the base branch).
+_Avoid_: Diff mode, diff type
+
+**Base branch**:
+The branch the Branch scope compares against: the remote's default branch, else `main`, `master` or `dev` (remote copy first).
+_Avoid_: Target branch, parent branch

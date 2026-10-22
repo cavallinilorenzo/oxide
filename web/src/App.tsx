@@ -9,6 +9,8 @@ const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ d
 
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 type TerminalContext = { key: string; projectId: number; threadId: number | null };
+const terminalContextKey = (projectId: number, threadId: number | null) =>
+  `${projectId}:${threadId ?? "draft"}`;
 
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
@@ -22,7 +24,7 @@ export function App() {
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
   const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
-    const context = { key: `${projectId}:${threadId ?? "draft"}`, projectId, threadId };
+    const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
     setTerminalContexts((previous) => previous.some((item) => item.key === context.key)
       ? previous
       : [...previous, context]);
@@ -37,7 +39,7 @@ export function App() {
   const currentTerminalContext = useMemo<TerminalContext | null>(
     () => selected && threads !== null
       ? {
-          key: `${selected.id}:${currentThreadId ?? "draft"}`,
+          key: terminalContextKey(selected.id, currentThreadId),
           projectId: selected.id,
           threadId: currentThreadId,
         }

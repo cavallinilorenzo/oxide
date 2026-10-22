@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use oxide_provider::{ItemKind, PermissionMode, TurnStatus};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -81,15 +81,40 @@ pub struct ThreadSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThreadEvent {
-    TurnStarted { turn_index: u32, prompt: String },
-    ItemStarted { item_index: u32, kind: ItemKind },
-    ItemDeltaBatch { item_index: u32, delta: String },
-    ItemCompleted { item_index: u32, kind: ItemKind, content: String },
-    TurnCompleted { turn_index: u32, status: TurnStatus },
-    ThreadStatusChanged { status: ThreadStatus },
-    ApprovalRequested { id: String, description: String },
-    Error { message: String },
-    Unknown { raw: String },
+    TurnStarted {
+        turn_index: u32,
+        prompt: String,
+    },
+    ItemStarted {
+        item_index: u32,
+        kind: ItemKind,
+    },
+    ItemDeltaBatch {
+        item_index: u32,
+        delta: String,
+    },
+    ItemCompleted {
+        item_index: u32,
+        kind: ItemKind,
+        content: String,
+    },
+    TurnCompleted {
+        turn_index: u32,
+        status: TurnStatus,
+    },
+    ThreadStatusChanged {
+        status: ThreadStatus,
+    },
+    ApprovalRequested {
+        id: String,
+        description: String,
+    },
+    Error {
+        message: String,
+    },
+    Unknown {
+        raw: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

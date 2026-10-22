@@ -1,13 +1,16 @@
 use oxide_provider::{
-    contract_suite::verify_provider_contract, FakeProvider, ItemKind, PermissionMode, Provider,
-    ProviderEvent, TurnStatus,
+    FakeProvider, ItemKind, PermissionMode, Provider, ProviderEvent, TurnStatus,
+    contract_suite::verify_provider_contract,
 };
 
 #[test]
 fn fake_provider_satisfies_contract_capabilities_and_detect() {
     let provider = FakeProvider::default();
     let caps = provider.capabilities();
-    assert!(caps.supported_permission_modes.contains(&PermissionMode::Ask));
+    assert!(
+        caps.supported_permission_modes
+            .contains(&PermissionMode::Ask)
+    );
     assert!(caps.interactive_approvals);
 
     let detection = provider.detect().expect("detect should succeed");

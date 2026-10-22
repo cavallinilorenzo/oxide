@@ -167,7 +167,6 @@ fn save_settings(core: State<'_, Arc<Core>>, settings: Settings) -> Result<(), A
     Ok(core.save_settings(&convert(&settings))?)
 }
 
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
@@ -245,15 +244,40 @@ pub struct ThreadSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "payload")]
 pub enum ThreadEvent {
-    TurnStarted { turn_index: u32, prompt: String },
-    ItemStarted { item_index: u32, kind: ItemKind },
-    ItemDeltaBatch { item_index: u32, delta: String },
-    ItemCompleted { item_index: u32, kind: ItemKind, content: String },
-    TurnCompleted { turn_index: u32, status: TurnStatus },
-    ThreadStatusChanged { status: ThreadStatus },
-    ApprovalRequested { id: String, description: String },
-    Error { message: String },
-    Unknown { raw: String },
+    TurnStarted {
+        turn_index: u32,
+        prompt: String,
+    },
+    ItemStarted {
+        item_index: u32,
+        kind: ItemKind,
+    },
+    ItemDeltaBatch {
+        item_index: u32,
+        delta: String,
+    },
+    ItemCompleted {
+        item_index: u32,
+        kind: ItemKind,
+        content: String,
+    },
+    TurnCompleted {
+        turn_index: u32,
+        status: TurnStatus,
+    },
+    ThreadStatusChanged {
+        status: ThreadStatus,
+    },
+    ApprovalRequested {
+        id: String,
+        description: String,
+    },
+    Error {
+        message: String,
+    },
+    Unknown {
+        raw: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -321,10 +345,7 @@ fn subscribe_thread(
             if let ThreadEvent::ThreadStatusChanged { status } = app_evt.event {
                 let _ = app_clone.emit(
                     THREAD_STATUS_CHANGED,
-                    ThreadStatusChangedPayload {
-                        thread_id,
-                        status,
-                    },
+                    ThreadStatusChangedPayload { thread_id, status },
                 );
             }
             if on_event.send(app_evt).is_err() {

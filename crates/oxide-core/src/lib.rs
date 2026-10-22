@@ -5,32 +5,32 @@ mod db;
 mod discovery;
 mod error;
 mod settings;
-pub mod thread;
 mod storage_actor;
+pub mod thread;
 mod thread_actor;
 
+use oxide_provider::Provider as ProviderTrait;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use storage_actor::StorageHandle;
 use thread_actor::ThreadActorHandle;
-use oxide_provider::Provider as ProviderTrait;
 
 use rusqlite::Connection;
 use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
+pub use oxide_provider::{ItemKind, TurnStatus};
 use settings::SettingsStore;
+pub use settings::{
+    FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
+};
 pub use thread::{
     ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary,
     TurnSnapshot,
-};
-pub use oxide_provider::{ItemKind, TurnStatus};
-pub use settings::{
-    FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
 
 const DB_FILE: &str = "oxide.db";
@@ -190,7 +190,10 @@ impl Core {
         permission_mode: PermissionMode,
     ) -> Result<ThreadSummary> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let mode_str = serde_json::to_string(&permission_mode).unwrap_or_default().trim_matches('"').to_string();
+        let mode_str = serde_json::to_string(&permission_mode)
+            .unwrap_or_default()
+            .trim_matches('"')
+            .to_string();
         db.execute(
             "INSERT INTO threads (project_id, provider, model, effort, permission_mode, status) VALUES (?1, ?2, ?3, ?4, ?5, 'completed')",
             rusqlite::params![project_id, provider, model, effort, mode_str],
@@ -243,11 +246,12 @@ impl Core {
             PathBuf::from(path_str)
         };
 
-        let provider: Box<dyn ProviderTrait> = if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
-            p
-        } else {
-            Box::new(oxide_provider::FakeProvider::default())
-        };
+        let provider: Box<dyn ProviderTrait> =
+            if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
+                p
+            } else {
+                Box::new(oxide_provider::FakeProvider::default())
+            };
 
         let real_time = self.real_time_ticker.load(Ordering::Relaxed);
         let actor = ThreadActorHandle::new(
@@ -275,7 +279,10 @@ impl Core {
     pub fn subscribe_thread(
         &self,
         thread_id: u32,
-    ) -> Result<(ThreadSnapshot, crossbeam_channel::Receiver<SequencedThreadEvent>)> {
+    ) -> Result<(
+        ThreadSnapshot,
+        crossbeam_channel::Receiver<SequencedThreadEvent>,
+    )> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.subscribe()
     }

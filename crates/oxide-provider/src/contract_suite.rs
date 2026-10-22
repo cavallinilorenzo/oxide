@@ -1,8 +1,6 @@
+use crate::{ItemKind, Provider, ProviderEvent, StartContext, TurnStatus};
 use std::path::PathBuf;
 use std::time::Duration;
-use crate::{
-    ItemKind, Provider, ProviderEvent, StartContext, TurnStatus,
-};
 
 pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     let mut provider = factory();
@@ -16,7 +14,10 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
 
     // 2. Detect
     let detection = provider.detect().expect("detect must succeed");
-    assert!(detection.available, "provider must be detected as available");
+    assert!(
+        detection.available,
+        "provider must be detected as available"
+    );
 
     // 3. Start
     let context = StartContext {
@@ -28,7 +29,9 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     let receiver = provider.start(&context).expect("start must succeed");
 
     // 4. Send prompt & receive normalized events
-    provider.send_prompt("Hello test").expect("send_prompt must succeed");
+    provider
+        .send_prompt("Hello test")
+        .expect("send_prompt must succeed");
 
     let mut session_info_seen = false;
     let mut turn_started_seen = false;
@@ -60,7 +63,11 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
                 assert!(!delta.is_empty());
                 item_deltas_seen = true;
             }
-            ProviderEvent::ItemCompleted { item_index, kind, content } => {
+            ProviderEvent::ItemCompleted {
+                item_index,
+                kind,
+                content,
+            } => {
                 assert_eq!(item_index, 0);
                 assert_eq!(kind, ItemKind::AgentMessage);
                 assert_eq!(content, "Hello world!");

@@ -3,10 +3,10 @@
 
 pub mod contract_suite;
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use crossbeam_channel::Receiver;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -136,12 +136,14 @@ pub trait Provider: Send + 'static {
     fn capabilities(&self) -> ProviderCapabilities;
 }
 
+type PromptHandler = Box<dyn Fn(&str) + Send + Sync>;
+
 pub struct FakeProvider {
     capabilities: ProviderCapabilities,
     detection: Detection,
     event_sender: Option<crossbeam_channel::Sender<ProviderEvent>>,
     event_receiver: crossbeam_channel::Receiver<ProviderEvent>,
-    prompt_handler: Arc<Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>>,
+    prompt_handler: Arc<Mutex<Option<PromptHandler>>>,
 }
 
 impl Default for FakeProvider {

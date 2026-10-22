@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::sync::mpsc;
 use crossbeam_channel::{Receiver, Sender};
 use oxide_provider::{Provider, ProviderEvent, StartContext, TurnStatus};
+use std::collections::HashMap;
+use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
@@ -73,16 +73,23 @@ impl ThreadActorHandle {
 
     pub fn interrupt(&self) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
-        let _ = self.sender.send(ThreadActorMsg::Interrupt { reply: reply_tx });
+        let _ = self
+            .sender
+            .send(ThreadActorMsg::Interrupt { reply: reply_tx });
         reply_rx.recv().unwrap_or(Ok(()))
     }
 
     pub fn subscribe(&self) -> Result<(ThreadSnapshot, Receiver<SequencedThreadEvent>)> {
         let (reply_tx, reply_rx) = mpsc::channel();
-        let _ = self.sender.send(ThreadActorMsg::Subscribe { reply: reply_tx });
+        let _ = self
+            .sender
+            .send(ThreadActorMsg::Subscribe { reply: reply_tx });
         reply_rx.recv().map_err(|_| Error::Io {
             path: std::path::PathBuf::from("subscribe"),
-            source: std::io::Error::new(std::io::ErrorKind::BrokenPipe, "thread actor disconnected"),
+            source: std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "thread actor disconnected",
+            ),
         })
     }
 
@@ -140,27 +147,22 @@ impl ActorState {
         let deltas = std::mem::take(&mut self.pending_deltas);
         for (item_index, delta) in deltas {
             if !delta.is_empty() {
-                self.broadcast(ThreadEvent::ItemDeltaBatch {
-                    item_index,
-                    delta,
-                });
+                self.broadcast(ThreadEvent::ItemDeltaBatch { item_index, delta });
             }
         }
     }
 }
 
-fn handle_provider_event(
-    evt: ProviderEvent,
-    state: &mut ActorState,
-    storage: &StorageHandle,
-) {
+fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &StorageHandle) {
     match evt {
         ProviderEvent::SessionInfo { session_id } => {
             storage.set_provider_session_id(state.thread_id, session_id);
         }
         ProviderEvent::TurnStarted { turn_index, prompt } => {
             state.current_turn_index = turn_index;
-            if let Ok(turn_id) = storage.write_turn_started(state.thread_id, turn_index, prompt.clone()) {
+            if let Ok(turn_id) =
+                storage.write_turn_started(state.thread_id, turn_index, prompt.clone())
+            {
                 state.current_turn_id = Some(turn_id);
             }
             let _ = storage.update_thread_status(state.thread_id, ThreadStatus::Working);
@@ -171,7 +173,8 @@ fn handle_provider_event(
             state.broadcast(ThreadEvent::ItemStarted { item_index, kind });
         }
         ProviderEvent::ItemDelta { item_index, delta } => {
-            state.pending_deltas
+            state
+                .pending_deltas
                 .entry(item_index)
                 .or_default()
                 .push_str(&delta);
@@ -244,7 +247,11 @@ fn run_thread_actor(
         working_dir,
         model: None,
         effort: None,
-        permission_mode: caps.supported_permission_modes.first().copied().unwrap_or(oxide_provider::PermissionMode::AutoEdit),
+        permission_mode: caps
+            .supported_permission_modes
+            .first()
+            .copied()
+            .unwrap_or(oxide_provider::PermissionMode::AutoEdit),
     };
     let prx = match provider.start(&start_ctx) {
         Ok(receiver) => receiver,

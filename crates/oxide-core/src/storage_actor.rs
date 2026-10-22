@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-use std::sync::mpsc;
 use crossbeam_channel::{Receiver, Sender};
 use rusqlite::Connection;
+use std::path::PathBuf;
+use std::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::thread::{ItemSnapshot, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot};
@@ -87,7 +87,9 @@ impl StorageHandle {
             prompt,
             reply: reply_tx,
         });
-        reply_rx.recv().unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn update_turn_completed(&self, turn_id: u32, status: TurnStatus) -> Result<()> {
@@ -115,7 +117,9 @@ impl StorageHandle {
             content,
             reply: reply_tx,
         });
-        reply_rx.recv().unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn update_thread_status(&self, thread_id: u32, status: ThreadStatus) -> Result<()> {
@@ -134,7 +138,9 @@ impl StorageHandle {
             thread_id,
             reply: reply_tx,
         });
-        reply_rx.recv().unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+        reply_rx
+            .recv()
+            .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
     }
 
     pub fn set_provider_session_id(&self, thread_id: u32, session_id: String) {
@@ -202,7 +208,10 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
-                    let kind_str = serde_json::to_string(&kind).unwrap_or_default().trim_matches('"').to_string();
+                    let kind_str = serde_json::to_string(&kind)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string();
                     conn.execute(
                         "INSERT INTO items (turn_id, item_index, kind, content) VALUES (?1, ?2, ?3, ?4)",
                         rusqlite::params![turn_id, item_index, kind_str, content],

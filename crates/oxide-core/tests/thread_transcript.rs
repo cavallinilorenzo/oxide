@@ -1,6 +1,4 @@
-use oxide_core::{
-    Core, ItemKind, PermissionMode, ThreadEvent, ThreadStatus, TurnStatus,
-};
+use oxide_core::{Core, ItemKind, PermissionMode, ThreadEvent, ThreadStatus, TurnStatus};
 use oxide_provider::{FakeProvider, ProviderEvent};
 use tempfile::tempdir;
 
@@ -15,19 +13,13 @@ fn creates_thread_and_lists_it() {
     core.save_settings(&settings).unwrap();
 
     let project_dir = dir.path().join("my-project");
-    std::fs::create_dir_all(&project_dir.join(".git")).unwrap();
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
     let projects = core.rescan_projects().unwrap();
     assert_eq!(projects.len(), 1);
     let project = &projects[0];
 
     let thread = core
-        .create_thread(
-            project.id,
-            "fake",
-            None,
-            None,
-            PermissionMode::AutoEdit,
-        )
+        .create_thread(project.id, "fake", None, None, PermissionMode::AutoEdit)
         .expect("create_thread failed");
 
     assert_eq!(thread.project_id, project.id);
@@ -50,7 +42,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
     core.save_settings(&settings).unwrap();
 
     let project_dir = dir.path().join("my-project");
-    std::fs::create_dir_all(&project_dir.join(".git")).unwrap();
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
     let projects = core.rescan_projects().unwrap();
     let project = &projects[0];
 
@@ -93,13 +85,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
     });
 
     let thread = core
-        .create_thread(
-            project.id,
-            "fake",
-            None,
-            None,
-            PermissionMode::AutoEdit,
-        )
+        .create_thread(project.id, "fake", None, None, PermissionMode::AutoEdit)
         .expect("create_thread failed");
 
     // Register our fake provider instance for this thread
@@ -110,7 +96,8 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
     assert_eq!(snapshot.turns.len(), 0);
 
     // Send prompt
-    core.send_prompt(thread.id, "Hi agent").expect("send_prompt failed");
+    core.send_prompt(thread.id, "Hi agent")
+        .expect("send_prompt failed");
 
     // Receive events
     let mut received_deltas = String::new();
@@ -137,7 +124,9 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
     assert_eq!(received_deltas, "Hello world!");
 
     // Verify persistence in SQLite after completion
-    let reloaded_snapshot = core.get_thread_snapshot(thread.id).expect("snapshot failed");
+    let reloaded_snapshot = core
+        .get_thread_snapshot(thread.id)
+        .expect("snapshot failed");
     assert_eq!(reloaded_snapshot.turns.len(), 1);
     let turn = &reloaded_snapshot.turns[0];
     assert_eq!(turn.prompt, "Hi agent");
@@ -158,7 +147,7 @@ fn resubscribing_after_simulated_gap_returns_consistent_snapshot() {
     core.save_settings(&settings).unwrap();
 
     let project_dir = dir.path().join("my-project");
-    std::fs::create_dir_all(&project_dir.join(".git")).unwrap();
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
     let projects = core.rescan_projects().unwrap();
     let project = &projects[0];
 
@@ -211,7 +200,10 @@ fn resubscribing_after_simulated_gap_returns_consistent_snapshot() {
     assert_eq!(reconnected_snapshot.turns.len(), 1);
     assert_eq!(reconnected_snapshot.turns[0].prompt, "Turn 1");
     assert_eq!(reconnected_snapshot.turns[0].items.len(), 1);
-    assert_eq!(reconnected_snapshot.turns[0].items[0].content, "First answer");
+    assert_eq!(
+        reconnected_snapshot.turns[0].items[0].content,
+        "First answer"
+    );
 }
 
 #[test]
@@ -225,7 +217,7 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     core.save_settings(&settings).unwrap();
 
     let project_dir = dir.path().join("my-project");
-    std::fs::create_dir_all(&project_dir.join(".git")).unwrap();
+    std::fs::create_dir_all(project_dir.join(".git")).unwrap();
     let projects = core.rescan_projects().unwrap();
     let project = &projects[0];
 
@@ -261,7 +253,9 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
 
     // Wait until ItemStarted arrives in rx
     loop {
-        let evt = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
+        let evt = rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .unwrap();
         if let ThreadEvent::ItemStarted { .. } = evt.event {
             break;
         }
@@ -288,7 +282,9 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     core.tick_thread(thread.id);
 
     // Now ItemDeltaBatch MUST arrive with "foobar" coalesced
-    let batch_evt = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
+    let batch_evt = rx
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap();
     match batch_evt.event {
         ThreadEvent::ItemDeltaBatch { item_index, delta } => {
             assert_eq!(item_index, 0);
@@ -308,7 +304,9 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     // Tick again to flush "baz"
     core.tick_thread(thread.id);
 
-    let batch_evt2 = rx.recv_timeout(std::time::Duration::from_millis(500)).unwrap();
+    let batch_evt2 = rx
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap();
     match batch_evt2.event {
         ThreadEvent::ItemDeltaBatch { item_index, delta } => {
             assert_eq!(item_index, 0);

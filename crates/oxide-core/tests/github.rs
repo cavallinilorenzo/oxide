@@ -144,7 +144,12 @@ fn fixture() -> Fixture {
 }
 
 fn install_gh(f: &Fixture, state: serde_json::Value) {
-    for name in ["gh", "gh.py"] {
+    let names = if cfg!(windows) {
+        vec!["gh", "gh.py", "gh.cmd"]
+    } else {
+        vec!["gh", "gh.py"]
+    };
+    for name in names {
         let from = Path::new(FAKE_GH).with_file_name(name);
         std::fs::copy(from, f.gh_dir.join(name)).unwrap();
     }
@@ -368,4 +373,170 @@ fn gh_is_only_called_when_asked_so_there_is_no_polling() {
     assert!(after_one > 0);
     std::thread::sleep(std::time::Duration::from_millis(300));
     assert_eq!(f.gh_calls().len(), after_one);
+}
+
+#[test]
+fn list_and_search_issues_against_fake_gh() {
+    let f = fixture();
+    install_gh(
+        &f,
+        serde_json::json!({
+            "auth": "ok",
+            "default_branch": "main",
+            "next_number": 3,
+            "issues": [
+                {
+                    "number": 1,
+                    "title": "First issue",
+                    "body": "Body 1",
+                    "state": "OPEN",
+                    "author": {"login": "alice"},
+                    "url": "https://github.com/fake/repo/issues/1",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "comments": []
+                },
+                {
+                    "number": 2,
+                    "title": "Bug in parser",
+                    "body": "Details",
+                    "state": "OPEN",
+                    "author": {"login": "bob"},
+                    "url": "https://github.com/fake/repo/issues/2",
+                    "createdAt": "2026-01-02T00:00:00Z",
+                    "comments": [{"author": {"login": "alice"}, "body": "me too", "createdAt": "2026-01-02T01:00:00Z"}]
+                }
+            ]
+        }),
+    );
+
+    let all = f.core.list_issues(f.project.id, "").unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].number, 1);
+    assert_eq!(all[0].title, "First issue");
+    assert_eq!(all[0].comments_count, 0);
+    assert_eq!(all[1].number, 2);
+    assert_eq!(all[1].comments_count, 1);
+
+    let searched = f.core.list_issues(f.project.id, "parser").unwrap();
+    assert_eq!(searched.len(), 1);
+    assert_eq!(searched[0].number, 2);
+}
+
+#[test]
+fn view_issue_detail_with_comments() {
+    let f = fixture();
+    install_gh(
+        &f,
+        serde_json::json!({
+            "auth": "ok",
+            "default_branch": "main",
+            "next_number": 3,
+            "issues": [
+                {
+                    "number": 42,
+                    "title": "Bug in lexer",
+                    "body": "It crashes on null byte",
+                    "state": "OPEN",
+                    "author": {"login": "charlie"},
+                    "url": "https://github.com/fake/repo/issues/42",
+                    "createdAt": "2026-01-03T10:00:00Z",
+                    "comments": [
+                        {
+                            "author": {"login": "dave"},
+                            "body": "Can confirm on macOS",
+                            "createdAt": "2026-01-03T10:30:00Z"
+                        }
+                    ]
+                }
+            ]
+        }),
+    );
+
+    let detail = f.core.issue_detail(f.project.id, 42).unwrap();
+    assert_eq!(detail.number, 42);
+    assert_eq!(detail.title, "Bug in lexer");
+    assert_eq!(detail.body, "It crashes on null byte");
+    assert_eq!(detail.author, "charlie");
+    assert_eq!(detail.state, "OPEN");
+    assert_eq!(detail.url, "https://github.com/fake/repo/issues/42");
+    assert_eq!(detail.comments.len(), 1);
+    assert_eq!(detail.comments[0].author, "dave");
+    assert_eq!(detail.comments[0].body, "Can confirm on macOS");
+}
+
+#[test]
+fn create_comment_and_close_issue_calling_gh() {
+    let f = fixture();
+    install_gh(
+        &f,
+        serde_json::json!({
+            "auth": "ok",
+            "default_branch": "main",
+            "next_number": 10,
+            "issues": []
+        }),
+    );
+
+    // Create
+    let created = f
+        .core
+        .create_issue(f.project.id, "New Feature", "Feature description")
+        .unwrap();
+    assert_eq!(created.number, 10);
+    assert_eq!(created.title, "New Feature");
+    assert_eq!(created.url, "https://github.com/fake/repo/issues/10");
+
+    // List after create shows it
+    let list = f.core.list_issues(f.project.id, "").unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].number, 10);
+
+    // Comment
+    f.core
+        .comment_issue(f.project.id, 10, "First thought")
+        .unwrap();
+    let detail = f.core.issue_detail(f.project.id, 10).unwrap();
+    assert_eq!(detail.comments.len(), 1);
+    assert_eq!(detail.comments[0].body, "First thought");
+
+    // Open on GitHub
+    f.core.open_issue(f.project.id, 10).unwrap();
+    assert_eq!(
+        *f.system.opened.lock().unwrap(),
+        ["https://github.com/fake/repo/issues/10"]
+    );
+
+    // Close
+    f.core.close_issue(f.project.id, 10).unwrap();
+    let open_list = f.core.list_issues(f.project.id, "").unwrap();
+    assert_eq!(open_list.len(), 0);
+
+    // Searching finds closed issues
+    let search_all = f.core.list_issues(f.project.id, "Feature").unwrap();
+    assert_eq!(search_all.len(), 1);
+    assert_eq!(search_all[0].state, "CLOSED");
+}
+
+#[test]
+fn issues_state_reports_guidance_when_missing_or_logged_out() {
+    let f = fixture();
+    let missing = f.core.issues_state(f.project.id).unwrap();
+    assert_eq!(missing.availability, GithubAvailability::Missing);
+    assert!(missing.guidance.as_ref().unwrap().contains("Install"));
+
+    install_gh(&f, serde_json::json!({"auth": "logged_out"}));
+    let logged_out = f.core.issues_state(f.project.id).unwrap();
+    assert_eq!(logged_out.availability, GithubAvailability::LoggedOut);
+    assert!(
+        logged_out
+            .guidance
+            .as_ref()
+            .unwrap()
+            .contains("gh auth login")
+    );
+
+    f.set_gh(serde_json::json!({"auth": "ok", "issues": []}));
+    let ready = f.core.issues_state(f.project.id).unwrap();
+    assert_eq!(ready.availability, GithubAvailability::Ready);
+    assert!(ready.guidance.is_none());
 }

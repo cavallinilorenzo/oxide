@@ -203,9 +203,22 @@ fn parse(json: &str) -> Result<serde_json::Value> {
 }
 
 fn find_in(path: &OsString, program: &str) -> Option<PathBuf> {
-    std::env::split_paths(path)
-        .map(|dir| dir.join(program))
-        .find(|candidate| candidate.is_file())
+    #[cfg(windows)]
+    let candidates = [
+        format!("{program}.cmd"),
+        format!("{program}.exe"),
+        format!("{program}.bat"),
+        program.to_string(),
+    ];
+    #[cfg(not(windows))]
+    let candidates = [program.to_string()];
+
+    std::env::split_paths(path).find_map(|dir| {
+        candidates
+            .iter()
+            .map(|c| dir.join(c))
+            .find(|candidate| candidate.is_file())
+    })
 }
 
 pub fn pull_request_state(gh: &Gh, cwd: &Path) -> Result<PullRequestState> {
@@ -350,4 +363,166 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
         )));
     }
     Ok(pr.url)
+}
+
+const ISSUE_FIELDS: &str = "number,title,state,author,url,createdAt,comments";
+const ISSUE_DETAIL_FIELDS: &str = "number,title,body,state,author,url,createdAt,comments";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub comments_count: u32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub number: u32,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub created_at: String,
+    pub comments: Vec<IssueComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuesState {
+    pub availability: GithubAvailability,
+    pub guidance: Option<String>,
+}
+
+fn text(v: &serde_json::Value) -> String {
+    v.as_str().unwrap_or_default().to_string()
+}
+
+fn issue_summary_from(v: &serde_json::Value) -> IssueSummary {
+    IssueSummary {
+        number: v["number"].as_u64().unwrap_or(0) as u32,
+        title: text(&v["title"]),
+        state: text(&v["state"]),
+        author: text(&v["author"]["login"]),
+        url: text(&v["url"]),
+        comments_count: v["comments"].as_array().map(|c| c.len()).unwrap_or(0) as u32,
+        created_at: text(&v["createdAt"]),
+    }
+}
+
+pub fn issues_state(gh: &Gh, cwd: &Path) -> Result<IssuesState> {
+    let (availability, guidance) = gh.availability(cwd);
+    Ok(IssuesState {
+        availability,
+        guidance,
+    })
+}
+
+pub fn list_issues(gh: &Gh, cwd: &Path, search: &str) -> Result<Vec<IssueSummary>> {
+    gh.require_ready(cwd)?;
+    let search = search.trim();
+    let mut args = vec!["issue", "list", "--limit", "100", "--json", ISSUE_FIELDS];
+    if search.is_empty() {
+        args.extend(["--state", "open"]);
+    } else {
+        args.extend(["--state", "all", "--search", search]);
+    }
+    let list = parse(&gh.run(cwd, &args)?)?;
+    Ok(list
+        .as_array()
+        .map(|issues| issues.iter().map(issue_summary_from).collect())
+        .unwrap_or_default())
+}
+
+pub fn issue_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<IssueDetail> {
+    gh.require_ready(cwd)?;
+    let n = number.to_string();
+    let v = parse(&gh.run(cwd, &["issue", "view", &n, "--json", ISSUE_DETAIL_FIELDS])?)?;
+    let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
+    Ok(IssueDetail {
+        number: v["number"].as_u64().unwrap_or(0) as u32,
+        title: text(&v["title"]),
+        body: text(&v["body"]),
+        state: text(&v["state"]),
+        author: text(&v["author"]["login"]),
+        url: text(&v["url"]),
+        created_at: text(&v["createdAt"]),
+        comments: list("comments")
+            .iter()
+            .map(|c| IssueComment {
+                author: text(&c["author"]["login"]),
+                body: text(&c["body"]),
+                created_at: text(&c["createdAt"]),
+            })
+            .collect(),
+    })
+}
+
+pub fn create_issue(gh: &Gh, cwd: &Path, title: &str, body: &str) -> Result<IssueSummary> {
+    gh.require_ready(cwd)?;
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(Error::Github("Write an issue title.".into()));
+    }
+    let output = gh.run(cwd, &["issue", "create", "--title", title, "--body", body])?;
+    let url = output.trim();
+    let number = url
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    let detail = issue_detail(gh, cwd, number)?;
+    Ok(IssueSummary {
+        number: detail.number,
+        title: detail.title,
+        state: detail.state,
+        author: detail.author,
+        url: detail.url,
+        comments_count: 0,
+        created_at: detail.created_at,
+    })
+}
+
+pub fn comment_issue(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Result<()> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(Error::Github("Write a comment first.".into()));
+    }
+    gh.require_ready(cwd)?;
+    gh.run(
+        cwd,
+        &["issue", "comment", &number.to_string(), "--body", body],
+    )?;
+    Ok(())
+}
+
+pub fn close_issue(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["issue", "close", &number.to_string()])?;
+    Ok(())
+}
+
+pub fn issue_url(gh: &Gh, cwd: &Path, number: u32) -> Result<String> {
+    let detail = issue_detail(gh, cwd, number)?;
+    if !detail.url.starts_with("https://") {
+        return Err(Error::Github(format!(
+            "refusing to open unexpected issue URL: {}",
+            detail.url
+        )));
+    }
+    Ok(detail.url)
 }

@@ -79,8 +79,15 @@ export const commands = {
 	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
 	/**  Pushes the branch if needed, then opens a pull request for it. */
 	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
-	/**  Opens the branch's pull request on GitHub. */
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
+	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
+	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
+	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
+	issueDetail: (projectId: number, number: number) => typedError<IssueDetail, AppError>(__TAURI_INVOKE("issue_detail", { projectId, number })),
+	createIssue: (projectId: number, title: string, body: string) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body })),
+	commentIssue: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_issue", { projectId, number, body })),
+	closeIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("close_issue", { projectId, number })),
+	openIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("open_issue", { projectId, number })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
@@ -288,6 +295,45 @@ export type GitStatus_Serialize = {
 };
 
 export type GithubAvailability = "ready" | "missing" | "loggedOut";
+
+export type IssueComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type IssueDetail = {
+	number: number,
+	title: string,
+	body: string,
+	state: string,
+	author: string,
+	url: string,
+	createdAt: string,
+	comments: IssueComment[],
+};
+
+export type IssueSummary = {
+	number: number,
+	title: string,
+	state: string,
+	author: string,
+	url: string,
+	commentsCount: number,
+	createdAt: string,
+};
+
+export type IssuesState = IssuesState_Serialize | IssuesState_Deserialize;
+
+export type IssuesState_Deserialize = {
+	availability: GithubAvailability,
+	guidance?: string | null,
+};
+
+export type IssuesState_Serialize = {
+	availability: GithubAvailability,
+	guidance: string | null,
+};
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
 

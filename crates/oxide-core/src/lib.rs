@@ -23,7 +23,7 @@ use serde::Serialize;
 
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, TurnStatus};
+pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -230,6 +230,27 @@ impl Core {
         actor.respond_to_approval(approval_id.to_string(), decision)
     }
 
+    pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
+        match provider {
+            "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
+                .detect()
+                .unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                }),
+            _ => oxide_provider::Detection {
+                available: true,
+                installed: true,
+                version: Some("0.1.0-fake".into()),
+                authenticated: true,
+                warning: None,
+            },
+        }
+    }
+
     pub fn get_provider_capabilities(
         &self,
         provider: &str,
@@ -302,6 +323,13 @@ impl Core {
         let provider: Box<dyn ProviderTrait> =
             if let Some(p) = self.fake_providers.lock().unwrap().remove(&thread_id) {
                 p
+            } else if snapshot.thread.provider == "claude"
+                && oxide_provider::claude::ClaudeCodeProvider::new()
+                    .detect()
+                    .map(|d| d.installed)
+                    .unwrap_or(false)
+            {
+                Box::new(oxide_provider::claude::ClaudeCodeProvider::new())
             } else {
                 Box::new(oxide_provider::FakeProvider::default())
             };

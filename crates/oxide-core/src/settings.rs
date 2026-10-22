@@ -62,7 +62,8 @@ pub struct Settings {
     pub providers: Providers,
     pub scan_roots: Vec<String>,
     pub confirm_quit: bool,
-    /// Command used by "Open in editor".
+    /// Bundle identifier of the editor "Open in editor" uses; empty or not detected means
+    /// the first detected editor.
     pub editor: String,
 }
 
@@ -83,7 +84,7 @@ impl Default for Settings {
             .map(|d| format!("~/{d}"))
             .into(),
             confirm_quit: true,
-            editor: "code".into(),
+            editor: String::new(),
         }
     }
 }

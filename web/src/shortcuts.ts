@@ -26,7 +26,13 @@ export function toggleForKey(e: KeyPress): LayoutToggle | null {
   return null;
 }
 
-/** ⌘N starts a new Thread in the current Project. (⌘⇧N is Project palette). */
+/** ⌘⇧N opens the Project palette. */
+export function isProjectPaletteShortcut(e: KeyPress): boolean {
+  if (!e.metaKey || e.ctrlKey || e.altKey || !e.shiftKey) return false;
+  return e.key === "n" || e.key === "N";
+}
+
+/** ⌘N starts a new Thread in the current Project. (⌘⇧N is the Project palette). */
 export function isNewThreadShortcut(e: KeyPress): boolean {
   if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return false;
   return e.key === "n" || e.key === "N";

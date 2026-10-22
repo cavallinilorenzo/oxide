@@ -4,10 +4,11 @@ import { commands, type AppError, type Project, type Thread, type ThreadStatus }
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
+import { ProjectPalette } from "./ProjectPalette";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
-import { isNewThreadShortcut, toggleForKey } from "./shortcuts";
+import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
@@ -35,6 +36,10 @@ export function App() {
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+  // A Project picked in the palette that should get a new Thread once its Threads have loaded.
+  const pendingNewThread = useRef<number | null>(null);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
@@ -50,6 +55,14 @@ export function App() {
       ? previous
       : [...previous, context]);
   }, []);
+
+  const [defaultParentFolder, setDefaultParentFolder] = useState("~/Developer");
+  useEffect(() => {
+    if (!showPalette) return;
+    void commands.getSettings().then((s) => {
+      if (s.settings.scanRoots[0]) setDefaultParentFolder(s.settings.scanRoots[0]);
+    });
+  }, [showPalette]);
 
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
@@ -161,28 +174,69 @@ export function App() {
     );
   }, []);
 
-  const startNewThread = useCallback(async () => {
-    if (!selected) return;
+  /** A new Thread in the Project with Settings defaults; `null` if it could not be created. */
+  const createThreadIn = useCallback(async (projectId: number): Promise<Thread | null> => {
     const settingsRes = await commands.getSettings();
     const provider = settingsRes.settings.defaultProvider || "claude";
     const provKey = provider as keyof typeof settingsRes.settings.providers;
     const provSettings = settingsRes.settings.providers[provKey];
     const created = await commands.createThread(
-      selected.id,
+      projectId,
       provider,
       provSettings?.model ?? null,
       provSettings?.effort ?? null,
       provSettings?.permissionMode ?? null
     );
-    if (created.status === "ok") {
-      setThreads((prev) => [created.data, ...(prev || [])]);
-      setSelectedThreadId(created.data.id);
-      rememberTerminalContext(selected.id, created.data.id);
+    return created.status === "ok" ? created.data : null;
+  }, []);
+
+  const startNewThread = useCallback(async () => {
+    if (!selected) return;
+    const created = await createThreadIn(selected.id);
+    if (created) {
+      setThreads((prev) => [created, ...(prev || [])]);
+      setSelectedThreadId(created.id);
+      rememberTerminalContext(selected.id, created.id);
     }
-  }, [selected, rememberTerminalContext]);
+  }, [selected, createThreadIn, rememberTerminalContext]);
+
+  const openProject = useCallback((project: Project) => {
+    restore.current = null;
+    setShowSettings(false);
+    setProjects((prev) => [project, ...(prev?.filter((p) => p.id !== project.id) ?? [])]);
+    if (project.id !== selectedId) {
+      setSelectedId(project.id);
+      setThreads(null);
+      setSelectedThreadId(null);
+    }
+  }, [selectedId]);
+
+  // The palette's search pick: ⌘⇧N plus Enter is a new Thread in that Project.
+  const startThreadIn = useCallback((project: Project) => {
+    setShowSettings(false);
+    if (project.id === selectedId) {
+      void startNewThread();
+      return;
+    }
+    pendingNewThread.current = project.id;
+    openProject(project);
+  }, [selectedId, startNewThread, openProject]);
+
+  const openCheckout = useCallback(async (how: "editor" | "finder") => {
+    if (!selected) return;
+    const res = how === "editor"
+      ? await commands.openInEditor(selected.id, currentThreadId)
+      : await commands.revealInFinder(selected.id, currentThreadId);
+    setOpenError(res.status === "error" ? res.error.message : null);
+  }, [selected, currentThreadId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isProjectPaletteShortcut(e)) {
+        e.preventDefault();
+        setShowPalette(true);
+        return;
+      }
       if (isNewThreadShortcut(e)) {
         if (selected) {
           e.preventDefault();
@@ -232,7 +286,15 @@ export function App() {
       }
 
       const res = await commands.listThreads(selected.id);
-      if (active && res.status === "ok") {
+      if (active && res.status === "ok" && pendingNewThread.current === selected.id) {
+        pendingNewThread.current = null;
+        const created = await createThreadIn(selected.id);
+        if (!active) return;
+        setThreads(created ? [created, ...res.data] : res.data);
+        const initialThreadId = created?.id ?? res.data[0]?.id ?? null;
+        setSelectedThreadId(initialThreadId);
+        rememberTerminalContext(selected.id, initialThreadId);
+      } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
         const restored =
@@ -248,11 +310,20 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [selected, rememberTerminalContext]);
+  }, [selected, rememberTerminalContext, createThreadIn]);
 
   return (
     <div className="window">
       <QuitDialog />
+      {showPalette && (
+        <ProjectPalette
+          projects={projects ?? []}
+          defaultParent={defaultParentFolder}
+          onClose={() => setShowPalette(false)}
+          onStartThread={startThreadIn}
+          onOpenProject={openProject}
+        />
+      )}
       <header className="header">
         {selected ? (
           <span className="title">
@@ -272,6 +343,17 @@ export function App() {
           />
         )}
         <div className="toggles">
+          {selected && !selected.missing && (
+            <>
+              {openError && <span className="error" role="alert">{openError}</span>}
+              <button title="Open in editor" onClick={() => void openCheckout("editor")}>
+                Open in editor
+              </button>
+              <button title="Reveal in Finder" onClick={() => void openCheckout("finder")}>
+                Reveal in Finder
+              </button>
+            </>
+          )}
           <button aria-pressed={showTools} title="Toggle tools panel (⌘\)" onClick={() => setShowTools((v) => !v)}>
             Tools
           </button>

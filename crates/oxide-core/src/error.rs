@@ -19,6 +19,8 @@ pub enum Error {
     Git(String),
     #[error("{0}")]
     Github(String),
+    #[error("{0}")]
+    Editor(String),
     #[error("provider error: {0}")]
     Provider(String),
 }

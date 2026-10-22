@@ -10,6 +10,10 @@ A desktop app for agentic engineering: you open a Project and drive coding agent
 A folder on the user's machine holding a Git repository, usually linked to a GitHub repository. The unit everything else belongs to.
 _Avoid_: Workspace, repo (when meaning the Oxide concept)
 
+**Project palette**:
+The keyboard-only overlay opened with ⌘⇧N. It searches Projects (Enter starts a new Thread in the pick, with Settings defaults) and registers new ones: an existing folder, a new folder with `git init`, a clone from a Git URL, or a clone of one of the user's GitHub repositories found through `gh`.
+_Avoid_: Project switcher, quick open
+
 ## Threads
 
 **Thread**:

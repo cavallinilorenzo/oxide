@@ -70,6 +70,17 @@ export const commands = {
 	commit: (projectId: number, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, paths, message })),
 	/**  Pushes the current branch; never forced. */
 	push: (projectId: number, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, allowProtected })),
+	/**
+	 *  Whether `gh` works and the branch's open pull request. Runs `gh` only when
+	 *  asked; the Surface decides when to refresh.
+	 */
+	pullRequestState: (projectId: number) => typedError<PullRequestState_Serialize, AppError>(__TAURI_INVOKE("pull_request_state", { projectId })),
+	/**  Title, body and base prefilled from the branch's commits. */
+	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
+	/**  Pushes the branch if needed, then opens a pull request for it. */
+	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
+	/**  Opens the branch's pull request on GitHub. */
+	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
@@ -276,6 +287,8 @@ export type GitStatus_Serialize = {
 	unpublished: boolean,
 };
 
+export type GithubAvailability = "ready" | "missing" | "loggedOut";
+
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
 
 export type ItemSnapshot = ItemSnapshot_Serialize | ItemSnapshot_Deserialize;
@@ -343,6 +356,42 @@ export type Providers_Serialize = {
 	claude: ProviderSettings_Serialize,
 	codex: ProviderSettings_Serialize,
 	antigravity: ProviderSettings_Serialize,
+};
+
+export type PullRequest = {
+	number: number,
+	title: string,
+	url: string,
+	draft: boolean,
+	base: string,
+	head: string,
+};
+
+export type PullRequestDraft = {
+	title: string,
+	body: string,
+	base: string,
+	head: string,
+};
+
+export type PullRequestState = PullRequestState_Serialize | PullRequestState_Deserialize;
+
+export type PullRequestState_Deserialize = {
+	availability: GithubAvailability,
+	/**  How to get `gh` working, when it is not. */
+	guidance?: string | null,
+	branch?: string | null,
+	defaultBranch?: string | null,
+	pullRequest?: PullRequest | null,
+};
+
+export type PullRequestState_Serialize = {
+	availability: GithubAvailability,
+	/**  How to get `gh` working, when it is not. */
+	guidance: string | null,
+	branch: string | null,
+	defaultBranch: string | null,
+	pullRequest: PullRequest | null,
 };
 
 export type Selection = Selection_Serialize | Selection_Deserialize;

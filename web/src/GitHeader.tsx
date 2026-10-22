@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands, type AppError, type GitBranch, type GitStatus } from "./bindings";
 import { canCreateBranch, filterBranches } from "./branchFilter";
-import { nextAction, pushBlockedReason } from "./gitAction";
+import { createPrBlockedReason, nextAction, pushBlockedReason } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 
 interface GitHeaderProps {
@@ -9,6 +9,7 @@ interface GitHeaderProps {
   /** Changes whenever a Thread's status does, so the picker lock stays current. */
   threadsKey: string;
   onOpenDiff: () => void;
+  onOpenPullRequest: () => void;
   /** Called after Git changed the checkout or its remote, so other views reload. */
   onChanged: () => void;
 }
@@ -21,7 +22,7 @@ export function GitHeader(props: GitHeaderProps) {
   return <GitHeaderBody key={props.projectId} {...props} />;
 }
 
-function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onChanged }: GitHeaderProps) {
+function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, onChanged }: GitHeaderProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,10 +36,14 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onChanged }: GitHead
       }),
     [projectId],
   );
-  const push = usePushFlow(projectId, () => {
-    void refresh();
-    onChanged();
-  });
+  const push = usePushFlow(
+    projectId,
+    () => {
+      void refresh();
+      onChanged();
+    },
+    onOpenPullRequest,
+  );
 
   // Fetch when the Project opens and when the window regains focus. Core
   // throttles, and a failed background fetch (offline) isn't worth showing.
@@ -61,6 +66,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onChanged }: GitHead
     setError(null);
     const result = await run();
     if (result.status === "error") setError(result.error.message);
+    else onChanged();
     setBusy(false);
     await refresh();
   }
@@ -150,7 +156,12 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onChanged }: GitHead
             >
               Push
             </button>
-            <button role="menuitem" disabled title="Coming with the pull request ticket">
+            <button
+              role="menuitem"
+              disabled={createPrBlockedReason(status) !== null}
+              title={createPrBlockedReason(status) ?? undefined}
+              onClick={() => (setMenuOpen(false), onOpenPullRequest())}
+            >
               Create PR
             </button>
           </div>

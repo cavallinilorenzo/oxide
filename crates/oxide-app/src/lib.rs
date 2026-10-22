@@ -734,6 +734,103 @@ async fn push(
     git_blocking(&core, move |core| core.push(project_id, allow_protected)).await
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GithubAvailability {
+    Ready,
+    Missing,
+    LoggedOut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    pub draft: bool,
+    pub base: String,
+    pub head: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestState {
+    pub availability: GithubAvailability,
+    /// How to get `gh` working, when it is not.
+    pub guidance: Option<String>,
+    pub branch: Option<String>,
+    pub default_branch: Option<String>,
+    pub pull_request: Option<PullRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDraft {
+    pub title: String,
+    pub body: String,
+    pub base: String,
+    pub head: String,
+}
+
+/// Whether `gh` works and the branch's open pull request. Runs `gh` only when
+/// asked; the Surface decides when to refresh.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_state(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<PullRequestState, AppError> {
+    git_blocking(&core, move |core| core.pull_request_state(project_id))
+        .await
+        .map(|state| convert(&state))
+}
+
+/// Title, body and base prefilled from the branch's commits.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_draft(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<PullRequestDraft, AppError> {
+    git_blocking(&core, move |core| core.pull_request_draft(project_id))
+        .await
+        .map(|draft| convert(&draft))
+}
+
+/// Pushes the branch if needed, then opens a pull request for it.
+#[tauri::command]
+#[specta::specta]
+async fn create_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    title: String,
+    body: String,
+    base: String,
+    draft: bool,
+) -> Result<PullRequest, AppError> {
+    git_blocking(&core, move |core| {
+        core.create_pull_request(
+            project_id,
+            &oxide_core::PullRequestInput {
+                title,
+                body,
+                base,
+                draft,
+            },
+        )
+    })
+    .await
+    .map(|pr| convert(&pr))
+}
+
+/// Opens the branch's pull request on GitHub.
+#[tauri::command]
+#[specta::specta]
+async fn open_pull_request(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.open_pull_request(project_id)).await
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -1097,6 +1194,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull,
         commit,
         push,
+        pull_request_state,
+        pull_request_draft,
+        create_pull_request,
+        open_pull_request,
         last_selection,
         remember_selection,
         confirm_quit

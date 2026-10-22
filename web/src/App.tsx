@@ -18,6 +18,9 @@ const terminalContextKey = (projectId: number, threadId: number | null) =>
   `${projectId}:${threadId ?? "draft"}`;
 
 const DiffPanel = lazy(() => import("./DiffPanel").then((module) => ({ default: module.DiffPanel })));
+const PullRequestPanel = lazy(() =>
+  import("./PullRequestPanel").then((module) => ({ default: module.PullRequestPanel })),
+);
 const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
 const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
 
@@ -90,6 +93,11 @@ export function App() {
     setActiveTool("Diff");
     setChosenDiffScope({ threadId: currentThreadRef.current, scope: "uncommitted" });
     setDiffFocus(hint ?? null);
+  }, []);
+
+  const openPullRequest = useCallback(() => {
+    setShowTools(true);
+    setActiveTool("Pull request");
   }, []);
 
   useEffect(() => {
@@ -256,6 +264,7 @@ export function App() {
             projectId={selected.id}
             threadsKey={threadsKey}
             onOpenDiff={() => openDiff()}
+            onOpenPullRequest={openPullRequest}
             onChanged={onGitChanged}
           />
         )}
@@ -377,7 +386,13 @@ export function App() {
                   focus={diffFocus}
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
+                  onOpenPullRequest={openPullRequest}
                 />
+              </Suspense>
+            )}
+            {activeTool === "Pull request" && selected && (
+              <Suspense fallback={null}>
+                <PullRequestPanel projectId={selected.id} refreshKey={gitRevision} onChanged={onGitChanged} />
               </Suspense>
             )}
             {activeTool === "Files" && selected && (

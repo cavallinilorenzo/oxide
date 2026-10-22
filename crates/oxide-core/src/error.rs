@@ -15,6 +15,8 @@ pub enum Error {
     InvalidPath(String),
     #[error("terminal error: {0}")]
     Terminal(String),
+    #[error("{0}")]
+    Git(String),
     #[error("provider error: {0}")]
     Provider(String),
 }

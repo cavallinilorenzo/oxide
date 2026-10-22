@@ -515,6 +515,99 @@ async fn read_file(
         .map_err(AppError::from)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    /// `null` while HEAD is detached.
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub added: u32,
+    pub removed: u32,
+    pub changed_files: u32,
+    /// Why the branch picker is disabled, if it is.
+    pub picker_disabled_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub remote: bool,
+    pub current: bool,
+}
+
+/// Runs blocking Git work off the async runtime.
+async fn git_blocking<T: Send + 'static>(
+    core: &State<'_, Arc<Core>>,
+    f: impl FnOnce(&Core) -> oxide_core::Result<T> + Send + 'static,
+) -> Result<T, AppError> {
+    let core = Arc::clone(core);
+    tauri::async_runtime::spawn_blocking(move || f(&core))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+
+/// Branch, ahead/behind and uncommitted-change counts of the main checkout.
+#[tauri::command]
+#[specta::specta]
+async fn git_status(core: State<'_, Arc<Core>>, project_id: u32) -> Result<GitStatus, AppError> {
+    git_blocking(&core, move |core| core.git_status(project_id))
+        .await
+        .map(|status| convert(&status))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn list_branches(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<GitBranch>, AppError> {
+    git_blocking(&core, move |core| core.list_branches(project_id))
+        .await
+        .map(|branches| branches.iter().map(convert).collect())
+}
+
+/// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
+#[tauri::command]
+#[specta::specta]
+async fn checkout_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    name: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.checkout_branch(project_id, &name)).await
+}
+
+/// Creates a branch from HEAD and checks it out.
+#[tauri::command]
+#[specta::specta]
+async fn create_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    name: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.create_branch(project_id, &name)).await
+}
+
+/// Background fetch; returns whether it ran (it is throttled).
+#[tauri::command]
+#[specta::specta]
+async fn fetch_project(core: State<'_, Arc<Core>>, project_id: u32) -> Result<bool, AppError> {
+    git_blocking(&core, move |core| core.fetch_project(project_id)).await
+}
+
+/// `git pull --ff-only`.
+#[tauri::command]
+#[specta::specta]
+async fn pull(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.pull(project_id)).await
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -723,7 +816,13 @@ pub fn builder() -> Builder<tauri::Wry> {
         resize_terminal,
         close_terminal,
         list_dir,
-        read_file
+        read_file,
+        git_status,
+        list_branches,
+        checkout_branch,
+        create_branch,
+        fetch_project,
+        pull
     ])
 }
 

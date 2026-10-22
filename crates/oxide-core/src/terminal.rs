@@ -1,6 +1,6 @@
 use crate::{Error, Result};
-use crossbeam_channel::{Receiver, Sender, bounded};
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -19,12 +19,14 @@ pub struct TerminalSummary {
 
 pub struct TerminalSession {
     pub summary: TerminalSummary,
-    writer: Mutex<Box<dyn Write + Send>>,
-    master: Mutex<Box<dyn MasterPty + Send>>,
-    child: Mutex<Box<dyn Child + Send + Sync>>,
+    commands: Sender<SessionCommand>,
     subscribers: Arc<Mutex<Vec<Sender<Vec<u8>>>>>,
-    #[cfg(unix)]
-    process_group: i32,
+}
+
+enum SessionCommand {
+    Write(Vec<u8>, Sender<std::io::Result<()>>),
+    Resize(PtySize, Sender<std::result::Result<(), String>>),
+    Close(Sender<()>),
 }
 
 impl TerminalSession {
@@ -39,7 +41,7 @@ impl TerminalSession {
             })
             .map_err(|e| Error::Terminal(format!("open terminal: {e}")))?;
         let command = shell_command(cwd);
-        let child = pair
+        let mut child = pair
             .slave
             .spawn_command(command)
             .map_err(|e| Error::Terminal(format!("start terminal shell: {e}")))?;
@@ -57,18 +59,41 @@ impl TerminalSession {
         let subscribers = Arc::new(Mutex::new(Vec::<Sender<Vec<u8>>>::new()));
         let output_subscribers = Arc::clone(&subscribers);
         std::thread::spawn(move || read_output(reader, output_subscribers));
+        let (commands, receiver) = unbounded();
+        std::thread::spawn(move || {
+            let mut writer = writer;
+            let master = pair.master;
+            while let Ok(command) = receiver.recv() {
+                match command {
+                    SessionCommand::Write(input, reply) => {
+                        let _ = reply.send(writer.write_all(&input).and_then(|_| writer.flush()));
+                    }
+                    SessionCommand::Resize(size, reply) => {
+                        let result = master.resize(size).map_err(|error| error.to_string());
+                        let _ = reply.send(result);
+                    }
+                    SessionCommand::Close(reply) => {
+                        #[cfg(unix)]
+                        kill_session_processes(process_group);
+                        #[cfg(not(unix))]
+                        {
+                            let _ = child.kill();
+                        }
+                        let _ = child.wait();
+                        let _ = reply.send(());
+                        break;
+                    }
+                }
+            }
+        });
         Ok(Self {
             summary: TerminalSummary {
                 id,
                 pid,
                 cwd: cwd.to_string_lossy().into_owned(),
             },
-            writer: Mutex::new(writer),
-            master: Mutex::new(pair.master),
-            child: Mutex::new(child),
+            commands,
             subscribers,
-            #[cfg(unix)]
-            process_group,
         })
     }
 
@@ -82,37 +107,39 @@ impl TerminalSession {
     }
 
     pub fn write(&self, bytes: &[u8]) -> Result<()> {
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        writer
-            .write_all(bytes)
-            .and_then(|_| writer.flush())
+        let (reply, result) = bounded(1);
+        self.commands
+            .send(SessionCommand::Write(bytes.to_vec(), reply))
+            .map_err(|_| Error::Terminal("terminal actor stopped".into()))?;
+        result
+            .recv()
+            .map_err(|_| Error::Terminal("terminal actor stopped".into()))?
             .map_err(|e| Error::Terminal(format!("write terminal input: {e}")))
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
-        self.master
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+        let (reply, result) = bounded(1);
+        self.commands
+            .send(SessionCommand::Resize(
+                PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+                reply,
+            ))
+            .map_err(|_| Error::Terminal("terminal actor stopped".into()))?;
+        result
+            .recv()
+            .map_err(|_| Error::Terminal("terminal actor stopped".into()))?
             .map_err(|e| Error::Terminal(format!("resize terminal: {e}")))
     }
 
     pub fn close(&self) {
-        #[cfg(unix)]
-        {
-            kill_session_processes(self.process_group);
-            let _ = self.child.lock().unwrap_or_else(|e| e.into_inner()).wait();
-        }
-        #[cfg(not(unix))]
-        {
-            let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = child.kill();
-            let _ = child.wait();
+        let (reply, result) = bounded(1);
+        if self.commands.send(SessionCommand::Close(reply)).is_ok() {
+            let _ = result.recv();
         }
     }
 }

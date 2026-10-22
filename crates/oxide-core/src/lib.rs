@@ -306,6 +306,15 @@ impl Core {
                     authenticated: false,
                     warning: None,
                 }),
+            "codex" => oxide_provider::codex::CodexProvider::new()
+                .detect()
+                .unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                }),
             "fake" => oxide_provider::Detection {
                 available: true,
                 installed: true,
@@ -329,6 +338,7 @@ impl Core {
     ) -> oxide_provider::ProviderCapabilities {
         match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
+            "codex" => oxide_provider::codex::CodexProvider::new().capabilities(),
             "agy" | "antigravity" => oxide_provider::ProviderCapabilities {
                 supported_permission_modes: vec![
                     PermissionMode::AutoEdit,
@@ -412,6 +422,19 @@ impl Core {
                     return Err(Error::Provider("Claude Code is not installed".to_string()));
                 }
                 Box::new(claude)
+            } else if snapshot.thread.provider == "codex" {
+                let codex = oxide_provider::codex::CodexProvider::new();
+                let detection = codex.detect().unwrap_or(oxide_provider::Detection {
+                    available: false,
+                    installed: false,
+                    version: None,
+                    authenticated: false,
+                    warning: None,
+                });
+                if !detection.installed {
+                    return Err(Error::Provider("Codex is not installed".to_string()));
+                }
+                Box::new(codex)
             } else {
                 Box::new(oxide_provider::FakeProvider::scripted())
             };

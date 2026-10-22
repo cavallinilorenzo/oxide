@@ -290,11 +290,11 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
 }
 
 fn resolve_pending_approvals_if_any(state: &mut ActorState, storage: &StorageHandle) {
-    if let Some(turn_id) = state.current_turn_id {
-        if state.pending_approval_id.take().is_some() {
-            let _ =
-                storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
-        }
+    if let (Some(turn_id), true) = (
+        state.current_turn_id,
+        state.pending_approval_id.take().is_some(),
+    ) {
+        let _ = storage.resolve_pending_approvals(turn_id, ApprovalDecision::Deny, String::new());
     }
 }
 

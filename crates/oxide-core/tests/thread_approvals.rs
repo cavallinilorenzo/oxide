@@ -293,10 +293,9 @@ fn core_runs_approval_deny_end_to_end() {
     core.send_prompt(thread.id, "Try dangerous").unwrap();
 
     while let Ok(seq_evt) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
-        if let ThreadEvent::ApprovalRequested { id, .. } = seq_evt.event {
-            if id == "appr-deny-1" {
-                break;
-            }
+        if matches!(seq_evt.event, ThreadEvent::ApprovalRequested { ref id, .. } if id == "appr-deny-1")
+        {
+            break;
         }
     }
 

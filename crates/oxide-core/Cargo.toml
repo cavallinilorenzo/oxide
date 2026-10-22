@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 crossbeam-channel = "0.5.17"
+libc = "0.2.191"
 notify = "8"
 oxide-provider = { path = "../oxide-provider" }
+portable-pty = "0.9.0"
 rayon = "1.12.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

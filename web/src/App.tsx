@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { toggleForKey } from "./shortcuts";
+
+const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
@@ -136,7 +138,15 @@ export function App() {
               <p>Pick a Project to begin.</p>
             </main>
           )}
-          {showTerminal && <section className="terminal" aria-label="Terminal" />}
+          {selected && (
+            <Suspense fallback={showTerminal ? <section className="terminal" aria-label="Terminal" /> : null}>
+              <TerminalPanel
+                projectId={selected.id}
+                contextKey={`${selected.id}:${selectedThreadId ?? "draft"}`}
+                visible={showTerminal}
+              />
+            </Suspense>
+          )}
         </div>
         {showTools && (
           <aside className="tools" aria-label="Tools panel">

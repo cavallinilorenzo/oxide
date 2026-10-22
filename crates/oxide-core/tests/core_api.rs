@@ -83,6 +83,64 @@ fn refuses_a_database_from_a_newer_build() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_session_accepts_input_streams_output_and_shuts_down_its_process_group() {
+    use std::time::Duration;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let core = Core::open(tmp.path().join("oxide")).unwrap();
+    let root = tmp.path().join("project");
+    std::fs::create_dir_all(&root).unwrap();
+    let project_id = {
+        let conn = Connection::open(tmp.path().join("oxide/oxide.db")).unwrap();
+        conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('project', ?1)",
+            [root.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        conn.last_insert_rowid() as u32
+    };
+    let terminal = core.start_terminal(project_id).unwrap();
+    let rx = core.subscribe_terminal(terminal.id).unwrap();
+    let pid = terminal.pid;
+
+    core.write_terminal(
+        terminal.id,
+        b"printf 'terminal-ready\\n'; read value; printf 'received:%s\\n' \"$value\"\n",
+    )
+    .unwrap();
+    let mut output = String::new();
+    while !output.contains("terminal-ready") {
+        let chunk = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("terminal output");
+        output.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    assert!(output.contains("terminal-ready"));
+    core.write_terminal(terminal.id, b"hello\n").unwrap();
+    while !output.contains("received:hello") {
+        let chunk = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("echoed terminal input");
+        output.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    core.close_terminal(terminal.id).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let result = unsafe { libc::kill(-(pid as i32), 0) };
+        if result == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "terminal process group {pid} survived shutdown"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn lists_projects_most_recent_first() {
     let tmp = tempfile::tempdir().unwrap();

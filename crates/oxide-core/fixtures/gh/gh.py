@@ -69,7 +69,14 @@ if args[:2] == ["repo", "view"]:
     sys.exit(0)
 
 if args[:2] == ["pr", "list"]:
-    prs = [p for p in state.get("prs", {}).values() if p.get("state") == "OPEN"]
+    wanted = flag("--state") or "open"
+    prs = [
+        p for p in state.get("prs", {}).values()
+        if wanted == "all" or p.get("state", "").lower() == wanted
+    ]
+    head = flag("--head")
+    if head:
+        prs = [p for p in prs if p.get("headRefName") == head]
     prs.sort(key=lambda p: p["number"])
     if flag("--author") == "@me":
         prs = [p for p in prs if p.get("author", {}).get("login") == "me"]

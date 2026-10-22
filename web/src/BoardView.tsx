@@ -3,7 +3,7 @@ import { GitBranchIcon } from "@primer/octicons-react";
 import { Channel } from "@tauri-apps/api/core";
 import { commands, type ApprovalDecision, type BoardCard, type BoardEvent, type Thread } from "./bindings";
 import { DispatchDialog } from "./DispatchDialog";
-import { applyBoardEvent, groupBoard, mergeCard } from "./board";
+import { applyBoardEvent, groupBoard, mergeCard, pullRequestSummary, suggestsArchive } from "./board";
 import { threadTitle } from "./threadList";
 
 interface BoardViewProps {
@@ -125,6 +125,7 @@ function BoardCardView({
 }) {
   const { thread } = card;
   const running = thread.status === "working" || thread.status === "needs-input";
+  const summary = pullRequestSummary(card.pullRequest);
   return (
     <li className="board-card" aria-label={threadTitle(thread)}>
       <div className="board-card-head">
@@ -165,6 +166,18 @@ function BoardCardView({
           </div>
         </div>
       ))}
+      {summary && (
+        <div className={`board-pr ${card.pullRequest?.phase}`} aria-label="Pull request">
+          <span>{summary}</span>
+          {card.pullRequest && card.pullRequest.checksFailed > 0 && <span className="board-pr-failing">failing</span>}
+        </div>
+      )}
+      {suggestsArchive(card) && (
+        <div className="board-archive-suggestion">
+          <span>This pull request was merged.</span>
+          <button onClick={onArchive}>Archive Thread</button>
+        </div>
+      )}
       <div className="board-card-actions">
         <button onClick={onOpen}>Open</button>
         {running && <button onClick={onStop}>Stop</button>}

@@ -1,4 +1,4 @@
-import type { BoardCard, BoardEvent } from "./bindings";
+import type { BoardCard, BoardEvent, BranchPullRequest } from "./bindings";
 import { threadTitle } from "./threadList";
 
 export type BoardColumns = { needsInput: BoardCard[]; working: BoardCard[]; completed: BoardCard[] };
@@ -28,4 +28,22 @@ export function mergeCard(cards: BoardCard[], next: BoardCard): BoardCard[] {
 
 export function applyBoardEvent(cards: BoardCard[], event: BoardEvent): BoardCard[] {
   return mergeCard(cards, event.payload);
+}
+
+const PHASE_LABEL = { draft: "Draft", open: "Open", merged: "Merged", closed: "Closed" } as const;
+
+/** What a card says about its pull request, e.g. "PR #9 · Open · 2 passed, 1 failed"; `null` without one. */
+export function pullRequestSummary(pr: BranchPullRequest | null | undefined): string | null {
+  if (!pr) return null;
+  const checks = [
+    pr.checksPassed && `${pr.checksPassed} passed`,
+    pr.checksFailed && `${pr.checksFailed} failed`,
+    pr.checksPending && `${pr.checksPending} pending`,
+  ].filter(Boolean);
+  return [`PR #${pr.number}`, PHASE_LABEL[pr.phase], ...(checks.length ? [checks.join(", ")] : [])].join(" · ");
+}
+
+/** A merged pull request means the work landed: the card offers to archive the Thread. */
+export function suggestsArchive(card: BoardCard): boolean {
+  return card.pullRequest?.phase === "merged" && !card.thread.archived;
 }

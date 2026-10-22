@@ -287,9 +287,10 @@ export function App() {
 
       const res = await commands.listThreads(selected.id);
       if (active && res.status === "ok" && pendingNewThread.current === selected.id) {
-        pendingNewThread.current = null;
         const created = await createThreadIn(selected.id);
+        // Cleared only once applied: a re-run mid-await must still start the Thread.
         if (!active) return;
+        pendingNewThread.current = null;
         setThreads(created ? [created, ...res.data] : res.data);
         const initialThreadId = created?.id ?? res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);

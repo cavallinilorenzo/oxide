@@ -29,8 +29,8 @@ pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
 };
 pub use thread::{
-    ApprovalSnapshot, ItemSnapshot, SequencedThreadEvent, ThreadEvent, ThreadSnapshot,
-    ThreadStatus, ThreadSummary, TurnSnapshot,
+    ApprovalSnapshot, DebugSequencedThreadEvent, ItemSnapshot, SequencedThreadEvent, ThreadEvent,
+    ThreadSnapshot, ThreadStatus, ThreadSummary, TurnSnapshot, UnknownEventSnapshot,
 };
 
 const DB_FILE: &str = "oxide.db";
@@ -384,6 +384,21 @@ impl Core {
         actor.subscribe()
     }
 
+    /// Like [`subscribe_thread`] but returns a debug channel where each event
+    /// is paired with the raw Provider payload that produced it.  Only open
+    /// this when the debug view is visible; raw payloads are never sent when
+    /// no debug subscriber is registered.
+    pub fn subscribe_thread_debug(
+        &self,
+        thread_id: u32,
+    ) -> Result<(
+        ThreadSnapshot,
+        crossbeam_channel::Receiver<DebugSequencedThreadEvent>,
+    )> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.subscribe_debug()
+    }
+
     pub fn tick_thread(&self, thread_id: u32) {
         if let Some(actor) = self.thread_actors.lock().unwrap().get(&thread_id) {
             actor.tick();
@@ -391,7 +406,11 @@ impl Core {
     }
 
     pub fn get_thread_snapshot(&self, thread_id: u32) -> Result<ThreadSnapshot> {
-        self.storage.get_snapshot(thread_id)
+        let mut snapshot = self.storage.get_snapshot(thread_id)?;
+        for turn in &mut snapshot.turns {
+            turn.unknown_events.clear();
+        }
+        Ok(snapshot)
     }
 
     fn expand_home(&self, root: &str) -> PathBuf {

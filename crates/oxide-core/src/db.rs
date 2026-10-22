@@ -65,6 +65,14 @@ pub const MIGRATIONS: &[&str] = &[
         decided_at TEXT
     );
 ",
+    "
+    CREATE TABLE unknown_events (
+        id INTEGER PRIMARY KEY,
+        turn_id INTEGER NOT NULL REFERENCES turns(id),
+        raw TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

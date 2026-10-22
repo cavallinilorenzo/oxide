@@ -24,6 +24,7 @@ export const commands = {
 	sendPrompt: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt })),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
+	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
 };
 
 /* Types */
@@ -63,6 +64,20 @@ export type ApprovalSnapshot_Serialize = {
 	decision: ApprovalDecision | null,
 	createdAt: string,
 	decidedAt: string | null,
+};
+
+export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
+
+export type DebugSequencedThreadEvent_Deserialize = {
+	seq: number,
+	event: ThreadEvent_Deserialize,
+	rawPayload?: string | null,
+};
+
+export type DebugSequencedThreadEvent_Serialize = {
+	seq: number,
+	event: ThreadEvent_Serialize,
+	rawPayload: string | null,
 };
 
 export type Detection = Detection_Serialize | Detection_Deserialize;
@@ -220,9 +235,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	decided_at: string,
 } } | { type: "Error"; payload: {
 	message: string,
-} } | { type: "Unknown"; payload: {
-	raw: string,
-} };
+} } | { type: "Unknown" };
 
 export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	turn_index: number,
@@ -253,9 +266,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	decided_at: string,
 } } | { type: "Error"; payload: {
 	message: string,
-} } | { type: "Unknown"; payload: {
-	raw: string,
-} };
+} } | { type: "Unknown" };
 
 export type ThreadSnapshot = ThreadSnapshot_Serialize | ThreadSnapshot_Deserialize;
 
@@ -312,6 +323,7 @@ export type TurnSnapshot_Deserialize = {
 	completedAt?: string | null,
 	items: ItemSnapshot[],
 	approvals: ApprovalSnapshot_Deserialize[],
+	unknownEvents: UnknownEventSnapshot[],
 };
 
 export type TurnSnapshot_Serialize = {
@@ -323,9 +335,16 @@ export type TurnSnapshot_Serialize = {
 	completedAt: string | null,
 	items: ItemSnapshot[],
 	approvals: ApprovalSnapshot_Serialize[],
+	unknownEvents: UnknownEventSnapshot[],
 };
 
 export type TurnStatus = "running" | "completed" | "interrupted" | "error";
+
+export type UnknownEventSnapshot = {
+	id: number,
+	raw: string,
+	createdAt: string,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

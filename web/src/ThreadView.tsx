@@ -4,6 +4,7 @@ import {
   commands,
   type ApprovalDecision,
   type ApprovalSnapshot,
+  type DebugSequencedThreadEvent,
   type Detection,
   type ItemSnapshot,
   type PermissionMode,
@@ -197,6 +198,11 @@ export function ThreadView({
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugState, setDebugState] = useState<{
+    threadId: number | null;
+    events: DebugSequencedThreadEvent[];
+  }>({ threadId: null, events: [] });
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
@@ -242,9 +248,15 @@ export function ThreadView({
       };
     }
 
-    const channel = new Channel<SequencedThreadEvent>();
+    const channel = new Channel<SequencedThreadEvent | DebugSequencedThreadEvent>();
     channel.onmessage = (event) => {
-      pendingEventsRef.current.push(event);
+      if ("rawPayload" in event) {
+        setDebugState((previous) => ({
+          threadId,
+          events: [...(previous.threadId === threadId ? previous.events : []).slice(-199), event],
+        }));
+      }
+      pendingEventsRef.current.push(event as SequencedThreadEvent);
       if (!rafIdRef.current) {
         rafIdRef.current = requestAnimationFrame(() => {
           rafIdRef.current = 0;
@@ -266,7 +278,9 @@ export function ThreadView({
     };
 
     void (async () => {
-      const res = await commands.subscribeThread(threadId, channel);
+      const res = debugOpen
+        ? await commands.subscribeThreadDebug(threadId, channel as Channel<DebugSequencedThreadEvent>)
+        : await commands.subscribeThread(threadId, channel as Channel<SequencedThreadEvent>);
       if (active && res.status === "ok") {
         const initial = initialTranscriptState(res.data);
         setTranscript(initial);
@@ -282,7 +296,9 @@ export function ThreadView({
       }
       pendingEventsRef.current = [];
     };
-  }, [threadId, onStatusChange]);
+  }, [threadId, onStatusChange, debugOpen]);
+
+  const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 
   // Auto-scroll to bottom as messages stream in
   useEffect(() => {
@@ -377,6 +393,28 @@ export function ThreadView({
 
   return (
     <div className="thread-container">
+      <div className="thread-debug-toolbar">
+        <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
+          {debugOpen ? "Close raw event debug" : "Open raw event debug"}
+        </button>
+      </div>
+      {debugOpen && (
+        <section className="thread-debug-view" aria-label="Raw event debug view">
+          <h3>Raw provider events</h3>
+          {transcript.turns.flatMap((turn) => turn.unknownEvents ?? []).map((unknown) => (
+            <pre key={`persisted-${unknown.id}`}><strong>Persisted Unknown</strong>{"\n"}{unknown.raw}</pre>
+          ))}
+          {debugEvents.map((entry) => (
+            <pre key={entry.seq}>
+              <strong>#{entry.seq} {entry.event.type}</strong>{"\n"}
+              {entry.rawPayload ?? "No provider payload (synthetic event)"}
+            </pre>
+          ))}
+          {debugEvents.length === 0 && transcript.turns.every((turn) => !(turn.unknownEvents?.length)) && (
+            <p>Raw provider events will appear while a Turn is running.</p>
+          )}
+        </section>
+      )}
       <div className="transcript" aria-label="Transcript">
         {transcript.turns.length === 0 ? (
           <div className="empty-thread">

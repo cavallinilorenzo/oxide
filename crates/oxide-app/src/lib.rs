@@ -751,6 +751,53 @@ pub struct PullRequest {
     pub draft: bool,
     pub base: String,
     pub head: String,
+    pub author: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckState {
+    Success,
+    Failure,
+    Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub state: CheckState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetail {
+    pub pull_request: PullRequest,
+    pub body: String,
+    pub checks: Vec<PullRequestCheck>,
+    pub comments: Vec<PullRequestComment>,
+    /// The merge methods the repository allows.
+    pub merge_methods: Vec<MergeMethod>,
+    /// Whether the repository deletes merged branches on its own.
+    pub delete_branch_on_merge: bool,
+    /// The changed files, for the Diff Surface.
+    pub diff: Diff,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -829,6 +876,80 @@ async fn create_pull_request(
 #[specta::specta]
 async fn open_pull_request(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
     git_blocking(&core, move |core| core.open_pull_request(project_id)).await
+}
+
+/// Open pull requests; `mine` keeps the user's own, `search` is a GitHub query.
+#[tauri::command]
+#[specta::specta]
+async fn list_pull_requests(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    mine: bool,
+    search: String,
+) -> Result<Vec<PullRequest>, AppError> {
+    git_blocking(&core, move |core| {
+        core.list_pull_requests(project_id, mine, &search)
+    })
+    .await
+    .map(|prs| convert(&prs))
+}
+
+/// One pull request's description, checks, conversation and changed files.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_detail(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<PullRequestDetail, AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_request_detail(project_id, number)
+    })
+    .await
+    .map(|detail| convert(&detail))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn comment_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.comment_pull_request(project_id, number, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn merge_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    method: MergeMethod,
+    delete_branch: bool,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.merge_pull_request(project_id, number, convert(&method), delete_branch)
+    })
+    .await
+}
+
+/// Checks the pull request's branch out in the main checkout.
+#[tauri::command]
+#[specta::specta]
+async fn checkout_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.checkout_pull_request(project_id, number)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1198,6 +1319,11 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull_request_draft,
         create_pull_request,
         open_pull_request,
+        list_pull_requests,
+        pull_request_detail,
+        comment_pull_request,
+        merge_pull_request,
+        checkout_pull_request,
         last_selection,
         remember_selection,
         confirm_quit

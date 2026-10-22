@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands, type GitStatus, type PullRequestDraft, type PullRequestState } from "./bindings";
 import { createPrBlockedReason } from "./gitAction";
+import { PullRequestBrowser } from "./PullRequestBrowser";
 
 interface PullRequestPanelProps {
   projectId: number;
   /** Changes after the user's own Git changes (commit, push, pull, checkout), which refresh the panel. */
   refreshKey: number;
-  /** Called after a pull request was created, so other Git views reload. */
+  /** Called after a pull request was created, merged or checked out, so other Git views reload. */
   onChanged: () => void;
+  /** Shows a pull request's changed files in the Diff Surface. */
+  onReviewFiles: (number: number) => void;
 }
 
 type Loaded =
@@ -19,7 +22,34 @@ type Loaded =
  *  after the user's own Git changes or a manual refresh; it never polls.
  *  State belongs to one Project, so a different one remounts it. */
 export function PullRequestPanel(props: PullRequestPanelProps) {
-  return <PullRequestBody key={props.projectId} {...props} />;
+  return <PullRequestViews key={props.projectId} {...props} />;
+}
+
+const VIEWS = [
+  { view: "branch", label: "This branch" },
+  { view: "browse", label: "Open pull requests" },
+] as const;
+
+function PullRequestViews(props: PullRequestPanelProps) {
+  const [view, setView] = useState<(typeof VIEWS)[number]["view"]>("branch");
+  return (
+    <div className="pr-views">
+      <div className="diff-scopes" role="tablist" aria-label="Pull request view">
+        {VIEWS.map((v) => (
+          <button key={v.view} role="tab" aria-selected={view === v.view} onClick={() => setView(v.view)}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === "branch" ? (
+        <PullRequestBody {...props} />
+      ) : (
+        <section className="pr-panel" aria-label="Pull requests">
+          <PullRequestBrowser {...props} />
+        </section>
+      )}
+    </div>
+  );
 }
 
 function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelProps) {

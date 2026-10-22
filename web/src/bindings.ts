@@ -81,6 +81,14 @@ export const commands = {
 	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
 	/**  Opens the branch's pull request on GitHub. */
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
+	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
+	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
+	/**  One pull request's description, checks, conversation and changed files. */
+	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
+	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
+	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch })),
+	/**  Checks the pull request's branch out in the main checkout. */
+	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
@@ -126,6 +134,8 @@ export type ApprovalSnapshot_Serialize = {
 	createdAt: string,
 	decidedAt: string | null,
 };
+
+export type CheckState = "success" | "failure" | "pending";
 
 /**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
 export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
@@ -311,6 +321,8 @@ export type ItemSnapshot_Serialize = {
 	createdAt: string,
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
 
 export type Project = {
@@ -365,6 +377,46 @@ export type PullRequest = {
 	draft: boolean,
 	base: string,
 	head: string,
+	author: string,
+};
+
+export type PullRequestCheck = {
+	name: string,
+	state: CheckState,
+};
+
+export type PullRequestComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type PullRequestDetail = PullRequestDetail_Serialize | PullRequestDetail_Deserialize;
+
+export type PullRequestDetail_Deserialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Deserialize,
+};
+
+export type PullRequestDetail_Serialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Serialize,
 };
 
 export type PullRequestDraft = {

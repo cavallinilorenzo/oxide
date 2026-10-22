@@ -24,7 +24,8 @@ pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    GithubAvailability, PullRequest, PullRequestDraft, PullRequestInput, PullRequestState,
+    CheckState, GithubAvailability, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment,
+    PullRequestDetail, PullRequestDraft, PullRequestInput, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -969,6 +970,52 @@ impl Core {
         let url = github::pull_request_url(&self.gh, &self.main_checkout(project_id)?)?;
         self.activity.open_url(&url);
         Ok(())
+    }
+
+    /// Open pull requests of the Project's repository: only the user's own, if
+    /// `mine`, and matching the GitHub search query, if not empty.
+    pub fn list_pull_requests(
+        &self,
+        project_id: u32,
+        mine: bool,
+        search: &str,
+    ) -> Result<Vec<PullRequest>> {
+        github::list_pull_requests(&self.gh, &self.main_checkout(project_id)?, mine, search)
+    }
+
+    /// A pull request's description, checks, conversation, allowed merge
+    /// methods and changed files.
+    pub fn pull_request_detail(&self, project_id: u32, number: u32) -> Result<PullRequestDetail> {
+        github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Adds a conversation comment to a pull request.
+    pub fn comment_pull_request(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
+        github::comment_pull_request(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Merges a pull request with one of the methods its repository allows,
+    /// optionally deleting the branch.
+    pub fn merge_pull_request(
+        &self,
+        project_id: u32,
+        number: u32,
+        method: MergeMethod,
+        delete_branch: bool,
+    ) -> Result<()> {
+        let cwd = self.main_checkout(project_id)?;
+        self.git.mutate(&cwd, || {
+            github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch)
+        })
+    }
+
+    /// Checks a pull request's branch out in the main checkout, under the
+    /// branch picker's rules: Git's refusal is the error, and it is refused
+    /// while a Thread is working.
+    pub fn checkout_pull_request(&self, project_id: u32, number: u32) -> Result<()> {
+        self.switch_branch(project_id, |cwd| {
+            github::checkout_pull_request(&self.gh, cwd, number)
+        })
     }
 
     /// Runs a command that changes the main checkout's files, serialized per

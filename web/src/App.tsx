@@ -95,6 +95,16 @@ export function App() {
     setDiffFocus(hint ?? null);
   }, []);
 
+  // The pull request whose files the Diff Surface's PR scope shows.
+  const [reviewedPr, setReviewedPr] = useState<{ projectId: number; number: number } | null>(null);
+  const reviewPullRequestFiles = useCallback((projectId: number, number: number) => {
+    setReviewedPr({ projectId, number });
+    setShowTools(true);
+    setActiveTool("Diff");
+    setChosenDiffScope({ threadId: currentThreadRef.current, scope: "pr" });
+    setDiffFocus(null);
+  }, []);
+
   const openPullRequest = useCallback(() => {
     setShowTools(true);
     setActiveTool("Pull request");
@@ -379,6 +389,7 @@ export function App() {
                   threadId={currentThreadId}
                   board={diffThread.board}
                   scope={diffScope}
+                  reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}
                   onScopeChange={(scope) => {
                     setChosenDiffScope({ threadId: currentThreadId, scope });
                     setDiffFocus(null);
@@ -392,7 +403,12 @@ export function App() {
             )}
             {activeTool === "Pull request" && selected && (
               <Suspense fallback={null}>
-                <PullRequestPanel projectId={selected.id} refreshKey={gitRevision} onChanged={onGitChanged} />
+                <PullRequestPanel
+                  projectId={selected.id}
+                  refreshKey={gitRevision}
+                  onChanged={onGitChanged}
+                  onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
+                />
               </Suspense>
             )}
             {activeTool === "Files" && selected && (

@@ -46,7 +46,10 @@ use serde::Serialize;
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
-pub use oxide_provider::{ApprovalDecision, ApprovalKind, Detection, ItemKind, TurnStatus};
+pub use oxide_provider::{
+    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, ProviderCapabilities,
+    TurnStatus,
+};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -103,6 +106,7 @@ pub struct Core {
     git: git::GitState,
     gh: github::Gh,
     activity: Arc<activity::Activity>,
+    model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
 }
 
 impl Core {
@@ -154,6 +158,7 @@ impl Core {
             git: git::GitState::default(),
             gh: github::Gh::default(),
             activity: Arc::new(activity::Activity::new()),
+            model_catalogs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -510,7 +515,7 @@ impl Core {
     }
 
     pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
-        match provider {
+        let det = match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
                 .detect()
                 .unwrap_or(oxide_provider::Detection {
@@ -552,7 +557,11 @@ impl Core {
                 authenticated: false,
                 warning: Some(format!("Unknown provider '{provider}'")),
             },
+        };
+        if det.available || det.installed {
+            let _ = self.get_model_catalog(provider, false);
         }
+        det
     }
 
     pub fn get_provider_capabilities(
@@ -576,6 +585,80 @@ impl Core {
                 slash_command_passthrough: false,
             },
         }
+    }
+
+    pub fn get_model_catalog(
+        &self,
+        provider: &str,
+        refresh: bool,
+    ) -> Result<Vec<oxide_provider::ModelInfo>> {
+        if !refresh {
+            let cache = self.model_catalogs.lock().unwrap();
+            if let Some(models) = cache.get(provider) {
+                return Ok(models.clone());
+            }
+        }
+
+        let models = match provider {
+            "claude" => {
+                let p = oxide_provider::claude::ClaudeCodeProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            "codex" => {
+                let p = oxide_provider::codex::CodexProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            "agy" | "antigravity" => {
+                let p = oxide_provider::agy::AgyProvider::new();
+                ProviderTrait::models(&p).unwrap_or_default()
+            }
+            _ => {
+                let fake = oxide_provider::FakeProvider::default();
+                ProviderTrait::models(&fake).unwrap_or_default()
+            }
+        };
+
+        self.model_catalogs
+            .lock()
+            .unwrap()
+            .insert(provider.to_string(), models.clone());
+        Ok(models)
+    }
+
+    pub fn get_favourite_models(&self) -> Result<Vec<String>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let res: std::result::Result<String, rusqlite::Error> = db.query_row(
+            "SELECT value FROM app_state WHERE key = 'favourite_models'",
+            [],
+            |r| r.get(0),
+        );
+        match res {
+            Ok(json_str) => Ok(serde_json::from_str(&json_str).unwrap_or_default()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(vec![]),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    pub fn set_favourite_models(&self, favourites: &[String]) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let json_str =
+            serde_json::to_string(favourites).map_err(|e| Error::Provider(e.to_string()))?;
+        db.execute(
+            "INSERT INTO app_state (key, value) VALUES ('favourite_models', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![json_str],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_thread_model_and_effort(
+        &self,
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let actor = self.get_or_create_thread_actor(thread_id)?;
+        actor.set_model_and_effort(model, effort)
     }
 
     pub fn list_threads(&self, project_id: u32) -> Result<Vec<ThreadSummary>> {

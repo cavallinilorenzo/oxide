@@ -100,6 +100,9 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE threads ADD COLUMN session_lost INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE threads ADD COLUMN continued_from INTEGER REFERENCES threads(id);
 ",
+    "
+    ALTER TABLE threads ADD COLUMN title TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

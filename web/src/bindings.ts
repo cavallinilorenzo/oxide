@@ -19,6 +19,8 @@ export const commands = {
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
+	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
+	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
@@ -54,6 +56,8 @@ export const commands = {
 	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
 	/**  The changes of the main checkout in one scope, from Git. */
 	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
+	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
+	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -434,6 +438,8 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	error?: TurnError_Deserialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Deserialize,
@@ -473,6 +479,8 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	error: TurnError_Serialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Serialize,
@@ -523,6 +531,7 @@ export type Thread_Deserialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title?: string | null,
 	sessionLost: boolean,
 	continuedFrom?: number | null,
 	continuedIn?: number | null,
@@ -539,6 +548,7 @@ export type Thread_Serialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title: string | null,
 	sessionLost: boolean,
 	continuedFrom: number | null,
 	continuedIn: number | null,

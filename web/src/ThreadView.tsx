@@ -18,7 +18,8 @@ import { TurnView } from "./TurnView";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
-import { stopsTurn } from "./shortcuts";
+import { isClearCommand, stopsTurn } from "./shortcuts";
+import { ProviderMark } from "./ProviderMark";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -35,8 +36,13 @@ const PAGE_LOAD_DELAY = 80;
 interface ThreadViewProps {
   threadId: number | null;
   projectId: number;
+  draft?: string;
+  onDraftChange?: (draft: string) => void;
+  onClearThread?: () => void;
   onThreadCreated: (thread: Thread) => void;
+  onThreadUpdated?: (thread: Thread) => void;
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
+  onThreadTitleChange?: (threadId: number, title: string) => void;
   /** Text to put in this Thread's composer once, e.g. the recap of a continued Thread. */
   prefill: { threadId: number; text: string } | null;
   onPrefillUsed: () => void;
@@ -84,8 +90,13 @@ export function getOfferedPermissionModes(
 export function ThreadView({
   threadId,
   projectId,
+  draft,
+  onDraftChange,
+  onClearThread,
   onThreadCreated,
+  onThreadUpdated,
   onStatusChange,
+  onThreadTitleChange,
   prefill,
   onPrefillUsed,
   onOpenThread,
@@ -93,7 +104,7 @@ export function ThreadView({
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(draft ?? "");
   const [sending, setSending] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
@@ -106,11 +117,37 @@ export function ThreadView({
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   /** Where the view was last pinned to the bottom; null before the first pin. */
   const pinnedAtRef = useRef<number | null>(null);
   const requestedPagesRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    if (draft !== undefined) {
+      setInput(draft);
+    }
+  }, [draft, threadId]);
+
+  const handleInputChange = (val: string) => {
+    setInput(val);
+    onDraftChange?.(val);
+  };
+
+  useEffect(() => {
+    let active = true;
+    void commands.gitStatus(projectId).then((res) => {
+      if (active && res.status === "ok") {
+        setGitBranch(res.data.branch ?? "detached HEAD");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
 
   // Load defaults from settings for a fresh thread
   useEffect(() => {
@@ -167,6 +204,9 @@ export function ThreadView({
         if (next.status !== prev.status) {
           onStatusChange(threadId, next.status);
         }
+        if (next.thread?.title !== prev.thread?.title && next.thread?.title) {
+          onThreadTitleChange?.(threadId, next.thread.title);
+        }
         return next;
       });
     });
@@ -190,6 +230,9 @@ export function ThreadView({
         setTranscript(initial);
         setPages(new Map());
         onStatusChange(threadId, initial.status);
+        if (initial.thread?.title) {
+          onThreadTitleChange?.(threadId, initial.thread.title);
+        }
       }
     })();
 
@@ -197,7 +240,7 @@ export function ThreadView({
       active = false;
       batcher.cancel();
     };
-  }, [threadId, onStatusChange, debugOpen]);
+  }, [threadId, onStatusChange, debugOpen, onThreadTitleChange]);
 
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {
@@ -332,6 +375,55 @@ export function ThreadView({
     }
   };
 
+  const handleProviderChange = async (newProvider: string) => {
+    if (turnCount > 0 || isTurnActive || sending) return;
+    const s = await commands.getSettings();
+    const provKey = newProvider as keyof typeof s.settings.providers;
+    const provSettings = s.settings.providers[provKey];
+    const newMode = provSettings?.permissionMode || "auto-edit";
+
+    if (threadId) {
+      const res = await commands.setThreadProvider(threadId, newProvider);
+      if (res.status === "ok") {
+        setTranscript((prev) =>
+          prev.thread ? { ...prev, thread: res.data } : prev
+        );
+        onThreadUpdated?.(res.data);
+      }
+    } else {
+      setDraftProvider(newProvider);
+      setDraftMode(newMode);
+    }
+
+    const capsRes = await commands.getProviderCapabilities(newProvider);
+    if (capsRes.status === "ok") {
+      setTranscript((prev) => ({
+        ...prev,
+        supportedPermissionModes: capsRes.data.supportedPermissionModes,
+      }));
+    }
+  };
+
+  const threadTitle =
+    transcript.thread?.title || (threadId ? `Thread #${threadId}` : "New Thread");
+
+  const handleStartRename = () => {
+    if (!threadId) return;
+    setEditTitle(transcript.thread?.title || `Thread #${threadId}`);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveRename = async () => {
+    setIsEditingTitle(false);
+    const trimmed = editTitle.trim();
+    if (!trimmed || !threadId) return;
+    await commands.renameThread(threadId, trimmed);
+    setTranscript((prev) =>
+      prev.thread ? { ...prev, thread: { ...prev.thread, title: trimmed } } : prev
+    );
+    onThreadTitleChange?.(threadId, trimmed);
+  };
+
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
 
@@ -366,20 +458,28 @@ export function ThreadView({
     const prompt = input.trim();
     if (!prompt || sending || turnIsRunning(transcript.status)) return;
 
+    if (isClearCommand(input)) {
+      handleInputChange("");
+      onClearThread?.();
+      return;
+    }
+
     setSending(true);
-    setInput("");
+    handleInputChange("");
 
     try {
       let targetThreadId = threadId;
       if (!targetThreadId) {
         // Create new thread for this project with selected permission mode
         const settings = await commands.getSettings();
-        const providerName = settings.settings.defaultProvider || "fake";
+        const providerName = draftProvider || settings.settings.defaultProvider || "claude";
+        const provKey = providerName as keyof typeof settings.settings.providers;
+        const provSettings = settings.settings.providers[provKey];
         const created = await commands.createThread(
           projectId,
           providerName,
-          null,
-          null,
+          provSettings?.model ?? null,
+          provSettings?.effort ?? null,
           draftMode
         );
         if (created.status === "ok") {
@@ -395,6 +495,7 @@ export function ThreadView({
       const attachments = pendingImages.map((i) => i.path);
       pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
       setPendingImages([]);
+
       await commands.sendPrompt(targetThreadId, prompt, attachments);
     } finally {
       setSending(false);
@@ -417,10 +518,43 @@ export function ThreadView({
 
   return (
     <div className="thread-container">
-      <div className="thread-debug-toolbar">
-        <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
-          {debugOpen ? "Close raw event debug" : "Open raw event debug"}
-        </button>
+      <div className="thread-header-bar">
+        {isEditingTitle ? (
+          <input
+            className="thread-title-input"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={() => void handleSaveRename()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSaveRename();
+              if (e.key === "Escape") setIsEditingTitle(false);
+            }}
+            autoFocus
+            aria-label="Rename thread title"
+          />
+        ) : (
+          <div className="thread-title-display">
+            <h2 className="thread-title" onClick={handleStartRename} title="Click to rename">
+              {threadTitle}
+            </h2>
+            {threadId && (
+              <button
+                type="button"
+                className="rename-thread-btn"
+                aria-label="Rename thread"
+                title="Rename thread"
+                onClick={handleStartRename}
+              >
+                ✏️
+              </button>
+            )}
+          </div>
+        )}
+        <div className="thread-debug-toolbar">
+          <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
+            {debugOpen ? "Close raw event debug" : "Open raw event debug"}
+          </button>
+        </div>
       </div>
       {debugOpen && (
         <section className="thread-debug-view" aria-label="Raw event debug view">
@@ -517,24 +651,45 @@ export function ThreadView({
         </div>
       ) : (
       <form className="composer" onSubmit={handleSubmit}>
-        <div className="permission-chip-wrapper" title="Permission mode">
-          <label className="permission-chip" htmlFor="permission-mode-select">
-            <span className="permission-chip-icon">{currentModeConfig.icon}</span>
-            <select
-              id="permission-mode-select"
-              className="permission-chip-select"
-              value={currentMode}
-              disabled={isTurnActive || sending}
-              onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
-              aria-label="Permission mode"
-            >
-              {offeredModes.map((item) => (
-                <option key={item.mode} value={item.mode}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="composer-controls-row">
+          <div className="provider-chip-wrapper" title="Provider">
+            <label className="provider-chip" htmlFor="provider-select">
+              <ProviderMark provider={currentProvider} size={14} />
+              <select
+                id="provider-select"
+                className="provider-chip-select"
+                value={currentProvider}
+                disabled={turnCount > 0 || isTurnActive || sending}
+                onChange={(e) => void handleProviderChange(e.target.value)}
+                aria-label="Provider"
+              >
+                <option value="claude">Claude Code</option>
+                <option value="codex">Codex</option>
+                <option value="antigravity">Antigravity CLI</option>
+                {currentProvider === "fake" && <option value="fake">Fake Provider</option>}
+              </select>
+            </label>
+          </div>
+
+          <div className="permission-chip-wrapper" title="Permission mode">
+            <label className="permission-chip" htmlFor="permission-mode-select">
+              <span className="permission-chip-icon">{currentModeConfig.icon}</span>
+              <select
+                id="permission-mode-select"
+                className="permission-chip-select"
+                value={currentMode}
+                disabled={isTurnActive || sending}
+                onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
+                aria-label="Permission mode"
+              >
+                {offeredModes.map((item) => (
+                  <option key={item.mode} value={item.mode}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
 
         {pendingImages.length > 0 && (
@@ -583,7 +738,7 @@ export function ThreadView({
             rows={Math.min(8, input.split("\n").length)}
             placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
               if (stopsTurn(e, transcript.status)) {
@@ -608,6 +763,10 @@ export function ThreadView({
         </div>
       </form>
       )}
+      <div className="composer-footer" aria-label="Thread checkout and branch">
+        <span className="checkout-badge">main checkout</span>
+        <span className="branch-badge">⎇ {gitBranch ?? "main"}</span>
+      </div>
     </div>
   );
 }

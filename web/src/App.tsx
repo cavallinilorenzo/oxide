@@ -1,12 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type AppError, type DiffScope, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import { DiffOpenContext } from "./diffOpen";
+import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { GitHeader } from "./GitHeader";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
-import { toggleForKey } from "./shortcuts";
+import { isNewThreadShortcut, toggleForKey } from "./shortcuts";
+import { getDraft, setDraft } from "./threadDrafts";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -23,13 +25,15 @@ export function App() {
   const [showTools, setShowTools] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
-  const [diffScope, setDiffScope] = useState<DiffScope>("uncommitted");
+  // The user's pick, for the Thread it was made in: elsewhere that Thread's default applies.
+  const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   // The Project and Thread of the last session: `undefined` until read, `null` once applied.
   const restore = useRef<{ projectId: number; threadId: number | null } | null | undefined>(undefined);
@@ -47,6 +51,17 @@ export function App() {
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
+  // Board Threads (own worktree) don't exist yet: every Thread is a chat Thread.
+  const diffThread = { board: false };
+  const diffScope =
+    chosenDiffScope && chosenDiffScope.threadId === currentThreadId
+      ? chosenDiffScope.scope
+      : defaultDiffScope(diffThread);
+  // Read by the stable `openDiff`.
+  const currentThreadRef = useRef(currentThreadId);
+  useEffect(() => {
+    currentThreadRef.current = currentThreadId;
+  });
   const currentTerminalContext = useMemo<TerminalContext | null>(
     () => selected && threads !== null
       ? {
@@ -73,7 +88,7 @@ export function App() {
   const openDiff = useCallback((hint?: string) => {
     setShowTools(true);
     setActiveTool("Diff");
-    setDiffScope("uncommitted");
+    setChosenDiffScope({ threadId: currentThreadRef.current, scope: "uncommitted" });
     setDiffFocus(hint ?? null);
   }, []);
 
@@ -123,8 +138,47 @@ export function App() {
     );
   }, []);
 
+  const onThreadTitleChange = useCallback((threadId: number, title: string) => {
+    setThreads(
+      (prev) => prev?.map((t) => (t.id === threadId ? { ...t, title } : t)) ?? null
+    );
+  }, []);
+
+  const onThreadUpdated = useCallback((updated: Thread) => {
+    setThreads(
+      (prev) => prev?.map((t) => (t.id === updated.id ? updated : t)) ?? null
+    );
+  }, []);
+
+  const startNewThread = useCallback(async () => {
+    if (!selected) return;
+    const settingsRes = await commands.getSettings();
+    const provider = settingsRes.settings.defaultProvider || "claude";
+    const provKey = provider as keyof typeof settingsRes.settings.providers;
+    const provSettings = settingsRes.settings.providers[provKey];
+    const created = await commands.createThread(
+      selected.id,
+      provider,
+      provSettings?.model ?? null,
+      provSettings?.effort ?? null,
+      provSettings?.permissionMode ?? null
+    );
+    if (created.status === "ok") {
+      setThreads((prev) => [created.data, ...(prev || [])]);
+      setSelectedThreadId(created.data.id);
+      rememberTerminalContext(selected.id, created.data.id);
+    }
+  }, [selected, rememberTerminalContext]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isNewThreadShortcut(e)) {
+        if (selected) {
+          e.preventDefault();
+          void startNewThread();
+        }
+        return;
+      }
       const toggle = toggleForKey(e);
       if (!toggle) return;
       e.preventDefault();
@@ -134,7 +188,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selected, startNewThread]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -232,9 +286,9 @@ export function App() {
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
           onNewThread={() => {
-            setSelectedThreadId(null);
-            if (selected) rememberTerminalContext(selected.id, null);
+            void startNewThread();
           }}
+          onRenameThread={onThreadTitleChange}
         />
         <div className="centre-column">
           {showSettings ? (
@@ -245,12 +299,21 @@ export function App() {
                 <ThreadView
                   threadId={selectedThreadId}
                   projectId={selected.id}
+                  draft={getDraft(drafts, selectedThreadId)}
+                  onDraftChange={(text) =>
+                    setDrafts((prev) => setDraft(prev, selectedThreadId, text))
+                  }
+                  onClearThread={() => {
+                    void startNewThread();
+                  }}
                   onThreadCreated={(newThread) => {
                     setThreads((prev) => [newThread, ...(prev || [])]);
                     setSelectedThreadId(newThread.id);
                     rememberTerminalContext(selected.id, newThread.id);
                   }}
+                  onThreadUpdated={onThreadUpdated}
                   onStatusChange={onThreadStatusChange}
+                  onThreadTitleChange={onThreadTitleChange}
                   prefill={prefill}
                   onPrefillUsed={() => setPrefill(null)}
                   onOpenThread={(id) => {
@@ -304,9 +367,11 @@ export function App() {
               <Suspense fallback={null}>
                 <DiffPanel
                   projectId={selected.id}
+                  threadId={currentThreadId}
+                  board={diffThread.board}
                   scope={diffScope}
                   onScopeChange={(scope) => {
-                    setDiffScope(scope);
+                    setChosenDiffScope({ threadId: currentThreadId, scope });
                     setDiffFocus(null);
                   }}
                   focus={diffFocus}
@@ -336,6 +401,7 @@ interface SidebarProps {
   selectedThreadId: number | null;
   onSelectThread: (threadId: number) => void;
   onNewThread: () => void;
+  onRenameThread?: (threadId: number, newTitle: string) => void;
 }
 
 function Sidebar({
@@ -347,10 +413,21 @@ function Sidebar({
   selectedThreadId,
   onSelectThread,
   onNewThread,
+  onRenameThread,
 }: SidebarProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
+  const [editingThreadId, setEditingThreadId] = useState<number | null>(null);
+  const [renameText, setRenameText] = useState("");
+
+  const finishRename = async (threadId: number) => {
+    setEditingThreadId(null);
+    const trimmed = renameText.trim();
+    if (!trimmed) return;
+    await commands.renameThread(threadId, trimmed);
+    onRenameThread?.(threadId, trimmed);
+  };
 
   const apply = (r: Result<Project[], AppError>) => {
     if (r.status === "ok") {
@@ -448,19 +525,39 @@ function Sidebar({
           <ul aria-label="Thread list">
             {threads?.map((t) => (
               <li key={t.id}>
-                <button
-                  className="thread-item"
-                  aria-current={t.id === selectedThreadId}
-                  onClick={() => onSelectThread(t.id)}
-                  title={`Thread #${t.id} (${t.status})`}
-                >
-                  <span
-                    className={`status-dot ${t.status}`}
-                    aria-label={`Status: ${t.status}`}
-                    title={`Status: ${t.status}`}
+                {editingThreadId === t.id ? (
+                  <input
+                    className="thread-rename-input"
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.target.value)}
+                    onBlur={() => void finishRename(t.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void finishRename(t.id);
+                      if (e.key === "Escape") setEditingThreadId(null);
+                    }}
+                    autoFocus
+                    aria-label={`Rename thread ${t.title || `Thread #${t.id}`}`}
                   />
-                  <span>Thread #{t.id}</span>
-                </button>
+                ) : (
+                  <button
+                    className="thread-item"
+                    aria-current={t.id === selectedThreadId}
+                    onClick={() => onSelectThread(t.id)}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      setEditingThreadId(t.id);
+                      setRenameText(t.title || `Thread #${t.id}`);
+                    }}
+                    title={`${t.title || `Thread #${t.id}`} (${t.status})`}
+                  >
+                    <span
+                      className={`status-dot ${t.status}`}
+                      aria-label={`Status: ${t.status}`}
+                      title={`Status: ${t.status}`}
+                    />
+                    <span className="thread-item-title">{t.title || `Thread #${t.id}`}</span>
+                  </button>
+                )}
               </li>
             ))}
           </ul>

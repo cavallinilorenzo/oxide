@@ -9,6 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use crate::activity::Activity;
+use crate::checkpoint::{self, Phase};
 use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
@@ -42,6 +43,9 @@ pub enum ThreadActorMsg {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)>,
     },
     Tick,
+    Rename {
+        title: String,
+    },
     Shutdown {
         reply: mpsc::Sender<()>,
     },
@@ -170,6 +174,10 @@ impl ThreadActorHandle {
         let _ = self.sender.send(ThreadActorMsg::Tick);
     }
 
+    pub fn rename(&self, title: String) {
+        let _ = self.sender.send(ThreadActorMsg::Rename { title });
+    }
+
     /// Shuts the Provider down (escalating to SIGKILL if it won't go) and stops the actor.
     /// Returns once the Provider's processes are gone.
     pub fn shutdown(&self) {
@@ -194,6 +202,8 @@ struct CurrentTurn {
 
 struct ActorState {
     thread_id: u32,
+    /// The working tree this Thread's Checkpoints snapshot.
+    checkout: PathBuf,
     next_turn_index: u32,
     current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
@@ -225,6 +235,7 @@ struct PendingDelta {
 impl ActorState {
     fn new(
         thread_id: u32,
+        checkout: PathBuf,
         next_turn_index: u32,
         capabilities: ProviderCapabilities,
         clock: Arc<dyn Clock>,
@@ -238,6 +249,7 @@ impl ActorState {
             provider_exited: false,
             idle_since,
             thread_id,
+            checkout,
             next_turn_index,
             current_turn: None,
             pending_deltas: HashMap::new(),
@@ -337,9 +349,11 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             let turn_index = state.next_turn_index;
             state.next_turn_index += 1;
             state.dropped_items.clear();
+            checkpoint::take(&state.checkout, state.thread_id, turn_index, Phase::Start);
             let attachments = std::mem::take(&mut state.pending_attachments);
             let (mut model, mut effort) = (None, None);
             let mut id = None;
+            let mut new_title = None;
             if let Ok(started) = storage.write_turn_started(
                 state.thread_id,
                 turn_index,
@@ -349,6 +363,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 id = Some(started.id);
                 model = started.model;
                 effort = started.effort;
+                new_title = started.thread_title;
             }
             state.current_turn = Some(CurrentTurn {
                 index: turn_index,
@@ -366,6 +381,9 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 },
                 raw,
             );
+            if let Some(title) = new_title {
+                state.broadcast(ThreadEvent::ThreadRenamed { title });
+            }
             state.broadcast_status(ThreadStatus::Working);
         }
         ProviderEvent::ItemStarted {
@@ -519,6 +537,7 @@ fn finish_turn(
         return;
     };
     state.idle_since = Some(state.clock.now());
+    checkpoint::take(&state.checkout, state.thread_id, turn.index, Phase::End);
     let error = (status == TurnStatus::Error).then(|| {
         let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
         let message = turn
@@ -593,7 +612,14 @@ fn run_thread_actor(
 
     // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
-    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone(), clock, activity);
+    let mut state = ActorState::new(
+        thread_id,
+        working_dir.clone(),
+        next_turn_index,
+        caps.clone(),
+        clock,
+        activity,
+    );
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {
@@ -735,6 +761,9 @@ fn run_thread_actor(
                         }
                         state.flush_pending_deltas();
                         reap_if_idle(&mut *provider, &mut state, &mut prx);
+                    }
+                    ThreadActorMsg::Rename { title } => {
+                        state.broadcast(ThreadEvent::ThreadRenamed { title });
                     }
                     ThreadActorMsg::Shutdown { reply } => {
                         stop_provider(&mut *provider, &mut state, &mut prx);

@@ -238,6 +238,7 @@ pub struct Thread {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
     pub session_lost: bool,
     pub continued_from: Option<u32>,
     pub continued_in: Option<u32>,
@@ -368,6 +369,9 @@ pub enum ThreadEvent {
     },
     ThreadStatusChanged {
         status: ThreadStatus,
+    },
+    ThreadRenamed {
+        title: String,
     },
     ApprovalRequested {
         id: String,
@@ -662,6 +666,15 @@ async fn git_diff(
         .map(|diff| convert(&diff))
 }
 
+/// What a Thread's latest Turn changed, from its two Checkpoints.
+#[tauri::command]
+#[specta::specta]
+async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.latest_turn_diff(thread_id))
+        .await
+        .map(|diff| convert(&diff))
+}
+
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
 #[tauri::command]
 #[specta::specta]
@@ -755,6 +768,27 @@ fn set_thread_permission_mode(
 ) -> Result<(), AppError> {
     let mode: oxide_core::PermissionMode = convert(&permission_mode);
     Ok(core.set_thread_permission_mode(thread_id, mode)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_provider(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    provider: String,
+) -> Result<Thread, AppError> {
+    let summary = core.set_thread_provider(thread_id, &provider)?;
+    Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn rename_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    title: String,
+) -> Result<(), AppError> {
+    Ok(core.rename_thread(thread_id, &title)?)
 }
 
 #[tauri::command]
@@ -1033,6 +1067,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_thread,
         continue_thread,
         set_thread_permission_mode,
+        set_thread_provider,
+        rename_thread,
         respond_to_approval,
         detect_provider,
         get_provider_capabilities,
@@ -1054,6 +1090,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         git_status,
         list_branches,
         git_diff,
+        git_turn_diff,
         checkout_branch,
         create_branch,
         fetch_project,
@@ -1180,6 +1217,7 @@ mod tests {
                 archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
+                title: None,
                 session_lost: false,
                 continued_from: None,
                 continued_in: None,

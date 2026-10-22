@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod activity;
+mod checkpoint;
 mod clock;
 mod continuation;
 mod db;
@@ -361,14 +362,33 @@ impl Core {
         Ok(())
     }
 
-    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+    pub fn default_settings_for_provider(
+        &self,
+        provider: &str,
+    ) -> (Option<String>, Option<String>, PermissionMode) {
         let settings = self.settings().settings;
         match provider {
-            "claude" => settings.providers.claude.permission_mode,
-            "codex" => settings.providers.codex.permission_mode,
-            "agy" | "antigravity" => settings.providers.antigravity.permission_mode,
-            _ => PermissionMode::Ask,
+            "claude" => (
+                settings.providers.claude.model,
+                settings.providers.claude.effort,
+                settings.providers.claude.permission_mode,
+            ),
+            "codex" => (
+                settings.providers.codex.model,
+                settings.providers.codex.effort,
+                settings.providers.codex.permission_mode,
+            ),
+            "agy" | "antigravity" => (
+                settings.providers.antigravity.model,
+                settings.providers.antigravity.effort,
+                settings.providers.antigravity.permission_mode,
+            ),
+            _ => (None, None, PermissionMode::AutoEdit),
         }
+    }
+
+    pub fn default_permission_mode_for(&self, provider: &str) -> PermissionMode {
+        self.default_settings_for_provider(provider).2
     }
 
     pub fn create_thread(
@@ -379,9 +399,10 @@ impl Core {
         effort: Option<String>,
         permission_mode: impl Into<Option<PermissionMode>>,
     ) -> Result<ThreadSummary> {
-        let permission_mode = permission_mode
-            .into()
-            .unwrap_or_else(|| self.default_permission_mode_for(provider));
+        let (def_model, def_effort, def_perm) = self.default_settings_for_provider(provider);
+        let model = model.or(def_model);
+        let effort = effort.or(def_effort);
+        let permission_mode = permission_mode.into().unwrap_or(def_perm);
         self.insert_thread(project_id, provider, model, effort, permission_mode, None)
     }
 
@@ -435,6 +456,36 @@ impl Core {
         )?;
         let id = db.last_insert_rowid() as u32;
         self.get_thread_by_id(&db, id)
+    }
+
+    pub fn set_thread_provider(&self, thread_id: u32, provider: &str) -> Result<ThreadSummary> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let (turn_count, status_str): (u32, String) = db.query_row(
+            "SELECT (SELECT COUNT(*) FROM turns WHERE thread_id = ?1), status FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if turn_count > 0 || status_str == "working" {
+            return Err(Error::Provider(
+                "cannot switch provider after the first turn has started".into(),
+            ));
+        }
+
+        let (def_model, def_effort, def_perm) = self.default_settings_for_provider(provider);
+        let mode_str = serde_json::to_string(&def_perm)
+            .unwrap_or_default()
+            .trim_matches('"')
+            .to_string();
+
+        db.execute(
+            "UPDATE threads SET provider = ?1, model = ?2, effort = ?3, permission_mode = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
+            rusqlite::params![provider, def_model, def_effort, mode_str, thread_id],
+        )?;
+        self.thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&thread_id);
+        self.get_thread_by_id(&db, thread_id)
     }
 
     pub fn set_thread_permission_mode(&self, thread_id: u32, mode: PermissionMode) -> Result<()> {
@@ -539,6 +590,24 @@ impl Core {
             thread::parse_thread_summary,
         )
         .map_err(Into::into)
+    }
+
+    pub fn rename_thread(&self, thread_id: u32, title: &str) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE threads SET title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+            rusqlite::params![title, thread_id],
+        )?;
+        drop(db);
+        if let Some(actor) = self
+            .thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&thread_id)
+        {
+            actor.rename(title.to_string());
+        }
+        Ok(())
     }
 
     pub fn register_fake_provider(&self, thread_id: u32, provider: impl ProviderTrait) {
@@ -791,6 +860,27 @@ impl Core {
     /// The changes of a Project's main checkout in one scope, straight from Git.
     pub fn diff(&self, project_id: u32, scope: DiffScope) -> Result<Diff> {
         git_diff::diff(&self.main_checkout(project_id)?, scope)
+    }
+
+    /// What one Turn changed: the diff between its two Checkpoints.
+    pub fn turn_diff(&self, thread_id: u32, turn_index: u32) -> Result<Diff> {
+        let project_id = self.storage.get_snapshot(thread_id, 0)?.thread.project_id;
+        checkpoint::turn_diff(&self.main_checkout(project_id)?, thread_id, turn_index)
+    }
+
+    /// [`Core::turn_diff`] of the Thread's latest Turn; empty before the first.
+    pub fn latest_turn_diff(&self, thread_id: u32) -> Result<Diff> {
+        let snapshot = self.storage.get_snapshot(thread_id, 0)?;
+        match snapshot.turn_count.checked_sub(1) {
+            Some(latest) => {
+                let cwd = self.main_checkout(snapshot.thread.project_id)?;
+                checkpoint::turn_diff(&cwd, thread_id, latest)
+            }
+            None => Ok(Diff {
+                base: None,
+                files: Vec::new(),
+            }),
+        }
     }
 
     /// Local and remote branches of a Project's main checkout.

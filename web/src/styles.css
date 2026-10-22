@@ -126,6 +126,23 @@ button[aria-pressed="true"] { background: #8883; }
 .thread-item[aria-current="true"] {
   background: #8884;
 }
+.thread-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.thread-rename-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 4px 6px;
+  background: inherit;
+  color: inherit;
+  border: 1px solid #0070f3;
+  border-radius: 4px;
+  outline: none;
+  box-sizing: border-box;
+}
 .status-dot {
   width: 8px;
   height: 8px;
@@ -276,12 +293,125 @@ button[aria-pressed="true"] { background: #8883; }
 .file-change:hover { background: #8882; }
 .subagent { border: 1px solid #8883; border-radius: 8px; padding: 4px 8px; }
 .subagent-task { font-size: 12px; opacity: 0.6; margin-bottom: 6px; }
+/* Composer and footer */
 .composer {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 12px 16px 8px;
   border-top: 1px solid #8884;
+}
+.composer-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 16px 8px;
+  font-size: 11px;
+  color: #888;
+  border-top: 1px solid #8882;
+  user-select: none;
+}
+.composer-footer .checkout-badge,
+.composer-footer .branch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.thread-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid #8882;
+  min-height: 40px;
+  gap: 12px;
+}
+.thread-title-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.thread-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thread-title:hover {
+  text-decoration: underline;
+}
+.thread-title-input {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border: 1px solid #0070f3;
+  border-radius: 4px;
+  background: inherit;
+  color: inherit;
+  outline: none;
+  flex: 1;
+  max-width: 400px;
+}
+.rename-thread-btn {
+  background: none;
+  border: 0;
+  font-size: 12px;
+  opacity: 0.5;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.rename-thread-btn:hover {
+  opacity: 1;
+  background: #8882;
+}
+.provider-chip-wrapper {
+  display: flex;
+  align-items: center;
+}
+.provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #8882;
+  border: 1px solid #8884;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.provider-chip:hover {
+  background: #8883;
+}
+.provider-chip:has(.provider-chip-select:disabled) {
+  opacity: 0.6;
+  cursor: default;
+}
+.provider-chip-select {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+}
+.provider-chip-select:disabled {
+  cursor: default;
 }
 .composer-input {
   flex: 1;
@@ -506,6 +636,7 @@ button[aria-pressed="true"] { background: #8883; }
 .diff-scopes button { font: inherit; padding: 2px 8px; border: 1px solid #8884; border-radius: 4px; background: none; color: inherit; cursor: pointer; }
 .diff-scopes button[aria-selected="true"] { background: #8883; font-weight: 600; }
 .diff-base { margin-left: auto; opacity: .7; }
+.diff-note { padding: 4px 8px; font-size: .85em; opacity: .6; border-bottom: 1px solid #8883; }
 .diff-body { flex: 1; min-height: 0; overflow: auto; }
 .diff-file { border-bottom: 1px solid #8883; }
 .diff-file-focused { outline: 2px solid #4a90e2; outline-offset: -2px; }

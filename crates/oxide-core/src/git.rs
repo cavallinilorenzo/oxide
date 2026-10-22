@@ -107,9 +107,14 @@ impl GitState {
 }
 
 pub(crate) fn run(cwd: &Path, args: &[&str]) -> Result<String> {
+    run_with_env(cwd, args, &[])
+}
+
+pub(crate) fn run_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .envs(env.iter().copied())
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output()

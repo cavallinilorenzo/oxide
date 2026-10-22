@@ -60,6 +60,11 @@ export const commands = {
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
+	/**  The Project and Thread to reopen on launch. */
+	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
+	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
+	/**  The user confirmed quitting: interrupt every Thread and exit. */
+	confirmQuit: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("confirm_quit", { dontAskAgain })),
 };
 
 /* Types */
@@ -305,6 +310,18 @@ export type Providers_Serialize = {
 	claude: ProviderSettings_Serialize,
 	codex: ProviderSettings_Serialize,
 	antigravity: ProviderSettings_Serialize,
+};
+
+export type Selection = Selection_Serialize | Selection_Deserialize;
+
+export type Selection_Deserialize = {
+	projectId: number,
+	threadId?: number | null,
+};
+
+export type Selection_Serialize = {
+	projectId: number,
+	threadId: number | null,
 };
 
 export type SequencedThreadEvent = SequencedThreadEvent_Serialize | SequencedThreadEvent_Deserialize;

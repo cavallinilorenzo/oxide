@@ -88,6 +88,13 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX turns_by_thread ON turns(thread_id, id);
     CREATE INDEX items_by_turn ON items(turn_id, item_index);
 ",
+    // Small app-level facts, such as the Project and Thread last open.
+    "
+    CREATE TABLE app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

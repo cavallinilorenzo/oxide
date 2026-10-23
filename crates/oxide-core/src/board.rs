@@ -161,8 +161,7 @@ impl BoardHub {
                 let options: String = r.get(3)?;
                 Ok(PendingApproval {
                     approval_id: r.get(0)?,
-                    kind: serde_json::from_value(serde_json::Value::String(kind))
-                        .unwrap_or_default(),
+                    kind: kind.parse().unwrap_or_default(),
                     summary: r.get(2)?,
                     options: serde_json::from_str(&options).unwrap_or_default(),
                 })

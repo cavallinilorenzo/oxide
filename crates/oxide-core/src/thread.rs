@@ -258,8 +258,7 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         provider: r.get(2)?,
         model: r.get(3)?,
         effort: r.get(4)?,
-        permission_mode: serde_json::from_value(serde_json::Value::String(mode_str))
-            .unwrap_or(PermissionMode::AutoEdit),
+        permission_mode: mode_str.parse().unwrap_or(PermissionMode::AutoEdit),
         status: status_str.parse().unwrap_or(ThreadStatus::Completed),
         archived: r.get::<_, i64>(7)? != 0,
         created_at: r.get(8)?,

@@ -100,32 +100,11 @@ impl ClaudeCodeProvider {
     }
 
     pub fn parse_version_string(raw: &str) -> Option<String> {
-        for word in raw.split_whitespace() {
-            let clean = word
-                .trim_start_matches('v')
-                .trim_matches(|c: char| !c.is_numeric() && c != '.');
-            let parts: Vec<&str> = clean.split('.').collect();
-            if parts.len() >= 2 && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
-                return Some(clean.to_string());
-            }
-        }
-        None
+        crate::parse_version_string(raw)
     }
 
     pub fn is_version_within_pinned_range(version: &str) -> bool {
-        let parts: Vec<u64> = version
-            .split('.')
-            .filter_map(|p| p.parse::<u64>().ok())
-            .collect();
-        if parts.len() < 2 {
-            return false;
-        }
-        let major = parts[0];
-        let minor = parts[1];
-        let patch = if parts.len() > 2 { parts[2] } else { 0 };
-
-        let ver = (major, minor, patch);
-        ver >= PINNED_VERSION_MIN && ver < PINNED_VERSION_MAX
+        crate::is_version_within_range(version, PINNED_VERSION_MIN, PINNED_VERSION_MAX)
     }
 
     fn spawn_process(

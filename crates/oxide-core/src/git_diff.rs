@@ -196,8 +196,10 @@ pub(crate) fn diff_against(cwd: &Path, revs: &[&str]) -> Result<Vec<DiffFile>> {
 /// Files of a unified diff that did not come from our own `git diff` call,
 /// such as `gh pr diff`'s, with the default `a/` and `b/` path prefixes.
 pub(crate) fn parse_patch(patch: &str) -> Vec<DiffFile> {
+    use rayon::prelude::*;
+
     split_patch(patch)
-        .into_iter()
+        .par_iter()
         .map(|section| {
             let header = section.lines().next().unwrap_or_default();
             let meta = |prefix: &str| {
@@ -287,6 +289,8 @@ fn parse_hunks(section: &str) -> (Vec<DiffHunk>, bool) {
 }
 
 fn untracked_files(cwd: &Path) -> Result<Vec<DiffFile>> {
+    use rayon::prelude::*;
+
     let listing = run(
         cwd,
         &[
@@ -297,9 +301,9 @@ fn untracked_files(cwd: &Path) -> Result<Vec<DiffFile>> {
             "-z",
         ],
     )?;
-    Ok(listing
-        .split('\0')
-        .filter(|p| !p.is_empty())
+    let paths: Vec<&str> = listing.split('\0').filter(|p| !p.is_empty()).collect();
+    Ok(paths
+        .par_iter()
         .map(|path| {
             let text = read_text(&cwd.join(path));
             let lines: Vec<DiffLine> = text
@@ -342,7 +346,7 @@ fn read_text(path: &Path) -> Option<String> {
     if !meta.is_file() || meta.len() > MAX_COUNTED_BYTES {
         return None;
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(meta.len().min(MAX_COUNTED_BYTES) as usize);
     File::open(path).ok()?.read_to_end(&mut bytes).ok()?;
     if bytes[..bytes.len().min(8000)].contains(&0) {
         return None;

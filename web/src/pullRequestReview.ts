@@ -18,13 +18,17 @@ export function mergeLabel(method: MergeMethod): string {
 /** One line on the checks, putting what needs attention first. */
 export function summarizeChecks(checks: PullRequestCheck[]): string {
   if (checks.length === 0) return "No checks";
-  const count = (state: PullRequestCheck["state"]) => checks.filter((c) => c.state === state).length;
-  return [
-    [count("failure"), "failing"],
-    [count("pending"), "pending"],
-    [count("success"), "passing"],
-  ]
-    .filter(([n]) => n !== 0)
-    .map(([n, word]) => `${n} ${word}`)
-    .join(", ");
+  let failing = 0;
+  let pending = 0;
+  let passing = 0;
+  for (const c of checks) {
+    if (c.state === "failure") failing++;
+    else if (c.state === "pending") pending++;
+    else if (c.state === "success") passing++;
+  }
+  const parts: string[] = [];
+  if (failing > 0) parts.push(`${failing} failing`);
+  if (pending > 0) parts.push(`${pending} pending`);
+  if (passing > 0) parts.push(`${passing} passing`);
+  return parts.join(", ");
 }

@@ -21,11 +21,55 @@ pub enum PermissionMode {
     FullAccess,
 }
 
+impl PermissionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PermissionMode::Ask => "ask",
+            PermissionMode::AutoEdit => "auto-edit",
+            PermissionMode::FullAccess => "full-access",
+        }
+    }
+}
+
+impl std::str::FromStr for PermissionMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "ask" => Ok(PermissionMode::Ask),
+            "auto-edit" => Ok(PermissionMode::AutoEdit),
+            "full-access" => Ok(PermissionMode::FullAccess),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApprovalDecision {
     Allow,
     Deny,
+}
+
+impl ApprovalDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ApprovalDecision::Allow => "allow",
+            ApprovalDecision::Deny => "deny",
+        }
+    }
+}
+
+impl std::str::FromStr for ApprovalDecision {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "allow" => Ok(ApprovalDecision::Allow),
+            "deny" => Ok(ApprovalDecision::Deny),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -39,6 +83,31 @@ pub enum ApprovalKind {
     Other,
 }
 
+impl ApprovalKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ApprovalKind::Command => "command",
+            ApprovalKind::FileChange => "file-change",
+            ApprovalKind::Tool => "tool",
+            ApprovalKind::Other => "other",
+        }
+    }
+}
+
+impl std::str::FromStr for ApprovalKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "command" => Ok(ApprovalKind::Command),
+            "file-change" | "file_change" => Ok(ApprovalKind::FileChange),
+            "tool" => Ok(ApprovalKind::Tool),
+            "other" => Ok(ApprovalKind::Other),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
@@ -49,6 +118,33 @@ pub enum ItemKind {
     Subagent,
 }
 
+impl ItemKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ItemKind::AgentMessage => "agent_message",
+            ItemKind::Reasoning => "reasoning",
+            ItemKind::ToolCall => "tool_call",
+            ItemKind::FileChange => "file_change",
+            ItemKind::Subagent => "subagent",
+        }
+    }
+}
+
+impl std::str::FromStr for ItemKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "agent_message" => Ok(ItemKind::AgentMessage),
+            "reasoning" => Ok(ItemKind::Reasoning),
+            "tool_call" => Ok(ItemKind::ToolCall),
+            "file_change" => Ok(ItemKind::FileChange),
+            "subagent" => Ok(ItemKind::Subagent),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -56,6 +152,62 @@ pub enum TurnStatus {
     Completed,
     Interrupted,
     Error,
+}
+
+impl TurnStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TurnStatus::Running => "running",
+            TurnStatus::Completed => "completed",
+            TurnStatus::Interrupted => "interrupted",
+            TurnStatus::Error => "error",
+        }
+    }
+}
+
+impl std::str::FromStr for TurnStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "running" => Ok(TurnStatus::Running),
+            "completed" => Ok(TurnStatus::Completed),
+            "interrupted" => Ok(TurnStatus::Interrupted),
+            "error" => Ok(TurnStatus::Error),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Extracts a `x.y` or `x.y.z` version string from raw CLI output (e.g. "claude 1.2.3").
+pub fn parse_version_string(raw: &str) -> Option<String> {
+    for word in raw.split_whitespace() {
+        let clean = word
+            .trim_start_matches('v')
+            .trim_matches(|c: char| !c.is_numeric() && c != '.');
+        let parts: Vec<&str> = clean.split('.').collect();
+        if parts.len() >= 2 && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
+            return Some(clean.to_string());
+        }
+    }
+    None
+}
+
+/// Checks whether a semver-like string falls within [min, max).
+pub fn is_version_within_range(
+    version: &str,
+    min: (u64, u64, u64),
+    max: (u64, u64, u64),
+) -> bool {
+    let parts: Vec<u64> = version
+        .split('.')
+        .filter_map(|p| p.parse::<u64>().ok())
+        .collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    let ver = (parts[0], parts[1], parts.get(2).copied().unwrap_or(0));
+    ver >= min && ver < max
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

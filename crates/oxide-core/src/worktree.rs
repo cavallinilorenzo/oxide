@@ -29,7 +29,11 @@ pub struct DispatchRequest {
 /// `body` closing issue `n` when merged: unchanged if it already has a `Closes #n`.
 pub(crate) fn closing_issue(body: &str, n: u32) -> String {
     let line = format!("Closes #{n}");
-    if body.to_lowercase().contains(&line.to_lowercase()) {
+    let needle = line.to_ascii_lowercase();
+    let already_present = body
+        .lines()
+        .any(|l| l.to_ascii_lowercase().contains(&needle));
+    if already_present {
         body.to_string()
     } else if body.trim().is_empty() {
         line

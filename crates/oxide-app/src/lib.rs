@@ -31,6 +31,8 @@ pub struct Project {
     name: String,
     path: String,
     hidden: bool,
+    /// Listed in the sidebar; scanned Projects stay closed until the user opens one.
+    open: bool,
     missing: bool,
 }
 
@@ -41,6 +43,7 @@ impl From<ProjectSummary> for Project {
             name: p.name,
             path: p.path,
             hidden: p.hidden,
+            open: p.open,
             missing: p.missing,
         }
     }
@@ -180,6 +183,13 @@ fn reveal_in_finder(
 #[specta::specta]
 fn set_project_hidden(core: State<'_, Arc<Core>>, id: u32, hidden: bool) -> Result<(), AppError> {
     Ok(core.set_project_hidden(id, hidden)?)
+}
+
+/// Lists the Project in the sidebar, or takes it out (it stays in the Project palette).
+#[tauri::command]
+#[specta::specta]
+fn set_project_open(core: State<'_, Arc<Core>>, id: u32, open: bool) -> Result<(), AppError> {
+    Ok(core.set_project_open(id, open)?)
 }
 
 // Settings cross the boundary as the same JSON shape as `settings.json`, so
@@ -1714,6 +1724,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         open_in_editor,
         reveal_in_finder,
         set_project_hidden,
+        set_project_open,
         get_settings,
         save_settings,
         create_thread,

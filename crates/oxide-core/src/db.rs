@@ -115,6 +115,13 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE threads ADD COLUMN issue_number INTEGER;
 ",
+    // Open Projects: the ones the user opened, listed in the sidebar. A scan only makes
+    // Projects known (findable in the Project palette); Projects with Threads start open.
+    "
+    ALTER TABLE projects ADD COLUMN opened_at TEXT;
+    UPDATE projects SET opened_at = created_at
+        WHERE id IN (SELECT DISTINCT project_id FROM threads);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

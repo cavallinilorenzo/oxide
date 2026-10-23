@@ -30,6 +30,7 @@ const project = (id: number, name: string, extra: object = {}) => ({
   name,
   path: `/code/${name}`,
   hidden: false,
+  open: false,
   missing: false,
   ...extra,
 });

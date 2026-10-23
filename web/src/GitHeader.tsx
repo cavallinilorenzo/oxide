@@ -1,4 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  GitBranchIcon,
+  GitCommitIcon,
+  GitPullRequestIcon,
+  PlusIcon,
+  RepoPullIcon,
+  RepoPushIcon,
+  TriangleDownIcon,
+  XIcon,
+} from "@primer/octicons-react";
 import { commands, type AppError, type GitBranch, type GitStatus } from "./bindings";
 import { canCreateBranch, filterBranches } from "./branchFilter";
 import { createPrBlockedReason, nextAction, pushBlockedReason } from "./gitAction";
@@ -81,14 +93,16 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
     <div className="git-header">
       <div className="branch-picker">
         <button
-          className="branch-button"
+          className="hdrbtn branch-button"
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={disabledReason !== null}
           title={disabledReason ?? "Switch branch"}
           onClick={() => setOpen((v) => !v)}
         >
-          ⎇ {status.branch ?? "detached HEAD"}
+          <GitBranchIcon size={14} />
+          <span className="branch-name">{status.branch ?? "detached HEAD"}</span>
+          <ChevronDownIcon size={12} />
         </button>
         {open && (
           <BranchMenu
@@ -99,10 +113,9 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
           />
         )}
       </div>
-      {status.pickerDisabledReason && <span className="git-reason">{status.pickerDisabledReason}</span>}
       {dirty && (
         <button
-          className="dirty-chip"
+          className="chip dirty-chip"
           title={`${status.changedFiles} changed file${status.changedFiles === 1 ? "" : "s"}`}
           onClick={onOpenDiff}
         >
@@ -111,22 +124,23 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
       )}
       {status.behind > 0 && (
         <button
-          className="pull-button"
+          className="btn pull-button"
           disabled={busy}
-          title={`Fast-forward from ${status.upstream ?? "upstream"}`}
+          title={`Fast-forward ${status.behind} commit${status.behind === 1 ? "" : "s"} from ${status.upstream ?? "upstream"}`}
           onClick={() => void act(() => commands.pull(projectId))}
         >
-          Pull ↓{status.behind}
+          <RepoPullIcon size={14} /> Pull
         </button>
       )}
-      <div className="split-button">
+      <div className={`split-button${action.kind === "up-to-date" ? "" : " primary"}`}>
         <button
           className="git-primary"
           disabled={busy || push.busy || action.kind === "up-to-date" || action.blockedReason !== null}
           title={action.blockedReason ?? undefined}
           onClick={() => (action.kind === "commit-push" ? onOpenDiff() : void pushNow())}
         >
-          {action.label}
+          {action.kind === "up-to-date" ? <CheckIcon size={14} /> : action.kind === "commit-push" ? <GitCommitIcon size={14} /> : <RepoPushIcon size={14} />}
+          {action.label.replace(/^✓\s*/, "")}
         </button>
         <button
           className="git-menu-toggle"
@@ -135,7 +149,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
           aria-label="More Git actions"
           onClick={() => setMenuOpen((v) => !v)}
         >
-          ▾
+          <TriangleDownIcon size={14} />
         </button>
         {menuOpen && (
           <div
@@ -146,7 +160,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
             }}
           >
             <button role="menuitem" disabled={!dirty} onClick={() => (setMenuOpen(false), onOpenDiff())}>
-              Commit…
+              <GitCommitIcon size={14} /> Commit…
             </button>
             <button
               role="menuitem"
@@ -154,7 +168,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
               title={pushBlockedReason(status) ?? undefined}
               onClick={() => (setMenuOpen(false), void pushNow())}
             >
-              Push
+              <RepoPushIcon size={14} /> Push
             </button>
             <button
               role="menuitem"
@@ -162,7 +176,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
               title={createPrBlockedReason(status) ?? undefined}
               onClick={() => (setMenuOpen(false), onOpenPullRequest())}
             >
-              Create PR
+              <GitPullRequestIcon size={14} /> Create PR
             </button>
           </div>
         )}
@@ -172,13 +186,14 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
         <span className="git-error" role="alert" title={error ?? push.error ?? undefined}>
           <span className="git-error-text">{error ?? push.error}</span>
           <button
+            className="icon-btn sm"
             aria-label="Dismiss error"
             onClick={() => {
               setError(null);
               push.clearError();
             }}
           >
-            ✕
+            <XIcon size={12} />
           </button>
         </span>
       )}
@@ -236,15 +251,17 @@ function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProp
         {shown.map((b) => (
           <li key={`${b.remote}:${b.name}`} role="option" aria-selected={b.current}>
             <button disabled={b.current} onClick={() => choose(() => onCheckout(b.name))}>
-              {b.current ? "✓ " : ""}
-              {b.name}
+              <span className="menu-check">{b.current && <CheckIcon size={12} />}</span>
+              <span className="branch-name">{b.name}</span>
               {b.remote && <span className="badge">remote</span>}
             </button>
           </li>
         ))}
         {branches !== null && canCreateBranch(branches, query) && (
           <li>
-            <button onClick={() => choose(() => onCreate(name))}>Create “{name}” from HEAD</button>
+            <button onClick={() => choose(() => onCreate(name))}>
+              <PlusIcon size={12} /> Create “{name}” from HEAD
+            </button>
           </li>
         )}
       </ul>

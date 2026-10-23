@@ -6,14 +6,20 @@ use crate::git;
 use crate::git_diff::{Diff, parse_patch};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const INSTALL_GUIDANCE: &str =
     "Install the GitHub CLI (https://cli.github.com), then run `gh auth login`.";
 const LOGIN_GUIDANCE: &str = "The GitHub CLI is not logged in. Run `gh auth login` in a terminal.";
+
+/// How long a passing `gh auth status`, and a repository's default branch, are reused.
+/// Each costs a round trip to GitHub, and the Pull request Surface needs both on every load.
+const CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Where a GUI app, which inherits a minimal PATH, may find a Homebrew `gh`.
 const FALLBACK_DIRS: [&str; 2] = ["/opt/homebrew/bin", "/usr/local/bin"];
@@ -187,14 +193,22 @@ enum GhError {
 
 /// How `gh` is found: the process PATH plus Homebrew's, unless a search path
 /// replaces it (tests put a fake `gh` alone on it).
+/// Only success is cached: a missing or logged-out `gh` is checked again every time.
 #[derive(Default)]
 pub struct Gh {
     search_path: Mutex<Option<Vec<PathBuf>>>,
+    ready_at: Mutex<Option<Instant>>,
+    default_branches: Mutex<HashMap<PathBuf, (Instant, String)>>,
 }
 
 impl Gh {
     pub fn set_search_path(&self, dirs: Option<Vec<PathBuf>>) {
         *self.search_path.lock().unwrap_or_else(|e| e.into_inner()) = dirs;
+        *self.ready_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.default_branches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     fn path_var(&self) -> OsString {
@@ -244,8 +258,15 @@ impl Gh {
 
     /// Whether `gh` can be used, and if not, what to tell the user.
     fn availability(&self, cwd: &Path) -> (GithubAvailability, Option<String>) {
+        let fresh = |at: &Option<Instant>| at.is_some_and(|at| at.elapsed() < CACHE_TTL);
+        if fresh(&self.ready_at.lock().unwrap_or_else(|e| e.into_inner())) {
+            return (GithubAvailability::Ready, None);
+        }
         match self.run(cwd, &["auth", "status"]) {
-            Ok(_) => (GithubAvailability::Ready, None),
+            Ok(_) => {
+                *self.ready_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+                (GithubAvailability::Ready, None)
+            }
             Err(GhError::Missing) => (GithubAvailability::Missing, Some(INSTALL_GUIDANCE.into())),
             Err(GhError::Failed(_)) => (GithubAvailability::LoggedOut, Some(LOGIN_GUIDANCE.into())),
         }
@@ -259,12 +280,26 @@ impl Gh {
     }
 
     fn default_branch(&self, cwd: &Path) -> Result<String> {
+        if let Some((at, branch)) = self
+            .default_branches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(cwd)
+            && at.elapsed() < CACHE_TTL
+        {
+            return Ok(branch.clone());
+        }
         let json = self.run(cwd, &["repo", "view", "--json", "defaultBranchRef"])?;
         let value: serde_json::Value = parse(&json)?;
-        value["defaultBranchRef"]["name"]
+        let branch = value["defaultBranchRef"]["name"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| Error::Github("GitHub did not report a default branch.".into()))
+            .ok_or_else(|| Error::Github("GitHub did not report a default branch.".into()))?;
+        self.default_branches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(cwd.to_path_buf(), (Instant::now(), branch.clone()));
+        Ok(branch)
     }
 
     /// The open pull request of the checked-out branch.
@@ -373,10 +408,23 @@ pub fn pull_request_state(gh: &Gh, cwd: &Path) -> Result<PullRequestState> {
         pull_request: None,
     };
     if availability == GithubAvailability::Ready {
-        state.default_branch = Some(gh.default_branch(cwd)?);
-        if state.branch.is_some() {
-            state.pull_request = gh.current_pull_request(cwd)?;
-        }
+        // Two independent round trips to GitHub: run them side by side.
+        let (default_branch, pull_request) = std::thread::scope(|scope| {
+            let pull_request = state
+                .branch
+                .is_some()
+                .then(|| scope.spawn(|| gh.current_pull_request(cwd)));
+            let default_branch = gh.default_branch(cwd);
+            let pull_request = match pull_request {
+                Some(handle) => handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+                None => Ok(None),
+            };
+            (default_branch, pull_request)
+        });
+        state.default_branch = Some(default_branch?);
+        state.pull_request = pull_request?;
     }
     Ok(state)
 }

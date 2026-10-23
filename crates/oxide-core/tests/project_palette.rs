@@ -288,3 +288,49 @@ fn reveal_in_finder_reveals_the_checkout() {
         [repo.canonicalize().unwrap()]
     );
 }
+
+#[test]
+fn scanned_projects_stay_closed_until_opened_and_closing_keeps_them_known() {
+    let f = fixture(vec![]);
+    make_repo(&f.root().join("code/scanned"));
+    make_repo(&f.root().join("code/added"));
+    let mut settings = f.core.settings().settings;
+    settings.scan_roots = vec![f.root().join("code").to_string_lossy().into_owned()];
+    f.core.save_settings(&settings).unwrap();
+
+    let scanned = f.core.rescan_projects().unwrap();
+    assert_eq!(scanned.len(), 2);
+    assert!(
+        scanned.iter().all(|p| !p.open),
+        "a scan only makes Projects known"
+    );
+
+    let added = f
+        .core
+        .add_project(f.root().join("code/added").to_str().unwrap())
+        .unwrap();
+    assert!(added.open, "adding a folder opens it");
+
+    let other = scanned.iter().find(|p| p.name == "scanned").unwrap();
+    f.core.remember_selection(other.id, None).unwrap();
+    let open = |name: &str| {
+        f.core
+            .list_projects()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.name == name)
+            .unwrap()
+            .open
+    };
+    assert!(open("scanned"), "selecting a Project opens it");
+
+    f.core.set_project_open(other.id, false).unwrap();
+    assert!(!open("scanned"));
+    f.core.rescan_projects().unwrap();
+    assert!(!open("scanned"), "a rescan does not reopen it");
+    assert_eq!(
+        f.core.list_projects().unwrap().len(),
+        2,
+        "closing keeps the Project known"
+    );
+}

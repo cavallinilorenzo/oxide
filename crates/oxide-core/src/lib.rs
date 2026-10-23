@@ -82,8 +82,10 @@ pub struct ProjectSummary {
     pub id: u32,
     pub name: String,
     pub path: String,
-    /// Hidden from the sidebar; stays hidden across rescans.
+    /// Left out of the sidebar and the Project palette; stays hidden across rescans.
     pub hidden: bool,
+    /// Opened by the user, so listed in the sidebar. Scanned Projects start closed.
+    pub open: bool,
     /// The folder no longer exists; the record and its data are kept.
     pub missing: bool,
 }
@@ -258,7 +260,9 @@ impl Core {
     }
 
     /// Remembers the Project and Thread the user is looking at, to reopen on next launch.
+    /// Opening a Project this way also lists it in the sidebar.
     pub fn remember_selection(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
+        self.set_project_open(project_id, true)?;
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         db.execute(
             "INSERT INTO app_state (key, value) VALUES ('selection', ?1)
@@ -331,8 +335,9 @@ impl Core {
     /// recently added first.
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt =
-            db.prepare("SELECT id, name, path, hidden FROM projects ORDER BY id DESC")?;
+        let mut stmt = db.prepare(
+            "SELECT id, name, path, hidden, opened_at IS NOT NULL FROM projects ORDER BY id DESC",
+        )?;
         let rows = stmt.query_map([], |r| {
             let path: String = r.get(2)?;
             Ok(ProjectSummary {
@@ -341,6 +346,7 @@ impl Core {
                 missing: !Path::new(&path).exists(),
                 path,
                 hidden: r.get(3)?,
+                open: r.get(4)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -376,7 +382,7 @@ impl Core {
         self.list_projects()
     }
 
-    /// Registers an existing folder as a Project (and shows it again if it was hidden).
+    /// Registers an existing folder as a Project and opens it (showing it again if it was hidden).
     /// Opening the same folder twice yields the same Project.
     pub fn add_project(&self, path: &str) -> Result<ProjectSummary> {
         let expanded = self.expand_home(path.trim());
@@ -401,7 +407,12 @@ impl Core {
                 "INSERT OR IGNORE INTO projects (name, path) VALUES (?1, ?2)",
                 (&name, &path),
             )?;
-            db.execute("UPDATE projects SET hidden = 0 WHERE path = ?1", [&path])?;
+            db.execute(
+                "UPDATE projects SET hidden = 0,
+                     opened_at = COALESCE(opened_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 WHERE path = ?1",
+                [&path],
+            )?;
             db.query_row("SELECT id FROM projects WHERE path = ?1", [&path], |r| {
                 r.get::<_, u32>(0)
             })?
@@ -471,6 +482,23 @@ impl Core {
             .into_iter()
             .find(|p| p.id == id)
             .ok_or(Error::Db(rusqlite::Error::QueryReturnedNoRows))
+    }
+
+    /// Lists the Project in the sidebar, or takes it out; it stays known either way, so
+    /// the Project palette still finds it. Opening keeps the time it was first opened.
+    pub fn set_project_open(&self, id: u32, open: bool) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        if open {
+            db.execute(
+                "UPDATE projects SET hidden = 0,
+                     opened_at = COALESCE(opened_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 WHERE id = ?1",
+                [id],
+            )?;
+        } else {
+            db.execute("UPDATE projects SET opened_at = NULL WHERE id = ?1", [id])?;
+        }
+        Ok(())
     }
 
     pub fn set_project_hidden(&self, id: u32, hidden: bool) -> Result<()> {

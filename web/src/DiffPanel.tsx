@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, UnfoldIcon } from "@primer/octicons-react";
 import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, type PanelScope } from "./diffScope";
+import { hunkContext, numberHunk, splitPath, startsCollapsed } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 
@@ -116,32 +118,118 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
     onChanged();
   }
 
-  useEffect(() => {
-    if (!focused) return;
-    document.getElementById(fileAnchor(focused.path))?.scrollIntoView?.({ block: "start" });
-  }, [focused?.path, loaded.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The file shown on the right: the user's pick, a hint from the chat, else the first.
+  // A pick holds until the chat points at another file.
+  const [pick, setPick] = useState<{ path: string; focus: string | null } | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const picked = pick && pick.focus === focus ? files.find((f) => f.path === pick.path) : undefined;
+  const current = picked ?? focused ?? files[0] ?? null;
+  const setPicked = (path: string) => setPick({ path, focus });
+  const added = files.reduce((n, f) => n + f.added, 0);
+  const removed = files.reduce((n, f) => n + f.removed, 0);
+
+  const toggleChecked = (path: string, checked: boolean) =>
+    setUnchecked((prev) => {
+      const next = new Set(prev);
+      if (checked) next.delete(path);
+      else next.add(path);
+      return next;
+    });
 
   return (
     <section className="diff" aria-label="Diff">
-      <div className="diff-scopes" role="tablist" aria-label="Diff scope">
-        {(reviewedPr === null ? SCOPES : [...SCOPES, { scope: "pr" as const, label: `PR #${reviewedPr}` }]).map((s) => (
-          <button
-            key={s.scope}
-            role="tab"
-            aria-selected={scope === s.scope}
-            onClick={() => onScopeChange(s.scope)}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="surface-bar">
+        <div className="seg" role="tablist" aria-label="Diff scope">
+          {(reviewedPr === null ? SCOPES : [...SCOPES, { scope: "pr" as const, label: `PR #${reviewedPr}` }]).map((s) => (
+            <button
+              key={s.scope}
+              role="tab"
+              aria-selected={scope === s.scope}
+              onClick={() => onScopeChange(s.scope)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
         {(scope === "branch" || scope === "pr") && loaded.state === "ready" && loaded.diff.base && (
-          <span className="diff-base">vs {loaded.diff.base}</span>
+          <span className="diff-base mono">vs {loaded.diff.base}</span>
+        )}
+        <span className="grow" />
+        {files.length > 0 && (
+          <span className="diff-total">
+            {files.length} file{files.length === 1 ? "" : "s"} <span className="add">+{added}</span>{" "}
+            <span className="del">−{removed}</span>
+          </span>
         )}
       </div>
       {showsConcurrencyNote(scope, { board }) && (
-        <div className="diff-note">May include concurrent changes from other Threads in this checkout.</div>
+        <div className="surface-note">
+          <InfoIcon size={12} /> May include concurrent changes from other Threads in this checkout.
+        </div>
       )}
-      {canCommit && (
+      {push.dialog}
+      {loaded.state === "loading" && <div className="surface-empty">Loading…</div>}
+      {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}
+      {loaded.state === "ready" && files.length === 0 && (
+        <div className="surface-empty">
+          <CheckCircleIcon size={20} />
+          {scope === "branch" && !loaded.diff.base
+            ? "No base branch found."
+            : scope === "turn" && threadId === null
+              ? "Select a Thread to see its Turn."
+              : "No changes."}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="diff-split">
+          <ul className="diff-files" role="listbox" aria-label="Changed files">
+            {files.map((file) => {
+              const { dir, name } = splitPath(file.path);
+              return (
+                <li
+                  key={file.path}
+                  role="option"
+                  aria-selected={file.path === current?.path}
+                  className="diff-file-row"
+                  onClick={() => setPicked(file.path)}
+                  title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+                >
+                  {canCommit && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Include ${file.path} in the commit`}
+                      checked={!unchecked.has(file.path)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => toggleChecked(file.path, e.target.checked)}
+                    />
+                  )}
+                  <span className={`diff-status diff-status-${file.status}`} title={file.status}>
+                    {STATUS_LABEL[file.status]}
+                  </span>
+                  <span className="diff-file-name">
+                    {name}
+                    {dir && <span className="diff-file-dir"> {dir}</span>}
+                  </span>
+                  <span className="diff-counts">
+                    <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="diff-body">
+            {current && (
+              <FileDiff
+                key={current.path}
+                file={current}
+                collapsed={startsCollapsed(current) && !expanded.has(current.path)}
+                onExpand={() => setExpanded((prev) => new Set(prev).add(current.path))}
+              />
+            )}
+          </div>
+        </div>
+      )}
+      {canCommit ? (
         <form
           className="commit-form"
           aria-label="Commit"
@@ -156,108 +244,96 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
             rows={2}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.metaKey && ready) {
+                e.preventDefault();
+                void runCommit(true);
+              }
+            }}
           />
           <div className="commit-actions">
             <span className="commit-count">
               {selected.length === 0 ? "No files selected" : `${files.filter((f) => !unchecked.has(f.path)).length} of ${files.length} files`}
             </span>
-            <button type="submit" disabled={!ready}>
-              Commit
+            <button type="submit" className="btn" disabled={!ready}>
+              <GitCommitIcon size={14} /> Commit
             </button>
-            <button type="button" disabled={!ready} onClick={() => void runCommit(true)}>
-              Commit &amp; Push
+            <button type="button" className="btn primary" disabled={!ready} onClick={() => void runCommit(true)} title="Commit & Push (⌘↩)">
+              <RepoPushIcon size={14} /> Commit &amp; Push
             </button>
           </div>
           {(commitError ?? push.error) && (
-            <div className="files-note error" role="alert">
+            <div className="error" role="alert">
               {commitError ?? push.error}
             </div>
           )}
         </form>
-      )}
-      {push.dialog}
-      <div className="diff-body">
-        {loaded.state === "loading" && <div className="files-note">Loading…</div>}
-        {loaded.state === "error" && <div className="files-note error">{loaded.message}</div>}
-        {loaded.state === "ready" && files.length === 0 && (
-          <div className="files-note">
-            {scope === "branch" && !loaded.diff.base
-              ? "No base branch found."
-              : scope === "turn" && threadId === null
-                ? "Select a Thread to see its Turn."
-                : "No changes."}
+      ) : (
+        scope !== "uncommitted" && (
+          <div className="surface-foot">
+            Switch to{" "}
+            <button className="link" onClick={() => onScopeChange("uncommitted")}>
+              Uncommitted
+            </button>{" "}
+            to commit.
           </div>
-        )}
-        {files.map((file) => (
-          <FileDiff
-            key={file.path}
-            file={file}
-            focused={file.path === focused?.path}
-            checkbox={
-              canCommit
-                ? {
-                    checked: !unchecked.has(file.path),
-                    onChange: (checked) =>
-                      setUnchecked((prev) => {
-                        const next = new Set(prev);
-                        if (checked) next.delete(file.path);
-                        else next.add(file.path);
-                        return next;
-                      }),
-                  }
-                : null
-            }
-          />
-        ))}
-      </div>
+        )
+      )}
     </section>
   );
 }
 
-const fileAnchor = (path: string) => `diff-file-${path}`;
-
-function FileDiff({
-  file,
-  focused,
-  checkbox,
-}: {
-  file: DiffFile;
-  focused: boolean;
-  checkbox: { checked: boolean; onChange: (checked: boolean) => void } | null;
-}) {
+function FileDiff({ file, collapsed, onExpand }: { file: DiffFile; collapsed: boolean; onExpand: () => void }) {
   return (
-    <div id={fileAnchor(file.path)} className={`diff-file${focused ? " diff-file-focused" : ""}`} aria-label={`Changes to ${file.path}`}>
+    <div className="diff-file" aria-label={`Changes to ${file.path}`}>
       <div className="diff-file-title">
-        {checkbox && (
-          <input
-            type="checkbox"
-            aria-label={`Include ${file.path} in the commit`}
-            checked={checkbox.checked}
-            onChange={(e) => checkbox.onChange(e.target.checked)}
-          />
-        )}
         <span className={`diff-status diff-status-${file.status}`} title={file.status}>
           {STATUS_LABEL[file.status]}
         </span>
-        <span className="diff-path">
-          {file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+        <span className="diff-path mono">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</span>
+        <span className="diff-counts">
+          <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
         </span>
-        <span className="chip-added">+{file.added}</span> <span className="chip-removed">−{file.removed}</span>
       </div>
-      {file.binary && <div className="files-note">Binary or too large to show.</div>}
-      {file.hunks.map((hunk, i) => (
-        <pre key={i} className="diff-hunk">
-          <code>
-            <span className="diff-hunk-header">{hunk.header}</span>
-            {hunk.lines.map((line, j) => (
-              <span key={j} className={`diff-line diff-${line.kind}`}>
-                {line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "}
-                {line.text}
-              </span>
-            ))}
-          </code>
-        </pre>
-      ))}
+      {file.binary && <div className="surface-empty">Binary or too large to show.</div>}
+      {!file.binary && collapsed && (
+        <div className="surface-empty">
+          <span>
+            {file.added + file.removed} changed lines, collapsed{/\.lock$|lock\.(json|yaml)$/.test(file.path) ? " (lockfile)" : ""}.
+          </span>
+          <button className="btn sm" onClick={onExpand}>
+            <UnfoldIcon size={14} /> Show diff
+          </button>
+        </div>
+      )}
+      {!file.binary &&
+        !collapsed &&
+        file.hunks.map((hunk, i) => (
+          <table key={i} className="diff-hunk">
+            <colgroup>
+              <col className="diff-ln-col" />
+              <col className="diff-ln-col" />
+              <col />
+            </colgroup>
+            <tbody>
+              <tr className="diff-hunk-header">
+                <td colSpan={3}>
+                  <span className="mono">{hunk.header.match(/^@@[^@]*@@/)?.[0] ?? hunk.header}</span> {hunkContext(hunk.header)}
+                </td>
+              </tr>
+              {numberHunk(hunk).map((line, j) => (
+                <tr key={j} className={`diff-line diff-${line.kind}`}>
+                  <td className="diff-ln">{line.old ?? ""}</td>
+                  <td className="diff-ln">{line.new ?? ""}</td>
+                  <td className="diff-code">
+                    <span className="diff-sign">{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}</span>
+                    {line.text}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
     </div>
   );
 }

@@ -1,23 +1,35 @@
 name: CI
 
+# Job names are referenced by the `dev` and `main` rulesets as required checks:
+# rename them only together with the rulesets.
+
 on:
   push:
     branches: [main, dev]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are cancelled; every push to dev/main runs to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust:
     runs-on: macos-latest # Apple Silicon
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v4
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -33,11 +45,13 @@ jobs:
   web:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -46,3 +60,53 @@ jobs:
       - run: pnpm --dir web typecheck
       - run: pnpm --dir web lint
       - run: pnpm --dir web test
+
+  # Platform-independent checks run on Linux: cheaper, and they don't queue
+  # behind the macOS jobs.
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tauri crate and JS packages share major.minor
+        run: node .github/scripts/tauri-alignment.mjs
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Licenses, bans and sources (deny.toml)
+        run: cargo deny --locked check bans licenses sources
+      # Advisories are checked daily by advisories.yml instead: a new advisory
+      # against an untouched crate must not block unrelated PRs.
+      - name: No newly added dependency with a high or critical advisory
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  repo-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint workflows (actionlint)
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" -color
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: zizmor@1.31.1
+      - name: Audit workflows for security issues (zizmor)
+        run: zizmor --format=github .
+        env:
+          GH_TOKEN: ${{ github.token }} # enables zizmor's online audits (impostor commits, known-vulnerable actions)
+      - name: Validate Dependabot config and issue forms against their schemas
+        run: |
+          pipx run check-jsonschema==0.38.2 --builtin-schema vendor.dependabot .github/dependabot.yml
+          pipx run check-jsonschema==0.38.2 --builtin-schema vendor.github-issue-forms .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
+          pipx run check-jsonschema==0.38.2 --builtin-schema vendor.github-issue-config .github/ISSUE_TEMPLATE/config.yml
+      - name: Test the CI helper scripts
+        run: node --test .github/scripts/*.test.mjs

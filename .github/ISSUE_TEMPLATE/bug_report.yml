@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Oxide doesn't work as expected.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please search [existing issues](https://github.com/cavallinilorenzo/oxide/issues) first.
+        **Security problems go through [private reporting](https://github.com/cavallinilorenzo/oxide/security/advisories/new), not here.**
+  - type: input
+    id: oxide-version
+    attributes:
+      label: Oxide version or commit
+      description: From the release you downloaded, or `git rev-parse --short HEAD` if built from source.
+      placeholder: v0.1.0 or 7652830
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: macOS 26.1 (Apple Silicon)
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Which Provider was the Thread using?
+      options:
+        - Claude Code
+        - Codex
+        - Antigravity CLI
+        - Not Provider-specific
+    validations:
+      required: true
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider CLI version
+      description: Output of `claude --version`, `codex --version` or `agy --version`.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a Project…
+        2. Start a Thread with…
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or raw-event debug view output
+      description: Relevant output from the raw-event debug view or the terminal. Remove anything private.
+      render: text

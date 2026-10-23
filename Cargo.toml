@@ -6,3 +6,4 @@ members = ["crates/oxide-provider", "crates/oxide-core", "crates/oxide-app"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+publish = false

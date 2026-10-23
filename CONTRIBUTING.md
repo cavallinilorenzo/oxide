@@ -62,7 +62,7 @@ Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single sour
 
 [Dependabot](.github/dependabot.yml) watches Cargo, the pnpm web app (`web/`), GitHub Actions and the Rust toolchain:
 
-- **Version updates** open weekly, on Monday morning (Europe/Rome), against `main`. They only open after a cooldown (3 days for patch, 7 for minor, 14 for major releases), so a compromised or broken release is usually pulled before it reaches us. Minor and patch updates share one grouped PR per ecosystem. Related packages move together in named groups: `tauri`, `specta`, `react`, `lint`, `build-test`, `xterm` and `actions`. Every other major update gets its own PR.
+- **Version updates** open weekly, on Monday morning (Europe/Rome), against `main`. They only open after a cooldown (3 days for patch, 7 for minor, 14 for major releases; 7 days flat for GitHub Actions and the Rust toolchain), so a compromised or broken release is usually pulled before it reaches us. Minor and patch updates share one grouped PR per ecosystem. Related packages move together in named groups: `tauri`, `specta`, `react`, `lint`, `build-test`, `xterm` and `actions`. Every other major update gets its own PR.
 - **Security updates** open as soon as an advisory affects us, without the cooldown, against the default branch (`main`).
 - PRs are labelled `dependencies` plus `rust`, `javascript` or `github-actions`, with commit messages prefixed `chore(deps)` (`chore(deps-dev)` for dev dependencies).
 

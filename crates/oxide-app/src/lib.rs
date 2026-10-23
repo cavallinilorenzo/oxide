@@ -1842,6 +1842,9 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            set_macos_dock_icon();
+
             let home = app
                 .path()
                 .home_dir()
@@ -1882,6 +1885,28 @@ pub fn run() {
             tauri::RunEvent::Exit => app.state::<Arc<Core>>().quit(),
             _ => {}
         });
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon() {
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let icon_data = unsafe {
+        NSData::initWithBytes_length(NSData::alloc(), ICON_PNG.as_ptr().cast(), ICON_PNG.len())
+    };
+    if let Some(icon) = NSImage::initWithData(NSImage::alloc(), &icon_data) {
+        unsafe {
+            NSApplication::sharedApplication(main_thread).setApplicationIconImage(Some(&icon));
+        }
+    }
 }
 
 #[cfg(test)]

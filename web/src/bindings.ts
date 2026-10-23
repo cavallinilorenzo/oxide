@@ -180,12 +180,16 @@ export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
 export type BoardCard_Deserialize = {
 	thread: Thread_Deserialize,
 	pendingApprovals: PendingApproval_Deserialize[],
+	/**  The Thread's branch's pull request, once GitHub has been asked. */
+	pullRequest?: BranchPullRequest | null,
 };
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard_Serialize = {
 	thread: Thread_Serialize,
 	pendingApprovals: PendingApproval_Serialize[],
+	/**  The Thread's branch's pull request, once GitHub has been asked. */
+	pullRequest: BranchPullRequest | null,
 };
 
 export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
@@ -193,6 +197,16 @@ export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
 export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize };
 
 export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize };
+
+/**  A Board Thread's pull request: its state and a tally of its checks. */
+export type BranchPullRequest = {
+	number: number,
+	url: string,
+	phase: PullRequestPhase,
+	checksPassed: number,
+	checksFailed: number,
+	checksPending: number,
+};
 
 export type CheckState = "success" | "failure" | "pending";
 
@@ -604,6 +618,8 @@ export type PullRequestDraft = {
 	base: string,
 	head: string,
 };
+
+export type PullRequestPhase = "draft" | "open" | "merged" | "closed";
 
 export type PullRequestState = PullRequestState_Serialize | PullRequestState_Deserialize;
 

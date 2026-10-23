@@ -390,6 +390,29 @@ pub struct PendingApproval {
 pub struct BoardCard {
     pub thread: Thread,
     pub pending_approvals: Vec<PendingApproval>,
+    /// The Thread's branch's pull request, once GitHub has been asked.
+    pub pull_request: Option<BranchPullRequest>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestPhase {
+    Draft,
+    Open,
+    Merged,
+    Closed,
+}
+
+/// A Board Thread's pull request: its state and a tally of its checks.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPullRequest {
+    pub number: u32,
+    pub url: String,
+    pub phase: PullRequestPhase,
+    pub checks_passed: u32,
+    pub checks_failed: u32,
+    pub checks_pending: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

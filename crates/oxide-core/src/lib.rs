@@ -30,9 +30,9 @@ pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail, IssueSummary,
-    IssuesState, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment, PullRequestDetail,
-    PullRequestDraft, PullRequestInput, PullRequestState,
+    BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail,
+    IssueSummary, IssuesState, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment,
+    PullRequestDetail, PullRequestDraft, PullRequestInput, PullRequestPhase, PullRequestState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -113,7 +113,7 @@ pub struct Core {
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
     git: git::GitState,
-    gh: github::Gh,
+    gh: Arc<github::Gh>,
     activity: Arc<activity::Activity>,
     board: Arc<board::BoardHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
@@ -167,7 +167,7 @@ impl Core {
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
             git: git::GitState::default(),
-            gh: github::Gh::default(),
+            gh: Arc::new(github::Gh::default()),
             activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
             board,
             model_catalogs: Mutex::new(HashMap::new()),
@@ -1008,7 +1008,34 @@ impl Core {
         &self,
         project_id: u32,
     ) -> Result<(Vec<BoardCard>, crossbeam_channel::Receiver<BoardEvent>)> {
-        self.board.subscribe(project_id)
+        let subscription = self.board.subscribe(project_id)?;
+        self.refresh_board_pull_requests(project_id, &subscription.0);
+        Ok(subscription)
+    }
+
+    /// Looks up each Board Thread's pull request by branch, off-thread because `gh` is slow,
+    /// and publishes whatever it finds. Without a usable `gh` the cards simply show nothing.
+    fn refresh_board_pull_requests(&self, project_id: u32, cards: &[BoardCard]) {
+        let Ok(cwd) = self.main_checkout(project_id) else {
+            return;
+        };
+        let threads: Vec<(u32, String)> = cards
+            .iter()
+            .filter(|c| !c.thread.archived)
+            .filter_map(|c| Some((c.thread.id, c.thread.branch.clone()?)))
+            .collect();
+        if threads.is_empty() {
+            return;
+        }
+        let (gh, board) = (Arc::clone(&self.gh), Arc::clone(&self.board));
+        std::thread::spawn(move || {
+            for (thread_id, branch) in threads {
+                match github::branch_pull_request(&gh, &cwd, &branch) {
+                    Ok(pr) => board.set_pull_request(thread_id, pr),
+                    Err(_) => return,
+                }
+            }
+        });
     }
 
     pub fn subscribe_thread(

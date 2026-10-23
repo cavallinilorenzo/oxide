@@ -1,6 +1,7 @@
 //! The Thread Board's feed. The Board stores nothing of its own: a card is a Thread row plus its
 //! pending Approvals, read fresh whenever a Thread changes and pushed to that Project's subscribers.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -8,6 +9,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::github::BranchPullRequest;
 use crate::thread::{self, ThreadSummary};
 use oxide_provider::ApprovalKind;
 
@@ -26,6 +28,8 @@ pub struct PendingApproval {
 pub struct BoardCard {
     pub thread: ThreadSummary,
     pub pending_approvals: Vec<PendingApproval>,
+    /// The Thread's branch's pull request, as last refreshed; `None` when it has none.
+    pub pull_request: Option<BranchPullRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +43,8 @@ pub(crate) struct BoardHub {
     db_path: PathBuf,
     conn: Mutex<Option<Connection>>,
     subscribers: Mutex<Vec<(u32, crossbeam_channel::Sender<BoardEvent>)>>,
+    /// Pull requests by Thread, kept in memory: GitHub owns them, the Board only shows them.
+    pull_requests: Mutex<HashMap<u32, BranchPullRequest>>,
 }
 
 impl BoardHub {
@@ -47,7 +53,31 @@ impl BoardHub {
             db_path,
             conn: Mutex::new(None),
             subscribers: Mutex::new(Vec::new()),
+            pull_requests: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Records what GitHub says about the Thread's pull request and tells subscribers.
+    pub(crate) fn set_pull_request(&self, thread_id: u32, pr: Option<BranchPullRequest>) {
+        let changed = {
+            let mut map = self.pull_requests.lock().unwrap_or_else(|e| e.into_inner());
+            let previous = match &pr {
+                Some(pr) => map.insert(thread_id, pr.clone()),
+                None => map.remove(&thread_id),
+            };
+            previous != pr
+        };
+        if changed {
+            self.publish(thread_id);
+        }
+    }
+
+    fn pull_request(&self, thread_id: u32) -> Option<BranchPullRequest> {
+        self.pull_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&thread_id)
+            .cloned()
     }
 
     /// Every Thread of the Project, newest activity first, and a feed of what changes next.
@@ -71,7 +101,7 @@ impl BoardHub {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             threads
                 .into_iter()
-                .map(|thread| card(conn, thread))
+                .map(|thread| self.card(conn, thread))
                 .collect()
         })?;
         Ok((cards, rx))
@@ -96,7 +126,7 @@ impl BoardHub {
                 [thread_id],
                 thread::parse_thread_summary,
             )?;
-            card(conn, thread)
+            self.card(conn, thread)
         }) else {
             return;
         };
@@ -118,35 +148,37 @@ impl BoardHub {
         }
         f(guard.as_ref().expect("connection opened above"))
     }
-}
 
-fn card(conn: &Connection, thread: ThreadSummary) -> Result<BoardCard> {
-    let mut stmt = conn.prepare(
-        "SELECT a.approval_id, a.kind, a.summary, a.options
-         FROM approvals a JOIN turns t ON t.id = a.turn_id
-         WHERE t.thread_id = ?1 AND a.decision IS NULL ORDER BY a.id ASC",
-    )?;
-    let pending_approvals = stmt
-        .query_map([thread.id], |r| {
-            let kind: String = r.get(1)?;
-            let options: String = r.get(3)?;
-            Ok(PendingApproval {
-                approval_id: r.get(0)?,
-                kind: serde_json::from_value(serde_json::Value::String(kind)).unwrap_or_default(),
-                summary: r.get(2)?,
-                options: serde_json::from_str(&options).unwrap_or_default(),
-            })
-        })?
-        .collect::<std::result::Result<_, _>>()?;
-    // Only a Thread waiting on the user has Approvals to answer; older ones were resolved
-    // by an interrupt or a restart.
-    let pending_approvals = if thread.status == thread::ThreadStatus::NeedsInput {
-        pending_approvals
-    } else {
-        Vec::new()
-    };
-    Ok(BoardCard {
-        thread,
-        pending_approvals,
-    })
+    fn card(&self, conn: &Connection, thread: ThreadSummary) -> Result<BoardCard> {
+        let mut stmt = conn.prepare(
+            "SELECT a.approval_id, a.kind, a.summary, a.options
+             FROM approvals a JOIN turns t ON t.id = a.turn_id
+             WHERE t.thread_id = ?1 AND a.decision IS NULL ORDER BY a.id ASC",
+        )?;
+        let pending_approvals = stmt
+            .query_map([thread.id], |r| {
+                let kind: String = r.get(1)?;
+                let options: String = r.get(3)?;
+                Ok(PendingApproval {
+                    approval_id: r.get(0)?,
+                    kind: serde_json::from_value(serde_json::Value::String(kind))
+                        .unwrap_or_default(),
+                    summary: r.get(2)?,
+                    options: serde_json::from_str(&options).unwrap_or_default(),
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        // Only a Thread waiting on the user has Approvals to answer; older ones were resolved
+        // by an interrupt or a restart.
+        let pending_approvals = if thread.status == thread::ThreadStatus::NeedsInput {
+            pending_approvals
+        } else {
+            Vec::new()
+        };
+        Ok(BoardCard {
+            pull_request: self.pull_request(thread.id),
+            thread,
+            pending_approvals,
+        })
+    }
 }

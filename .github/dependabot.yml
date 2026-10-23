@@ -95,10 +95,8 @@ updates:
       time: "07:00"
       timezone: Europe/Rome
     cooldown:
+      # github-actions and rust-toolchain only support `default-days`.
       default-days: 7
-      semver-patch-days: 3
-      semver-minor-days: 7
-      semver-major-days: 14
     open-pull-requests-limit: 5
     labels: [dependencies, github-actions]
     commit-message:

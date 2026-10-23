@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="160" height="160" alt="Oxide logo" src="https://github.com/user-attachments/assets/2dbf3b1e-362f-4365-ac9d-6583b0f4015c" />
+  <img width="160" height="160" alt="Oxide logo" src="assets/brand/oxide/oxide-mark.svg" />
 </p>
 
 <h1 align="center">Oxide</h1>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 192" role="img" aria-labelledby="title">
+  <title id="title">Oxide</title>
+  <g transform="translate(32 32)">
+    <path fill="#14234A" d="m0 29 48-26 48 26-48 27L0 29Z"/>
+    <path fill="#4F83F3" d="m0 45 48 27 48-27v18L48 90 0 63V45Z"/>
+    <path fill="#9DBFFF" d="m0 72 48 27 48-27v16l-48 27L0 88V72Z"/>
+  </g>
+  <text x="168" y="132" fill="#14234A" font-family="Inter, SF Pro Display, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="96" font-weight="650" letter-spacing="-5">Oxide</text>
+</svg>

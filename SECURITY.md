@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Oxide is pre-1.0. Only the **latest release** gets security fixes. Fixes land on `dev` and ship in the next release. Older versions are not patched.
+Oxide is pre-1.0. Only the **latest release** gets security fixes. Fixes land on `main` and ship in the next release. Older versions are not patched.
 
 ## Reporting a vulnerability
 

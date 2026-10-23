@@ -1,6 +1,6 @@
 name: Dependabot auto-merge
 
-# Enables auto-merge (squash) on low-risk Dependabot PRs into dev and labels the
+# Enables auto-merge (squash) on low-risk Dependabot PRs into main and labels the
 # rest `manual-review`. It never merges directly: the rulesets' required checks
 # remain the only gate. Policy lives in .github/scripts/dependabot-policy.mjs.
 
@@ -17,7 +17,7 @@ jobs:
   auto-merge:
     # Gate on the PR author, not the triggering actor, so a re-run by someone
     # else on a Dependabot PR still qualifies and a human PR never does.
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'dev'
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: write

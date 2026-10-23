@@ -5,7 +5,7 @@
 <h1 align="center">Oxide</h1>
 
 <p align="center">
-  <a href="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml/badge.svg?branch=dev"></a>
+  <a href="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
 

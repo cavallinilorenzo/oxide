@@ -1,10 +1,9 @@
 # Dependabot version and security updates. Policy (what auto-merges, what
 # waits for review) is in CONTRIBUTING.md and .github/workflows/dependabot-auto-merge.yml.
 #
-# Version updates target `dev`, weekly on Monday morning (Europe/Rome), after a
+# Version updates target the default branch (`main`), weekly on Monday morning (Europe/Rome), after a
 # cooldown so a compromised or broken release is usually pulled before it
-# reaches us. Security updates skip the cooldown and are raised against the
-# default branch, which must be `dev`.
+# reaches us. Security updates skip the cooldown and use the same branch.
 #
 # Named groups take every update type, majors included, so interdependent
 # packages move together. Outside them, minor and patch updates share one
@@ -17,7 +16,6 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
-    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -50,7 +48,6 @@ updates:
 
   - package-ecosystem: npm # pnpm lockfiles use the npm ecosystem
     directory: /web
-    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -92,7 +89,6 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
-    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -116,7 +112,6 @@ updates:
 
   - package-ecosystem: rust-toolchain
     directory: /
-    target-branch: dev
     schedule:
       interval: weekly
       day: monday

@@ -27,7 +27,7 @@ export function checkReleaseVersion({ tag, cargoToml, tauriConf, webPackage }) {
     const list = mismatched.map(([file, version]) => `${file} ${version ?? "(missing)"}`).join(", ");
     return {
       ok: false,
-      message: `Tag ${tag} does not match the declared version: ${list}. Bump all three in a PR into dev before tagging.`,
+      message: `Tag ${tag} does not match the declared version: ${list}. Bump all three in a PR into main before tagging.`,
     };
   }
   return { ok: true, message: `Tag ${tag} matches Cargo.toml, tauri.conf.json and web/package.json` };

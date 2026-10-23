@@ -1,11 +1,11 @@
 name: CI
 
-# Job names are referenced by the `dev` and `main` rulesets as required checks:
+# Job names are referenced by the `main` ruleset as required checks:
 # rename them only together with the rulesets.
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseded PR runs are cancelled; every push to dev/main runs to completion.
+  # Superseded PR runs are cancelled; every push to main runs to completion.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

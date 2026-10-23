@@ -8,17 +8,16 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 The full rules are in [docs/agents/git-workflow.md](docs/agents/git-workflow.md). In short:
 
-- `main` is stable and `dev` is integration. Nobody pushes to either directly.
-- **Branch from `dev`**: `git fetch origin && git switch -c <type>/<slug> origin/dev`. Here `<type>` is `feat`, `fix`, `docs`, `chore`, `refactor`, `test` or `research`. Include the issue number when there is one, e.g. `feat/42-terminal-surface`.
-- **Open PRs against `dev`** (`gh pr create --base dev`). PRs into `dev` are squash-merged.
-- Put `Closes #<id>` in the PR body. `dev` is the default branch, so the issue closes when the PR merges.
-- Promoting `dev` to `main` is a maintainer decision, done with a merge-commit PR.
+- `main` is the only long-lived branch and the default. Nobody pushes to it directly.
+- **Branch from `main`**: `git fetch origin && git switch -c <type>/<slug> origin/main`. Here `<type>` is `feat`, `fix`, `docs`, `chore`, `refactor`, `test` or `research`. Include the issue number when there is one, e.g. `feat/42-terminal-surface`.
+- **Open PRs against `main`** (`gh pr create --base main`). PRs are squash-merged.
+- Put `Closes #<id>` in the PR body. `main` is the default branch, so the issue closes when the PR merges.
 
 Dependabot branches (`dependabot/...`) are the one exception to the `<type>/<slug>` naming rule.
 
 ## Local checks
 
-These are the checks CI runs on every PR. Get them green locally before pushing. The rulesets on `dev` and `main` list which jobs are required to merge (see [docs/agents/git-workflow.md](docs/agents/git-workflow.md)).
+These are the checks CI runs on every PR. Get them green locally before pushing. The ruleset on `main` lists which jobs are required to merge (see [docs/agents/git-workflow.md](docs/agents/git-workflow.md)).
 
 | CI job | Run locally |
 | --- | --- |
@@ -63,8 +62,8 @@ Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single sour
 
 [Dependabot](.github/dependabot.yml) watches Cargo, the pnpm web app (`web/`), GitHub Actions and the Rust toolchain:
 
-- **Version updates** open weekly, on Monday morning (Europe/Rome), against `dev`. They only open after a cooldown (3 days for patch, 7 for minor, 14 for major releases), so a compromised or broken release is usually pulled before it reaches us. Minor and patch updates share one grouped PR per ecosystem. Related packages move together in named groups: `tauri`, `specta`, `react`, `lint`, `build-test`, `xterm` and `actions`. Every other major update gets its own PR.
-- **Security updates** open as soon as an advisory affects us, without the cooldown, against the default branch (`dev`).
+- **Version updates** open weekly, on Monday morning (Europe/Rome), against `main`. They only open after a cooldown (3 days for patch, 7 for minor, 14 for major releases), so a compromised or broken release is usually pulled before it reaches us. Minor and patch updates share one grouped PR per ecosystem. Related packages move together in named groups: `tauri`, `specta`, `react`, `lint`, `build-test`, `xterm` and `actions`. Every other major update gets its own PR.
+- **Security updates** open as soon as an advisory affects us, without the cooldown, against the default branch (`main`).
 - PRs are labelled `dependencies` plus `rust`, `javascript` or `github-actions`, with commit messages prefixed `chore(deps)` (`chore(deps-dev)` for dev dependencies).
 
 The [auto-merge workflow](.github/workflows/dependabot-auto-merge.yml) applies this policy:
@@ -84,11 +83,11 @@ Third-party actions are pinned to full commit SHAs, with the version as a traili
 
 ## Releasing
 
-Releases are cut from `main` by the maintainer:
+Releases are tagged on `main` by the maintainer:
 
-1. **Bump the version** in a normal PR into `dev`. Three places must agree: `version` in `[workspace.package]` of `Cargo.toml`, `version` in `crates/oxide-app/tauri.conf.json`, and `version` in `web/package.json`. Run `cargo check` so `Cargo.lock` picks up the new version.
-2. **Promote** `dev` to `main` with a merge-commit PR, and wait for the `bundle` job to pass.
-3. **Tag** the merge commit on `main` and push the tag:
+1. **Bump the version** in a normal PR into `main`. Three places must agree: `version` in `[workspace.package]` of `Cargo.toml`, `version` in `crates/oxide-app/tauri.conf.json`, and `version` in `web/package.json`. Run `cargo check` so `Cargo.lock` picks up the new version.
+2. **Wait for the `bundle` job** to pass on the merged commit.
+3. **Tag** that commit on `main` and push the tag:
    ```sh
    git fetch origin && git tag -a vX.Y.Z origin/main -m "Oxide vX.Y.Z" && git push origin vX.Y.Z
    ```

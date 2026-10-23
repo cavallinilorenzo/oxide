@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use oxide_core::{BoardEvent, Core, DispatchRequest, PullRequestPhase};
 use tempfile::TempDir;
@@ -93,12 +93,20 @@ fn pr(
     })
 }
 
-/// The first event for the Thread that carries a pull request.
+/// Long enough for the off-thread lookup (two fake `gh` runs, each starting Python) on a slow
+/// CI runner. Waiting for an event that does arrive returns as soon as it does.
+const ARRIVES_WITHIN: Duration = Duration::from_secs(20);
+/// How long to watch before concluding no pull request event is coming.
+const QUIET_FOR: Duration = Duration::from_secs(3);
+
+/// The first event for the Thread that carries a pull request, if one arrives within `within`.
 fn pull_request_event(
     rx: &crossbeam_channel::Receiver<BoardEvent>,
     thread_id: u32,
+    within: Duration,
 ) -> Option<oxide_core::BoardCard> {
-    while let Ok(BoardEvent::ThreadChanged(card)) = rx.recv_timeout(Duration::from_secs(3)) {
+    let deadline = Instant::now() + within;
+    while let Ok(BoardEvent::ThreadChanged(card)) = rx.recv_deadline(deadline) {
         if card.thread.id == thread_id && card.pull_request.is_some() {
             return Some(card);
         }
@@ -122,7 +130,7 @@ fn opening_the_board_shows_each_threads_pull_request_state_and_checks() {
 
     let (_, rx) = f.core.subscribe_board(f.project).unwrap();
 
-    let card = pull_request_event(&rx, thread.id).expect("pull request event");
+    let card = pull_request_event(&rx, thread.id, ARRIVES_WITHIN).expect("pull request event");
     let pr = card.pull_request.unwrap();
     assert_eq!(pr.number, 9);
     assert_eq!(pr.phase, PullRequestPhase::Draft);
@@ -143,7 +151,7 @@ fn a_merged_pull_request_is_reported_as_merged() {
     }));
 
     let (_, rx) = f.core.subscribe_board(f.project).unwrap();
-    let card = pull_request_event(&rx, thread.id).expect("pull request event");
+    let card = pull_request_event(&rx, thread.id, ARRIVES_WITHIN).expect("pull request event");
     assert_eq!(card.pull_request.unwrap().phase, PullRequestPhase::Merged);
 }
 
@@ -155,9 +163,9 @@ fn threads_without_a_pull_request_or_without_gh_show_nothing_extra() {
 
     let (snapshot, rx) = f.core.subscribe_board(f.project).unwrap();
     assert!(snapshot.iter().all(|c| c.pull_request.is_none()));
-    assert!(pull_request_event(&rx, thread.id).is_none());
+    assert!(pull_request_event(&rx, thread.id, QUIET_FOR).is_none());
 
     f.set_gh(serde_json::json!({ "auth": "logged_out" }));
     let (_, rx) = f.core.subscribe_board(f.project).unwrap();
-    assert!(pull_request_event(&rx, thread.id).is_none());
+    assert!(pull_request_event(&rx, thread.id, QUIET_FOR).is_none());
 }

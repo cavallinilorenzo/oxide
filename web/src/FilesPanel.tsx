@@ -1,4 +1,12 @@
 import { useEffect, useState } from "react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FileDirectoryFillIcon,
+  FileDirectoryOpenFillIcon,
+  FileIcon,
+  LockIcon,
+} from "@primer/octicons-react";
 import { commands, type FileContent, type FileEntry } from "./bindings";
 import { languageForPath, shouldHighlight } from "./fileLang";
 import { highlighter } from "./highlighter";
@@ -45,7 +53,7 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   }
 
   function renderDir(path: string, depth: number) {
-    const indent = { paddingLeft: 8 + depth * 12 };
+    const indent = { paddingLeft: 8 + depth * 14 };
     const listing = listings[path];
     if (listing === undefined) return <div className="files-note" style={indent}>Loading…</div>;
     if ("error" in listing) return <div className="files-note error" style={indent}>{listing.error}</div>;
@@ -55,9 +63,20 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
         <button
           className={`files-row${selected === entry.path ? " files-row-selected" : ""}`}
           style={indent}
+          title={entry.path}
           onClick={() => (entry.isDir ? toggle(entry.path) : setSelected(entry.path))}
         >
-          <span aria-hidden>{entry.isDir ? (expanded.has(entry.path) ? "▾" : "▸") : " "}</span> {entry.name}
+          <span className="files-chevron" aria-hidden>
+            {entry.isDir && (expanded.has(entry.path) ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />)}
+          </span>
+          <span className={entry.isDir ? "files-icon dir" : "files-icon"} aria-hidden>
+            {entry.isDir ? (
+              expanded.has(entry.path) ? <FileDirectoryOpenFillIcon size={14} /> : <FileDirectoryFillIcon size={14} />
+            ) : (
+              <FileIcon size={14} />
+            )}
+          </span>
+          <span className="files-name">{entry.name}</span>
         </button>
         {entry.isDir && expanded.has(entry.path) && <div role="group">{renderDir(entry.path, depth + 1)}</div>}
       </div>
@@ -69,8 +88,13 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
       <div className="files-tree" role="tree">
         {renderDir("", 0)}
       </div>
-      {selected && (
+      {selected ? (
         <FileViewer key={selected} projectId={projectId} threadId={threadId} path={selected} />
+      ) : (
+        <div className="files-viewer files-viewer-empty">
+          <FileIcon size={20} />
+          <span>Pick a file to read it here.</span>
+        </div>
       )}
     </section>
   );
@@ -108,7 +132,12 @@ function FileViewer({ projectId, threadId, path }: { projectId: number; threadId
 
   return (
     <div className="files-viewer" aria-label={`File ${path}`}>
-      <div className="files-viewer-title">{path}</div>
+      <div className="files-viewer-title">
+        <span className="files-viewer-path" title={path}>{path}</span>
+        <span className="chip" title="Oxide only reads files; edit them in your editor">
+          <LockIcon size={12} /> read-only
+        </span>
+      </div>
       {loaded.state === "loading" && <div className="files-note">Loading…</div>}
       {loaded.state === "error" && <div className="files-note error">{loaded.message}</div>}
       {loaded.state === "ready" && <FileBody file={loaded.file} html={loaded.html} />}
@@ -123,11 +152,18 @@ function FileBody({ file, html }: { file: FileContent; html?: string }) {
       {file.truncated && <div className="files-note">Showing the first 1 MB of {formatSize(file.size)}.</div>}
       {html !== undefined ? (
         // Shiki's output, generated from escaped source in our own worker.
-        <div className="code-block" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="code-block numbered" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
-        <div className="code-block">
+        <div className="code-block numbered">
           <pre className="shiki code-plain">
-            <code>{file.content}</code>
+            <code>
+              {file.content.split("\n").map((line, i) => (
+                <span key={i} className="line">
+                  {line}
+                  {"\n"}
+                </span>
+              ))}
+            </code>
           </pre>
         </div>
       )}

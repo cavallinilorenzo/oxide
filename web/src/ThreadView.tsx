@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PaperclipIcon, XIcon } from "@primer/octicons-react";
+import {
+  ArrowUpIcon,
+  BugIcon,
+  ChevronDownIcon,
+  FileDirectoryIcon,
+  GitBranchIcon,
+  LightBulbIcon,
+  LockIcon,
+  PaperclipIcon,
+  PencilIcon,
+  RepoIcon,
+  ShieldCheckIcon,
+  SquareFillIcon,
+  UnlockIcon,
+  XIcon,
+  type Icon,
+} from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
@@ -16,6 +32,7 @@ import {
   type ProviderCapabilities,
 } from "./bindings";
 import { TurnView } from "./TurnView";
+import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
@@ -69,19 +86,28 @@ interface PendingImage {
   previewUrl: string;
 }
 
+/** Octicon names: lock = Ask, shield = Auto-edit, open lock = Full access. */
+export type PermissionIcon = "lock" | "shield-check" | "unlock";
+
 export const PERMISSION_CONFIG: Record<
   PermissionMode,
-  { icon: string; label: string; softDenyLabel: string }
+  { icon: PermissionIcon; label: string; softDenyLabel: string }
 > = {
-  ask: { icon: "🔒", label: "Ask", softDenyLabel: "Ask" },
-  "auto-edit": { icon: "🛡️", label: "Auto-edit", softDenyLabel: "Auto-edit (soft-deny)" },
-  "full-access": { icon: "🔓", label: "Full access", softDenyLabel: "Full access" },
+  ask: { icon: "lock", label: "Ask", softDenyLabel: "Ask" },
+  "auto-edit": { icon: "shield-check", label: "Auto-edit", softDenyLabel: "Auto-edit (soft-deny)" },
+  "full-access": { icon: "unlock", label: "Full access", softDenyLabel: "Full access" },
+};
+
+const PERMISSION_ICONS: Record<PermissionIcon, Icon> = {
+  lock: LockIcon,
+  "shield-check": ShieldCheckIcon,
+  unlock: UnlockIcon,
 };
 
 export function getOfferedPermissionModes(
   supportedModes: PermissionMode[],
   provider: string
-): { mode: PermissionMode; label: string; icon: string }[] {
+): { mode: PermissionMode; label: string; icon: PermissionIcon }[] {
   const isAgy = provider === "antigravity" || provider === "agy";
   return supportedModes
     .filter((m) => PERMISSION_CONFIG[m])
@@ -617,27 +643,43 @@ export function ThreadView({
           />
         ) : (
           <div className="thread-title-display">
+            {thread && <span className={`status-dot ${thread.status}`} aria-label={`Status: ${thread.status}`} />}
             <h2 className="thread-title" onClick={handleStartRename} title="Click to rename">
               {threadTitle}
             </h2>
+            {thread?.issueNumber != null && (
+              <span className="chip" title={`Started from issue #${thread.issueNumber}`}>
+                #{thread.issueNumber}
+              </span>
+            )}
             {threadId && (
               <button
                 type="button"
-                className="rename-thread-btn"
+                className="icon-btn sm rename-thread-btn"
                 aria-label="Rename thread"
                 title="Rename thread"
                 onClick={handleStartRename}
               >
-                ✏️
+                <PencilIcon size={12} />
               </button>
             )}
           </div>
         )}
-        <div className="thread-debug-toolbar">
-          <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
-            {debugOpen ? "Close raw event debug" : "Open raw event debug"}
-          </button>
-        </div>
+        {thread && isBoardThread(thread) && (
+          <span className="thread-kind" title={`Works in its own worktree on ${thread.branch}`}>
+            <GitBranchIcon size={12} /> Board Thread · own worktree
+          </span>
+        )}
+        <button
+          type="button"
+          className="icon-btn sm"
+          onClick={() => setDebugOpen((open) => !open)}
+          aria-pressed={debugOpen}
+          aria-label={debugOpen ? "Close raw event debug" : "Open raw event debug"}
+          title={debugOpen ? "Close raw event debug" : "Raw event debug"}
+        >
+          <BugIcon size={14} />
+        </button>
       </div>
       {debugOpen && (
         <section className="thread-debug-view" aria-label="Raw event debug view">
@@ -667,7 +709,7 @@ export function ThreadView({
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
         {turnCount === 0 ? (
           <div className="empty-thread">
-            <p>Pick a Project, type a prompt, and watch the agent message stream in.</p>
+            <p>Type a prompt below and watch the agent's answer stream in.</p>
           </div>
         ) : (
           <div className="transcript-rows" style={{ height: totalSize }}>
@@ -729,11 +771,12 @@ export function ThreadView({
         </div>
       )}
 
+      <div className="composer-wrap">
       {thread?.sessionLost ? (
-        <div className="composer">
+        <div className="composer composer-lost">
           <button
             type="button"
-            className="composer-submit"
+            className="btn primary"
             disabled={thread.continuedIn != null}
             onClick={() => void continueInNewThread()}
           >
@@ -742,45 +785,6 @@ export function ThreadView({
         </div>
       ) : (
       <form className="composer" onSubmit={handleSubmit}>
-        <div className="composer-controls-row">
-          <div className="provider-chip-wrapper" title="Model & Effort">
-            <button
-              type="button"
-              className="model-trigger-chip"
-              onClick={() => {
-                setModelPickerMode("model");
-                setModelPickerOpen(true);
-              }}
-              disabled={isTurnActive || sending}
-              aria-label="Model and Effort"
-            >
-              <ProviderMark provider={currentProvider} size={14} />
-              <span className="model-trigger-name">{currentModel || currentProvider}</span>
-              {currentEffort && <span className="model-trigger-effort">{currentEffort}</span>}
-            </button>
-          </div>
-
-          <div className="permission-chip-wrapper" title="Permission mode">
-            <label className="permission-chip" htmlFor="permission-mode-select">
-              <span className="permission-chip-icon">{currentModeConfig.icon}</span>
-              <select
-                id="permission-mode-select"
-                className="permission-chip-select"
-                value={currentMode}
-                disabled={isTurnActive || sending}
-                onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
-                aria-label="Permission mode"
-              >
-                {offeredModes.map((item) => (
-                  <option key={item.mode} value={item.mode}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
         {pendingImages.length > 0 && (
           <div className="pending-images">
             {pendingImages.map((img) => (
@@ -797,13 +801,91 @@ export function ThreadView({
             ))}
           </div>
         )}
-        <div className="composer-row">
+        <textarea
+          className="composer-input"
+          rows={Math.max(2, Math.min(10, input.split("\n").length))}
+          placeholder={
+            isTurnActive
+              ? "Working… (Esc to stop)"
+              : turnCount === 0
+                ? "Ask for changes, or attach images  (/model, /effort, /clear)"
+                : "Send a follow-up  (/clear starts a new Thread)"
+          }
+          value={input}
+          onChange={(e) => handleInputChange(e.target.value)}
+          onPaste={handlePaste}
+          onKeyDown={(e) => {
+            if (stopsTurn(e, transcript.status)) {
+              e.preventDefault();
+              stop();
+            } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          disabled={sending}
+        />
+        <div className="composer-bar">
+          <div className="ctl">
+            <button
+              type="button"
+              className="cbtn"
+              onClick={() => {
+                setModelPickerMode("model");
+                setModelPickerOpen(true);
+              }}
+              disabled={isTurnActive || sending}
+              aria-label="Model"
+              title="Model (/model)"
+            >
+              <ProviderMark provider={currentProvider} size={14} />
+              <span className="t">{currentModel || currentProvider}</span>
+              <ChevronDownIcon size={12} />
+            </button>
+            <button
+              type="button"
+              className="cbtn compact"
+              onClick={() => {
+                setModelPickerMode("effort");
+                setModelPickerOpen(true);
+              }}
+              disabled={isTurnActive || sending}
+              aria-label="Effort"
+              title="Effort (/effort)"
+            >
+              <LightBulbIcon size={14} />
+              <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
+              <ChevronDownIcon size={12} className="cv" />
+            </button>
+            <label className="cbtn compact" title={`Permission mode: ${currentModeConfig.label}`}>
+              {(() => {
+                const PermIcon = PERMISSION_ICONS[currentModeConfig.icon];
+                return <PermIcon size={14} />;
+              })()}
+              <select
+                id="permission-mode-select"
+                className="t permission-chip-select"
+                value={currentMode}
+                disabled={isTurnActive || sending}
+                onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
+                aria-label="Permission mode"
+              >
+                {offeredModes.map((item) => (
+                  <option key={item.mode} value={item.mode}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon size={12} className="cv" />
+            </label>
+          </div>
           {imagesOffered && (
             <>
               <button
                 type="button"
-                className="composer-attach"
+                className="cbtn"
                 aria-label="Attach image"
+                title="Attach image"
                 disabled={isTurnActive || sending}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -822,39 +904,33 @@ export function ThreadView({
               />
             </>
           )}
-          <textarea
-            className="composer-input"
-            rows={Math.min(8, input.split("\n").length)}
-            placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (stopsTurn(e, transcript.status)) {
-                e.preventDefault();
-                stop();
-              } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
-              }
-            }}
-            disabled={sending}
-          />
           {isTurnActive ? (
-            <button type="button" className="composer-submit" onClick={stop}>
-              Stop
+            <button type="button" className="send stop" onClick={stop} aria-label="Stop" title="Stop (Esc)">
+              <SquareFillIcon size={12} />
             </button>
           ) : (
-            <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
-              Send
+            <button type="submit" className="send" disabled={!input.trim() || sending} aria-label="Send" title="Send (↩)">
+              <ArrowUpIcon size={16} />
             </button>
           )}
         </div>
       </form>
       )}
       <div className="composer-footer" aria-label="Thread checkout and branch">
-        <span className="checkout-badge">main checkout</span>
-        <span className="branch-badge">⎇ {gitBranch ?? "main"}</span>
+        {thread && isBoardThread(thread) ? (
+          <span className="checkout-badge" title={thread.worktreePath ?? undefined}>
+            <FileDirectoryIcon size={12} /> Own worktree
+          </span>
+        ) : (
+          <span className="checkout-badge">
+            <RepoIcon size={12} /> Main checkout
+          </span>
+        )}
+        <span className="grow" />
+        <span className="branch-badge mono">
+          <GitBranchIcon size={12} /> {(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}
+        </span>
+      </div>
       </div>
 
       {modelPickerOpen && (

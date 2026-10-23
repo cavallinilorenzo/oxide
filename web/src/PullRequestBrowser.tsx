@@ -1,3 +1,4 @@
+import { ArrowLeftIcon, CheckIcon, DotFillIcon, XIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import {
   commands,
@@ -153,7 +154,7 @@ function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, o
 
   const back = (
     <button className="pr-back" onClick={onBack}>
-      ← Pull requests
+      <ArrowLeftIcon size={14} /> Pull requests
     </button>
   );
   if (loaded.state === "loading") return <div className="pr-review">{back}</div>;
@@ -227,7 +228,7 @@ function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, o
         <ul className="pr-checks">
           {detail.checks.map((check, i) => (
             <li key={`${i}:${check.name}`} className={`pr-check pr-check-${check.state}`}>
-              <span aria-hidden>{check.state === "success" ? "✓" : check.state === "failure" ? "✗" : "…"}</span>{" "}
+              <span aria-hidden>{check.state === "success" ? <CheckIcon size={12} /> : check.state === "failure" ? <XIcon size={12} /> : <DotFillIcon size={12} />}</span>{" "}
               {check.name} <span className="pr-check-state">{check.state}</span>
             </li>
           ))}

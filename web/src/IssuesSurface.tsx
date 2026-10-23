@@ -1,3 +1,4 @@
+import { ArrowLeftIcon, CommentIcon } from "@primer/octicons-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   commands,
@@ -235,7 +236,12 @@ function IssuesListView({
                 </span>
                 <span className="pr-row-meta issue-row-meta">
                   opened by {issue.author}
-                  {issue.commentsCount > 0 && ` · 💬 ${issue.commentsCount}`}
+                  {issue.commentsCount > 0 && (
+                    <>
+                      {" · "}
+                      <CommentIcon size={12} /> {issue.commentsCount}
+                    </>
+                  )}
                 </span>
               </button>
             </li>
@@ -275,7 +281,7 @@ function CreateIssueView({ projectId, onBack, onCreated }: CreateIssueViewProps)
   return (
     <div className="issue-create">
       <button className="pr-back issue-back" onClick={onBack}>
-        ← Issues
+        <ArrowLeftIcon size={14} /> Issues
       </button>
       <h3>New issue</h3>
       <form className="pr-form" onSubmit={(e) => void handleSubmit(e)}>
@@ -394,7 +400,7 @@ function IssueDetailView({
 
   const back = (
     <button className="pr-back issue-back" onClick={onBack}>
-      ← Issues
+      <ArrowLeftIcon size={14} /> Issues
     </button>
   );
 

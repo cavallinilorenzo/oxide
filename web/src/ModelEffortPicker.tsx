@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
 import { applyModelShortcut, filterModels } from "./modelPicker";
@@ -219,7 +220,7 @@ export function ModelEffortPicker({
         <div className="model-picker-header">
           <h2>Model &amp; Effort</h2>
           <button type="button" className="close-button" onClick={onClose} aria-label="Close">
-            &times;
+            <XIcon size={16} />
           </button>
         </div>
 
@@ -250,7 +251,7 @@ export function ModelEffortPicker({
               className={`rail-tab ${activeTab === "favourites" ? "active" : ""}`}
               onClick={() => setActiveTab("favourites")}
             >
-              <span className="rail-icon">⭐</span>
+              <span className="rail-icon"><StarFillIcon size={14} /></span>
               <span className="rail-text">Favourites</span>
             </button>
 
@@ -268,7 +269,7 @@ export function ModelEffortPicker({
                 >
                   <ProviderMark provider={p.id} size={14} />
                   <span className="rail-text">{p.name}</span>
-                  {isLocked && <span className="lock-icon" aria-label="Locked">🔒</span>}
+                  {isLocked && <span className="lock-icon" aria-label="Locked"><LockIcon size={12} /></span>}
                 </button>
               );
             })}
@@ -300,13 +301,13 @@ export function ModelEffortPicker({
 
             {tabIsLocked && (
               <div className="tab-locked-banner" role="status">
-                🔒 Provider locked after the first Turn. Models from other Providers cannot be selected.
+                <LockIcon size={12} /> Provider locked after the first Turn. Models from other Providers cannot be selected.
               </div>
             )}
 
             {modelSwitchLocked && !tabIsLocked && (
               <div className="tab-locked-banner" role="status">
-                🔒 Provider does not support mid-thread model switching.
+                <LockIcon size={12} /> Provider does not support mid-thread model switching.
               </div>
             )}
 
@@ -344,14 +345,14 @@ export function ModelEffortPicker({
                           onClick={(e) => void toggleFavourite(m.id, e)}
                           aria-label={isFav ? "Unfavourite" : "Favourite"}
                         >
-                          {isFav ? "★" : "☆"}
+                          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
                         </button>
 
                         <div className="model-details">
                           <div className="model-name-row">
                             <span className="model-name">{m.name}</span>
                             {isSelected && <span className="current-badge">Active</span>}
-                            {isItemLocked && <span className="locked-badge">🔒 Locked</span>}
+                            {isItemLocked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
                           </div>
                           {m.description && <div className="model-desc">{m.description}</div>}
                         </div>
@@ -395,14 +396,14 @@ export function ModelEffortPicker({
                           onClick={(e) => void toggleFavourite(m.id, e)}
                           aria-label={isFav ? "Unfavourite" : "Favourite"}
                         >
-                          {isFav ? "★" : "☆"}
+                          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
                         </button>
 
                         <div className="model-details">
                           <div className="model-name-row">
                             <span className="model-name">{m.name}</span>
                             {isSelected && <span className="current-badge">Active</span>}
-                            {isItemLocked && <span className="locked-badge">🔒 Locked</span>}
+                            {isItemLocked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
                           </div>
                           {m.description && <div className="model-desc">{m.description}</div>}
                         </div>

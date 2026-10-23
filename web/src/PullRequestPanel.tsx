@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  GitPullRequestDraftIcon,
+  GitPullRequestIcon,
+  LinkExternalIcon,
+  SyncIcon,
+} from "@primer/octicons-react";
 import { commands, type GitStatus, type PullRequestDraft, type PullRequestState } from "./bindings";
 import { createPrBlockedReason } from "./gitAction";
 import { PullRequestBrowser } from "./PullRequestBrowser";
@@ -16,7 +22,7 @@ interface PullRequestPanelProps {
 type Loaded =
   | { state: "loading" }
   | { state: "error"; message: string }
-  | { state: "ready"; pr: PullRequestState; git: GitStatus };
+  | { state: "ready"; pr: PullRequestState; git: GitStatus; draft: PullRequestDraft | null };
 
 /** The branch's pull request on GitHub, through `gh`. It loads when opened and
  *  after the user's own Git changes or a manual refresh; it never polls.
@@ -27,58 +33,68 @@ export function PullRequestPanel(props: PullRequestPanelProps) {
 
 const VIEWS = [
   { view: "branch", label: "This branch" },
-  { view: "browse", label: "Open pull requests" },
+  { view: "browse", label: "Open PRs" },
 ] as const;
 
 function PullRequestViews(props: PullRequestPanelProps) {
   const [view, setView] = useState<(typeof VIEWS)[number]["view"]>("branch");
+  // Bumped by the Refresh button: the only reload besides opening and the user's own changes.
+  const [manual, setManual] = useState(0);
+  const refresh = useCallback(() => setManual((n) => n + 1), []);
   return (
     <div className="pr-views">
-      <div className="diff-scopes" role="tablist" aria-label="Pull request view">
-        {VIEWS.map((v) => (
-          <button key={v.view} role="tab" aria-selected={view === v.view} onClick={() => setView(v.view)}>
-            {v.label}
-          </button>
-        ))}
+      <div className="surface-bar">
+        <div className="seg" role="tablist" aria-label="Pull request view">
+          {VIEWS.map((v) => (
+            <button key={v.view} role="tab" aria-selected={view === v.view} onClick={() => setView(v.view)}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <span className="grow" />
+        <button className="icon-btn sm" onClick={refresh} title="Reload from GitHub" aria-label="Reload from GitHub">
+          <SyncIcon size={14} />
+        </button>
       </div>
       {view === "branch" ? (
-        <PullRequestBody {...props} />
+        <PullRequestBody {...props} manual={manual} onRefresh={refresh} />
       ) : (
         <section className="pr-panel" aria-label="Pull requests">
-          <PullRequestBrowser {...props} />
+          <PullRequestBrowser {...props} refreshKey={props.refreshKey + manual} />
         </section>
       )}
     </div>
   );
 }
 
-function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelProps) {
+function PullRequestBody({
+  projectId,
+  refreshKey,
+  onChanged,
+  manual,
+  onRefresh,
+}: PullRequestPanelProps & { manual: number; onRefresh: () => void }) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [error, setError] = useState<string | null>(null);
-
-  // Bumped by the Refresh button: the only reload besides opening and the user's own changes.
-  const [manual, setManual] = useState(0);
-  const load = useCallback(() => setManual((n) => n + 1), []);
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [pr, git] = await Promise.all([commands.pullRequestState(projectId), commands.gitStatus(projectId)]);
+      // Side by side: the draft only needs local Git once `gh` and the default branch are known.
+      const [pr, git, draft] = await Promise.all([
+        commands.pullRequestState(projectId),
+        commands.gitStatus(projectId),
+        commands.pullRequestDraft(projectId),
+      ]);
       if (!active) return;
       if (pr.status === "error") setLoaded({ state: "error", message: pr.error.message });
       else if (git.status === "error") setLoaded({ state: "error", message: git.error.message });
-      else setLoaded({ state: "ready", pr: pr.data, git: git.data });
+      else setLoaded({ state: "ready", pr: pr.data, git: git.data, draft: draft.status === "ok" ? draft.data : null });
     })();
     return () => {
       active = false;
     };
   }, [projectId, refreshKey, manual]);
-
-  const refresh = (
-    <button className="pr-refresh" onClick={load} title="Reload from GitHub">
-      Refresh
-    </button>
-  );
 
   async function openOnGithub() {
     setError(null);
@@ -86,22 +102,28 @@ function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelP
     if (result.status === "error") setError(result.error.message);
   }
 
-  if (loaded.state === "loading") return <section className="pr-panel" aria-label="Pull request" />;
+  if (loaded.state === "loading") {
+    return (
+      <section className="pr-panel" aria-label="Pull request" aria-busy>
+        <p className="surface-empty">
+          <SyncIcon size={14} className="spin" /> Loading from GitHub…
+        </p>
+      </section>
+    );
+  }
   if (loaded.state === "error") {
     return (
       <section className="pr-panel" aria-label="Pull request">
-        <p role="alert">{loaded.message}</p>
-        {refresh}
+        <p role="alert" className="error">{loaded.message}</p>
       </section>
     );
   }
 
-  const { pr, git } = loaded;
+  const { pr, git, draft } = loaded;
   if (pr.availability !== "ready") {
     return (
       <section className="pr-panel" aria-label="Pull request">
         <p className="pr-guidance">{pr.guidance}</p>
-        {refresh}
       </section>
     );
   }
@@ -110,34 +132,37 @@ function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelP
   return (
     <section className="pr-panel" aria-label="Pull request">
       {existing ? (
-        <>
-          <h3>
-            #{existing.number} {existing.title}
-            {existing.draft && <span className="badge">draft</span>}
-          </h3>
-          <p>
-            {existing.head} → {existing.base}
-          </p>
-          <div className="pr-actions">
-            <button onClick={() => void openOnGithub()}>Open on GitHub</button>
-            {refresh}
+        <div className="pr-card">
+          <div className="pr-card-title">
+            {existing.draft ? <GitPullRequestDraftIcon size={16} /> : <GitPullRequestIcon size={16} className="pr-open" />}
+            <strong>{existing.title}</strong>
+            <span className="dim">#{existing.number}</span>
           </div>
-        </>
+          <div className="pr-card-meta">
+            <span className={`badge ${existing.draft ? "b-draft" : "b-open"}`}>{existing.draft ? "Draft" : "Open"}</span>
+            <span className="mono dim">
+              {existing.head} → {existing.base}
+            </span>
+          </div>
+          <div className="pr-actions">
+            <button className="btn" onClick={() => void openOnGithub()}>
+              <LinkExternalIcon size={14} /> Open on GitHub
+            </button>
+          </div>
+        </div>
       ) : (
-        <>
-          <CreateForm
-            projectId={projectId}
-            git={git}
-            onCreated={() => {
-              onChanged();
-              load();
-            }}
-          />
-          <div className="pr-actions">{refresh}</div>
-        </>
+        <CreateForm
+          projectId={projectId}
+          git={git}
+          draft={draft}
+          onCreated={() => {
+            onChanged();
+            onRefresh();
+          }}
+        />
       )}
       {error && (
-        <p role="alert" className="git-error-text">
+        <p role="alert" className="error">
           {error}
         </p>
       )}
@@ -148,42 +173,29 @@ function PullRequestBody({ projectId, refreshKey, onChanged }: PullRequestPanelP
 interface CreateFormProps {
   projectId: number;
   git: GitStatus;
+  /** Title, body and base prefilled from the branch's commits; null if they couldn't be read. */
+  draft: PullRequestDraft | null;
   onCreated: () => void;
 }
 
-function CreateForm({ projectId, git, onCreated }: CreateFormProps) {
+function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormProps) {
   const blocked = createPrBlockedReason(git);
-  const [form, setForm] = useState<Pick<PullRequestDraft, "title" | "body" | "base"> | null>(null);
+  const [form, setForm] = useState<Pick<PullRequestDraft, "title" | "body" | "base">>({
+    title: prefill?.title ?? "",
+    body: prefill?.body ?? "",
+    base: prefill?.base ?? "main",
+  });
   const [draft, setDraft] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (blocked) return;
-    let active = true;
-    void commands.pullRequestDraft(projectId).then((result) => {
-      if (!active) return;
-      if (result.status === "ok") setForm({ title: result.data.title, body: result.data.body, base: result.data.base });
-      else setError(result.error.message);
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, blocked]);
-
   if (blocked) return <p className="pr-guidance">{blocked}</p>;
-  if (!form) return error ? <p role="alert">{error}</p> : null;
 
-  async function create(current: NonNullable<typeof form>) {
+  const pushFirst = git.unpublished || git.ahead > 0;
+  async function create() {
     setBusy(true);
     setError(null);
-    const result = await commands.createPullRequest(
-      projectId,
-      current.title,
-      current.body,
-      current.base,
-      draft,
-    );
+    const result = await commands.createPullRequest(projectId, form.title, form.body, form.base, draft);
     setBusy(false);
     if (result.status === "error") setError(result.error.message);
     else onCreated();
@@ -194,38 +206,58 @@ function CreateForm({ projectId, git, onCreated }: CreateFormProps) {
       className="pr-form"
       onSubmit={(e) => {
         e.preventDefault();
-        void create(form);
+        void create();
       }}
     >
-      <p>
-        {git.branch} has no pull request.
-        {(git.unpublished || git.ahead > 0) && " It is pushed first."}
+      <p className="dim">
+        No pull request for <span className="mono">{git.branch}</span> yet.
       </p>
       <input
         aria-label="Title"
         placeholder="Title"
         value={form.title}
+        autoFocus
         onChange={(e) => setForm({ ...form, title: e.target.value })}
       />
       <textarea
         aria-label="Description"
         placeholder="Description"
-        rows={6}
+        rows={8}
         value={form.body}
         onChange={(e) => setForm({ ...form, body: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.metaKey) {
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          }
+        }}
       />
-      <label>
-        Base{" "}
-        <input aria-label="Base branch" value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })} />
-      </label>
-      <label>
-        <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} /> Draft
-      </label>
-      <button type="submit" disabled={busy || !form.title.trim() || !form.base.trim()}>
-        {busy ? "Creating…" : "Create pull request"}
-      </button>
+      <div className="pr-form-row">
+        <label className="pr-base">
+          base
+          <input
+            aria-label="Base branch"
+            className="mono"
+            value={form.base}
+            onChange={(e) => setForm({ ...form, base: e.target.value })}
+          />
+        </label>
+        <label className="pr-draft">
+          <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} /> Draft
+        </label>
+        <span className="grow" />
+        <button
+          type="submit"
+          className="btn primary"
+          disabled={busy || !form.title.trim() || !form.base.trim()}
+          title="Create the pull request (⌘↩ in the description)"
+        >
+          <GitPullRequestIcon size={14} />
+          {busy ? "Creating…" : pushFirst ? "Push & create PR" : "Create PR"}
+        </button>
+      </div>
       {error && (
-        <p role="alert" className="git-error-text">
+        <p role="alert" className="error">
           {error}
         </p>
       )}

@@ -27,6 +27,8 @@ export const commands = {
 	openInEditor: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("open_in_editor", { projectId, threadId })),
 	revealInFinder: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_finder", { projectId, threadId })),
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
+	/**  Lists the Project in the sidebar, or takes it out (it stays in the Project palette). */
+	setProjectOpen: (id: number, open: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_open", { id, open })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
@@ -521,6 +523,8 @@ export type Project = {
 	name: string,
 	path: string,
 	hidden: boolean,
+	/**  Listed in the sidebar; scanned Projects stay closed until the user opens one. */
+	open: boolean,
 	missing: boolean,
 };
 

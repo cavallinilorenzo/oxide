@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { TerminalIcon, XIcon } from "@primer/octicons-react";
 import { commands } from "./bindings";
 import { takeFrameBatch } from "./terminalOutput";
 import "@xterm/xterm/css/xterm.css";
@@ -11,9 +12,10 @@ interface TerminalPanelProps {
   threadId: number | null;
   contextKey: string;
   visible: boolean;
+  onClose?: () => void;
 }
 
-export function TerminalPanel({ projectId, threadId, contextKey, visible }: TerminalPanelProps) {
+export function TerminalPanel({ projectId, threadId, contextKey, visible, onClose }: TerminalPanelProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -28,6 +30,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible }: Term
       fontSize: 12,
       scrollback: 10_000,
       convertEol: true,
+      theme: { background: "#0a0b0e", foreground: "#c9d1d9", cursor: "#2f81f7", selectionBackground: "#2f81f755" },
     });
     const fit = new FitAddon();
     fitRef.current = fit;
@@ -115,9 +118,17 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible }: Term
 
   return (
     <section className={`terminal${visible ? "" : " terminal-hidden"}`} aria-label="Terminal" aria-hidden={!visible}>
-      <div className="terminal-toolbar">
-        <span>Terminal</span>
+      <div className="tabs terminal-toolbar">
+        <span className="tab" aria-selected>
+          <TerminalIcon size={14} /> Terminal
+        </span>
         {error && <span className="terminal-error">{error}</span>}
+        <span className="grow" />
+        {onClose && (
+          <button className="icon-btn sm" title="Close Terminal (⌘J)" aria-label="Close Terminal" onClick={onClose}>
+            <XIcon size={14} />
+          </button>
+        )}
       </div>
       <div className="terminal-host" ref={hostRef} />
     </section>

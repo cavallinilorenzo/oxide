@@ -1,3 +1,4 @@
+import { MarkGithubIcon, RepoIcon } from "@primer/octicons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { commands, type AppError, type GithubRepository, type Project } from "./bindings";
 import { matchActions, matchProjects, moveHighlight, type PaletteActionId } from "./paletteSearch";
@@ -251,8 +252,11 @@ export function ProjectPalette({
           <ul className="palette-list" role="listbox" aria-label="Results">
             {projectRows.map((p, i) => (
               <li key={p.id} role="option" aria-selected={i === highlight}>
-                <span className="palette-name">{p.name}</span>
-                <span className="palette-detail">{p.path}</span>
+                <span className="palette-name">
+                  <RepoIcon size={14} /> {p.name}
+                  {p.open && <span className="palette-open" title="In the sidebar">open</span>}
+                </span>
+                <span className="palette-detail">{p.path.replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
               </li>
             ))}
             {actionRows.map((a, i) => (
@@ -272,7 +276,9 @@ export function ProjectPalette({
           <ul className="palette-list" role="listbox" aria-label="GitHub repositories">
             {repositories.map((r, i) => (
               <li key={r.nameWithOwner} role="option" aria-selected={i === highlight}>
-                <span className="palette-name">{r.nameWithOwner}</span>
+                <span className="palette-name">
+                  <MarkGithubIcon size={14} /> {r.nameWithOwner}
+                </span>
                 <span className="palette-detail">{r.description}</span>
               </li>
             ))}

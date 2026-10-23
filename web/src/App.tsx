@@ -1,7 +1,28 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
-import { GitBranchIcon } from "@primer/octicons-react";
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CodeIcon,
+  CommentDiscussionIcon,
+  FileDiffIcon,
+  FileDirectoryIcon,
+  FileIcon,
+  GearIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+  IssueOpenedIcon,
+  PlusIcon,
+  ProjectIcon,
+  RepoIcon,
+  SearchIcon,
+  TerminalIcon,
+  ToolsIcon,
+  XIcon,
+  type Icon,
+} from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
 import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
@@ -13,7 +34,7 @@ import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
-import { splitThreads, threadTitle } from "./threadList";
+import { relativeAge, sidebarProjects, splitThreads, threadTitle } from "./threadList";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -30,7 +51,15 @@ const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default
 const IssuesSurface = lazy(() =>
   import("./IssuesSurface").then((module) => ({ default: module.IssuesSurface })),
 );
-const TOOL_TABS = ["Terminal", "Files", "Diff", "Pull request", "Issues"];
+const TOOL_TABS: { name: string; Icon: Icon }[] = [
+  { name: "Files", Icon: FileIcon },
+  { name: "Diff", Icon: FileDiffIcon },
+  { name: "Pull request", Icon: GitPullRequestIcon },
+  { name: "Issues", Icon: IssueOpenedIcon },
+];
+
+/** `/Users/me/code/app` → `~/code/app`, as the header shows it. */
+const displayPath = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
 
 export function App() {
   const [showTools, setShowTools] = useState(true);
@@ -66,6 +95,10 @@ export function App() {
     if (!showPalette) return;
     void commands.getSettings().then((s) => {
       if (s.settings.scanRoots[0]) setDefaultParentFolder(s.settings.scanRoots[0]);
+    });
+    // Scanned repositories are only offered here, so refresh them while the palette is open.
+    void commands.rescanProjects().then((res) => {
+      if (res.status === "ok") setProjects(res.data);
     });
   }, [showPalette]);
 
@@ -222,7 +255,8 @@ export function App() {
     restore.current = null;
     setShowSettings(false);
     setShowBoard(false);
-    setProjects((prev) => [project, ...(prev?.filter((p) => p.id !== project.id) ?? [])]);
+    const opened = { ...project, open: true, hidden: false };
+    setProjects((prev) => [opened, ...(prev?.filter((p) => p.id !== project.id) ?? [])]);
     if (project.id !== selectedId) {
       setSelectedId(project.id);
       setThreads(null);
@@ -364,14 +398,17 @@ export function App() {
           onOpenProject={openProject}
         />
       )}
-      <header className="header">
+      <header className="header" data-tauri-drag-region>
         {selected ? (
-          <span className="title">
-            <strong>{selected.name}</strong> <span className="path">{selected.path}</span>
+          <span className="title" data-tauri-drag-region>
+            <strong>{selected.name}</strong>
+            <span className="path" title={selected.path}>{displayPath(selected.path)}</span>
             {selected.missing && <span className="badge">missing</span>}
           </span>
         ) : (
-          <span className="title">Oxide</span>
+          <span className="title" data-tauri-drag-region>
+            <strong>Oxide</strong>
+          </span>
         )}
         {selected && !selected.missing && (
           <GitHeader
@@ -382,35 +419,46 @@ export function App() {
             onChanged={onGitChanged}
           />
         )}
-        <div className="toggles">
-          {selected && !selected.missing && (
-            <>
-              {openError && <span className="error" role="alert">{openError}</span>}
-              <button title="Open in editor" onClick={() => void openCheckout("editor")}>
-                Open in editor
-              </button>
-              <button title="Reveal in Finder" onClick={() => void openCheckout("finder")}>
-                Reveal in Finder
-              </button>
-            </>
-          )}
-          {selected && (
-            <span role="group" aria-label="View" className="view-toggle">
-              <button aria-pressed={!showBoard} title="Chat (⌘B)" onClick={() => setShowBoard(false)}>
-                Chat
-              </button>
-              <button aria-pressed={showBoard} title="Board (⌘B)" onClick={() => setShowBoard(true)}>
-                Board
-              </button>
-            </span>
-          )}
-          <button aria-pressed={showTools} title="Toggle tools panel (⌘\)" onClick={() => setShowTools((v) => !v)}>
-            Tools
-          </button>
-          <button aria-pressed={showTerminal} title="Toggle Terminal (⌘J)" onClick={() => setShowTerminal((v) => !v)}>
-            Terminal
-          </button>
-        </div>
+        <span className="grow" data-tauri-drag-region />
+        {openError && <span className="error header-error" role="alert">{openError}</span>}
+        {selected && !selected.missing && (
+          <>
+            <button className="icon-btn" title="Open in editor" aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
+              <CodeIcon size={16} />
+            </button>
+            <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
+              <FileDirectoryIcon size={16} />
+            </button>
+          </>
+        )}
+        {selected && (
+          <span role="group" aria-label="View" className="seg">
+            <button aria-pressed={!showBoard} title="Chat (⌘B)" onClick={() => setShowBoard(false)}>
+              <CommentDiscussionIcon size={14} /> Chat
+            </button>
+            <button aria-pressed={showBoard} title="Thread Board (⌘B)" onClick={() => setShowBoard(true)}>
+              <ProjectIcon size={14} /> Board
+            </button>
+          </span>
+        )}
+        <button
+          className="icon-btn"
+          aria-pressed={showTools}
+          title="Tools: Files, Diff, Pull request, Issues (⌘\)"
+          aria-label="Toggle tools panel"
+          onClick={() => setShowTools((v) => !v)}
+        >
+          <ToolsIcon size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          aria-pressed={showTerminal}
+          title="Terminal (⌘J)"
+          aria-label="Toggle Terminal"
+          onClick={() => setShowTerminal((v) => !v)}
+        >
+          <TerminalIcon size={16} />
+        </button>
       </header>
       <div className="body">
         <Sidebar
@@ -419,6 +467,7 @@ export function App() {
           selected={selected}
           onSelect={(p) => {
             restore.current = null;
+            setShowSettings(false);
             setSelectedId(p.id);
             setThreads(null);
             setSelectedThreadId(null);
@@ -426,6 +475,7 @@ export function App() {
           threads={threads}
           selectedThreadId={selectedThreadId}
           onSelectThread={(threadId) => {
+            setShowSettings(false);
             setShowBoard(false);
             setSelectedThreadId(threadId);
             if (selected) rememberTerminalContext(selected.id, threadId);
@@ -435,6 +485,18 @@ export function App() {
             void startNewThread();
           }}
           onRenameThread={onThreadTitleChange}
+          onOpenPalette={() => setShowPalette(true)}
+          onOpenBoard={(p) => {
+            if (p.id !== selected?.id) {
+              restore.current = null;
+              setSelectedId(p.id);
+              setThreads(null);
+              setSelectedThreadId(null);
+            }
+            setShowSettings(false);
+            setShowBoard(true);
+          }}
+          onOpenSettings={() => setShowSettings(true)}
         />
         <div className="centre-column">
           {showSettings ? (
@@ -495,7 +557,13 @@ export function App() {
             </main>
           ) : (
             <main className="centre empty-thread" aria-label="Thread">
-              <p>Pick a Project to begin.</p>
+              <div className="empty-state">
+                <RepoIcon size={24} />
+                <p>Open a Project to begin.</p>
+                <button className="btn primary" onClick={() => setShowPalette(true)}>
+                  Open a Project <kbd>⌘⇧N</kbd>
+                </button>
+              </div>
             </main>
           )}
           {terminalContextsToRender.map((context) => (
@@ -505,24 +573,29 @@ export function App() {
                 threadId={context.threadId}
                 contextKey={context.key}
                 visible={showTerminal && context.key === currentTerminalContext?.key}
+                onClose={() => setShowTerminal(false)}
               />
             </Suspense>
           ))}
         </div>
         {showTools && (
           <aside className="tools" aria-label="Tools panel">
-            <nav className="tool-tabs">
-              {TOOL_TABS.map((t) => (
+            <nav className="tabs" role="tablist" aria-label="Surfaces">
+              {TOOL_TABS.map(({ name, Icon }) => (
                 <button
-                  key={t}
-                  title={t}
-                  aria-label={t}
-                  aria-pressed={activeTool === t}
-                  onClick={() => setActiveTool(t)}
+                  key={name}
+                  role="tab"
+                  className="tab"
+                  aria-selected={activeTool === name}
+                  onClick={() => setActiveTool(name)}
                 >
-                  {t[0]}
+                  <Icon size={14} /> {name}
                 </button>
               ))}
+              <span className="grow" />
+              <button className="icon-btn sm" title="Close panel (⌘\)" aria-label="Close tools panel" onClick={() => setShowTools(false)}>
+                <XIcon size={14} />
+              </button>
             </nav>
             {activeTool === "Diff" && selected && (
               <Suspense fallback={null}>
@@ -586,8 +659,13 @@ interface SidebarProps {
   onArchiveThread: (threadId: number, archived: boolean) => void;
   onNewThread: () => void;
   onRenameThread?: (threadId: number, newTitle: string) => void;
+  /** ⌘⇧N: every known Project, scanned ones included, is found there. */
+  onOpenPalette: () => void;
+  onOpenBoard: (p: Project) => void;
+  onOpenSettings: () => void;
 }
 
+/** Open Projects, each with its Threads. Scanned repositories stay out until opened from ⌘⇧N. */
 function Sidebar({
   projects,
   onProjects,
@@ -599,12 +677,13 @@ function Sidebar({
   onArchiveThread,
   onNewThread,
   onRenameThread,
+  onOpenPalette,
+  onOpenBoard,
+  onOpenSettings,
 }: SidebarProps) {
   const [threadQuery, setThreadQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(true);
-  const [showHidden, setShowHidden] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<number | null>(null);
   const [renameText, setRenameText] = useState("");
 
@@ -623,14 +702,8 @@ function Sidebar({
     } else setError(r.error.message);
   };
 
-  const rescan = async () => {
-    setScanning(true);
-    apply(await commands.rescanProjects());
-    setScanning(false);
-  };
-
-  // Show what's known right away, then scan on launch. Sequential, so the
-  // scan result can't be overwritten by the earlier, staler list.
+  // Show what's known right away, then scan on launch so ⌘⇧N can offer new
+  // repositories. Sequential, so the scan can't be overwritten by the staler list.
   useEffect(() => {
     void (async () => {
       const known = await commands.listProjects();
@@ -638,22 +711,24 @@ function Sidebar({
       const scanned = await commands.rescanProjects();
       if (scanned.status === "ok") onProjects(scanned.data);
       else setError(scanned.error.message);
-      setScanning(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hide = async (p: Project, hidden: boolean) => {
-    const r = await commands.setProjectHidden(p.id, hidden);
+  const close = async (p: Project) => {
+    const r = await commands.setProjectOpen(p.id, false);
     if (r.status === "error") setError(r.error.message);
     else apply(await commands.listProjects());
   };
 
-  const visible = projects?.filter((p) => !p.hidden) ?? [];
-  const hidden = projects?.filter((p) => p.hidden) ?? [];
+  // The selected Project always shows, even before the Core has marked it open.
+  const listed = sidebarProjects(projects ?? []);
+  const shown = selected && !listed.some((p) => p.id === selected.id) ? [selected, ...listed] : listed;
   const { active: activeThreads, archived: archivedThreads } = splitThreads(threads ?? [], threadQuery);
+  const now = new Date();
+
   const renderThread = (t: Thread, archived: boolean) => (
-    <li key={t.id}>
+    <li key={t.id} className="thread-row">
       {editingThreadId === t.id ? (
         <input
           className="thread-rename-input"
@@ -677,19 +752,16 @@ function Sidebar({
             setEditingThreadId(t.id);
             setRenameText(threadTitle(t));
           }}
-          title={`${threadTitle(t)} (${t.status})`}
+          title={`${threadTitle(t)} (${t.status}). Double-click to rename.`}
         >
-          <span
-            className={`status-dot ${t.status}`}
-            aria-label={`Status: ${t.status}`}
-            title={`Status: ${t.status}`}
-          />
+          <span className={`status-dot ${t.status}`} aria-label={`Status: ${t.status}`} />
+          <span className="thread-item-title">{threadTitle(t)}</span>
           {isBoardThread(t) && (
-            <span className="thread-item-branch" title={`Worktree on ${t.branch}`} aria-label="Board Thread">
+            <span className="thread-item-branch" title={`Board Thread: own worktree on ${t.branch}`} aria-label="Board Thread">
               <GitBranchIcon size={12} />
             </span>
           )}
-          <span className="thread-item-title">{threadTitle(t)}</span>
+          <span className="thread-item-age">{relativeAge(t.updatedAt, now)}</span>
         </button>
       )}
       <button
@@ -698,7 +770,7 @@ function Sidebar({
         aria-label={`${archived ? "Unarchive" : "Archive"} ${threadTitle(t)}`}
         title={archived ? "Unarchive" : "Archive"}
       >
-        {archived ? "Unarchive" : "Archive"}
+        <ArchiveIcon size={12} />
       </button>
     </li>
   );
@@ -706,81 +778,82 @@ function Sidebar({
   return (
     <nav className="sidebar" aria-label="Projects">
       <div className="sidebar-actions">
-        <button onClick={rescan} disabled={scanning} title="Rescan for repositories">
-          {scanning ? "Scanning…" : "Rescan"}
+        <button className="btn grow" onClick={onNewThread} disabled={!selected} title="New Thread in this Project (⌘N)">
+          <PlusIcon size={14} /> New Thread <kbd>⌘N</kbd>
+        </button>
+        <button className="btn" onClick={onOpenPalette} title="Open a Project, or a new Thread in another one (⌘⇧N)" aria-label="Open a Project">
+          <RepoIcon size={14} />
         </button>
       </div>
-      {error && <p className="error">{error}</p>}
-      {projects && visible.length === 0 && !scanning && <p className="empty">No projects found</p>}
-      <ul>
-        {visible.map((p) => (
-          <li key={p.id} className={p.missing ? "missing" : undefined}>
-            <button className="project" aria-current={p.id === selected?.id} onClick={() => onSelect(p)} title={p.path}>
-              {p.name}
-              {p.missing && <span className="badge">missing</span>}
-            </button>
-            <button className="row-action" onClick={() => hide(p, true)} aria-label={`Hide ${p.name}`} title="Hide">
-              ✕
-            </button>
-          </li>
-        ))}
-      </ul>
-      {hidden.length > 0 && (
-        <section>
-          <button className="hidden-toggle" aria-expanded={showHidden} onClick={() => setShowHidden((v) => !v)}>
-            Hidden ({hidden.length})
-          </button>
-          {showHidden && (
-            <ul aria-label="Hidden projects">
-              {hidden.map((p) => (
-                <li key={p.id} className={p.missing ? "missing" : undefined}>
-                  <span className="project" title={p.path}>
-                    {p.name}
-                  </span>
-                  <button className="row-action" onClick={() => hide(p, false)} aria-label={`Unhide ${p.name}`}>
-                    Unhide
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
       {selected && (
-        <section className="threads-section" aria-label="Threads">
-          <div className="threads-header">
-            <span>Threads</span>
-            <button className="new-thread-btn" onClick={onNewThread} title="Start a new Thread">
-              + New
-            </button>
-          </div>
+        <label className="sidebar-search">
+          <SearchIcon size={12} />
           <input
             type="search"
-            className="thread-search"
             placeholder="Search Threads"
             aria-label="Search Threads by title"
             value={threadQuery}
             onChange={(e) => setThreadQuery(e.target.value)}
           />
-          {threads && activeThreads.length === 0 && (
-            <p className="empty" style={{ padding: "4px 6px", margin: 0 }}>
-              {threads.length === 0 ? "No threads yet" : "No matching threads"}
-            </p>
-          )}
-          <ul aria-label="Thread list">{activeThreads.map((t) => renderThread(t, false))}</ul>
-          {archivedThreads.length > 0 && (
-            <>
-              <button className="hidden-toggle" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
-                Archived ({archivedThreads.length})
-              </button>
-              {showArchived && (
-                <ul aria-label="Archived threads">{archivedThreads.map((t) => renderThread(t, true))}</ul>
-              )}
-            </>
-          )}
-        </section>
+        </label>
       )}
+      {error && <p className="error sidebar-note">{error}</p>}
+      <div className="sidebar-scroll">
+        {projects && shown.length === 0 && (
+          <div className="sidebar-empty">
+            <p>No open Projects.</p>
+            <button className="btn" onClick={onOpenPalette}>
+              <RepoIcon size={14} /> Open a Project <kbd>⌘⇧N</kbd>
+            </button>
+          </div>
+        )}
+        <ul className="project-list">
+          {shown.map((p) => {
+            const isSelected = p.id === selected?.id;
+            return (
+              <li key={p.id} className={`project-node${p.missing ? " missing" : ""}`}>
+                <div className="project-row">
+                  <button className="project" aria-current={isSelected} aria-expanded={isSelected} onClick={() => onSelect(p)} title={p.path}>
+                    {isSelected ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+                    <RepoIcon size={13} />
+                    <span className="project-name">{p.name}</span>
+                    {p.missing && <span className="badge">missing</span>}
+                  </button>
+                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title="Thread Board">
+                    <ProjectIcon size={13} />
+                  </button>
+                  <button className="row-action" onClick={() => void close(p)} aria-label={`Close ${p.name}`} title="Close Project (it stays in ⌘⇧N)">
+                    <XIcon size={13} />
+                  </button>
+                </div>
+                {isSelected && (
+                  <ul className="thread-list" aria-label="Thread list">
+                    {threads && activeThreads.length === 0 && (
+                      <li className="sidebar-note">{threads.length === 0 ? "No Threads yet" : "No matching Threads"}</li>
+                    )}
+                    {activeThreads.map((t) => renderThread(t, false))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {selected && archivedThreads.length > 0 && (
+          <>
+            <button className="sidebar-link" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              <ArchiveIcon size={12} /> Archived Threads ({archivedThreads.length})
+            </button>
+            {showArchived && (
+              <ul className="thread-list archived" aria-label="Archived threads">
+                {archivedThreads.map((t) => renderThread(t, true))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+      <button className="sidebar-footer" onClick={onOpenSettings} title="Settings (⌘,)">
+        <GearIcon size={14} /> Settings
+      </button>
     </nav>
   );
 }

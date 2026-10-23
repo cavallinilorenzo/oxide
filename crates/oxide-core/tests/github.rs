@@ -226,6 +226,29 @@ fn state_reports_the_default_branch_and_the_open_pull_request_of_the_branch() {
 }
 
 #[test]
+fn reloading_the_surface_asks_github_only_for_the_pull_request() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    f.core.create_branch(f.project.id, "feature").unwrap();
+    f.core.pull_request_state(f.project.id).unwrap();
+    f.core.pull_request_draft(f.project.id).unwrap();
+    let before = f.gh_calls().len();
+
+    f.core.pull_request_state(f.project.id).unwrap();
+    f.core.pull_request_draft(f.project.id).unwrap();
+
+    let again: Vec<_> = f.gh_calls()[before..]
+        .iter()
+        .map(|c| c[..2].join(" "))
+        .collect();
+    assert_eq!(
+        again,
+        ["pr view"],
+        "auth status and the default branch are reused"
+    );
+}
+
+#[test]
 fn a_merged_pull_request_does_not_count_as_the_branchs_pull_request() {
     let f = fixture();
     install_gh(&f, ok_state());

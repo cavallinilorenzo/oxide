@@ -323,9 +323,9 @@ describe("transcript reducer", () => {
       "claude"
     );
     expect(claudeModes).toEqual([
-      { mode: "ask", label: "Ask", icon: "🔒" },
-      { mode: "auto-edit", label: "Auto-edit", icon: "🛡️" },
-      { mode: "full-access", label: "Full access", icon: "🔓" },
+      { mode: "ask", label: "Ask", icon: "lock" },
+      { mode: "auto-edit", label: "Auto-edit", icon: "shield-check" },
+      { mode: "full-access", label: "Full access", icon: "unlock" },
     ]);
 
     // agy supports only auto-edit and full-access, and labels auto-edit as soft-deny
@@ -334,14 +334,14 @@ describe("transcript reducer", () => {
       "antigravity"
     );
     expect(agyModes).toEqual([
-      { mode: "auto-edit", label: "Auto-edit (soft-deny)", icon: "🛡️" },
-      { mode: "full-access", label: "Full access", icon: "🔓" },
+      { mode: "auto-edit", label: "Auto-edit (soft-deny)", icon: "shield-check" },
+      { mode: "full-access", label: "Full access", icon: "unlock" },
     ]);
 
     // Provider that only supports AutoEdit
     const restrictedModes = getOfferedPermissionModes(["auto-edit"], "custom");
     expect(restrictedModes).toEqual([
-      { mode: "auto-edit", label: "Auto-edit", icon: "🛡️" },
+      { mode: "auto-edit", label: "Auto-edit", icon: "shield-check" },
     ]);
   });
 

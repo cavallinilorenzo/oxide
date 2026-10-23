@@ -1,13 +1,4 @@
-<p align="center">
-  <img width="160" height="160" alt="Oxide logo" src="https://github.com/user-attachments/assets/2dbf3b1e-362f-4365-ac9d-6583b0f4015c" />
-</p>
-
 <h1 align="center">Oxide</h1>
-
-<p align="center">
-  <a href="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cavallinilorenzo/oxide/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-</p>
 
 Oxide is a desktop app for agentic engineering. You open a Project and drive coding agents from a chat, switching between the agent CLIs already installed on your machine, with Git and GitHub at hand.
 

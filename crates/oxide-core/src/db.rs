@@ -111,6 +111,10 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE threads ADD COLUMN setup_output TEXT;
     ALTER TABLE projects ADD COLUMN setup_command TEXT;
 ",
+    // The GitHub issue a Board Thread was started from.
+    "
+    ALTER TABLE threads ADD COLUMN issue_number INTEGER;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

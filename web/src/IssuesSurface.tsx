@@ -4,7 +4,10 @@ import {
   type IssueDetail,
   type IssuesState_Serialize,
   type IssueSummary,
+  type Thread,
 } from "./bindings";
+import { DispatchDialog } from "./DispatchDialog";
+import type { DispatchIssue } from "./dispatch";
 import { canSubmitComment, canSubmitIssue, formatIssueLabel } from "./issueView";
 
 export interface IssuesSurfaceProps {
@@ -13,6 +16,8 @@ export interface IssuesSurfaceProps {
   refreshKey?: number;
   /** Called after issue mutations (create/close/comment), so parent views can react if needed. */
   onChanged?: () => void;
+  /** A Thread was started from an issue: the new Thread, for the sidebar. */
+  onDispatched?: (thread: Thread) => void;
 }
 
 type SurfaceState =
@@ -25,7 +30,7 @@ export function IssuesSurface(props: IssuesSurfaceProps) {
   return <IssuesSurfaceBody key={props.projectId} {...props} />;
 }
 
-function IssuesSurfaceBody({ projectId, refreshKey = 0, onChanged }: IssuesSurfaceProps) {
+function IssuesSurfaceBody({ projectId, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
   const [surfaceState, setSurfaceState] = useState<SurfaceState>({ state: "loading" });
   const [openedIssue, setOpenedIssue] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
@@ -108,6 +113,7 @@ function IssuesSurfaceBody({ projectId, refreshKey = 0, onChanged }: IssuesSurfa
           reloadList();
           onChanged?.();
         }}
+        onDispatched={onDispatched}
       />
     );
   } else {
@@ -311,6 +317,7 @@ interface IssueDetailViewProps {
   refreshKey: number;
   onBack: () => void;
   onMutation: () => void;
+  onDispatched?: (thread: Thread) => void;
 }
 
 type DetailState =
@@ -324,12 +331,14 @@ function IssueDetailView({
   refreshKey,
   onBack,
   onMutation,
+  onDispatched,
 }: IssueDetailViewProps) {
   const [detailState, setDetailState] = useState<DetailState>({ state: "loading" });
   const [commentText, setCommentText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localReload, setLocalReload] = useState(0);
+  const [starting, setStarting] = useState<DispatchIssue | null>(null);
 
   const reloadDetail = useCallback(() => setLocalReload((n) => n + 1), []);
 
@@ -407,6 +416,17 @@ function IssueDetailView({
   return (
     <div className="issue-review">
       {back}
+      {starting && onDispatched && (
+        <DispatchDialog
+          projectId={projectId}
+          issue={starting}
+          onClose={() => setStarting(null)}
+          onDispatched={(thread) => {
+            setStarting(null);
+            onDispatched(thread);
+          }}
+        />
+      )}
       <h3>
         {formatIssueLabel(issue)}
         <span className="badge" style={{ marginLeft: 6 }}>
@@ -418,6 +438,13 @@ function IssueDetailView({
       </p>
 
       <div className="pr-actions">
+        {onDispatched && issue.state === "OPEN" && (
+          <button
+            onClick={() => setStarting({ number: issue.number, title: issue.title, body: issue.body, url: issue.url })}
+          >
+            Start thread from issue
+          </button>
+        )}
         <button onClick={() => void handleOpenOnGithub()}>Open on GitHub</button>
         {issue.state === "OPEN" && (
           <button onClick={() => void handleCloseIssue()} disabled={busy}>

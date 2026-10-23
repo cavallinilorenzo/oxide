@@ -560,7 +560,12 @@ export function App() {
             )}
             {activeTool === "Issues" && selected && (
               <Suspense fallback={null}>
-                <IssuesSurface projectId={selected.id} />
+                <IssuesSurface
+                  projectId={selected.id}
+                  onDispatched={(thread) =>
+                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
+                  }
+                />
               </Suspense>
             )}
           </aside>

@@ -75,6 +75,8 @@ fn request(f: &Fixture, prompt: &str) -> DispatchRequest {
         effort: None,
         permission_mode: None,
         base_branch: Some("main".into()),
+        issue_number: None,
+        issue_title: None,
     }
 }
 
@@ -242,6 +244,23 @@ fn a_board_thread_does_not_block_branch_switching_in_the_main_checkout() {
     assert!(thread.worktree_path.is_some());
     git(&f.work, &["branch", "other"]);
     f.core.checkout_branch(f.project.id, "other").unwrap();
+}
+
+#[test]
+fn a_thread_started_from_an_issue_remembers_it_and_branches_on_its_number() {
+    let f = fixture();
+    let mut req = request(&f, "Fix it\n\nIssue #51");
+    req.issue_number = Some(51);
+    req.issue_title = Some("Start a Thread from an issue".into());
+    let thread = f.core.dispatch_thread(req).unwrap();
+
+    assert_eq!(thread.issue_number, Some(51));
+    assert_eq!(
+        thread.branch.as_deref(),
+        Some("oxide/51-start-a-thread-from-an-issue")
+    );
+    let plain = f.core.dispatch_thread(request(&f, "No issue")).unwrap();
+    assert_eq!(plain.issue_number, None);
 }
 
 fn worktree_of(thread: &oxide_core::ThreadSummary) -> PathBuf {

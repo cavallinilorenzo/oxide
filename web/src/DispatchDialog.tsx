@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { commands, type PermissionMode, type Settings, type Thread } from "./bindings";
-import { defaultDispatchForm, dispatchRequest, withProvider, type DispatchForm } from "./dispatch";
+import {
+  defaultDispatchForm,
+  dispatchRequest,
+  issueDispatchForm,
+  withProvider,
+  type DispatchForm,
+  type DispatchIssue,
+} from "./dispatch";
 
 const PROVIDERS = [
   { id: "claude", name: "Claude" },
@@ -16,12 +23,14 @@ const PERMISSION_MODES: { id: PermissionMode; name: string }[] = [
 
 interface DispatchDialogProps {
   projectId: number;
+  /** The issue the task starts from: it prefills the prompt, and the Thread is linked to it. */
+  issue?: DispatchIssue;
   onClose: () => void;
   onDispatched: (thread: Thread) => void;
 }
 
 /** Hands a task off to a new background Thread in a worktree of its own. */
-export function DispatchDialog({ projectId, onClose, onDispatched }: DispatchDialogProps) {
+export function DispatchDialog({ projectId, issue, onClose, onDispatched }: DispatchDialogProps) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [form, setForm] = useState<DispatchForm | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
@@ -35,7 +44,8 @@ export function DispatchDialog({ projectId, onClose, onDispatched }: DispatchDia
         if (!active) return;
         const current = status.status === "ok" ? status.data.branch : null;
         setSettings(state.settings);
-        setForm(defaultDispatchForm(state.settings, current));
+        const form = defaultDispatchForm(state.settings, current);
+        setForm(issue ? issueDispatchForm(form, issue) : form);
         if (list.status === "ok") setBranches(list.data.filter((b) => !b.remote).map((b) => b.name));
         if (status.status === "error") setError(status.error.message);
       },
@@ -43,7 +53,7 @@ export function DispatchDialog({ projectId, onClose, onDispatched }: DispatchDia
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, issue]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -57,7 +67,7 @@ export function DispatchDialog({ projectId, onClose, onDispatched }: DispatchDia
     if (!form || busy) return;
     setBusy(true);
     setError(null);
-    const res = await commands.dispatchThread(dispatchRequest(projectId, form));
+    const res = await commands.dispatchThread(dispatchRequest(projectId, form, issue));
     setBusy(false);
     if (res.status === "ok") onDispatched(res.data);
     else setError(res.error.message);
@@ -77,7 +87,7 @@ export function DispatchDialog({ projectId, onClose, onDispatched }: DispatchDia
           void dispatch();
         }}
       >
-        <h2>Dispatch a task</h2>
+        <h2>{issue ? `Start a Thread from #${issue.number}` : "Dispatch a task"}</h2>
         {form === null || settings === null ? (
           <p className="empty">Loading…</p>
         ) : (

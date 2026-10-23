@@ -307,6 +307,8 @@ export type DispatchRequest_Deserialize = {
 	effort?: string | null,
 	permissionMode?: PermissionMode | null,
 	baseBranch?: string | null,
+	issueNumber?: number | null,
+	issueTitle?: string | null,
 };
 
 /**  A Board Thread handed off from the Thread Board. */
@@ -318,6 +320,8 @@ export type DispatchRequest_Serialize = {
 	effort: string | null,
 	permissionMode: PermissionMode | null,
 	baseBranch: string | null,
+	issueNumber: number | null,
+	issueTitle: string | null,
 };
 
 export type Editor = {
@@ -814,6 +818,7 @@ export type Thread_Deserialize = {
 	branch?: string | null,
 	worktreePath?: string | null,
 	setupOutput?: string | null,
+	issueNumber?: number | null,
 };
 
 export type Thread_Serialize = {
@@ -834,6 +839,7 @@ export type Thread_Serialize = {
 	branch: string | null,
 	worktreePath: string | null,
 	setupOutput: string | null,
+	issueNumber: number | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "./bindings";
-import { defaultDispatchForm, dispatchRequest, isBoardThread, withProvider } from "./dispatch";
+import { defaultDispatchForm, dispatchRequest, isBoardThread, issueDispatchForm, withProvider } from "./dispatch";
 
 const settings = {
   defaultProvider: "claude",
@@ -45,7 +45,18 @@ describe("dispatch form", () => {
       effort: "low",
       permissionMode: "ask",
       baseBranch: null,
+      issueNumber: null,
+      issueTitle: null,
     });
+  });
+
+  it("starts from an issue: the prompt carries its number, title, body and URL, and the request links it", () => {
+    const issue = { number: 51, title: "Start a Thread", body: "Do it.", url: "https://github.com/o/r/issues/51" };
+    const form = issueDispatchForm(defaultDispatchForm(settings, "dev"), issue);
+    expect(form.prompt).toBe("Issue #51: Start a Thread\nhttps://github.com/o/r/issues/51\n\nDo it.");
+    expect(form.provider).toBe("claude");
+    const edited = { ...form, prompt: `${form.prompt} Be quick.` };
+    expect(dispatchRequest(7, edited, issue)).toMatchObject({ issueNumber: 51, issueTitle: "Start a Thread" });
   });
 
   it("tells Board Threads from chat Threads by their branch", () => {

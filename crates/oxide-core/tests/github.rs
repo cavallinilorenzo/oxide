@@ -795,3 +795,80 @@ fn issues_state_reports_guidance_when_missing_or_logged_out() {
     assert_eq!(ready.availability, GithubAvailability::Ready);
     assert!(ready.guidance.is_none());
 }
+
+#[test]
+fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    let thread = f
+        .core
+        .dispatch_thread(oxide_core::DispatchRequest {
+            project_id: f.project.id,
+            prompt: "Do it".into(),
+            provider: "fake".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            base_branch: Some("main".into()),
+            issue_number: Some(51),
+            issue_title: Some("Do it".into()),
+        })
+        .unwrap();
+    let branch = thread.branch.clone().unwrap();
+    // Move the branch into the main checkout, where pull requests are created from.
+    git(
+        &f.work,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            &thread.worktree_path.unwrap(),
+        ],
+    );
+    git(&f.work, &["checkout", "-q", &branch]);
+    commit_file(&f.work, "b.txt", "b\n", "Add b");
+
+    let draft = f.core.pull_request_draft(f.project.id).unwrap();
+    assert!(draft.body.contains("Closes #51"), "{}", draft.body);
+
+    f.core
+        .create_pull_request(f.project.id, &input("T", "main", false))
+        .unwrap();
+    assert_eq!(f.create_calls()[0][5], "Body\n\nCloses #51");
+}
+
+#[test]
+fn closes_is_not_repeated_when_the_body_already_has_it() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    let thread = f
+        .core
+        .dispatch_thread(oxide_core::DispatchRequest {
+            project_id: f.project.id,
+            prompt: "Do it".into(),
+            provider: "fake".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            base_branch: Some("main".into()),
+            issue_number: Some(51),
+            issue_title: None,
+        })
+        .unwrap();
+    git(
+        &f.work,
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            &thread.worktree_path.unwrap(),
+        ],
+    );
+    git(&f.work, &["checkout", "-q", &thread.branch.unwrap()]);
+    commit_file(&f.work, "b.txt", "b\n", "Add b");
+
+    let mut with = input("T", "main", false);
+    with.body = "Fixes it.\n\ncloses #51".into();
+    f.core.create_pull_request(f.project.id, &with).unwrap();
+    assert_eq!(f.create_calls()[0][5], "Fixes it.\n\ncloses #51");
+}

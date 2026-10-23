@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="160" height="160" alt="Oxide logo" src="assets/brand/oxide/oxide-mark.svg" />
+</p>
+
 <h1 align="center">Oxide</h1>
 
 Oxide is a desktop app for agentic engineering. You open a Project and drive coding agents from a chat, switching between the agent CLIs already installed on your machine, with Git and GitHub at hand.

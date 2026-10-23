@@ -448,13 +448,9 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
-                    let kind_str = serde_json::to_string(&kind)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     conn.execute(
                         "INSERT INTO items (turn_id, item_index, kind, content, parent_item_index) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![turn_id, item_index, kind_str, content, parent_item_index],
+                        rusqlite::params![turn_id, item_index, kind.as_str(), content, parent_item_index],
                     )?;
                     let item_id = conn.last_insert_rowid() as u32;
                     Ok(item_id)
@@ -470,15 +466,11 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
-                    let kind_str = serde_json::to_string(&kind)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let options_str =
                         serde_json::to_string(&options).unwrap_or_else(|_| "[]".into());
                     conn.execute(
                         "INSERT INTO approvals (turn_id, approval_id, kind, summary, options) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![turn_id, approval_id, kind_str, summary, options_str],
+                        rusqlite::params![turn_id, approval_id, kind.as_str(), summary, options_str],
                     )?;
                     let id = conn.last_insert_rowid() as u32;
                     Ok(id)
@@ -493,10 +485,6 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<String> {
-                    let dec_str = serde_json::to_string(&decision)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let final_decided_at: String = if !decided_at.is_empty() {
                         decided_at
                     } else {
@@ -506,7 +494,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND approval_id = ?4",
-                        rusqlite::params![dec_str, final_decided_at, turn_id, approval_id],
+                        rusqlite::params![decision.as_str(), final_decided_at, turn_id, approval_id],
                     )?;
                     Ok(final_decided_at)
                 })();
@@ -519,10 +507,6 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<String> {
-                    let dec_str = serde_json::to_string(&decision)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let final_decided_at: String = if !decided_at.is_empty() {
                         decided_at
                     } else {
@@ -532,7 +516,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND decision IS NULL",
-                        rusqlite::params![dec_str, final_decided_at, turn_id],
+                        rusqlite::params![decision.as_str(), final_decided_at, turn_id],
                     )?;
                     Ok(final_decided_at)
                 })();
@@ -544,13 +528,9 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<()> {
-                    let mode_str = serde_json::to_string(&permission_mode)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     conn.execute(
                         "UPDATE threads SET permission_mode = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
-                        rusqlite::params![mode_str, thread_id],
+                        rusqlite::params![permission_mode.as_str(), thread_id],
                     )?;
                     Ok(())
                 })();
@@ -768,8 +748,7 @@ fn turn_page(
         ) = t?;
         let item_rows = item_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
-            let kind: ItemKind = serde_json::from_value(serde_json::Value::String(kind_str))
-                .unwrap_or(ItemKind::AgentMessage);
+            let kind: ItemKind = kind_str.parse().unwrap_or(ItemKind::AgentMessage);
             Ok(ItemSnapshot {
                 id: r.get(0)?,
                 item_index: r.get(1)?,
@@ -783,13 +762,12 @@ fn turn_page(
 
         let app_rows = approval_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
-            let kind: ApprovalKind = serde_json::from_value(serde_json::Value::String(kind_str))
-                .unwrap_or(ApprovalKind::Other);
+            let kind: ApprovalKind = kind_str.parse().unwrap_or(ApprovalKind::Other);
             let options_str: String = r.get(4)?;
             let options: Vec<String> = serde_json::from_str(&options_str).unwrap_or_default();
             let decision_str: Option<String> = r.get(5)?;
-            let decision: Option<ApprovalDecision> = decision_str
-                .and_then(|d| serde_json::from_value(serde_json::Value::String(d)).ok());
+            let decision: Option<ApprovalDecision> =
+                decision_str.as_deref().and_then(|d| d.parse().ok());
             Ok(ApprovalSnapshot {
                 id: r.get(0)?,
                 turn_id: t_id,

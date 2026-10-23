@@ -39,19 +39,25 @@ export function filterModels(
   search: string
 ): { current: ModelInfo[]; legacy: ModelInfo[] } {
   const q = search.trim().toLowerCase();
-  const filtered = q
-    ? models.filter(
-        (m) =>
-          m.id.toLowerCase().includes(q) ||
-          m.name.toLowerCase().includes(q) ||
-          (m.description && m.description.toLowerCase().includes(q))
-      )
-    : models;
+  const current: ModelInfo[] = [];
+  const legacy: ModelInfo[] = [];
+  for (const m of models) {
+    if (
+      q &&
+      !m.id.toLowerCase().includes(q) &&
+      !m.name.toLowerCase().includes(q) &&
+      (!m.description || !m.description.toLowerCase().includes(q))
+    ) {
+      continue;
+    }
+    if (m.isLegacy) {
+      legacy.push(m);
+    } else {
+      current.push(m);
+    }
+  }
 
-  return {
-    current: filtered.filter((m) => !m.isLegacy),
-    legacy: filtered.filter((m) => m.isLegacy),
-  };
+  return { current, legacy };
 }
 
 /**

@@ -235,8 +235,10 @@ pub fn status(cwd: &Path) -> Result<GitStatus> {
             status.removed += cols.next().and_then(|n| n.parse().ok()).unwrap_or(0);
         }
     }
+    use rayon::prelude::*;
+
     status.added += untracked
-        .iter()
+        .par_iter()
         .map(|p| count_lines(&cwd.join(p)))
         .sum::<u32>();
     Ok(status)
@@ -252,7 +254,7 @@ fn count_lines(path: &Path) -> u32 {
             return Ok(None);
         }
         let file = File::open(path)?;
-        let mut bytes = Vec::new();
+        let mut bytes = Vec::with_capacity(meta.len().min(MAX_COUNTED_BYTES) as usize);
         file.take(MAX_COUNTED_BYTES).read_to_end(&mut bytes)?;
         if bytes[..bytes.len().min(8000)].contains(&0) {
             return Ok(None);

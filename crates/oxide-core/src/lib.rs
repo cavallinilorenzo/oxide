@@ -594,13 +594,9 @@ impl Core {
         continued_from: Option<u32>,
     ) -> Result<ThreadSummary> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let mode_str = serde_json::to_string(&permission_mode)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .to_string();
         db.execute(
             "INSERT INTO threads (project_id, provider, model, effort, permission_mode, status, continued_from) VALUES (?1, ?2, ?3, ?4, ?5, 'completed', ?6)",
-            rusqlite::params![project_id, provider, model, effort, mode_str, continued_from],
+            rusqlite::params![project_id, provider, model, effort, permission_mode.as_str(), continued_from],
         )?;
         let id = db.last_insert_rowid() as u32;
         let thread = self.get_thread_by_id(&db, id)?;
@@ -623,14 +619,10 @@ impl Core {
         }
 
         let (def_model, def_effort, def_perm) = self.default_settings_for_provider(provider);
-        let mode_str = serde_json::to_string(&def_perm)
-            .unwrap_or_default()
-            .trim_matches('"')
-            .to_string();
 
         db.execute(
             "UPDATE threads SET provider = ?1, model = ?2, effort = ?3, permission_mode = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
-            rusqlite::params![provider, def_model, def_effort, mode_str, thread_id],
+            rusqlite::params![provider, def_model, def_effort, def_perm.as_str(), thread_id],
         )?;
         self.thread_actors
             .lock()

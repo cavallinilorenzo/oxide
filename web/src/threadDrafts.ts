@@ -29,11 +29,16 @@ export function clearDraft(
 
 /** Truncates prompt to match Core's title truncation: first non-empty line up to 60 characters. */
 export function truncateTitle(prompt: string): string {
-  const firstLine =
-    prompt
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? "";
-  return firstLine.length > 60 ? firstLine.slice(0, 60) : firstLine;
+  let start = 0;
+  while (start < prompt.length) {
+    const end = prompt.indexOf("\n", start);
+    const line = (end === -1 ? prompt.slice(start) : prompt.slice(start, end)).trim();
+    if (line.length > 0) {
+      return line.length > 60 ? line.slice(0, 60) : line;
+    }
+    if (end === -1) break;
+    start = end + 1;
+  }
+  return "";
 }
 

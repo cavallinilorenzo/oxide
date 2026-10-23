@@ -5,11 +5,14 @@ export const threadTitle = (thread: Pick<Thread, "id" | "title">) => thread.titl
 /** Splits Threads into the sidebar list and the Archived list, both filtered by title only. */
 export function splitThreads(threads: Thread[], query: string) {
   const needle = query.trim().toLowerCase();
-  const matching = threads.filter((t) => threadTitle(t).toLowerCase().includes(needle));
-  return {
-    active: matching.filter((t) => !t.archived),
-    archived: matching.filter((t) => t.archived),
-  };
+  const active: Thread[] = [];
+  const archived: Thread[] = [];
+  for (const t of threads) {
+    if (needle && !threadTitle(t).toLowerCase().includes(needle)) continue;
+    if (t.archived) archived.push(t);
+    else active.push(t);
+  }
+  return { active, archived };
 }
 
 /** The sidebar lists only Projects the user opened; a scan just makes them findable in ⌘⇧N. */

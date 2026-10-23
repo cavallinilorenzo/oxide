@@ -5,7 +5,6 @@
 //! Headless `agy` cannot ask for Approval, so only Auto-edit (soft-deny) and Full access are
 //! offered (ADR-0004), and Oxide never touches `agy`'s settings file.
 
-use crate::claude::ClaudeCodeProvider;
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
     ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
@@ -126,16 +125,12 @@ impl AgyProvider {
         self.extra_env.insert(key.into(), value.into());
     }
 
+    pub fn parse_version_string(raw: &str) -> Option<String> {
+        crate::parse_version_string(raw)
+    }
+
     pub fn is_version_within_pinned_range(version: &str) -> bool {
-        let parts: Vec<u64> = version
-            .split('.')
-            .filter_map(|p| p.parse::<u64>().ok())
-            .collect();
-        if parts.len() < 2 {
-            return false;
-        }
-        let ver = (parts[0], parts[1], parts.get(2).copied().unwrap_or(0));
-        ver >= PINNED_VERSION_MIN && ver < PINNED_VERSION_MAX
+        crate::is_version_within_range(version, PINNED_VERSION_MIN, PINNED_VERSION_MAX)
     }
 
     /// The Model catalog, from `agy models`.
@@ -244,7 +239,7 @@ impl Provider for AgyProvider {
             }
         };
         let raw = String::from_utf8_lossy(&version_output.stdout);
-        let version = ClaudeCodeProvider::parse_version_string(&raw)
+        let version = Self::parse_version_string(&raw)
             .or_else(|| Some(raw.trim().to_string()).filter(|v| !v.is_empty()));
         let warning = version
             .as_deref()

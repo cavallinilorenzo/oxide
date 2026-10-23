@@ -91,7 +91,7 @@ pub fn read_file(root: &Path, relative: &str) -> Result<FileContent> {
     };
     let file = File::open(&path).map_err(io)?;
     let size = file.metadata().map_err(io)?.len();
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(size.min(MAX_FILE_BYTES) as usize);
     file.take(MAX_FILE_BYTES)
         .read_to_end(&mut bytes)
         .map_err(io)?;

@@ -7,8 +7,12 @@ export type BoardColumns = { needsInput: BoardCard[]; working: BoardCard[]; comp
 export function groupBoard(cards: BoardCard[], query: string): BoardColumns {
   const needle = query.trim().toLowerCase();
   const sorted = cards
-    .filter((c) => !c.thread.archived && threadTitle(c.thread).toLowerCase().includes(needle))
-    .sort((a, b) => b.thread.updatedAt.localeCompare(a.thread.updatedAt) || b.thread.id - a.thread.id);
+    .filter((c) => !c.thread.archived && (!needle || threadTitle(c.thread).toLowerCase().includes(needle)))
+    .sort((a, b) => {
+      if (b.thread.updatedAt > a.thread.updatedAt) return 1;
+      if (b.thread.updatedAt < a.thread.updatedAt) return -1;
+      return b.thread.id - a.thread.id;
+    });
   const columns: BoardColumns = { needsInput: [], working: [], completed: [] };
   for (const c of sorted) {
     if (c.thread.status === "working") columns.working.push(c);

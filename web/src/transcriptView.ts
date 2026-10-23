@@ -15,7 +15,9 @@ export function groupTurnItems(items: ItemSnapshot[]): Block[] {
   for (const it of items) {
     const parent = it.parentItemIndex ?? null;
     if (parent !== null && known.has(parent)) {
-      childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), it]);
+      const list = childrenOf.get(parent);
+      if (list) list.push(it);
+      else childrenOf.set(parent, [it]);
     } else {
       top.push(it);
     }

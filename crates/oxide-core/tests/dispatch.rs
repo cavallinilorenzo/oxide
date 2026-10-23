@@ -1,5 +1,5 @@
 use oxide_core::thread::ThreadStatus;
-use oxide_core::{Core, DispatchRequest, ProjectSummary};
+use oxide_core::{ArchiveOutcome, Core, DispatchRequest, ProjectSummary};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
@@ -242,4 +242,88 @@ fn a_board_thread_does_not_block_branch_switching_in_the_main_checkout() {
     assert!(thread.worktree_path.is_some());
     git(&f.work, &["branch", "other"]);
     f.core.checkout_branch(f.project.id, "other").unwrap();
+}
+
+fn worktree_of(thread: &oxide_core::ThreadSummary) -> PathBuf {
+    PathBuf::from(thread.worktree_path.clone().unwrap())
+}
+
+#[test]
+fn archiving_a_clean_board_thread_removes_its_worktree_and_keeps_the_branch() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Clean up")).unwrap();
+    let worktree = worktree_of(&thread);
+
+    let outcome = f.core.archive_thread(thread.id, false).unwrap();
+
+    assert_eq!(outcome, ArchiveOutcome::Archived);
+    assert!(!worktree.exists());
+    git(&f.work, &["rev-parse", "--verify", "oxide/clean-up"]);
+    assert!(f.core.list_threads(f.project.id).unwrap()[0].archived);
+}
+
+#[test]
+fn archiving_a_dirty_board_thread_asks_first_and_declining_keeps_the_worktree() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Dirty work")).unwrap();
+    let worktree = worktree_of(&thread);
+    std::fs::write(worktree.join("wip.txt"), "unsaved").unwrap();
+
+    let outcome = f.core.archive_thread(thread.id, false).unwrap();
+
+    assert_eq!(outcome, ArchiveOutcome::NeedsConfirmation);
+    assert!(worktree.join("wip.txt").exists());
+    assert!(!f.core.list_threads(f.project.id).unwrap()[0].archived);
+
+    // Accepting removes the worktree; the branch survives.
+    assert_eq!(
+        f.core.archive_thread(thread.id, true).unwrap(),
+        ArchiveOutcome::Archived
+    );
+    assert!(!worktree.exists());
+    git(&f.work, &["rev-parse", "--verify", "oxide/dirty-work"]);
+}
+
+#[test]
+fn a_worktree_deleted_by_hand_is_recreated_on_the_next_message() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Come back")).unwrap();
+    let worktree = worktree_of(&thread);
+    first_turn(&f.core, thread.id);
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    f.core.send_prompt(thread.id, "Again").unwrap();
+
+    assert!(worktree.join("a.txt").exists());
+    assert_eq!(
+        git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "oxide/come-back"
+    );
+}
+
+#[test]
+fn resuming_an_archived_board_thread_recreates_its_worktree() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Resume me")).unwrap();
+    let worktree = worktree_of(&thread);
+    first_turn(&f.core, thread.id);
+    f.core.archive_thread(thread.id, false).unwrap();
+    assert!(!worktree.exists());
+
+    f.core.send_prompt(thread.id, "More").unwrap();
+
+    assert!(worktree.join("a.txt").exists());
+    assert!(!f.core.list_threads(f.project.id).unwrap()[0].archived);
+}
+
+#[test]
+fn opening_a_project_prunes_worktrees_deleted_by_hand() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Stale")).unwrap();
+    std::fs::remove_dir_all(worktree_of(&thread)).unwrap();
+    assert!(git(&f.work, &["worktree", "list"]).contains("stale"));
+
+    f.core.open_project(f.project.id).unwrap();
+
+    assert!(!git(&f.work, &["worktree", "list"]).contains("stale"));
 }

@@ -66,6 +66,22 @@ fn first_turn(core: &Core, thread_id: u32) -> oxide_core::TurnSnapshot {
     panic!("the Thread never started a Turn");
 }
 
+fn completed_first_turn(core: &Core, thread_id: u32) -> oxide_core::TurnSnapshot {
+    for _ in 0..500 {
+        if let Some(turn) = core
+            .get_thread_snapshot(thread_id)
+            .unwrap()
+            .turns
+            .first()
+            .filter(|turn| turn.status == oxide_core::TurnStatus::Completed)
+        {
+            return turn.clone();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the Thread's first Turn never completed");
+}
+
 fn request(f: &Fixture, prompt: &str) -> DispatchRequest {
     DispatchRequest {
         project_id: f.project.id,
@@ -272,6 +288,7 @@ fn archiving_a_clean_board_thread_removes_its_worktree_and_keeps_the_branch() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Clean up")).unwrap();
     let worktree = worktree_of(&thread);
+    completed_first_turn(&f.core, thread.id);
 
     let outcome = f.core.archive_thread(thread.id, false).unwrap();
 
@@ -286,6 +303,7 @@ fn archiving_a_dirty_board_thread_asks_first_and_declining_keeps_the_worktree() 
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Dirty work")).unwrap();
     let worktree = worktree_of(&thread);
+    completed_first_turn(&f.core, thread.id);
     std::fs::write(worktree.join("wip.txt"), "unsaved").unwrap();
 
     let outcome = f.core.archive_thread(thread.id, false).unwrap();
@@ -308,7 +326,7 @@ fn a_worktree_deleted_by_hand_is_recreated_on_the_next_message() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Come back")).unwrap();
     let worktree = worktree_of(&thread);
-    first_turn(&f.core, thread.id);
+    completed_first_turn(&f.core, thread.id);
     std::fs::remove_dir_all(&worktree).unwrap();
 
     f.core.send_prompt(thread.id, "Again").unwrap();
@@ -325,7 +343,7 @@ fn resuming_an_archived_board_thread_recreates_its_worktree() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Resume me")).unwrap();
     let worktree = worktree_of(&thread);
-    first_turn(&f.core, thread.id);
+    completed_first_turn(&f.core, thread.id);
     f.core.archive_thread(thread.id, false).unwrap();
     assert!(!worktree.exists());
 

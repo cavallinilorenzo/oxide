@@ -15,6 +15,7 @@ pub struct TurnStarted {
     pub id: u32,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub thread_title: Option<String>,
 }
 
 pub enum StorageMsg {
@@ -65,6 +66,12 @@ pub enum StorageMsg {
         permission_mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
+    UpdateThreadModelAndEffort {
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+        reply: mpsc::Sender<Result<()>>,
+    },
     UpdateThreadStatus {
         thread_id: u32,
         status: ThreadStatus,
@@ -84,6 +91,13 @@ pub enum StorageMsg {
     SetProviderSessionId {
         thread_id: u32,
         session_id: String,
+    },
+    GetProviderSessionId {
+        thread_id: u32,
+        reply: mpsc::Sender<Option<String>>,
+    },
+    MarkSessionLost {
+        thread_id: u32,
     },
     WriteUnknownEvent {
         turn_id: u32,
@@ -257,6 +271,22 @@ impl StorageHandle {
         reply_rx.recv().unwrap_or(Ok(()))
     }
 
+    pub fn update_thread_model_and_effort(
+        &self,
+        thread_id: u32,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::UpdateThreadModelAndEffort {
+            thread_id,
+            model,
+            effort,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
     pub fn update_thread_status(&self, thread_id: u32, status: ThreadStatus) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::UpdateThreadStatus {
@@ -300,6 +330,21 @@ impl StorageHandle {
         });
     }
 
+    /// Records that the Provider no longer has the Thread's session and puts the Thread in error.
+    pub fn mark_session_lost(&self, thread_id: u32) {
+        let _ = self.sender.send(StorageMsg::MarkSessionLost { thread_id });
+    }
+
+    /// The Provider's own session id for the Thread, once the Provider has reported one.
+    pub fn get_provider_session_id(&self, thread_id: u32) -> Option<String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::GetProviderSessionId {
+            thread_id,
+            reply: reply_tx,
+        });
+        reply_rx.recv().ok().flatten()
+    }
+
     pub fn write_unknown_event(&self, turn_id: u32, raw: String) -> Result<u32> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteUnknownEvent {
@@ -329,10 +374,14 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
             } => {
                 let res = (|| -> Result<TurnStarted> {
                     let tx = conn.unchecked_transaction()?;
-                    let (model, effort): (Option<String>, Option<String>) = tx.query_row(
-                        "SELECT model, effort FROM threads WHERE id = ?1",
+                    let (model, effort, current_title): (
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                    ) = tx.query_row(
+                        "SELECT model, effort, title FROM threads WHERE id = ?1",
                         [thread_id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )?;
                     let attachments_json =
                         serde_json::to_string(&attachments).unwrap_or_else(|_| "[]".into());
@@ -341,15 +390,26 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         rusqlite::params![thread_id, turn_index, prompt, model, effort, attachments_json],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
-                    tx.execute(
-                        "UPDATE threads SET status = 'working', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-                        rusqlite::params![thread_id],
-                    )?;
+                    let mut thread_title = None;
+                    if turn_index == 0 && current_title.is_none() {
+                        let title = crate::thread::truncate_title(&prompt);
+                        tx.execute(
+                            "UPDATE threads SET status = 'working', title = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
+                            rusqlite::params![title, thread_id],
+                        )?;
+                        thread_title = Some(title);
+                    } else {
+                        tx.execute(
+                            "UPDATE threads SET status = 'working', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                            rusqlite::params![thread_id],
+                        )?;
+                    }
                     tx.commit()?;
                     Ok(TurnStarted {
                         id: turn_id,
                         model,
                         effort,
+                        thread_title,
                     })
                 })();
                 let _ = reply.send(res);
@@ -388,13 +448,9 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
-                    let kind_str = serde_json::to_string(&kind)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     conn.execute(
                         "INSERT INTO items (turn_id, item_index, kind, content, parent_item_index) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![turn_id, item_index, kind_str, content, parent_item_index],
+                        rusqlite::params![turn_id, item_index, kind.as_str(), content, parent_item_index],
                     )?;
                     let item_id = conn.last_insert_rowid() as u32;
                     Ok(item_id)
@@ -410,15 +466,11 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
-                    let kind_str = serde_json::to_string(&kind)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let options_str =
                         serde_json::to_string(&options).unwrap_or_else(|_| "[]".into());
                     conn.execute(
                         "INSERT INTO approvals (turn_id, approval_id, kind, summary, options) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![turn_id, approval_id, kind_str, summary, options_str],
+                        rusqlite::params![turn_id, approval_id, kind.as_str(), summary, options_str],
                     )?;
                     let id = conn.last_insert_rowid() as u32;
                     Ok(id)
@@ -433,10 +485,6 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<String> {
-                    let dec_str = serde_json::to_string(&decision)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let final_decided_at: String = if !decided_at.is_empty() {
                         decided_at
                     } else {
@@ -446,7 +494,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND approval_id = ?4",
-                        rusqlite::params![dec_str, final_decided_at, turn_id, approval_id],
+                        rusqlite::params![decision.as_str(), final_decided_at, turn_id, approval_id],
                     )?;
                     Ok(final_decided_at)
                 })();
@@ -459,10 +507,6 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<String> {
-                    let dec_str = serde_json::to_string(&decision)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     let final_decided_at: String = if !decided_at.is_empty() {
                         decided_at
                     } else {
@@ -472,7 +516,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     };
                     conn.execute(
                         "UPDATE approvals SET decision = ?1, decided_at = ?2 WHERE turn_id = ?3 AND decision IS NULL",
-                        rusqlite::params![dec_str, final_decided_at, turn_id],
+                        rusqlite::params![decision.as_str(), final_decided_at, turn_id],
                     )?;
                     Ok(final_decided_at)
                 })();
@@ -484,13 +528,24 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<()> {
-                    let mode_str = serde_json::to_string(&permission_mode)
-                        .unwrap_or_default()
-                        .trim_matches('"')
-                        .to_string();
                     conn.execute(
                         "UPDATE threads SET permission_mode = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?2",
-                        rusqlite::params![mode_str, thread_id],
+                        rusqlite::params![permission_mode.as_str(), thread_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::UpdateThreadModelAndEffort {
+                thread_id,
+                model,
+                effort,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    conn.execute(
+                        "UPDATE threads SET model = ?1, effort = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?3",
+                        rusqlite::params![model, effort, thread_id],
                     )?;
                     Ok(())
                 })();
@@ -537,6 +592,23 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     rusqlite::params![session_id, thread_id],
                 );
             }
+            StorageMsg::MarkSessionLost { thread_id } => {
+                let _ = conn.execute(
+                    "UPDATE threads SET session_lost = 1, status = 'error', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                    [thread_id],
+                );
+            }
+            StorageMsg::GetProviderSessionId { thread_id, reply } => {
+                let session_id = conn
+                    .query_row(
+                        "SELECT provider_session_id FROM threads WHERE id = ?1",
+                        [thread_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                let _ = reply.send(session_id);
+            }
             StorageMsg::WriteUnknownEvent {
                 turn_id,
                 raw,
@@ -558,8 +630,10 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
 
 pub fn query_snapshot(conn: &Connection, thread_id: u32, tail: u32) -> Result<ThreadSnapshot> {
     let thread: ThreadSummary = conn.query_row(
-        "SELECT id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at
-         FROM threads WHERE id = ?1",
+        &format!(
+            "SELECT {} FROM threads WHERE id = ?1",
+            crate::thread::THREAD_COLUMNS
+        ),
         [thread_id],
         crate::thread::parse_thread_summary,
     )?;
@@ -674,8 +748,7 @@ fn turn_page(
         ) = t?;
         let item_rows = item_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
-            let kind: ItemKind = serde_json::from_value(serde_json::Value::String(kind_str))
-                .unwrap_or(ItemKind::AgentMessage);
+            let kind: ItemKind = kind_str.parse().unwrap_or(ItemKind::AgentMessage);
             Ok(ItemSnapshot {
                 id: r.get(0)?,
                 item_index: r.get(1)?,
@@ -689,13 +762,12 @@ fn turn_page(
 
         let app_rows = approval_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
-            let kind: ApprovalKind = serde_json::from_value(serde_json::Value::String(kind_str))
-                .unwrap_or(ApprovalKind::Other);
+            let kind: ApprovalKind = kind_str.parse().unwrap_or(ApprovalKind::Other);
             let options_str: String = r.get(4)?;
             let options: Vec<String> = serde_json::from_str(&options_str).unwrap_or_default();
             let decision_str: Option<String> = r.get(5)?;
-            let decision: Option<ApprovalDecision> = decision_str
-                .and_then(|d| serde_json::from_value(serde_json::Value::String(d)).ok());
+            let decision: Option<ApprovalDecision> =
+                decision_str.as_deref().and_then(|d| d.parse().ok());
             Ok(ApprovalSnapshot {
                 id: r.get(0)?,
                 turn_id: t_id,

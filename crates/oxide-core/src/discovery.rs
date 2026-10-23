@@ -63,7 +63,12 @@ fn walk(dir: &Path, depth: usize, visited: &Mutex<HashSet<PathBuf>>) -> Vec<Path
         .filter(|e| {
             let name = e.file_name();
             let name = name.to_string_lossy();
-            !name.starts_with('.') && !SKIPPED.contains(&name.as_ref())
+            if name.starts_with('.') || SKIPPED.contains(&name.as_ref()) {
+                return false;
+            }
+            e.file_type()
+                .map(|ft| ft.is_dir() || ft.is_symlink())
+                .unwrap_or(false)
         })
         .filter_map(|e| e.path().canonicalize().ok())
         .filter(|p| p.is_dir())

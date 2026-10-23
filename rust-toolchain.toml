@@ -1,0 +1,6 @@
+# Used by local rustup and by CI. Dependabot bumps it, so new compiler and
+# Clippy releases arrive as reviewed PRs instead of breaking CI.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

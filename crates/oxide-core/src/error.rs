@@ -11,8 +11,16 @@ pub enum Error {
     },
     #[error("database is at version {found}, newer than this build supports ({supported})")]
     DatabaseTooNew { found: u32, supported: u32 },
+    #[error("path is outside the checkout: {0}")]
+    InvalidPath(String),
     #[error("terminal error: {0}")]
     Terminal(String),
+    #[error("{0}")]
+    Git(String),
+    #[error("{0}")]
+    Github(String),
+    #[error("{0}")]
+    Editor(String),
     #[error("provider error: {0}")]
     Provider(String),
 }

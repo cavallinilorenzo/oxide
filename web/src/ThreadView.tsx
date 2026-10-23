@@ -1,10 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PaperclipIcon, XIcon } from "@primer/octicons-react";
+import {
+  ArrowUpIcon,
+  BugIcon,
+  ChevronDownIcon,
+  FileDirectoryIcon,
+  GitBranchIcon,
+  LightBulbIcon,
+  LockIcon,
+  PaperclipIcon,
+  PencilIcon,
+  RepoIcon,
+  ShieldCheckIcon,
+  SquareFillIcon,
+  UnlockIcon,
+  XIcon,
+  type Icon,
+} from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
+  type ContinuedThread,
   type DebugSequencedThreadEvent,
   type Detection,
   type PermissionMode,
@@ -12,15 +29,21 @@ import {
   type Thread,
   type ThreadCapabilities,
   type ThreadStatus,
+  type ProviderCapabilities,
 } from "./bindings";
 import { TurnView } from "./TurnView";
+import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
-import { stopsTurn } from "./shortcuts";
+import { isClearCommand, stopsTurn } from "./shortcuts";
+import { ProviderMark } from "./ProviderMark";
+import { ModelEffortPicker } from "./ModelEffortPicker";
+import { parseSlashCommand } from "./modelPicker";
 import {
   applyThreadEvent,
   initialTranscriptState,
+  SESSION_LOST_MESSAGE,
   turnIsRunning,
   type TranscriptState,
 } from "./transcript";
@@ -33,8 +56,20 @@ const PAGE_LOAD_DELAY = 80;
 interface ThreadViewProps {
   threadId: number | null;
   projectId: number;
+  draft?: string;
+  onDraftChange?: (draft: string) => void;
+  onClearThread?: () => void;
   onThreadCreated: (thread: Thread) => void;
+  onThreadUpdated?: (thread: Thread) => void;
   onStatusChange: (threadId: number, status: ThreadStatus) => void;
+  onThreadTitleChange?: (threadId: number, title: string) => void;
+  /** Text to put in this Thread's composer once, e.g. the recap of a continued Thread. */
+  prefill: { threadId: number; text: string } | null;
+  onPrefillUsed: () => void;
+  onOpenThread: (threadId: number) => void;
+  onThreadContinued: (continued: ContinuedThread, from: number) => void;
+  /** A prompt reached the Thread; the Core unarchives it. */
+  onPromptSent: (threadId: number) => void;
 }
 
 
@@ -51,19 +86,28 @@ interface PendingImage {
   previewUrl: string;
 }
 
+/** Octicon names: lock = Ask, shield = Auto-edit, open lock = Full access. */
+export type PermissionIcon = "lock" | "shield-check" | "unlock";
+
 export const PERMISSION_CONFIG: Record<
   PermissionMode,
-  { icon: string; label: string; softDenyLabel: string }
+  { icon: PermissionIcon; label: string; softDenyLabel: string }
 > = {
-  ask: { icon: "🔒", label: "Ask", softDenyLabel: "Ask" },
-  "auto-edit": { icon: "🛡️", label: "Auto-edit", softDenyLabel: "Auto-edit (soft-deny)" },
-  "full-access": { icon: "🔓", label: "Full access", softDenyLabel: "Full access" },
+  ask: { icon: "lock", label: "Ask", softDenyLabel: "Ask" },
+  "auto-edit": { icon: "shield-check", label: "Auto-edit", softDenyLabel: "Auto-edit (soft-deny)" },
+  "full-access": { icon: "unlock", label: "Full access", softDenyLabel: "Full access" },
+};
+
+const PERMISSION_ICONS: Record<PermissionIcon, Icon> = {
+  lock: LockIcon,
+  "shield-check": ShieldCheckIcon,
+  unlock: UnlockIcon,
 };
 
 export function getOfferedPermissionModes(
   supportedModes: PermissionMode[],
   provider: string
-): { mode: PermissionMode; label: string; icon: string }[] {
+): { mode: PermissionMode; label: string; icon: PermissionIcon }[] {
   const isAgy = provider === "antigravity" || provider === "agy";
   return supportedModes
     .filter((m) => PERMISSION_CONFIG[m])
@@ -77,12 +121,22 @@ export function getOfferedPermissionModes(
 export function ThreadView({
   threadId,
   projectId,
+  draft,
+  onDraftChange,
+  onClearThread,
   onThreadCreated,
+  onThreadUpdated,
   onStatusChange,
+  onThreadTitleChange,
+  prefill,
+  onPrefillUsed,
+  onOpenThread,
+  onThreadContinued,
+  onPromptSent,
 }: ThreadViewProps) {
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(draft ?? "");
   const [sending, setSending] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
@@ -94,12 +148,43 @@ export function ThreadView({
   }>({ threadId: null, events: [] });
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
+  const [draftModel, setDraftModel] = useState<string | null>(null);
+  const [draftEffort, setDraftEffort] = useState<string | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelPickerMode, setModelPickerMode] = useState<"model" | "effort">("model");
+  const [providerCaps, setProviderCaps] = useState<ProviderCapabilities | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   /** Where the view was last pinned to the bottom; null before the first pin. */
   const pinnedAtRef = useRef<number | null>(null);
   const requestedPagesRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    if (draft !== undefined) {
+      setInput(draft);
+    }
+  }, [draft, threadId]);
+
+  const handleInputChange = (val: string) => {
+    setInput(val);
+    onDraftChange?.(val);
+  };
+
+  useEffect(() => {
+    let active = true;
+    void commands.gitStatus(projectId).then((res) => {
+      if (active && res.status === "ok") {
+        setGitBranch(res.data.branch ?? "detached HEAD");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
 
   // Load defaults from settings for a fresh thread
   useEffect(() => {
@@ -110,8 +195,11 @@ export function ThreadView({
       if (!active) return;
       const defProvider = s.settings.defaultProvider;
       setDraftProvider(defProvider);
-      const defMode = s.settings.providers[defProvider]?.permissionMode || "auto-edit";
+      const provSettings = s.settings.providers[defProvider];
+      const defMode = provSettings?.permissionMode || "auto-edit";
       setDraftMode(defMode);
+      setDraftModel(provSettings?.model ?? null);
+      setDraftEffort(provSettings?.effort ?? null);
 
       const capsRes = await commands.getProviderCapabilities(defProvider);
       if (active && capsRes.status === "ok") {
@@ -156,6 +244,9 @@ export function ThreadView({
         if (next.status !== prev.status) {
           onStatusChange(threadId, next.status);
         }
+        if (next.thread?.title !== prev.thread?.title && next.thread?.title) {
+          onThreadTitleChange?.(threadId, next.thread.title);
+        }
         return next;
       });
     });
@@ -179,6 +270,9 @@ export function ThreadView({
         setTranscript(initial);
         setPages(new Map());
         onStatusChange(threadId, initial.status);
+        if (initial.thread?.title) {
+          onThreadTitleChange?.(threadId, initial.thread.title);
+        }
       }
     })();
 
@@ -186,7 +280,15 @@ export function ThreadView({
       active = false;
       batcher.cancel();
     };
-  }, [threadId, onStatusChange, debugOpen]);
+  }, [threadId, onStatusChange, debugOpen, onThreadTitleChange]);
+
+  // A continued Thread opens with its recap in the composer.
+  useEffect(() => {
+    if (prefill && prefill.threadId === threadId) {
+      setInput(prefill.text);
+      onPrefillUsed();
+    }
+  }, [prefill, threadId, onPrefillUsed]);
 
   const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 
@@ -313,8 +415,103 @@ export function ThreadView({
     }
   };
 
+  const handleProviderChange = async (newProvider: string) => {
+    if (turnCount > 0 || isTurnActive || sending) return;
+    const s = await commands.getSettings();
+    const provKey = newProvider as keyof typeof s.settings.providers;
+    const provSettings = s.settings.providers[provKey];
+    const newMode = provSettings?.permissionMode || "auto-edit";
+
+    if (threadId) {
+      const res = await commands.setThreadProvider(threadId, newProvider);
+      if (res.status === "ok") {
+        setTranscript((prev) =>
+          prev.thread ? { ...prev, thread: res.data } : prev
+        );
+        onThreadUpdated?.(res.data);
+      }
+    } else {
+      setDraftProvider(newProvider);
+      setDraftMode(newMode);
+      setDraftModel(provSettings?.model ?? null);
+      setDraftEffort(provSettings?.effort ?? null);
+    }
+
+    const capsRes = await commands.getProviderCapabilities(newProvider);
+    if (capsRes.status === "ok") {
+      setTranscript((prev) => ({
+        ...prev,
+        supportedPermissionModes: capsRes.data.supportedPermissionModes,
+      }));
+    }
+  };
+
+  const threadTitle =
+    transcript.thread?.title || (threadId ? `Thread #${threadId}` : "New Thread");
+
+  const handleStartRename = () => {
+    if (!threadId) return;
+    setEditTitle(transcript.thread?.title || `Thread #${threadId}`);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveRename = async () => {
+    setIsEditingTitle(false);
+    const trimmed = editTitle.trim();
+    if (!trimmed || !threadId) return;
+    await commands.renameThread(threadId, trimmed);
+    setTranscript((prev) =>
+      prev.thread ? { ...prev, thread: { ...prev.thread, title: trimmed } } : prev
+    );
+    onThreadTitleChange?.(threadId, trimmed);
+  };
+
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
+  const currentModel = threadId ? transcript.thread?.model ?? null : draftModel;
+  const currentEffort = threadId ? transcript.thread?.effort ?? null : draftEffort;
+
+  useEffect(() => {
+    let active = true;
+    void commands.getProviderCapabilities(currentProvider).then((res) => {
+      if (active && res.status === "ok") {
+        setProviderCaps(res.data);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentProvider]);
+
+  const handleSelectModelAndEffort = async (
+    newProvider: string,
+    newModel: string | null,
+    newEffort: string | null
+  ) => {
+    if (newProvider !== currentProvider && turnCount === 0) {
+      await handleProviderChange(newProvider);
+    }
+    if (threadId) {
+      const res = await commands.setThreadModelAndEffort(threadId, newModel, newEffort);
+      if (res.status === "ok") {
+        setTranscript((prev) =>
+          prev.thread
+            ? {
+                ...prev,
+                thread: {
+                  ...prev.thread,
+                  model: newModel,
+                  effort: newEffort,
+                },
+              }
+            : prev
+        );
+      }
+    } else {
+      setDraftModel(newModel);
+      setDraftEffort(newEffort);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -347,20 +544,50 @@ export function ThreadView({
     const prompt = input.trim();
     if (!prompt || sending || turnIsRunning(transcript.status)) return;
 
+    if (isClearCommand(input)) {
+      handleInputChange("");
+      onClearThread?.();
+      return;
+    }
+
+    const slash = parseSlashCommand(input);
+    if (slash.type === "model") {
+      if (slash.arg) {
+        void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
+      } else {
+        setModelPickerMode("model");
+        setModelPickerOpen(true);
+      }
+      handleInputChange("");
+      return;
+    }
+    if (slash.type === "effort") {
+      if (slash.arg) {
+        void handleSelectModelAndEffort(currentProvider, currentModel, slash.arg);
+      } else {
+        setModelPickerMode("effort");
+        setModelPickerOpen(true);
+      }
+      handleInputChange("");
+      return;
+    }
+
     setSending(true);
-    setInput("");
+    handleInputChange("");
 
     try {
       let targetThreadId = threadId;
       if (!targetThreadId) {
         // Create new thread for this project with selected permission mode
         const settings = await commands.getSettings();
-        const providerName = settings.settings.defaultProvider || "fake";
+        const providerName = draftProvider || settings.settings.defaultProvider || "claude";
+        const provKey = providerName as keyof typeof settings.settings.providers;
+        const provSettings = settings.settings.providers[provKey];
         const created = await commands.createThread(
           projectId,
           providerName,
-          null,
-          null,
+          draftModel ?? provSettings?.model ?? null,
+          draftEffort ?? provSettings?.effort ?? null,
           draftMode
         );
         if (created.status === "ok") {
@@ -376,13 +603,23 @@ export function ThreadView({
       const attachments = pendingImages.map((i) => i.path);
       pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
       setPendingImages([]);
-      await commands.sendPrompt(targetThreadId, prompt, attachments);
+
+      const sent = await commands.sendPrompt(targetThreadId, prompt, attachments);
+      if (sent.status === "ok") onPromptSent(targetThreadId);
     } finally {
       setSending(false);
     }
   };
 
   const isTurnActive = turnIsRunning(transcript.status);
+  const thread = transcript.thread;
+
+  const continueInNewThread = async () => {
+    if (!threadId) return;
+    const res = await commands.continueThread(threadId);
+    if (res.status === "ok") onThreadContinued(res.data, threadId);
+    else console.error("Failed to continue thread:", res.error);
+  };
 
   const stop = () => {
     if (threadId) void commands.interruptThread(threadId);
@@ -390,9 +627,58 @@ export function ThreadView({
 
   return (
     <div className="thread-container">
-      <div className="thread-debug-toolbar">
-        <button type="button" onClick={() => setDebugOpen((open) => !open)} aria-pressed={debugOpen}>
-          {debugOpen ? "Close raw event debug" : "Open raw event debug"}
+      <div className="thread-header-bar">
+        {isEditingTitle ? (
+          <input
+            className="thread-title-input"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={() => void handleSaveRename()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSaveRename();
+              if (e.key === "Escape") setIsEditingTitle(false);
+            }}
+            autoFocus
+            aria-label="Rename thread title"
+          />
+        ) : (
+          <div className="thread-title-display">
+            {thread && <span className={`status-dot ${thread.status}`} aria-label={`Status: ${thread.status}`} />}
+            <h2 className="thread-title" onClick={handleStartRename} title="Click to rename">
+              {threadTitle}
+            </h2>
+            {thread?.issueNumber != null && (
+              <span className="chip" title={`Started from issue #${thread.issueNumber}`}>
+                #{thread.issueNumber}
+              </span>
+            )}
+            {threadId && (
+              <button
+                type="button"
+                className="icon-btn sm rename-thread-btn"
+                aria-label="Rename thread"
+                title="Rename thread"
+                onClick={handleStartRename}
+              >
+                <PencilIcon size={12} />
+              </button>
+            )}
+          </div>
+        )}
+        {thread && isBoardThread(thread) && (
+          <span className="thread-kind" title={`Works in its own worktree on ${thread.branch}`}>
+            <GitBranchIcon size={12} /> Board Thread · own worktree
+          </span>
+        )}
+        <button
+          type="button"
+          className="icon-btn sm"
+          onClick={() => setDebugOpen((open) => !open)}
+          aria-pressed={debugOpen}
+          aria-label={debugOpen ? "Close raw event debug" : "Open raw event debug"}
+          title={debugOpen ? "Close raw event debug" : "Raw event debug"}
+        >
+          <BugIcon size={14} />
         </button>
       </div>
       {debugOpen && (
@@ -412,10 +698,18 @@ export function ThreadView({
           )}
         </section>
       )}
+      {transcript.thread?.setupOutput != null && (
+        <details className="setup-output" open={transcript.thread.status === "needs-input" && turnCount === 0}>
+          <summary>
+            Setup command{transcript.thread.status === "needs-input" && turnCount === 0 ? " failed" : ""}
+          </summary>
+          <pre>{transcript.thread.setupOutput || "(no output)"}</pre>
+        </details>
+      )}
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
         {turnCount === 0 ? (
           <div className="empty-thread">
-            <p>Pick a Project, type a prompt, and watch the agent message stream in.</p>
+            <p>Type a prompt below and watch the agent's answer stream in.</p>
           </div>
         ) : (
           <div className="transcript-rows" style={{ height: totalSize }}>
@@ -446,6 +740,28 @@ export function ThreadView({
         )}
       </div>
 
+      {thread?.continuedFrom != null && (
+        <div className="thread-link">
+          Continued from{" "}
+          <button type="button" onClick={() => onOpenThread(thread.continuedFrom!)}>
+            Thread #{thread.continuedFrom}
+          </button>
+        </div>
+      )}
+      {thread?.sessionLost && (
+        <div className="provider-hint missing" role="alert">
+          <span className="hint-message">{SESSION_LOST_MESSAGE}</span>
+          {thread.continuedIn != null && (
+            <span className="thread-link">
+              Continued in{" "}
+              <button type="button" onClick={() => onOpenThread(thread.continuedIn!)}>
+                Thread #{thread.continuedIn}
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
       {providerHint && providerHint.type !== "ok" && (
         <div className={`provider-hint ${providerHint.type}`} role="alert">
           <span className="hint-message">{providerHint.message}</span>
@@ -455,27 +771,20 @@ export function ThreadView({
         </div>
       )}
 
-      <form className="composer" onSubmit={handleSubmit}>
-        <div className="permission-chip-wrapper" title="Permission mode">
-          <label className="permission-chip" htmlFor="permission-mode-select">
-            <span className="permission-chip-icon">{currentModeConfig.icon}</span>
-            <select
-              id="permission-mode-select"
-              className="permission-chip-select"
-              value={currentMode}
-              disabled={isTurnActive || sending}
-              onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
-              aria-label="Permission mode"
-            >
-              {offeredModes.map((item) => (
-                <option key={item.mode} value={item.mode}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+      <div className="composer-wrap">
+      {thread?.sessionLost ? (
+        <div className="composer composer-lost">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={thread.continuedIn != null}
+            onClick={() => void continueInNewThread()}
+          >
+            Continue in new Thread
+          </button>
         </div>
-
+      ) : (
+      <form className="composer" onSubmit={handleSubmit}>
         {pendingImages.length > 0 && (
           <div className="pending-images">
             {pendingImages.map((img) => (
@@ -492,13 +801,91 @@ export function ThreadView({
             ))}
           </div>
         )}
-        <div className="composer-row">
+        <textarea
+          className="composer-input"
+          rows={Math.max(2, Math.min(10, input.split("\n").length))}
+          placeholder={
+            isTurnActive
+              ? "Working… (Esc to stop)"
+              : turnCount === 0
+                ? "Ask for changes, or attach images  (/model, /effort, /clear)"
+                : "Send a follow-up  (/clear starts a new Thread)"
+          }
+          value={input}
+          onChange={(e) => handleInputChange(e.target.value)}
+          onPaste={handlePaste}
+          onKeyDown={(e) => {
+            if (stopsTurn(e, transcript.status)) {
+              e.preventDefault();
+              stop();
+            } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          disabled={sending}
+        />
+        <div className="composer-bar">
+          <div className="ctl">
+            <button
+              type="button"
+              className="cbtn"
+              onClick={() => {
+                setModelPickerMode("model");
+                setModelPickerOpen(true);
+              }}
+              disabled={isTurnActive || sending}
+              aria-label="Model"
+              title="Model (/model)"
+            >
+              <ProviderMark provider={currentProvider} size={14} />
+              <span className="t">{currentModel || currentProvider}</span>
+              <ChevronDownIcon size={12} />
+            </button>
+            <button
+              type="button"
+              className="cbtn compact"
+              onClick={() => {
+                setModelPickerMode("effort");
+                setModelPickerOpen(true);
+              }}
+              disabled={isTurnActive || sending}
+              aria-label="Effort"
+              title="Effort (/effort)"
+            >
+              <LightBulbIcon size={14} />
+              <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
+              <ChevronDownIcon size={12} className="cv" />
+            </button>
+            <label className="cbtn compact" title={`Permission mode: ${currentModeConfig.label}`}>
+              {(() => {
+                const PermIcon = PERMISSION_ICONS[currentModeConfig.icon];
+                return <PermIcon size={14} />;
+              })()}
+              <select
+                id="permission-mode-select"
+                className="t permission-chip-select"
+                value={currentMode}
+                disabled={isTurnActive || sending}
+                onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
+                aria-label="Permission mode"
+              >
+                {offeredModes.map((item) => (
+                  <option key={item.mode} value={item.mode}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon size={12} className="cv" />
+            </label>
+          </div>
           {imagesOffered && (
             <>
               <button
                 type="button"
-                className="composer-attach"
+                className="cbtn"
                 aria-label="Attach image"
+                title="Attach image"
                 disabled={isTurnActive || sending}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -517,32 +904,48 @@ export function ThreadView({
               />
             </>
           )}
-          <input
-            type="text"
-            className="composer-input"
-            placeholder={isTurnActive ? "Working… (Esc to stop)" : "Type a prompt…"}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (stopsTurn(e, transcript.status)) {
-                e.preventDefault();
-                stop();
-              }
-            }}
-            disabled={sending}
-          />
           {isTurnActive ? (
-            <button type="button" className="composer-submit" onClick={stop}>
-              Stop
+            <button type="button" className="send stop" onClick={stop} aria-label="Stop" title="Stop (Esc)">
+              <SquareFillIcon size={12} />
             </button>
           ) : (
-            <button type="submit" className="composer-submit" disabled={!input.trim() || sending}>
-              Send
+            <button type="submit" className="send" disabled={!input.trim() || sending} aria-label="Send" title="Send (↩)">
+              <ArrowUpIcon size={16} />
             </button>
           )}
         </div>
       </form>
+      )}
+      <div className="composer-footer" aria-label="Thread checkout and branch">
+        {thread && isBoardThread(thread) ? (
+          <span className="checkout-badge" title={thread.worktreePath ?? undefined}>
+            <FileDirectoryIcon size={12} /> Own worktree
+          </span>
+        ) : (
+          <span className="checkout-badge">
+            <RepoIcon size={12} /> Main checkout
+          </span>
+        )}
+        <span className="grow" />
+        <span className="branch-badge mono">
+          <GitBranchIcon size={12} /> {(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}
+        </span>
+      </div>
+      </div>
+
+      {modelPickerOpen && (
+        <ModelEffortPicker
+          open={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          currentProvider={currentProvider}
+          currentModel={currentModel}
+          currentEffort={currentEffort}
+          turnCount={turnCount}
+          midThreadModelSwitch={providerCaps?.midThreadModelSwitch ?? true}
+          onSelectModelAndEffort={handleSelectModelAndEffort}
+          initialMode={modelPickerMode}
+        />
+      )}
     </div>
   );
 }

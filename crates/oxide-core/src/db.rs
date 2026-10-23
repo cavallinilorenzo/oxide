@@ -88,6 +88,40 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX turns_by_thread ON turns(thread_id, id);
     CREATE INDEX items_by_turn ON items(turn_id, item_index);
 ",
+    // Small app-level facts, such as the Project and Thread last open.
+    "
+    CREATE TABLE app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+",
+    // A Thread whose Provider session is gone, and the Thread that continues it.
+    "
+    ALTER TABLE threads ADD COLUMN session_lost INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE threads ADD COLUMN continued_from INTEGER REFERENCES threads(id);
+",
+    "
+    ALTER TABLE threads ADD COLUMN title TEXT;
+",
+    // Board Threads: a worktree of their own, and the output of the Project's Setup command
+    // that ran in it. The Setup command itself lives with the Project, never in its repository.
+    "
+    ALTER TABLE threads ADD COLUMN branch TEXT;
+    ALTER TABLE threads ADD COLUMN worktree_path TEXT;
+    ALTER TABLE threads ADD COLUMN setup_output TEXT;
+    ALTER TABLE projects ADD COLUMN setup_command TEXT;
+",
+    // The GitHub issue a Board Thread was started from.
+    "
+    ALTER TABLE threads ADD COLUMN issue_number INTEGER;
+",
+    // Open Projects: the ones the user opened, listed in the sidebar. A scan only makes
+    // Projects known (findable in the Project palette); Projects with Threads start open.
+    "
+    ALTER TABLE projects ADD COLUMN opened_at TEXT;
+    UPDATE projects SET opened_at = created_at
+        WHERE id IN (SELECT DISTINCT project_id FROM threads);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   commands,
   type Detection,
+  type Editor,
   type SettingsState,
   type Settings_Deserialize as Settings,
 } from "./bindings";
@@ -33,6 +34,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [claudeDetection, setClaudeDetection] = useState<Detection | null>(null);
+  const [editors, setEditors] = useState<Editor[]>([]);
 
   useEffect(() => {
     // A valid change on disk replaces the draft (the file is the source of
@@ -46,6 +48,9 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       if (res.status === "ok") {
         setClaudeDetection(res.data);
       }
+    });
+    commands.detectedEditors().then((res) => {
+      if (res.status === "ok") setEditors(res.data);
     });
     const unlisten = listen<SettingsState>("settings-changed", (e) => apply(e.payload));
     return () => void unlisten.then((f) => f());
@@ -171,7 +176,14 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
 
       <label>
         Editor for “Open in editor”
-        <input value={draft.editor} onChange={(e) => set({ editor: e.target.value })} />
+        <select value={draft.editor} onChange={(e) => set({ editor: e.target.value })}>
+          <option value="">First detected editor</option>
+          {editors.map((editor) => (
+            <option key={editor.bundleId} value={editor.bundleId}>
+              {editor.name}
+            </option>
+          ))}
+        </select>
         {fieldErrors("editor")}
       </label>
 

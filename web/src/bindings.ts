@@ -12,14 +12,47 @@ export const commands = {
 	 *  The walk runs on a blocking thread, off the main thread and the async runtime.
 	 */
 	rescanProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("rescan_projects")),
+	/**  Registers an existing folder as a Project. */
+	addProject: (path: string) => typedError<Project, AppError>(__TAURI_INVOKE("add_project", { path })),
+	/**  Creates `parent/name` with `git init` and registers it as a Project. */
+	createProject: (parent: string, name: string) => typedError<Project, AppError>(__TAURI_INVOKE("create_project", { parent, name })),
+	/**  Clones a Git URL into `parent` and registers the clone as a Project. */
+	cloneProject: (url: string, parent: string) => typedError<Project, AppError>(__TAURI_INVOKE("clone_project", { url, parent })),
+	searchGithubRepositories: (query: string) => typedError<GithubRepository[], AppError>(__TAURI_INVOKE("search_github_repositories", { query })),
+	/**  Clones one of the user's GitHub repositories into `parent` and registers it as a Project. */
+	cloneGithubRepository: (nameWithOwner: string, parent: string) => typedError<Project, AppError>(__TAURI_INVOKE("clone_github_repository", { nameWithOwner, parent })),
+	/**  The known editors installed on this machine. */
+	detectedEditors: () => typedError<Editor[], AppError>(__TAURI_INVOKE("detected_editors")),
+	/**  Opens the Project's checkout (or the Thread's) in the editor chosen in Settings. */
+	openInEditor: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("open_in_editor", { projectId, threadId })),
+	revealInFinder: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_finder", { projectId, threadId })),
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
+	/**  Lists the Project in the sidebar, or takes it out (it stays in the Project palette). */
+	setProjectOpen: (id: number, open: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_open", { id, open })),
 	getSettings: () => __TAURI_INVOKE<SettingsState_Serialize>("get_settings"),
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("save_settings", { settings })),
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
+	/**  Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn. */
+	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
+	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
+	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
+	/**  Starts a new Thread that continues one whose Provider session is gone. */
+	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
+	/**
+	 *  Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
+	 *  changes that waits for `discard_changes`.
+	 */
+	setThreadArchived: (threadId: number, archived: boolean, discardChanges: boolean) => typedError<ArchiveOutcome, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived, discardChanges })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
+	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
+	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
 	respondToApproval: (threadId: number, approvalId: string, decision: ApprovalDecision) => typedError<null, AppError>(__TAURI_INVOKE("respond_to_approval", { threadId, approvalId, decision })),
 	detectProvider: (provider: string) => typedError<Detection_Serialize, AppError>(__TAURI_INVOKE("detect_provider", { provider })),
 	getProviderCapabilities: (provider: string) => typedError<ProviderCapabilities, AppError>(__TAURI_INVOKE("get_provider_capabilities", { provider })),
+	getModelCatalog: (provider: string, refresh: boolean) => typedError<ModelInfo_Serialize[], AppError>(__TAURI_INVOKE("get_model_catalog", { provider, refresh })),
+	getFavouriteModels: () => typedError<string[], AppError>(__TAURI_INVOKE("get_favourite_models")),
+	setFavouriteModels: (favourites: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_favourite_models", { favourites })),
+	setThreadModelAndEffort: (threadId: number, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_model_and_effort", { threadId, model, effort })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
 	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
 	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
@@ -36,10 +69,69 @@ export const commands = {
 	listTurns: (threadId: number, offset: number, limit: number) => typedError<TurnPage_Serialize, AppError>(__TAURI_INVOKE("list_turns", { threadId, offset, limit })),
 	subscribeThread: (threadId: number, onEvent: Channel<SequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread", { threadId, onEvent })),
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
+	/**  The Project's Thread Board: its cards now, then every change on `on_event`. */
+	subscribeBoard: (projectId: number, onEvent: Channel<BoardEvent_Deserialize>) => typedError<BoardCard_Serialize[], AppError>(__TAURI_INVOKE("subscribe_board", { projectId, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
 	closeTerminal: (terminalId: number) => typedError<null, AppError>(__TAURI_INVOKE("close_terminal", { terminalId })),
+	/**
+	 *  Lists one directory of a Thread's checkout (`""` is the root), minus
+	 *  `.git` and gitignored entries.
+	 */
+	listDir: (projectId: number, threadId: number | null, path: string) => typedError<FileEntry[], AppError>(__TAURI_INVOKE("list_dir", { projectId, threadId, path })),
+	/**  Reads a file of a Thread's checkout, capped at 1 MiB. */
+	readFile: (projectId: number, threadId: number | null, path: string) => typedError<FileContent, AppError>(__TAURI_INVOKE("read_file", { projectId, threadId, path })),
+	/**  Branch, ahead/behind and uncommitted-change counts of the main checkout. */
+	gitStatus: (projectId: number) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId })),
+	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
+	/**  The changes of the main checkout in one scope, from Git. */
+	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
+	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
+	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
+	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
+	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
+	/**  Creates a branch from HEAD and checks it out. */
+	createBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("create_branch", { projectId, name })),
+	/**  Background fetch; returns whether it ran (it is throttled). */
+	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
+	/**  `git pull --ff-only`. */
+	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
+	/**  Commits exactly the given files; other staged state is untouched. */
+	commit: (projectId: number, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, paths, message })),
+	/**  Pushes the current branch; never forced. */
+	push: (projectId: number, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, allowProtected })),
+	/**
+	 *  Whether `gh` works and the branch's open pull request. Runs `gh` only when
+	 *  asked; the Surface decides when to refresh.
+	 */
+	pullRequestState: (projectId: number) => typedError<PullRequestState_Serialize, AppError>(__TAURI_INVOKE("pull_request_state", { projectId })),
+	/**  Title, body and base prefilled from the branch's commits. */
+	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
+	/**  Pushes the branch if needed, then opens a pull request for it. */
+	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
+	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
+	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
+	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
+	/**  One pull request's description, checks, conversation and changed files. */
+	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
+	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
+	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch })),
+	/**  Checks the pull request's branch out in the main checkout. */
+	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
+	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
+	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
+	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
+	issueDetail: (projectId: number, number: number) => typedError<IssueDetail, AppError>(__TAURI_INVOKE("issue_detail", { projectId, number })),
+	createIssue: (projectId: number, title: string, body: string) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body })),
+	commentIssue: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_issue", { projectId, number, body })),
+	closeIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("close_issue", { projectId, number })),
+	openIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("open_issue", { projectId, number })),
+	/**  The Project and Thread to reopen on launch. */
+	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
+	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
+	/**  The user confirmed quitting: interrupt every Thread and exit. */
+	confirmQuit: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("confirm_quit", { dontAskAgain })),
 };
 
 /* Types */
@@ -81,6 +173,60 @@ export type ApprovalSnapshot_Serialize = {
 	decidedAt: string | null,
 };
 
+export type ArchiveOutcome = "archived" | "needs-confirmation";
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Deserialize = {
+	thread: Thread_Deserialize,
+	pendingApprovals: PendingApproval_Deserialize[],
+	/**  The Thread's branch's pull request, once GitHub has been asked. */
+	pullRequest?: BranchPullRequest | null,
+};
+
+/**  A Thread on the Thread Board with the Approvals it is waiting on. */
+export type BoardCard_Serialize = {
+	thread: Thread_Serialize,
+	pendingApprovals: PendingApproval_Serialize[],
+	/**  The Thread's branch's pull request, once GitHub has been asked. */
+	pullRequest: BranchPullRequest | null,
+};
+
+export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
+
+export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize };
+
+export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize };
+
+/**  A Board Thread's pull request: its state and a tally of its checks. */
+export type BranchPullRequest = {
+	number: number,
+	url: string,
+	phase: PullRequestPhase,
+	checksPassed: number,
+	checksFailed: number,
+	checksPending: number,
+};
+
+export type CheckState = "success" | "failure" | "pending";
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Deserialize = {
+	thread: Thread_Deserialize,
+	recap: string,
+};
+
+/**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
+export type ContinuedThread_Serialize = {
+	thread: Thread_Serialize,
+	recap: string,
+};
+
 export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
 
 export type DebugSequencedThreadEvent_Deserialize = {
@@ -113,9 +259,198 @@ export type Detection_Serialize = {
 	warning: string | null,
 };
 
+export type Diff = Diff_Serialize | Diff_Deserialize;
+
+export type DiffFile = DiffFile_Serialize | DiffFile_Deserialize;
+
+export type DiffFile_Deserialize = {
+	path: string,
+	oldPath?: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffFile_Serialize = {
+	path: string,
+	oldPath: string | null,
+	status: DiffStatus,
+	added: number,
+	removed: number,
+	binary: boolean,
+	hunks: DiffHunk[],
+};
+
+export type DiffHunk = {
+	header: string,
+	lines: DiffLine[],
+};
+
+export type DiffKind = "context" | "added" | "removed";
+
+export type DiffLine = {
+	kind: DiffKind,
+	text: string,
+};
+
+export type DiffScope = "uncommitted" | "branch";
+
+export type DiffStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
+
+export type Diff_Deserialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base?: string | null,
+	files: DiffFile_Deserialize[],
+};
+
+export type Diff_Serialize = {
+	/**  What the Branch scope compares against, if a base branch exists. */
+	base: string | null,
+	files: DiffFile_Serialize[],
+};
+
+/**  A Board Thread handed off from the Thread Board. */
+export type DispatchRequest = DispatchRequest_Serialize | DispatchRequest_Deserialize;
+
+/**  A Board Thread handed off from the Thread Board. */
+export type DispatchRequest_Deserialize = {
+	projectId: number,
+	prompt: string,
+	provider: string,
+	model?: string | null,
+	effort?: string | null,
+	permissionMode?: PermissionMode | null,
+	baseBranch?: string | null,
+	issueNumber?: number | null,
+	issueTitle?: string | null,
+};
+
+/**  A Board Thread handed off from the Thread Board. */
+export type DispatchRequest_Serialize = {
+	projectId: number,
+	prompt: string,
+	provider: string,
+	model: string | null,
+	effort: string | null,
+	permissionMode: PermissionMode | null,
+	baseBranch: string | null,
+	issueNumber: number | null,
+	issueTitle: string | null,
+};
+
+export type Editor = {
+	name: string,
+	bundleId: string,
+};
+
 export type FieldError = {
 	path: string,
 	message: string,
+};
+
+export type FileContent = {
+	content: string,
+	/**  Saturates at 4 GiB. */
+	size: number,
+	truncated: boolean,
+	binary: boolean,
+};
+
+export type FileEntry = {
+	name: string,
+	path: string,
+	isDir: boolean,
+};
+
+export type GitBranch = {
+	name: string,
+	remote: boolean,
+	current: boolean,
+};
+
+export type GitStatus = GitStatus_Serialize | GitStatus_Deserialize;
+
+export type GitStatus_Deserialize = {
+	/**  `null` while HEAD is detached. */
+	branch?: string | null,
+	upstream?: string | null,
+	ahead: number,
+	behind: number,
+	added: number,
+	removed: number,
+	changedFiles: number,
+	/**  Why the branch picker is disabled, if it is. */
+	pickerDisabledReason?: string | null,
+	/**  Pushing this branch (`main`, `master`) needs the user's consent. */
+	protected: boolean,
+	/**  A branch with commits and no upstream yet; the first push publishes it. */
+	unpublished: boolean,
+};
+
+export type GitStatus_Serialize = {
+	/**  `null` while HEAD is detached. */
+	branch: string | null,
+	upstream: string | null,
+	ahead: number,
+	behind: number,
+	added: number,
+	removed: number,
+	changedFiles: number,
+	/**  Why the branch picker is disabled, if it is. */
+	pickerDisabledReason: string | null,
+	/**  Pushing this branch (`main`, `master`) needs the user's consent. */
+	protected: boolean,
+	/**  A branch with commits and no upstream yet; the first push publishes it. */
+	unpublished: boolean,
+};
+
+export type GithubAvailability = "ready" | "missing" | "loggedOut";
+
+export type GithubRepository = {
+	nameWithOwner: string,
+	description: string,
+	isPrivate: boolean,
+};
+
+export type IssueComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type IssueDetail = {
+	number: number,
+	title: string,
+	body: string,
+	state: string,
+	author: string,
+	url: string,
+	createdAt: string,
+	comments: IssueComment[],
+};
+
+export type IssueSummary = {
+	number: number,
+	title: string,
+	state: string,
+	author: string,
+	url: string,
+	commentsCount: number,
+	createdAt: string,
+};
+
+export type IssuesState = IssuesState_Serialize | IssuesState_Deserialize;
+
+export type IssuesState_Deserialize = {
+	availability: GithubAvailability,
+	guidance?: string | null,
+};
+
+export type IssuesState_Serialize = {
+	availability: GithubAvailability,
+	guidance: string | null,
 };
 
 export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
@@ -140,6 +475,47 @@ export type ItemSnapshot_Serialize = {
 	createdAt: string,
 };
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export type ModelInfo = ModelInfo_Serialize | ModelInfo_Deserialize;
+
+export type ModelInfo_Deserialize = {
+	id: string,
+	name: string,
+	description?: string | null,
+	supportedEfforts: string[],
+	defaultEffort?: string | null,
+	isLegacy: boolean,
+};
+
+export type ModelInfo_Serialize = {
+	id: string,
+	name: string,
+	description: string | null,
+	supportedEfforts: string[],
+	defaultEffort: string | null,
+	isLegacy: boolean,
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval = PendingApproval_Serialize | PendingApproval_Deserialize;
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Deserialize = {
+	approvalId: string,
+	kind: ApprovalKind_Deserialize,
+	summary: string,
+	options: string[],
+};
+
+/**  An Approval the Provider is still waiting on. */
+export type PendingApproval_Serialize = {
+	approvalId: string,
+	kind: ApprovalKind_Serialize,
+	summary: string,
+	options: string[],
+};
+
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
 
 export type Project = {
@@ -147,6 +523,8 @@ export type Project = {
 	name: string,
 	path: string,
 	hidden: boolean,
+	/**  Listed in the sidebar; scanned Projects stay closed until the user opens one. */
+	open: boolean,
 	missing: boolean,
 };
 
@@ -157,6 +535,8 @@ export type ProviderCapabilities = {
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
 	imageAttachments: boolean,
+	midThreadModelSwitch: boolean,
+	slashCommandPassthrough: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;
@@ -185,6 +565,96 @@ export type Providers_Serialize = {
 	claude: ProviderSettings_Serialize,
 	codex: ProviderSettings_Serialize,
 	antigravity: ProviderSettings_Serialize,
+};
+
+export type PullRequest = {
+	number: number,
+	title: string,
+	url: string,
+	draft: boolean,
+	base: string,
+	head: string,
+	author: string,
+};
+
+export type PullRequestCheck = {
+	name: string,
+	state: CheckState,
+};
+
+export type PullRequestComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
+
+export type PullRequestDetail = PullRequestDetail_Serialize | PullRequestDetail_Deserialize;
+
+export type PullRequestDetail_Deserialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Deserialize,
+};
+
+export type PullRequestDetail_Serialize = {
+	pullRequest: PullRequest,
+	body: string,
+	checks: PullRequestCheck[],
+	comments: PullRequestComment[],
+	/**  The merge methods the repository allows. */
+	mergeMethods: MergeMethod[],
+	/**  Whether the repository deletes merged branches on its own. */
+	deleteBranchOnMerge: boolean,
+	/**  The changed files, for the Diff Surface. */
+	diff: Diff_Serialize,
+};
+
+export type PullRequestDraft = {
+	title: string,
+	body: string,
+	base: string,
+	head: string,
+};
+
+export type PullRequestPhase = "draft" | "open" | "merged" | "closed";
+
+export type PullRequestState = PullRequestState_Serialize | PullRequestState_Deserialize;
+
+export type PullRequestState_Deserialize = {
+	availability: GithubAvailability,
+	/**  How to get `gh` working, when it is not. */
+	guidance?: string | null,
+	branch?: string | null,
+	defaultBranch?: string | null,
+	pullRequest?: PullRequest | null,
+};
+
+export type PullRequestState_Serialize = {
+	availability: GithubAvailability,
+	/**  How to get `gh` working, when it is not. */
+	guidance: string | null,
+	branch: string | null,
+	defaultBranch: string | null,
+	pullRequest: PullRequest | null,
+};
+
+export type Selection = Selection_Serialize | Selection_Deserialize;
+
+export type Selection_Deserialize = {
+	projectId: number,
+	threadId?: number | null,
+};
+
+export type Selection_Serialize = {
+	projectId: number,
+	threadId: number | null,
 };
 
 export type SequencedThreadEvent = SequencedThreadEvent_Serialize | SequencedThreadEvent_Deserialize;
@@ -268,6 +738,8 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	error?: TurnError_Deserialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Deserialize,
@@ -307,6 +779,8 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	error: TurnError_Serialize | null,
 } } | { type: "ThreadStatusChanged"; payload: {
 	status: ThreadStatus,
+} } | { type: "ThreadRenamed"; payload: {
+	title: string,
 } } | { type: "ApprovalRequested"; payload: {
 	id: string,
 	kind: ApprovalKind_Serialize,
@@ -357,6 +831,14 @@ export type Thread_Deserialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title?: string | null,
+	sessionLost: boolean,
+	continuedFrom?: number | null,
+	continuedIn?: number | null,
+	branch?: string | null,
+	worktreePath?: string | null,
+	setupOutput?: string | null,
+	issueNumber?: number | null,
 };
 
 export type Thread_Serialize = {
@@ -370,6 +852,14 @@ export type Thread_Serialize = {
 	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
+	title: string | null,
+	sessionLost: boolean,
+	continuedFrom: number | null,
+	continuedIn: number | null,
+	branch: string | null,
+	worktreePath: string | null,
+	setupOutput: string | null,
+	issueNumber: number | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

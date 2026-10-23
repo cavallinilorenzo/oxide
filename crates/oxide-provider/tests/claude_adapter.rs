@@ -3,6 +3,7 @@ use oxide_provider::claude::ClaudeCodeProvider;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn make_fake_cli(dir: &std::path::Path, version: &str, logged_in: bool) -> PathBuf {
     let script_path = dir.join("fake-claude.sh");
@@ -342,4 +343,76 @@ fn claude_provider_resume_passes_session_id() {
         wire_contents.contains("--resume") && wire_contents.contains("session-xyz-99"),
         "argv should contain --resume session-xyz-99"
     );
+}
+
+fn pid_alive(pid: i32) -> bool {
+    // `kill -0` also succeeds for zombies, so ask ps for the state.
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "stat="])
+        .output()
+        .map(|o| {
+            let stat = String::from_utf8_lossy(&o.stdout);
+            !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+        })
+        .unwrap_or(false)
+}
+
+fn wait_for_pid_file(path: &std::path::Path) -> i32 {
+    for _ in 0..200 {
+        if let Some(pid) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+        {
+            return pid;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("fake CLI never wrote {path:?}");
+}
+
+#[test]
+fn shutdown_escalates_and_leaves_no_child_behind() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let pid_file = temp_dir.path().join("grandchild.pid");
+    let script_path = temp_dir.path().join("stubborn-claude.sh");
+    // Ignores SIGTERM (and so does its child), so only SIGKILL on the group ends it.
+    fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\nsleep 300 &\necho $! > {}\nwait\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    use oxide_provider::{PermissionMode, StartContext};
+    let registry_path = temp_dir.path().join("processes.json");
+    let registry = std::sync::Arc::new(oxide_provider::process::ProcessRegistry::open(
+        &registry_path,
+    ));
+    let mut provider = ClaudeCodeProvider::with_command(script_path.to_str().unwrap());
+    provider.set_registry(registry);
+    let _events = provider
+        .start(&StartContext {
+            working_dir: temp_dir.path().to_path_buf(),
+            model: None,
+            effort: None,
+            permission_mode: PermissionMode::Ask,
+        })
+        .unwrap();
+    let grandchild = wait_for_pid_file(&pid_file);
+    assert!(pid_alive(grandchild));
+    let recorded = fs::read_to_string(&registry_path).unwrap();
+    assert!(recorded.contains("stubborn-claude.sh"), "{recorded}");
+
+    let started = std::time::Instant::now();
+    provider.shutdown().unwrap();
+
+    assert!(
+        started.elapsed() >= Duration::from_secs(2),
+        "SIGKILL only after the 2 s grace"
+    );
+    assert!(!pid_alive(grandchild), "the process group must be gone");
+    assert_eq!(fs::read_to_string(&registry_path).unwrap(), "[]");
 }

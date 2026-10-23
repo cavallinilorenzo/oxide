@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyThreadEvent, initialTranscriptState } from "./transcript";
+import { applyThreadEvent, initialTranscriptState, SESSION_LOST_MESSAGE } from "./transcript";
 import { getOfferedPermissionModes } from "./ThreadView";
-import type { SequencedThreadEvent, ThreadSnapshot } from "./bindings";
+import type { SequencedThreadEvent, Thread, ThreadSnapshot } from "./bindings";
 
 describe("transcript reducer", () => {
   it("initializes state from a snapshot", () => {
@@ -17,6 +17,9 @@ describe("transcript reducer", () => {
         archived: false,
         createdAt: "2026-10-22T10:00:00Z",
         updatedAt: "2026-10-22T10:00:00Z",
+        sessionLost: false,
+        continuedFrom: null,
+        continuedIn: null,
       },
       capabilities: { reasoningText: true, imageAttachments: false },
       turns: [
@@ -320,9 +323,9 @@ describe("transcript reducer", () => {
       "claude"
     );
     expect(claudeModes).toEqual([
-      { mode: "ask", label: "Ask", icon: "🔒" },
-      { mode: "auto-edit", label: "Auto-edit", icon: "🛡️" },
-      { mode: "full-access", label: "Full access", icon: "🔓" },
+      { mode: "ask", label: "Ask", icon: "lock" },
+      { mode: "auto-edit", label: "Auto-edit", icon: "shield-check" },
+      { mode: "full-access", label: "Full access", icon: "unlock" },
     ]);
 
     // agy supports only auto-edit and full-access, and labels auto-edit as soft-deny
@@ -331,14 +334,14 @@ describe("transcript reducer", () => {
       "antigravity"
     );
     expect(agyModes).toEqual([
-      { mode: "auto-edit", label: "Auto-edit (soft-deny)", icon: "🛡️" },
-      { mode: "full-access", label: "Full access", icon: "🔓" },
+      { mode: "auto-edit", label: "Auto-edit (soft-deny)", icon: "shield-check" },
+      { mode: "full-access", label: "Full access", icon: "unlock" },
     ]);
 
     // Provider that only supports AutoEdit
     const restrictedModes = getOfferedPermissionModes(["auto-edit"], "custom");
     expect(restrictedModes).toEqual([
-      { mode: "auto-edit", label: "Auto-edit", icon: "🛡️" },
+      { mode: "auto-edit", label: "Auto-edit", icon: "shield-check" },
     ]);
   });
 
@@ -374,7 +377,70 @@ describe("transcript reducer", () => {
     expect(state.turns[1].items[0]).toBe(before.turns[1].items[0]);
     expect(state.turns[1].items[1].content).toBe("stream");
   });
+
+  it("updates thread title on ThreadRenamed event", () => {
+    let state = initialTranscriptState({
+      thread: sampleThread(),
+      capabilities: { reasoningText: true, imageAttachments: false },
+      turns: [],
+      turnOffset: 0,
+      turnCount: 0,
+      lastSeq: 0,
+      supportedPermissionModes: ["ask", "auto-edit", "full-access"],
+    });
+
+    expect(state.thread?.title).toBeNull();
+
+    state = applyThreadEvent(state, {
+      seq: 1,
+      event: {
+        type: "ThreadRenamed",
+        payload: {
+          title: "New Custom Title",
+        },
+      },
+    });
+
+    expect(state.thread?.title).toBe("New Custom Title");
+  });
+
+  it("marks the Thread's session lost when the Provider session is gone", () => {
+    const thread = { ...initialTranscriptState(null), thread: sampleThread() };
+
+    const other = applyThreadEvent(thread, {
+      seq: 1,
+      event: { type: "Error", payload: { message: "boom" } },
+    });
+    expect(other.status).toBe("error");
+    expect(other.thread?.sessionLost).toBe(false);
+
+    const gone = applyThreadEvent(thread, {
+      seq: 1,
+      event: { type: "Error", payload: { message: SESSION_LOST_MESSAGE } },
+    });
+    expect(gone.status).toBe("error");
+    expect(gone.thread?.sessionLost).toBe(true);
+  });
 });
+
+function sampleThread(): Thread {
+  return {
+    id: 1,
+    projectId: 1,
+    provider: "fake",
+    model: null,
+    effort: null,
+    permissionMode: "auto-edit",
+    status: "completed",
+    archived: false,
+    createdAt: "a",
+    updatedAt: "b",
+    title: null,
+    sessionLost: false,
+    continuedFrom: null,
+    continuedIn: null,
+  };
+}
 
 function startTurn(seq: number, prompt: string): SequencedThreadEvent {
   return { seq, event: { type: "TurnStarted", payload: { turn_index: 0, prompt, attachments: [] } } };

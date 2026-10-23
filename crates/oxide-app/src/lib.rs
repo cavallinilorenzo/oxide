@@ -1,12 +1,15 @@
 //! The App shell: a thin Tauri layer that exposes [`oxide_core::Core`] to the webview.
 //! The webview talks only to the TypeScript bindings generated from here.
 
+mod system;
+
 use std::sync::Arc;
 
 use oxide_core::{Core, ProjectSummary};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 use tauri_specta::{Builder, collect_commands};
 
 #[derive(Debug, Serialize, Type)]
@@ -28,6 +31,8 @@ pub struct Project {
     name: String,
     path: String,
     hidden: bool,
+    /// Listed in the sidebar; scanned Projects stay closed until the user opens one.
+    open: bool,
     missing: bool,
 }
 
@@ -38,6 +43,7 @@ impl From<ProjectSummary> for Project {
             name: p.name,
             path: p.path,
             hidden: p.hidden,
+            open: p.open,
             missing: p.missing,
         }
     }
@@ -67,10 +73,123 @@ async fn rescan_projects(core: State<'_, Arc<Core>>) -> Result<Vec<Project>, App
     Ok(projects.into_iter().map(Project::from).collect())
 }
 
+/// Registers an existing folder as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn add_project(core: State<'_, Arc<Core>>, path: String) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.add_project(&path))
+        .await
+        .map(Project::from)
+}
+
+/// Creates `parent/name` with `git init` and registers it as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn create_project(
+    core: State<'_, Arc<Core>>,
+    parent: String,
+    name: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.create_project(&parent, &name))
+        .await
+        .map(Project::from)
+}
+
+/// Clones a Git URL into `parent` and registers the clone as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn clone_project(
+    core: State<'_, Arc<Core>>,
+    url: String,
+    parent: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| core.clone_project(&url, &parent))
+        .await
+        .map(Project::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRepository {
+    name_with_owner: String,
+    description: String,
+    is_private: bool,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn search_github_repositories(
+    core: State<'_, Arc<Core>>,
+    query: String,
+) -> Result<Vec<GithubRepository>, AppError> {
+    git_blocking(&core, move |core| core.search_github_repositories(&query))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+/// Clones one of the user's GitHub repositories into `parent` and registers it as a Project.
+#[tauri::command]
+#[specta::specta]
+async fn clone_github_repository(
+    core: State<'_, Arc<Core>>,
+    name_with_owner: String,
+    parent: String,
+) -> Result<Project, AppError> {
+    git_blocking(&core, move |core| {
+        core.clone_github_repository(&name_with_owner, &parent)
+    })
+    .await
+    .map(Project::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Editor {
+    name: String,
+    bundle_id: String,
+}
+
+/// The known editors installed on this machine.
+#[tauri::command]
+#[specta::specta]
+async fn detected_editors(core: State<'_, Arc<Core>>) -> Result<Vec<Editor>, AppError> {
+    git_blocking(&core, |core| Ok(core.detected_editors()))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+/// Opens the Project's checkout (or the Thread's) in the editor chosen in Settings.
+#[tauri::command]
+#[specta::specta]
+fn open_in_editor(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.open_in_editor(project_id, thread_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn reveal_in_finder(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.reveal_in_finder(project_id, thread_id)?)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn set_project_hidden(core: State<'_, Arc<Core>>, id: u32, hidden: bool) -> Result<(), AppError> {
     Ok(core.set_project_hidden(id, hidden)?)
+}
+
+/// Lists the Project in the sidebar, or takes it out (it stays in the Project palette).
+#[tauri::command]
+#[specta::specta]
+fn set_project_open(core: State<'_, Arc<Core>>, id: u32, open: bool) -> Result<(), AppError> {
+    Ok(core.set_project_open(id, open)?)
 }
 
 // Settings cross the boundary as the same JSON shape as `settings.json`, so
@@ -186,11 +305,24 @@ pub enum ApprovalKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub supported_efforts: Vec<String>,
+    pub default_effort: Option<String>,
+    pub is_legacy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
     pub image_attachments: bool,
+    pub mid_thread_model_switch: bool,
+    pub slash_command_passthrough: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -201,6 +333,13 @@ pub enum ThreadStatus {
     Completed,
     Error,
     Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArchiveOutcome {
+    Archived,
+    NeedsConfirmation,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -235,6 +374,69 @@ pub struct Thread {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
+    pub session_lost: bool,
+    pub continued_from: Option<u32>,
+    pub continued_in: Option<u32>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub setup_output: Option<String>,
+    pub issue_number: Option<u32>,
+}
+
+/// An Approval the Provider is still waiting on.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApproval {
+    pub approval_id: String,
+    pub kind: ApprovalKind,
+    pub summary: String,
+    pub options: Vec<String>,
+}
+
+/// A Thread on the Thread Board with the Approvals it is waiting on.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardCard {
+    pub thread: Thread,
+    pub pending_approvals: Vec<PendingApproval>,
+    /// The Thread's branch's pull request, once GitHub has been asked.
+    pub pull_request: Option<BranchPullRequest>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestPhase {
+    Draft,
+    Open,
+    Merged,
+    Closed,
+}
+
+/// A Board Thread's pull request: its state and a tally of its checks.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPullRequest {
+    pub number: u32,
+    pub url: String,
+    pub phase: PullRequestPhase,
+    pub checks_passed: u32,
+    pub checks_failed: u32,
+    pub checks_pending: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", content = "payload")]
+pub enum BoardEvent {
+    ThreadChanged(BoardCard),
+}
+
+/// A new Thread continuing one whose Provider session is gone, and the recap to prefill.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuedThread {
+    pub thread: Thread,
+    pub recap: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -355,6 +557,9 @@ pub enum ThreadEvent {
     ThreadStatusChanged {
         status: ThreadStatus,
     },
+    ThreadRenamed {
+        title: String,
+    },
     ApprovalRequested {
         id: String,
         kind: ApprovalKind,
@@ -453,6 +658,611 @@ fn close_terminal(core: State<'_, Arc<Core>>, terminal_id: u32) -> Result<(), Ap
     Ok(core.close_terminal(terminal_id)?)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    pub content: String,
+    /// Saturates at 4 GiB.
+    pub size: u32,
+    pub truncated: bool,
+    pub binary: bool,
+}
+
+/// Lists one directory of a Thread's checkout (`""` is the root), minus
+/// `.git` and gitignored entries.
+#[tauri::command]
+#[specta::specta]
+async fn list_dir(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+) -> Result<Vec<FileEntry>, AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.list_dir(project_id, thread_id, &path))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map(|entries| entries.iter().map(convert).collect())
+        .map_err(AppError::from)
+}
+
+/// Reads a file of a Thread's checkout, capped at 1 MiB.
+#[tauri::command]
+#[specta::specta]
+async fn read_file(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+) -> Result<FileContent, AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.read_file(project_id, thread_id, &path))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map(|file| FileContent {
+            size: u32::try_from(file.size).unwrap_or(u32::MAX),
+            content: file.content,
+            truncated: file.truncated,
+            binary: file.binary,
+        })
+        .map_err(AppError::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    /// `null` while HEAD is detached.
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub added: u32,
+    pub removed: u32,
+    pub changed_files: u32,
+    /// Why the branch picker is disabled, if it is.
+    pub picker_disabled_reason: Option<String>,
+    /// Pushing this branch (`main`, `master`) needs the user's consent.
+    pub protected: bool,
+    /// A branch with commits and no upstream yet; the first push publishes it.
+    pub unpublished: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub remote: bool,
+    pub current: bool,
+}
+
+/// Runs blocking Git work off the async runtime.
+async fn git_blocking<T: Send + 'static>(
+    core: &State<'_, Arc<Core>>,
+    f: impl FnOnce(&Core) -> oxide_core::Result<T> + Send + 'static,
+) -> Result<T, AppError> {
+    let core = Arc::clone(core);
+    tauri::async_runtime::spawn_blocking(move || f(&core))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+
+/// Branch, ahead/behind and uncommitted-change counts of the main checkout.
+#[tauri::command]
+#[specta::specta]
+async fn git_status(core: State<'_, Arc<Core>>, project_id: u32) -> Result<GitStatus, AppError> {
+    git_blocking(&core, move |core| core.git_status(project_id))
+        .await
+        .map(|status| convert(&status))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn list_branches(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<GitBranch>, AppError> {
+    git_blocking(&core, move |core| core.list_branches(project_id))
+        .await
+        .map(|branches| branches.iter().map(convert).collect())
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffScope {
+    Uncommitted,
+    Branch,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    pub kind: DiffKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: DiffStatus,
+    pub added: u32,
+    pub removed: u32,
+    pub binary: bool,
+    pub hunks: Vec<DiffHunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Diff {
+    /// What the Branch scope compares against, if a base branch exists.
+    pub base: Option<String>,
+    pub files: Vec<DiffFile>,
+}
+
+/// The changes of the main checkout in one scope, from Git.
+#[tauri::command]
+#[specta::specta]
+async fn git_diff(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    scope: DiffScope,
+) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.diff(project_id, convert(&scope)))
+        .await
+        .map(|diff| convert(&diff))
+}
+
+/// What a Thread's latest Turn changed, from its two Checkpoints.
+#[tauri::command]
+#[specta::specta]
+async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.latest_turn_diff(thread_id))
+        .await
+        .map(|diff| convert(&diff))
+}
+
+/// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
+#[tauri::command]
+#[specta::specta]
+async fn checkout_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    name: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.checkout_branch(project_id, &name)).await
+}
+
+/// Creates a branch from HEAD and checks it out.
+#[tauri::command]
+#[specta::specta]
+async fn create_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    name: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.create_branch(project_id, &name)).await
+}
+
+/// Background fetch; returns whether it ran (it is throttled).
+#[tauri::command]
+#[specta::specta]
+async fn fetch_project(core: State<'_, Arc<Core>>, project_id: u32) -> Result<bool, AppError> {
+    git_blocking(&core, move |core| core.fetch_project(project_id)).await
+}
+
+/// `git pull --ff-only`.
+#[tauri::command]
+#[specta::specta]
+async fn pull(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.pull(project_id)).await
+}
+
+/// Commits exactly the given files; other staged state is untouched.
+#[tauri::command]
+#[specta::specta]
+async fn commit(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    paths: Vec<String>,
+    message: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.commit(project_id, &paths, &message)).await
+}
+
+/// Pushes the current branch; never forced.
+#[tauri::command]
+#[specta::specta]
+async fn push(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    allow_protected: bool,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.push(project_id, allow_protected)).await
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GithubAvailability {
+    Ready,
+    Missing,
+    LoggedOut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    pub draft: bool,
+    pub base: String,
+    pub head: String,
+    pub author: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckState {
+    Success,
+    Failure,
+    Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub state: CheckState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetail {
+    pub pull_request: PullRequest,
+    pub body: String,
+    pub checks: Vec<PullRequestCheck>,
+    pub comments: Vec<PullRequestComment>,
+    /// The merge methods the repository allows.
+    pub merge_methods: Vec<MergeMethod>,
+    /// Whether the repository deletes merged branches on its own.
+    pub delete_branch_on_merge: bool,
+    /// The changed files, for the Diff Surface.
+    pub diff: Diff,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestState {
+    pub availability: GithubAvailability,
+    /// How to get `gh` working, when it is not.
+    pub guidance: Option<String>,
+    pub branch: Option<String>,
+    pub default_branch: Option<String>,
+    pub pull_request: Option<PullRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub comments_count: u32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub number: u32,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub author: String,
+    pub url: String,
+    pub created_at: String,
+    pub comments: Vec<IssueComment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuesState {
+    pub availability: GithubAvailability,
+    pub guidance: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDraft {
+    pub title: String,
+    pub body: String,
+    pub base: String,
+    pub head: String,
+}
+
+/// Whether `gh` works and the branch's open pull request. Runs `gh` only when
+/// asked; the Surface decides when to refresh.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_state(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<PullRequestState, AppError> {
+    git_blocking(&core, move |core| core.pull_request_state(project_id))
+        .await
+        .map(|state| convert(&state))
+}
+
+/// Title, body and base prefilled from the branch's commits.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_draft(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<PullRequestDraft, AppError> {
+    git_blocking(&core, move |core| core.pull_request_draft(project_id))
+        .await
+        .map(|draft| convert(&draft))
+}
+
+/// Pushes the branch if needed, then opens a pull request for it.
+#[tauri::command]
+#[specta::specta]
+async fn create_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    title: String,
+    body: String,
+    base: String,
+    draft: bool,
+) -> Result<PullRequest, AppError> {
+    git_blocking(&core, move |core| {
+        core.create_pull_request(
+            project_id,
+            &oxide_core::PullRequestInput {
+                title,
+                body,
+                base,
+                draft,
+            },
+        )
+    })
+    .await
+    .map(|pr| convert(&pr))
+}
+
+/// Availability of GitHub CLI for issues, and guidance if missing/logged out.
+#[tauri::command]
+#[specta::specta]
+async fn issues_state(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<IssuesState, AppError> {
+    git_blocking(&core, move |core| core.issues_state(project_id))
+        .await
+        .map(|state| convert(&state))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn list_issues(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    search: String,
+) -> Result<Vec<IssueSummary>, AppError> {
+    git_blocking(&core, move |core| core.list_issues(project_id, &search))
+        .await
+        .map(|list| list.iter().map(convert).collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn issue_detail(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<IssueDetail, AppError> {
+    git_blocking(&core, move |core| core.issue_detail(project_id, number))
+        .await
+        .map(|detail| convert(&detail))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn create_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    title: String,
+    body: String,
+) -> Result<IssueSummary, AppError> {
+    git_blocking(&core, move |core| {
+        core.create_issue(project_id, &title, &body)
+    })
+    .await
+    .map(|summary| convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn comment_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.comment_issue(project_id, number, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn close_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.close_issue(project_id, number)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn open_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.open_issue(project_id, number)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn open_pull_request(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.open_pull_request(project_id)).await
+}
+
+/// Open pull requests; `mine` keeps the user's own, `search` is a GitHub query.
+#[tauri::command]
+#[specta::specta]
+async fn list_pull_requests(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    mine: bool,
+    search: String,
+) -> Result<Vec<PullRequest>, AppError> {
+    git_blocking(&core, move |core| {
+        core.list_pull_requests(project_id, mine, &search)
+    })
+    .await
+    .map(|prs| convert(&prs))
+}
+
+/// One pull request's description, checks, conversation and changed files.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_detail(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<PullRequestDetail, AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_request_detail(project_id, number)
+    })
+    .await
+    .map(|detail| convert(&detail))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn comment_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.comment_pull_request(project_id, number, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn merge_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    method: MergeMethod,
+    delete_branch: bool,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.merge_pull_request(project_id, number, convert(&method), delete_branch)
+    })
+    .await
+}
+
+/// Checks the pull request's branch out in the main checkout.
+#[tauri::command]
+#[specta::specta]
+async fn checkout_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.checkout_pull_request(project_id, number)
+    })
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 fn create_thread(
@@ -468,6 +1278,83 @@ fn create_thread(
     Ok(convert(&summary))
 }
 
+/// A Board Thread handed off from the Thread Board.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchRequest {
+    pub project_id: u32,
+    pub prompt: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
+    pub base_branch: Option<String>,
+    pub issue_number: Option<u32>,
+    pub issue_title: Option<String>,
+}
+
+/// Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn.
+#[tauri::command]
+#[specta::specta]
+async fn dispatch_thread(
+    core: State<'_, Arc<Core>>,
+    request: DispatchRequest,
+) -> Result<Thread, AppError> {
+    let request: oxide_core::DispatchRequest = convert(&request);
+    git_blocking(&core, move |core| core.dispatch_thread(request))
+        .await
+        .map(|thread| convert(&thread))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_project_setup_command(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Option<String>, AppError> {
+    Ok(core.project_setup_command(project_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_project_setup_command(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    command: Option<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_project_setup_command(project_id, command.as_deref())?)
+}
+
+/// Starts a new Thread that continues one whose Provider session is gone.
+#[tauri::command]
+#[specta::specta]
+fn continue_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<ContinuedThread, AppError> {
+    Ok(convert(&core.continue_thread(thread_id)?))
+}
+
+/// Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
+/// changes that waits for `discard_changes`.
+#[tauri::command]
+#[specta::specta]
+fn set_thread_archived(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    archived: bool,
+    discard_changes: bool,
+) -> Result<ArchiveOutcome, AppError> {
+    if !archived {
+        core.set_thread_archived(thread_id, false)?;
+        return Ok(ArchiveOutcome::Archived);
+    }
+    Ok(match core.archive_thread(thread_id, discard_changes)? {
+        oxide_core::ArchiveOutcome::Archived => ArchiveOutcome::Archived,
+        oxide_core::ArchiveOutcome::NeedsConfirmation => ArchiveOutcome::NeedsConfirmation,
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 fn set_thread_permission_mode(
@@ -477,6 +1364,27 @@ fn set_thread_permission_mode(
 ) -> Result<(), AppError> {
     let mode: oxide_core::PermissionMode = convert(&permission_mode);
     Ok(core.set_thread_permission_mode(thread_id, mode)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_provider(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    provider: String,
+) -> Result<Thread, AppError> {
+    let summary = core.set_thread_provider(thread_id, &provider)?;
+    Ok(convert(&summary))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn rename_thread(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    title: String,
+) -> Result<(), AppError> {
+    Ok(core.rename_thread(thread_id, &title)?)
 }
 
 #[tauri::command]
@@ -520,7 +1428,46 @@ fn get_provider_capabilities(
 
 #[tauri::command]
 #[specta::specta]
+fn get_model_catalog(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+    refresh: bool,
+) -> Result<Vec<ModelInfo>, AppError> {
+    let models = core.get_model_catalog(&provider, refresh)?;
+    Ok(convert(&models))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_favourite_models(core: State<'_, Arc<Core>>) -> Result<Vec<String>, AppError> {
+    Ok(core.get_favourite_models()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_favourite_models(
+    core: State<'_, Arc<Core>>,
+    favourites: Vec<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_favourite_models(&favourites)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_thread_model_and_effort(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_thread_model_and_effort(thread_id, model, effort)?)
+}
+
+#[tauri::command]
+#[specta::specta]
 fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Thread>, AppError> {
+    // Listing a Project's Threads is what opening it does.
+    core.open_project(project_id)?;
     let list = core.list_threads(project_id)?;
     Ok(convert(&list))
 }
@@ -616,6 +1563,25 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+/// The Project's Thread Board: its cards now, then every change on `on_event`.
+#[tauri::command]
+#[specta::specta]
+fn subscribe_board(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    on_event: tauri::ipc::Channel<BoardEvent>,
+) -> Result<Vec<BoardCard>, AppError> {
+    let (cards, rx) = core.subscribe_board(project_id)?;
+    std::thread::spawn(move || {
+        while let Ok(evt) = rx.recv() {
+            if on_event.send(convert(&evt)).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&cards))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn subscribe_thread_debug(
@@ -635,18 +1601,148 @@ fn subscribe_thread_debug(
     Ok(convert(&snapshot))
 }
 
+/// Emitted when ⌘N is pressed (even with the window hidden): start a new Thread.
+pub const NEW_THREAD: &str = "new-thread";
+
+/// Emitted when Oxide is asked to quit while Threads are running; payload is how many.
+pub const QUIT_REQUESTED: &str = "quit-requested";
+
+const MAIN_WINDOW: &str = "main";
+
+#[derive(Debug, Clone, Copy, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    project_id: u32,
+    thread_id: Option<u32>,
+}
+
+/// The Project and Thread to reopen on launch.
+#[tauri::command]
+#[specta::specta]
+fn last_selection(core: State<'_, Arc<Core>>) -> Result<Option<Selection>, AppError> {
+    Ok(core.last_selection()?.map(|s| Selection {
+        project_id: s.project_id,
+        thread_id: s.thread_id,
+    }))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn remember_selection(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    Ok(core.remember_selection(project_id, thread_id)?)
+}
+
+/// The user confirmed quitting: interrupt every Thread and exit.
+#[tauri::command]
+#[specta::specta]
+fn confirm_quit(
+    core: State<'_, Arc<Core>>,
+    app: tauri::AppHandle,
+    dont_ask_again: bool,
+) -> Result<(), AppError> {
+    if dont_ask_again {
+        // A failed save must not trap the user in the dialog.
+        let _ = core.disable_quit_confirmation();
+    }
+    app.exit(0);
+    Ok(())
+}
+
+/// Brings the window back from hidden (Dock icon, ⌘N) and focuses it.
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn window_is_active(window: &WebviewWindow) -> bool {
+    window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
+}
+
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let new_thread = MenuItem::with_id(app, "new-thread", "New Thread", true, Some("CmdOrCtrl+N"))?;
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                "Oxide",
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(app, "File", true, &[&new_thread])?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
+
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         list_projects,
         rescan_projects,
+        add_project,
+        create_project,
+        clone_project,
+        search_github_repositories,
+        clone_github_repository,
+        detected_editors,
+        open_in_editor,
+        reveal_in_finder,
         set_project_hidden,
+        set_project_open,
         get_settings,
         save_settings,
         create_thread,
+        dispatch_thread,
+        get_project_setup_command,
+        set_project_setup_command,
+        continue_thread,
+        set_thread_archived,
         set_thread_permission_mode,
+        set_thread_provider,
+        rename_thread,
         respond_to_approval,
         detect_provider,
         get_provider_capabilities,
+        get_model_catalog,
+        get_favourite_models,
+        set_favourite_models,
+        set_thread_model_and_effort,
         list_threads,
         send_prompt,
         save_attachment,
@@ -656,10 +1752,42 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_turns,
         subscribe_thread,
         subscribe_thread_debug,
+        subscribe_board,
         start_terminal,
         write_terminal,
         resize_terminal,
-        close_terminal
+        close_terminal,
+        list_dir,
+        read_file,
+        git_status,
+        list_branches,
+        git_diff,
+        git_turn_diff,
+        checkout_branch,
+        create_branch,
+        fetch_project,
+        pull,
+        commit,
+        push,
+        pull_request_state,
+        pull_request_draft,
+        create_pull_request,
+        open_pull_request,
+        list_pull_requests,
+        pull_request_detail,
+        comment_pull_request,
+        merge_pull_request,
+        checkout_pull_request,
+        issues_state,
+        list_issues,
+        issue_detail,
+        create_issue,
+        comment_issue,
+        close_issue,
+        open_issue,
+        last_selection,
+        remember_selection,
+        confirm_quit
     ])
 }
 
@@ -682,7 +1810,37 @@ pub fn run() {
     export_bindings();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(builder.invoke_handler())
+        .menu(build_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == "new-thread" {
+                show_main_window(app);
+                let _ = app.emit(NEW_THREAD, ());
+            }
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW {
+                return;
+            }
+            match event {
+                // Closing only hides the window: Threads keep running in the background.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(false);
+                    }
+                }
+                tauri::WindowEvent::Focused(focused) => {
+                    let active = *focused && window.is_visible().unwrap_or(false);
+                    if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
+                        core.set_window_active(active);
+                    }
+                }
+                _ => {}
+            }
+        })
         .setup(|app| {
             let home = app
                 .path()
@@ -694,11 +1852,36 @@ pub fn run() {
             core.subscribe_settings(move |state| {
                 let _ = handle.emit(SETTINGS_CHANGED, SettingsState::from(state));
             });
+            core.set_system(Arc::new(system::MacSystem::new(app.handle().clone())));
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                core.set_window_active(window_is_active(&window));
+            }
             app.manage(Arc::new(core));
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app.notification().request_permission();
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Oxide");
+        .build(tauri::generate_context!())
+        .expect("error while building Oxide")
+        .run(|app, event| match event {
+            // The Dock icon was clicked while the window was hidden.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main_window(app),
+            // ⌘Q: ask first when Threads are running.
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
+                if let Some(running) = app.state::<Arc<Core>>().quit_confirmation() {
+                    api.prevent_exit();
+                    show_main_window(app);
+                    let _ = app.emit(QUIT_REQUESTED, running);
+                }
+            }
+            // Managed state is not dropped on exit: interrupt every Turn, then stop every
+            // Provider and shell by hand.
+            tauri::RunEvent::Exit => app.state::<Arc<Core>>().quit(),
+            _ => {}
+        });
 }
 
 #[cfg(test)]
@@ -723,6 +1906,14 @@ mod tests {
                 archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
+                title: None,
+                session_lost: false,
+                continued_from: None,
+                continued_in: None,
+                branch: None,
+                worktree_path: None,
+                setup_output: None,
+                issue_number: None,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

@@ -1,47 +1,44 @@
 # Git workflow
 
-Two long-lived branches, short-lived topic branches off `dev`.
+Trunk-based: one long-lived branch, `main`, and short-lived topic branches off it.
 
 ```
-main   ●───────────────●───────────────●   stable, release-quality
-        \             / \             /
-dev      ●──●──●──●──●   ●──●──●──●──●     integration of finished features
-            \ /  \ /
-feat/x       ●     fix/y                    one topic per branch
+main   ●──●──●──●──●──●──●──●   always green; releases are tags on main
+        \ /  \ /  \ /
+feat/x   ●    fix/y  docs/z     one topic per branch
 ```
 
 | Branch | Purpose | Who writes | Merge method |
 | --- | --- | --- | --- |
-| `main` | Stable version. Always builds, always green. | Nobody directly. PR from `dev` only. | merge commit |
-| `dev` | Where features accumulate and get tested together. | Nobody directly. PRs from topic branches only. | squash |
+| `main` | The default branch. Always builds, always green. Releases are tagged here. | Nobody directly. PRs from topic branches only. | squash |
 | `<type>/<slug>` | One feature, fix, research note or map/label task. | The author. | n/a |
 
-Both `main` and `dev` are protected by GitHub rulesets: PR required, `rust` and `web` CI checks must pass, no force-push, no deletion.
+`main` is protected by a GitHub ruleset: PR required, `rust` and `web` CI checks must pass, no force-push, no deletion.
 
 ## Rules for every agent and human
 
-1. **Branch from `dev`**, never from `main`: `git fetch origin && git switch -c <type>/<slug> origin/dev`.
+1. **Branch from `main`**: `git fetch origin && git switch -c <type>/<slug> origin/main`.
 2. **Name** topic branches `<type>/<slug>`, where type is `feat`, `fix`, `docs`, `chore`, `refactor`, `test` or `research`. Include the issue number when there is one: `feat/42-terminal-surface`.
-3. **Open PRs against `dev`**: `gh pr create --base dev`. Never `--base main` unless you are promoting (rule 7).
+3. **Open PRs against `main`**: `gh pr create --base main`.
 4. **One topic per branch.** Do not stack unrelated work. If you depend on another unmerged branch, say so in the PR.
-5. **Keep up to date** by merging or rebasing `origin/dev` into your branch, not `main`.
-6. **Never push to `main` or `dev`, force-push shared branches, or merge your own promotion PR.** The rulesets enforce most of this; do not look for workarounds.
-7. **Promotion (`dev` → `main`) is a human decision**, made when `dev` is stable enough. Open a PR `dev` → `main` and merge it with a **merge commit** (not squash, otherwise the branches diverge). After it lands, `main` is an ancestor of `dev` again; nothing else to sync.
-8. **Hotfixes** also go through `dev` (branch `fix/...` off `dev`). If `main` is broken and urgent, a human cherry-picks via a PR to `main`, then merges `main` back into `dev`.
+5. **Keep up to date** by merging or rebasing `origin/main` into your branch.
+6. **Never push to `main`, force-push shared branches, or merge your own PR without a human's go-ahead.** The ruleset enforces most of this; do not look for workarounds.
+7. **Releases are a human decision.** Bump the version in a normal PR into `main`, then tag it (see `CONTRIBUTING.md`).
+8. **Hotfixes** are ordinary PRs into `main`. If an already-published release needs a fix and `main` has moved on, a human creates a `release/x.y` branch from the tag and cherry-picks.
 9. Branches are deleted automatically on merge. Do not reuse a merged branch name.
 
 ## Typical flow
 
 ```sh
 gh issue edit <id> --add-assignee @me
-git fetch origin && git switch -c feat/<id>-<slug> origin/dev
+git fetch origin && git switch -c feat/<id>-<slug> origin/main
 # ... work, commit ...
 git push -u origin HEAD
-gh pr create --base dev
-# after merge into dev:
-gh issue close <id>
+gh pr create --base main
+# after merge into main:
+# the issue closes by itself via `Closes #<id>` in the PR body
 ```
 
-## Why issues are closed by hand
+## Issue auto-close
 
-GitHub only auto-closes issues (`Closes #n`) when a PR merges into the **default branch** (`main`). Since feature PRs target `dev`, close the issue yourself once the PR is merged.
+`main` is the repository's **default branch**, so `Closes #<id>` in a PR body links the PR to the issue and closes it when the PR merges.

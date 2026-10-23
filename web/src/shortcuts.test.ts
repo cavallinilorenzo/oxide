@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { stopsTurn, toggleForKey } from "./shortcuts";
+import {
+  isClearCommand,
+  isModelShortcut,
+  isNewThreadShortcut,
+  stopsTurn,
+  toggleForKey,
+} from "./shortcuts";
 
 describe("stopsTurn", () => {
   const esc = { key: "Escape", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
@@ -23,6 +29,10 @@ describe("toggleForKey", () => {
     expect(key("\\")).toBe("tools");
     expect(key("j")).toBe("terminal");
   });
+  it("maps ⌘B to the Chat / Board toggle", () => {
+    expect(key("b")).toBe("board");
+    expect(key("b", { shiftKey: true })).toBeNull();
+  });
   it("maps ⌘, to the Settings view", () => {
     expect(key(",")).toBe("settings");
     expect(key(",", { shiftKey: true })).toBeNull();
@@ -33,3 +43,95 @@ describe("toggleForKey", () => {
     expect(key("x")).toBeNull();
   });
 });
+
+describe("isNewThreadShortcut", () => {
+  it("recognizes ⌘N and rejects ⌘⇧N (which is Project palette)", () => {
+    expect(
+      isNewThreadShortcut({
+        key: "n",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(true);
+    expect(
+      isNewThreadShortcut({
+        key: "N",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(true);
+    expect(
+      isNewThreadShortcut({
+        key: "n",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: true,
+      })
+    ).toBe(false);
+    expect(
+      isNewThreadShortcut({
+        key: "n",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("isClearCommand", () => {
+  it("matches /clear with optional surrounding whitespace", () => {
+    expect(isClearCommand("/clear")).toBe(true);
+    expect(isClearCommand("  /clear  ")).toBe(true);
+    expect(isClearCommand("/clear something")).toBe(false);
+    expect(isClearCommand("/model")).toBe(false);
+  });
+});
+
+describe("isModelShortcut", () => {
+  it("returns index for ⌘1..9 / Ctrl 1..9", () => {
+    expect(
+      isModelShortcut({
+        key: "1",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(1);
+    expect(
+      isModelShortcut({
+        key: "9",
+        metaKey: false,
+        ctrlKey: true,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBe(9);
+    expect(
+      isModelShortcut({
+        key: "0",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBeNull();
+    expect(
+      isModelShortcut({
+        key: "1",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      })
+    ).toBeNull();
+  });
+});
+

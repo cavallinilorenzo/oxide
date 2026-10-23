@@ -1,0 +1,47 @@
+name: Dependabot auto-merge
+
+# Enables auto-merge (squash) on low-risk Dependabot PRs into main and labels the
+# rest `manual-review`. It never merges directly: the rulesets' required checks
+# remain the only gate. Policy lives in .github/scripts/dependabot-policy.mjs.
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    # Gate on the PR author, not the triggering actor, so a re-run by someone
+    # else on a Dependabot PR still qualifies and a human PR never does.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: policy
+        name: Decide auto-merge or manual review
+        run: node .github/scripts/dependabot-policy.mjs
+        env:
+          DEPENDENCIES_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
+      - name: Enable auto-merge (squash)
+        if: steps.policy.outputs.decision == 'auto'
+        run: gh pr merge --auto --squash --repo "$GITHUB_REPOSITORY" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Label for manual review
+        if: steps.policy.outputs.decision == 'manual'
+        run: gh pr edit --add-label manual-review --repo "$GITHUB_REPOSITORY" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,9 @@
+# Research reference snapshots, pinned for docs/research. Not needed to build
+# Oxide: CI doesn't check them out and Dependabot doesn't track them.
+# Fetch with: git submodule update --init references/<name>
+[submodule "references/t3code"]
+	path = references/t3code
+	url = https://github.com/pingdotgg/t3code.git
+[submodule "references/warp"]
+	path = references/warp
+	url = https://github.com/warpdotdev/warp.git

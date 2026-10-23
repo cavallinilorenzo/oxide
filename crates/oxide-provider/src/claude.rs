@@ -1,7 +1,8 @@
 //! Claude Code native provider adapter.
 
+use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, PermissionMode, Provider,
+    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -49,6 +50,7 @@ pub struct ClaudeCodeProvider {
     event_sender: Arc<Mutex<Option<Sender<ProviderEvent>>>>,
     turn_counter: Arc<AtomicU32>,
     active_turn: Arc<Mutex<Option<u32>>>,
+    registry: Option<Arc<ProcessRegistry>>,
 }
 
 impl Default for ClaudeCodeProvider {
@@ -75,13 +77,22 @@ impl ClaudeCodeProvider {
                 interactive_approvals: true,
                 supports_reasoning: true,
                 image_attachments: false,
+                mid_thread_model_switch: true,
+                slash_command_passthrough: false,
             })),
             child_process: Arc::new(Mutex::new(None)),
             child_stdin: Arc::new(Mutex::new(None)),
             event_sender: Arc::new(Mutex::new(None)),
             turn_counter: Arc::new(AtomicU32::new(0)),
             active_turn: Arc::new(Mutex::new(None)),
+            registry: None,
         }
+    }
+
+    /// Records the process group of every session in `registry`, so a crashed Oxide's
+    /// orphans can be found and killed on the next launch.
+    pub fn set_registry(&mut self, registry: Arc<ProcessRegistry>) {
+        self.registry = Some(registry);
     }
 
     pub fn set_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -89,32 +100,11 @@ impl ClaudeCodeProvider {
     }
 
     pub fn parse_version_string(raw: &str) -> Option<String> {
-        for word in raw.split_whitespace() {
-            let clean = word
-                .trim_start_matches('v')
-                .trim_matches(|c: char| !c.is_numeric() && c != '.');
-            let parts: Vec<&str> = clean.split('.').collect();
-            if parts.len() >= 2 && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
-                return Some(clean.to_string());
-            }
-        }
-        None
+        crate::parse_version_string(raw)
     }
 
     pub fn is_version_within_pinned_range(version: &str) -> bool {
-        let parts: Vec<u64> = version
-            .split('.')
-            .filter_map(|p| p.parse::<u64>().ok())
-            .collect();
-        if parts.len() < 2 {
-            return false;
-        }
-        let major = parts[0];
-        let minor = parts[1];
-        let patch = if parts.len() > 2 { parts[2] } else { 0 };
-
-        let ver = (major, minor, patch);
-        ver >= PINNED_VERSION_MIN && ver < PINNED_VERSION_MAX
+        crate::is_version_within_range(version, PINNED_VERSION_MIN, PINNED_VERSION_MAX)
     }
 
     fn spawn_process(
@@ -163,6 +153,7 @@ impl ClaudeCodeProvider {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
+        process::spawn_in_own_group(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| {
             ProviderError::StartFailed(format!(
                 "Failed to spawn Claude Code binary `{}`: {e}",
@@ -173,6 +164,9 @@ impl ClaudeCodeProvider {
         let stdin = child.stdin.take().expect("stdin must be piped");
         let stdout = child.stdout.take().expect("stdout must be piped");
 
+        if let Some(registry) = &self.registry {
+            registry.register(child.id() as i32, &self.command);
+        }
         *self.child_stdin.lock().unwrap() = Some(stdin);
         *self.child_process.lock().unwrap() = Some(child);
 
@@ -520,6 +514,7 @@ impl Provider for ClaudeCodeProvider {
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
         // Send SIGINT to child process
+        #[cfg(unix)]
         if let Some(ref child) = *self.child_process.lock().unwrap() {
             let pid = child.id() as i32;
             unsafe {
@@ -563,6 +558,60 @@ impl Provider for ClaudeCodeProvider {
         self.write_to_stdin(&payload)
     }
 
+    fn set_effort(&mut self, effort: &str) -> Result<(), ProviderError> {
+        let payload = json!({
+            "type": "control",
+            "command": "set_effort",
+            "effort": effort
+        });
+        self.write_to_stdin(&payload)
+    }
+
+    fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        Ok(vec![
+            ModelInfo {
+                id: "opus".into(),
+                name: "Claude 3.7 Opus".into(),
+                description: Some("Most capable model for coding and complex reasoning".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
+                default_effort: Some("high".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "sonnet".into(),
+                name: "Claude 3.7 Sonnet".into(),
+                description: Some("Balanced speed and capability for daily coding".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
+                default_effort: Some("medium".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "haiku".into(),
+                name: "Claude 3.5 Haiku".into(),
+                description: Some("Fastest model for lightweight tasks".into()),
+                supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
+                default_effort: Some("low".into()),
+                is_legacy: false,
+            },
+            ModelInfo {
+                id: "claude-3-opus".into(),
+                name: "Claude 3 Opus".into(),
+                description: None,
+                supported_efforts: vec![],
+                default_effort: None,
+                is_legacy: true,
+            },
+            ModelInfo {
+                id: "claude-3-sonnet".into(),
+                name: "Claude 3 Sonnet".into(),
+                description: None,
+                supported_efforts: vec![],
+                default_effort: None,
+                is_legacy: true,
+            },
+        ])
+    }
+
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {
         let mode_str = match mode {
             PermissionMode::Ask => "ask",
@@ -581,10 +630,16 @@ impl Provider for ClaudeCodeProvider {
         // Drop child stdin to signal EOF
         self.child_stdin.lock().unwrap().take();
 
-        // Kill or wait for child process
+        // Then SIGTERM the whole group, SIGKILL after the grace period.
         if let Some(mut child) = self.child_process.lock().unwrap().take() {
-            let _ = child.kill();
+            let pgid = child.id() as i32;
+            process::terminate_group(pgid, SHUTDOWN_GRACE, || {
+                let _ = child.try_wait();
+            });
             let _ = child.wait();
+            if let Some(registry) = &self.registry {
+                registry.unregister(pgid);
+            }
         }
 
         // Drop event sender

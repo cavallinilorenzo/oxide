@@ -53,7 +53,23 @@ pub struct ThreadSummary {
     pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub title: Option<String>,
+    /// Resuming the Provider's session failed because it no longer exists.
+    pub session_lost: bool,
+    /// The Thread this one continues, and the Thread that continues this one.
+    pub continued_from: Option<u32>,
+    pub continued_in: Option<u32>,
+    /// A Board Thread's `oxide/` branch and the worktree it lives in; both `None` for a chat Thread.
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    /// What the Project's Setup command printed in the worktree, when one ran.
+    pub setup_output: Option<String>,
+    /// The GitHub issue a Board Thread was started from.
+    pub issue_number: Option<u32>,
 }
+
+/// The `threads` columns [`parse_thread_summary`] reads, in order.
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -178,6 +194,9 @@ pub enum ThreadEvent {
     ThreadStatusChanged {
         status: ThreadStatus,
     },
+    ThreadRenamed {
+        title: String,
+    },
     ApprovalRequested {
         id: String,
         kind: ApprovalKind,
@@ -216,6 +235,20 @@ pub struct DebugSequencedThreadEvent {
     pub raw_payload: Option<String>,
 }
 
+pub fn truncate_title(prompt: &str) -> String {
+    let first_line = prompt
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    const MAX_LEN: usize = 60;
+    if first_line.chars().count() > MAX_LEN {
+        first_line.chars().take(MAX_LEN).collect()
+    } else {
+        first_line.to_string()
+    }
+}
+
 pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary> {
     let mode_str: String = r.get(5)?;
     let status_str: String = r.get(6)?;
@@ -225,11 +258,18 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         provider: r.get(2)?,
         model: r.get(3)?,
         effort: r.get(4)?,
-        permission_mode: serde_json::from_value(serde_json::Value::String(mode_str))
-            .unwrap_or(PermissionMode::AutoEdit),
+        permission_mode: mode_str.parse().unwrap_or(PermissionMode::AutoEdit),
         status: status_str.parse().unwrap_or(ThreadStatus::Completed),
         archived: r.get::<_, i64>(7)? != 0,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
+        session_lost: r.get::<_, i64>(10)? != 0,
+        continued_from: r.get(11)?,
+        continued_in: r.get(12)?,
+        title: r.get(13)?,
+        branch: r.get(14)?,
+        worktree_path: r.get(15)?,
+        setup_output: r.get(16)?,
+        issue_number: r.get(17)?,
     })
 }

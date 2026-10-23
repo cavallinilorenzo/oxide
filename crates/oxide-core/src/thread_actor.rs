@@ -1,12 +1,16 @@
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{
-    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderEvent,
-    StartContext, TurnStatus,
+    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderError,
+    ProviderEvent, StartContext, TurnStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
+use std::time::Instant;
 
+use crate::activity::Activity;
+use crate::checkpoint::{self, Phase};
+use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
 use crate::storage_actor::StorageHandle;
 use crate::thread::{
@@ -32,6 +36,11 @@ pub enum ThreadActorMsg {
         mode: PermissionMode,
         reply: mpsc::Sender<Result<()>>,
     },
+    SetModelAndEffort {
+        model: Option<String>,
+        effort: Option<String>,
+        reply: mpsc::Sender<Result<()>>,
+    },
     Subscribe {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<SequencedThreadEvent>)>,
     },
@@ -39,7 +48,12 @@ pub enum ThreadActorMsg {
         reply: mpsc::Sender<(ThreadSnapshot, Receiver<DebugSequencedThreadEvent>)>,
     },
     Tick,
-    Shutdown,
+    Rename {
+        title: String,
+    },
+    Shutdown {
+        reply: mpsc::Sender<()>,
+    },
 }
 
 #[derive(Clone)]
@@ -54,6 +68,8 @@ impl ThreadActorHandle {
         provider: Box<dyn Provider>,
         storage: StorageHandle,
         real_time_ticker: bool,
+        clock: Arc<dyn Clock>,
+        activity: Arc<Activity>,
     ) -> Result<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -72,7 +88,15 @@ impl ThreadActorHandle {
         std::thread::Builder::new()
             .name(format!("thread-actor-{thread_id}"))
             .spawn(move || {
-                run_thread_actor(thread_id, working_dir, provider, storage, rx);
+                run_thread_actor(
+                    thread_id,
+                    working_dir,
+                    provider,
+                    storage,
+                    clock,
+                    activity,
+                    rx,
+                );
             })
             .map_err(|e| Error::Io {
                 path: std::path::PathBuf::from(format!("thread-{thread_id}")),
@@ -123,6 +147,22 @@ impl ThreadActorHandle {
         reply_rx.recv().unwrap_or(Ok(()))
     }
 
+    pub fn set_model_and_effort(
+        &self,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(ThreadActorMsg::SetModelAndEffort {
+            model,
+            effort,
+            reply: reply_tx,
+        });
+        reply_rx
+            .recv()
+            .map_err(|_| Error::Provider("channel disconnected".into()))?
+    }
+
     pub fn subscribe(&self) -> Result<(ThreadSnapshot, Receiver<SequencedThreadEvent>)> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self
@@ -155,8 +195,21 @@ impl ThreadActorHandle {
         let _ = self.sender.send(ThreadActorMsg::Tick);
     }
 
+    pub fn rename(&self, title: String) {
+        let _ = self.sender.send(ThreadActorMsg::Rename { title });
+    }
+
+    /// Shuts the Provider down (escalating to SIGKILL if it won't go) and stops the actor.
+    /// Returns once the Provider's processes are gone.
     pub fn shutdown(&self) {
-        let _ = self.sender.send(ThreadActorMsg::Shutdown);
+        let (reply_tx, reply_rx) = mpsc::channel();
+        if self
+            .sender
+            .send(ThreadActorMsg::Shutdown { reply: reply_tx })
+            .is_ok()
+        {
+            let _ = reply_rx.recv();
+        }
     }
 }
 
@@ -170,6 +223,8 @@ struct CurrentTurn {
 
 struct ActorState {
     thread_id: u32,
+    /// The working tree this Thread's Checkpoints snapshot.
+    checkout: PathBuf,
     next_turn_index: u32,
     current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
@@ -182,6 +237,14 @@ struct ActorState {
     seq: u32,
     subscribers: Vec<Sender<SequencedThreadEvent>>,
     debug_subscribers: Vec<Sender<DebugSequencedThreadEvent>>,
+    clock: Arc<dyn Clock>,
+    activity: Arc<Activity>,
+    /// A Provider process is running for this Thread.
+    provider_live: bool,
+    /// The Provider ended on its own; its adapter still has to be shut down before a restart.
+    provider_exited: bool,
+    /// Since when no Turn has been in flight. `None` while a prompt is on its way.
+    idle_since: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -191,9 +254,23 @@ struct PendingDelta {
 }
 
 impl ActorState {
-    fn new(thread_id: u32, next_turn_index: u32, capabilities: ProviderCapabilities) -> Self {
+    fn new(
+        thread_id: u32,
+        checkout: PathBuf,
+        next_turn_index: u32,
+        capabilities: ProviderCapabilities,
+        clock: Arc<dyn Clock>,
+        activity: Arc<Activity>,
+    ) -> Self {
+        let idle_since = Some(clock.now());
         Self {
+            clock,
+            activity,
+            provider_live: false,
+            provider_exited: false,
+            idle_since,
             thread_id,
+            checkout,
             next_turn_index,
             current_turn: None,
             pending_deltas: HashMap::new(),
@@ -246,6 +323,7 @@ impl ActorState {
     }
 
     fn broadcast_status(&mut self, status: ThreadStatus) {
+        self.activity.set_status(self.thread_id, status);
         self.broadcast(ThreadEvent::ThreadStatusChanged { status });
     }
 
@@ -292,9 +370,11 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             let turn_index = state.next_turn_index;
             state.next_turn_index += 1;
             state.dropped_items.clear();
+            checkpoint::take(&state.checkout, state.thread_id, turn_index, Phase::Start);
             let attachments = std::mem::take(&mut state.pending_attachments);
             let (mut model, mut effort) = (None, None);
             let mut id = None;
+            let mut new_title = None;
             if let Ok(started) = storage.write_turn_started(
                 state.thread_id,
                 turn_index,
@@ -304,6 +384,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 id = Some(started.id);
                 model = started.model;
                 effort = started.effort;
+                new_title = started.thread_title;
             }
             state.current_turn = Some(CurrentTurn {
                 index: turn_index,
@@ -321,6 +402,9 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 },
                 raw,
             );
+            if let Some(title) = new_title {
+                state.broadcast(ThreadEvent::ThreadRenamed { title });
+            }
             state.broadcast_status(ThreadStatus::Working);
         }
         ProviderEvent::ItemStarted {
@@ -473,6 +557,8 @@ fn finish_turn(
     let Some(turn) = state.current_turn.take() else {
         return;
     };
+    state.idle_since = Some(state.clock.now());
+    checkpoint::take(&state.checkout, state.thread_id, turn.index, Phase::End);
     let error = (status == TurnStatus::Error).then(|| {
         let stderr_tail = exit_error.as_ref().and_then(|e| e.stderr_tail.clone());
         let message = turn
@@ -513,6 +599,8 @@ fn provider_exited(
     stderr_tail: Option<String>,
     raw: Option<String>,
 ) {
+    state.provider_live = false;
+    state.provider_exited = true;
     let message = match code {
         Some(code) => format!("The Provider exited unexpectedly (exit code {code})"),
         None => "The Provider exited unexpectedly".to_string(),
@@ -534,6 +622,8 @@ fn run_thread_actor(
     working_dir: std::path::PathBuf,
     mut provider: Box<dyn Provider>,
     storage: StorageHandle,
+    clock: Arc<dyn Clock>,
+    activity: Arc<Activity>,
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
@@ -541,32 +631,17 @@ fn run_thread_actor(
         .map(|s| s.turn_count)
         .unwrap_or(0);
 
-    // Start provider
+    // The Provider starts lazily, on the first prompt (resuming the stored session if there is one).
     let caps = provider.capabilities();
-    let mut state = ActorState::new(thread_id, next_turn_index, caps.clone());
-    let initial_mode = storage
-        .get_snapshot(thread_id, 0)
-        .map(|s| s.thread.permission_mode)
-        .unwrap_or_else(|_| {
-            caps.supported_permission_modes
-                .first()
-                .copied()
-                .unwrap_or(oxide_provider::PermissionMode::AutoEdit)
-        });
-    let start_ctx = StartContext {
-        working_dir,
-        model: None,
-        effort: None,
-        permission_mode: initial_mode,
-    };
-    let mut prx = match provider.start(&start_ctx) {
-        Ok(receiver) => receiver,
-        Err(e) => {
-            eprintln!("failed to start provider for thread {thread_id}: {e}");
-            let (_dummy_tx, dummy_rx) = crossbeam_channel::unbounded();
-            dummy_rx
-        }
-    };
+    let mut state = ActorState::new(
+        thread_id,
+        working_dir.clone(),
+        next_turn_index,
+        caps.clone(),
+        clock,
+        activity,
+    );
+    let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 
     loop {
         crossbeam_channel::select! {
@@ -577,6 +652,73 @@ fn run_thread_actor(
                 };
                 match msg {
                     ThreadActorMsg::SendPrompt { prompt, attachments, reply } => {
+                        let trimmed = prompt.trim();
+                        if trimmed == "/model" {
+                            // Selector action - intercepted, never reaches provider
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+                        if let Some(arg) = trimmed.strip_prefix("/model ") {
+                            let model_name = arg.trim();
+                            if !model_name.is_empty() {
+                                let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                                let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+                                let current_effort = current_snapshot.as_ref().ok().and_then(|s| s.thread.effort.clone());
+
+                                if state.next_turn_index > 0
+                                    && !state.capabilities.mid_thread_model_switch
+                                    && Some(model_name.to_string()) != current_model
+                                {
+                                    let _ = reply.send(Err(Error::Provider(
+                                        "Provider does not support mid-thread model switch".into(),
+                                    )));
+                                    continue;
+                                }
+
+                                if state.provider_live && state.current_turn.is_none() {
+                                    let _ = provider.set_model(model_name);
+                                }
+                                let _ = storage.update_thread_model_and_effort(
+                                    state.thread_id,
+                                    Some(model_name.to_string()),
+                                    current_effort,
+                                );
+                            }
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+
+                        if trimmed == "/effort" {
+                            // Selector action - intercepted, never reaches provider
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+                        if let Some(arg) = trimmed.strip_prefix("/effort ") {
+                            let effort_val = arg.trim();
+                            if !effort_val.is_empty() {
+                                let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                                let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+
+                                if state.provider_live && state.current_turn.is_none() {
+                                    let _ = provider.set_effort(effort_val);
+                                }
+                                let _ = storage.update_thread_model_and_effort(
+                                    state.thread_id,
+                                    current_model,
+                                    Some(effort_val.to_string()),
+                                );
+                            }
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+
+                        if trimmed.starts_with('/') && !state.capabilities.slash_command_passthrough {
+                            let _ = reply.send(Err(Error::Provider(
+                                format!("Slash command '{}' is not supported by this provider", trimmed),
+                            )));
+                            continue;
+                        }
+
                         if !attachments.is_empty() && !state.capabilities.image_attachments {
                             let _ = reply.send(Err(Error::Io {
                                 path: PathBuf::from("attachments"),
@@ -586,6 +728,13 @@ fn run_thread_actor(
                             }));
                             continue;
                         }
+                        if let Err(e) = ensure_provider_started(
+                            &mut *provider, &mut state, &storage, &working_dir, &mut prx,
+                        ) {
+                            let _ = reply.send(Err(e));
+                            continue;
+                        }
+                        state.idle_since = None;
                         state.pending_attachments = attachments
                             .iter()
                             .map(|p| p.to_string_lossy().to_string())
@@ -599,6 +748,9 @@ fn run_thread_actor(
                             path: PathBuf::from("provider"),
                             source: std::io::Error::other(e.to_string()),
                         });
+                        if p_res.is_err() && state.current_turn.is_none() {
+                            state.idle_since = Some(state.clock.now());
+                        }
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::Interrupt { reply } => {
@@ -637,11 +789,56 @@ fn run_thread_actor(
                         let _ = reply.send(p_res);
                     }
                     ThreadActorMsg::SetPermissionMode { mode, reply } => {
-                        let p_res = provider.set_permission_mode(mode).map_err(|e| Error::Io {
-                            path: std::path::PathBuf::from("provider"),
-                            source: std::io::Error::other(e.to_string()),
-                        });
+                        // Without a live Provider the stored mode applies when the next one starts.
+                        let p_res = if state.provider_live {
+                            provider.set_permission_mode(mode).map_err(|e| Error::Io {
+                                path: std::path::PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
                         let s_res = storage.update_thread_permission_mode(state.thread_id, mode);
+                        let _ = reply.send(p_res.and(s_res));
+                    }
+                    ThreadActorMsg::SetModelAndEffort { model, effort, reply } => {
+                        let current_snapshot = storage.get_snapshot(state.thread_id, 0);
+                        let current_model = current_snapshot.as_ref().ok().and_then(|s| s.thread.model.clone());
+                        let current_effort = current_snapshot.as_ref().ok().and_then(|s| s.thread.effort.clone());
+
+                        if state.next_turn_index > 0
+                            && !state.capabilities.mid_thread_model_switch
+                            && model.is_some()
+                            && model != current_model
+                        {
+                            let _ = reply.send(Err(Error::Provider(
+                                "Provider does not support mid-thread model switch".into(),
+                            )));
+                            continue;
+                        }
+
+                        let p_res = if state.provider_live && state.current_turn.is_none() {
+                            let m_res = if let Some(m) = model.as_deref() {
+                                provider.set_model(m)
+                            } else {
+                                Ok(())
+                            };
+                            let e_res = if let Some(e) = effort.as_deref() {
+                                provider.set_effort(e)
+                            } else {
+                                Ok(())
+                            };
+                            m_res.and(e_res).map_err(|e| Error::Io {
+                                path: PathBuf::from("provider"),
+                                source: std::io::Error::other(e.to_string()),
+                            })
+                        } else {
+                            Ok(())
+                        };
+
+                        let new_model = model.or(current_model);
+                        let new_effort = effort.or(current_effort);
+                        let s_res = storage.update_thread_model_and_effort(state.thread_id, new_model, new_effort);
                         let _ = reply.send(p_res.and(s_res));
                     }
                     ThreadActorMsg::Subscribe { reply } => {
@@ -691,9 +888,14 @@ fn run_thread_actor(
                             }
                         }
                         state.flush_pending_deltas();
+                        reap_if_idle(&mut *provider, &mut state, &mut prx);
                     }
-                    ThreadActorMsg::Shutdown => {
-                        let _ = provider.shutdown();
+                    ThreadActorMsg::Rename { title } => {
+                        state.broadcast(ThreadEvent::ThreadRenamed { title });
+                    }
+                    ThreadActorMsg::Shutdown { reply } => {
+                        stop_provider(&mut *provider, &mut state, &mut prx);
+                        let _ = reply.send(());
                         break;
                     }
                 }
@@ -703,6 +905,100 @@ fn run_thread_actor(
                 Err(_) => provider_channel_closed(&mut prx, &mut state, &storage),
             }
         }
+    }
+    stop_provider(&mut *provider, &mut state, &mut prx);
+    state.activity.forget(thread_id);
+}
+
+/// Starts the Provider if none is running: resumes the Thread's stored session when it has one,
+/// otherwise starts a fresh one.
+fn ensure_provider_started(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    storage: &StorageHandle,
+    working_dir: &std::path::Path,
+    prx: &mut Receiver<ProviderEvent>,
+) -> Result<()> {
+    if state.provider_live {
+        return Ok(());
+    }
+    if state.provider_exited {
+        // Reap what is left of the process that went away on its own.
+        let _ = provider.shutdown();
+        state.provider_exited = false;
+    }
+    let (permission_mode, model, effort) = storage
+        .get_snapshot(state.thread_id, 0)
+        .map(|s| (s.thread.permission_mode, s.thread.model, s.thread.effort))
+        .unwrap_or_else(|_| {
+            let perm = state
+                .capabilities
+                .supported_permission_modes
+                .first()
+                .copied()
+                .unwrap_or(PermissionMode::AutoEdit);
+            (perm, None, None)
+        });
+    let context = StartContext {
+        working_dir: working_dir.to_path_buf(),
+        model,
+        effort,
+        permission_mode,
+    };
+    let started = match storage.get_provider_session_id(state.thread_id) {
+        Some(session_id) => provider.resume(&session_id, &context),
+        None => provider.start(&context),
+    };
+    match started {
+        Ok(receiver) => {
+            *prx = receiver;
+            state.provider_live = true;
+            Ok(())
+        }
+        Err(ProviderError::SessionNotFound) => {
+            let message = ProviderError::SessionNotFound.to_string();
+            storage.mark_session_lost(state.thread_id);
+            state.broadcast(ThreadEvent::Error {
+                message: message.clone(),
+            });
+            state.broadcast_status(ThreadStatus::Error);
+            Err(Error::Provider(message))
+        }
+        Err(e) => Err(Error::Io {
+            path: PathBuf::from("provider"),
+            source: std::io::Error::other(e.to_string()),
+        }),
+    }
+}
+
+/// Shuts the Provider down and stops listening to it, if one is running.
+fn stop_provider(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    prx: &mut Receiver<ProviderEvent>,
+) {
+    if state.provider_live || state.provider_exited {
+        let _ = provider.shutdown();
+    }
+    state.provider_live = false;
+    state.provider_exited = false;
+    *prx = crossbeam_channel::never();
+}
+
+/// Shuts the Provider down once the Thread has had no Turn in flight for the idle timeout.
+/// The next prompt resumes it lazily from the stored session; the Thread's status is untouched.
+fn reap_if_idle(
+    provider: &mut dyn Provider,
+    state: &mut ActorState,
+    prx: &mut Receiver<ProviderEvent>,
+) {
+    let idle = state.provider_live
+        && state.current_turn.is_none()
+        && state.idle_since.is_some_and(|since| {
+            state.clock.now().saturating_duration_since(since) >= PROVIDER_IDLE_TIMEOUT
+        });
+    if idle {
+        stop_provider(provider, state, prx);
     }
 }
 

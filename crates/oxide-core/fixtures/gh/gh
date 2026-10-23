@@ -1,0 +1,5 @@
+#!/bin/sh
+# The fake sits alone on PATH in tests, so give the script its interpreter back.
+PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin
+export PATH
+exec python3 "${0%/*}/gh.py" "$@"

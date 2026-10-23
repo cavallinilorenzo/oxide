@@ -1,0 +1,1 @@
+{"event":"init","conversation_id":"411a104c-944f-4695-82b0-44454b6edad2","init":{"model":"gemini-3.8-flash-low","cwd":"/work","tools":["list_dir","run_command","view_file","write_to_file"],"permission_mode":"request-review"}}

@@ -2,6 +2,8 @@
 
 Research reports gathered for the Oxide MVP map. Each report records its scope, primary sources, recommendations, and evidence limits. Findings are inputs to design decisions; recommendations that have not been accepted in the map remain proposals.
 
+Some reports link into `references/`, which holds pinned upstream snapshots as Git submodules: [`pingdotgg/t3code`](https://github.com/pingdotgg/t3code) and [`warpdotdev/warp`](https://github.com/warpdotdev/warp). They aren't needed to build Oxide. To browse them locally, run `git submodule update --init references/t3code` (or `references/warp`).
+
 | Topic | Report | Map ticket |
 |---|---|---|
 | Claude Code Provider | [claude-code-provider.md](claude-code-provider.md) | [#2](https://github.com/cavallinilorenzo/oxide/issues/2) |

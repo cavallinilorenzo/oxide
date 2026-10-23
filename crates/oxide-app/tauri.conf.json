@@ -16,7 +16,9 @@
         "width": 1280,
         "height": 800,
         "minWidth": 900,
-        "minHeight": 560
+        "minHeight": 560,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -25,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "app",
+    "targets": ["app", "dmg"],
     "icon": ["icons/icon.png"]
   }
 }

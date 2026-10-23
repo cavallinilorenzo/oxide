@@ -194,11 +194,7 @@ pub fn parse_version_string(raw: &str) -> Option<String> {
 }
 
 /// Checks whether a semver-like string falls within [min, max).
-pub fn is_version_within_range(
-    version: &str,
-    min: (u64, u64, u64),
-    max: (u64, u64, u64),
-) -> bool {
+pub fn is_version_within_range(version: &str, min: (u64, u64, u64), max: (u64, u64, u64)) -> bool {
     let parts: Vec<u64> = version
         .split('.')
         .filter_map(|p| p.parse::<u64>().ok())

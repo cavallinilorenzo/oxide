@@ -766,9 +766,8 @@ fn turn_page(
             let options_str: String = r.get(4)?;
             let options: Vec<String> = serde_json::from_str(&options_str).unwrap_or_default();
             let decision_str: Option<String> = r.get(5)?;
-            let decision: Option<ApprovalDecision> = decision_str
-                .as_deref()
-                .and_then(|d| d.parse().ok());
+            let decision: Option<ApprovalDecision> =
+                decision_str.as_deref().and_then(|d| d.parse().ok());
             Ok(ApprovalSnapshot {
                 id: r.get(0)?,
                 turn_id: t_id,

@@ -47,7 +47,7 @@ use storage_actor::StorageHandle;
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
-pub use worktree::DispatchRequest;
+pub use worktree::{ArchiveOutcome, DispatchRequest};
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -930,6 +930,7 @@ impl Core {
                 source: std::io::Error::other("attachment is not stored under the Oxide home"),
             });
         }
+        self.ensure_worktree(thread_id)?;
         let actor = self.get_or_create_thread_actor(thread_id)?;
         self.set_thread_archived(thread_id, false)?;
         actor.send_prompt(prompt.to_string(), attachments.to_vec())
@@ -1203,7 +1204,12 @@ impl Core {
 
     /// Title, body and base prefilled for a new pull request of the current branch.
     pub fn pull_request_draft(&self, project_id: u32) -> Result<PullRequestDraft> {
-        github::pull_request_draft(&self.gh, &self.main_checkout(project_id)?)
+        let cwd = self.main_checkout(project_id)?;
+        let mut draft = github::pull_request_draft(&self.gh, &cwd)?;
+        if let Some(n) = self.issue_of_branch(project_id, &draft.head)? {
+            draft.body = worktree::closing_issue(&draft.body, n);
+        }
+        Ok(draft)
     }
 
     /// Pushes the current branch if needed, then opens a pull request for it.
@@ -1213,8 +1219,14 @@ impl Core {
         input: &PullRequestInput,
     ) -> Result<PullRequest> {
         let cwd = self.main_checkout(project_id)?;
+        let mut input = input.clone();
+        if let Some(branch) = git::status(&cwd)?.branch
+            && let Some(n) = self.issue_of_branch(project_id, &branch)?
+        {
+            input.body = worktree::closing_issue(&input.body, n);
+        }
         self.git
-            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, input))
+            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))
     }
 
     /// Availability of GitHub CLI for issues, and guidance if missing/logged out.

@@ -64,10 +64,12 @@ pub struct ThreadSummary {
     pub worktree_path: Option<String>,
     /// What the Project's Setup command printed in the worktree, when one ran.
     pub setup_output: Option<String>,
+    /// The GitHub issue a Board Thread was started from.
+    pub issue_number: Option<u32>,
 }
 
 /// The `threads` columns [`parse_thread_summary`] reads, in order.
-pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output";
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -269,5 +271,6 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         branch: r.get(14)?,
         worktree_path: r.get(15)?,
         setup_output: r.get(16)?,
+        issue_number: r.get(17)?,
     })
 }

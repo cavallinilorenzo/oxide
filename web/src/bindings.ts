@@ -36,7 +36,11 @@ export const commands = {
 	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
-	setThreadArchived: (threadId: number, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived })),
+	/**
+	 *  Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
+	 *  changes that waits for `discard_changes`.
+	 */
+	setThreadArchived: (threadId: number, archived: boolean, discardChanges: boolean) => typedError<ArchiveOutcome, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived, discardChanges })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
 	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
@@ -166,6 +170,8 @@ export type ApprovalSnapshot_Serialize = {
 	createdAt: string,
 	decidedAt: string | null,
 };
+
+export type ArchiveOutcome = "archived" | "needs-confirmation";
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
@@ -315,6 +321,8 @@ export type DispatchRequest_Deserialize = {
 	effort?: string | null,
 	permissionMode?: PermissionMode | null,
 	baseBranch?: string | null,
+	issueNumber?: number | null,
+	issueTitle?: string | null,
 };
 
 /**  A Board Thread handed off from the Thread Board. */
@@ -326,6 +334,8 @@ export type DispatchRequest_Serialize = {
 	effort: string | null,
 	permissionMode: PermissionMode | null,
 	baseBranch: string | null,
+	issueNumber: number | null,
+	issueTitle: string | null,
 };
 
 export type Editor = {
@@ -824,6 +834,7 @@ export type Thread_Deserialize = {
 	branch?: string | null,
 	worktreePath?: string | null,
 	setupOutput?: string | null,
+	issueNumber?: number | null,
 };
 
 export type Thread_Serialize = {
@@ -844,6 +855,7 @@ export type Thread_Serialize = {
 	branch: string | null,
 	worktreePath: string | null,
 	setupOutput: string | null,
+	issueNumber: number | null,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

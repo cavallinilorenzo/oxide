@@ -42,7 +42,7 @@ fn fixture() -> Fixture {
     for name in ["gh", "gh.py"] {
         std::fs::copy(Path::new(FAKE_GH_DIR).join(name), gh_dir.join(name)).unwrap();
     }
-    let core = Core::open(&tmp.path().join("home")).unwrap();
+    let core = Core::open(tmp.path().join("home")).unwrap();
     core.set_real_time_ticker(false);
     core.set_gh_search_path(Some(vec![gh_dir.clone()]));
     let mut settings = core.settings().settings;
@@ -72,6 +72,8 @@ impl Fixture {
                 effort: None,
                 permission_mode: None,
                 base_branch: Some("main".into()),
+                issue_number: None,
+                issue_title: None,
             })
             .unwrap()
     }

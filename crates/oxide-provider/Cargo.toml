@@ -2,6 +2,8 @@
 name = "oxide-provider"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
 crossbeam-channel = "0.5.17"

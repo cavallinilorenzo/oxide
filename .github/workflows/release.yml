@@ -30,10 +30,19 @@ jobs:
     runs-on: macos-latest # Apple Silicon
     outputs:
       signed: ${{ steps.build.outputs.signed }}
+      notarized: ${{ steps.build.outputs.notarized }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Tag is on main
+        if: github.ref_type == 'tag'
+        run: |
+          git fetch --no-tags --quiet origin main
+          if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "::error::Tag $GITHUB_REF_NAME points to a commit that is not on main. Release tags are cut from main only."
+            exit 1
+          fi
       - name: Tag matches the declared version
         if: github.ref_type == 'tag'
         run: node .github/scripts/release-version.mjs "$GITHUB_REF_NAME"
@@ -66,12 +75,17 @@ jobs:
 
           if [ -n "${APPLE_CERTIFICATE:-}" ]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
-            if [ -n "${APPLE_API_PRIVATE_KEY:-}" ]; then
+            if [ -n "${APPLE_API_PRIVATE_KEY:-}" ] && [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ]; then
+              echo "notarized=true" >> "$GITHUB_OUTPUT"
               export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
               printf '%s' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH"
+            else
+              echo "notarized=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::No App Store Connect API credentials: the app is signed but not notarized."
             fi
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "notarized=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No Apple signing credentials: building an unsigned (ad-hoc signed) app."
             # Apple Silicon refuses to launch a downloaded app with no signature at all.
             export APPLE_SIGNING_IDENTITY="-"
@@ -100,7 +114,8 @@ jobs:
 
   release:
     needs: bundle
-    if: github.ref_type == 'tag'
+    # A tag push only: a manual run started from a tag is still a dry run.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the draft release
@@ -122,11 +137,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           SIGNED: ${{ needs.bundle.outputs.signed }}
+          NOTARIZED: ${{ needs.bundle.outputs.notarized }}
         run: |
+          readme="https://github.com/$GITHUB_REPOSITORY#opening-an-unsigned-build"
           notes=""
           if [ "$SIGNED" != "true" ]; then
-            notes=$'> [!WARNING]\n> **Unsigned build.** This release is not signed with an Apple Developer ID or notarized, so macOS Gatekeeper will block it on first launch. See [Opening an unsigned build](https://github.com/'"$GITHUB_REPOSITORY"$'#opening-an-unsigned-build) in the README.\n'
+            notes="> [!WARNING]
+          > **Unsigned build.** This release is not signed with an Apple Developer ID or notarized, so macOS Gatekeeper will block it on first launch. See [Opening an unsigned build]($readme) in the README.
+          "
+          elif [ "$NOTARIZED" != "true" ]; then
+            notes="> [!WARNING]
+          > **Not notarized.** This release is signed with an Apple Developer ID but not notarized, so macOS Gatekeeper will warn on first launch. See [Opening an unsigned build]($readme) in the README.
+          "
           fi
-          flags=(--draft --verify-tag --generate-notes --title "Oxide $TAG")
+          flags=(--draft --verify-tag --generate-notes --title "$TAG")
           if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$TAG" "${flags[@]}" --notes "$notes" --repo "$GITHUB_REPOSITORY" release-artifacts/*

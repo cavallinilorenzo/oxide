@@ -18,14 +18,14 @@ Dependabot branches (`dependabot/...`) are the one exception to the `<type>/<slu
 
 ## Local checks
 
-These are the checks CI runs on every PR. The `rust`, `web`, `supply-chain` and `repo-config` jobs are required to merge.
+These are the checks CI runs on every PR. Get them green locally before pushing. The rulesets on `dev` and `main` list which jobs are required to merge (see [docs/agents/git-workflow.md](docs/agents/git-workflow.md)).
 
 | CI job | Run locally |
 | --- | --- |
 | `rust` | `pnpm --dir web install && pnpm --dir web build` (Tauri embeds `web/dist`), then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `git diff --exit-code web/src/bindings.ts` |
 | `web` | `pnpm --dir web typecheck`, `pnpm --dir web lint`, `pnpm --dir web test` |
-| `supply-chain` | `node .github/scripts/tauri-alignment.mjs`, `cargo deny check bans licenses sources` ([cargo-deny](https://github.com/EmbarkStudios/cargo-deny)). On PRs, GitHub's dependency review also rejects newly added dependencies with high or critical advisories. |
-| `repo-config` | `actionlint`, `zizmor .`, `uvx check-jsonschema --builtin-schema vendor.dependabot .github/dependabot.yml`, `node --test .github/scripts/*.test.mjs` |
+| `supply-chain` | `node .github/scripts/tauri-alignment.mjs`, `cargo deny --locked check bans licenses sources` ([cargo-deny](https://github.com/EmbarkStudios/cargo-deny)). On PRs, GitHub's dependency review also rejects newly added dependencies with high or critical advisories. |
+| `repo-config` | `actionlint`, `zizmor .`, `node --test .github/scripts/*.test.mjs`, and schema validation with [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) (`uvx check-jsonschema==0.38.2 …`; the exact invocations are in the `repo-config` job of [ci.yml](.github/workflows/ci.yml)) |
 
 PRs into `main` also run the `bundle` job of the [Release workflow](.github/workflows/release.yml), which builds the real app bundle. Run the same build locally with `web/node_modules/.bin/tauri build` from the repo root.
 
@@ -87,7 +87,7 @@ Third-party actions are pinned to full commit SHAs, with the version as a traili
 Releases are cut from `main` by the maintainer:
 
 1. **Bump the version** in a normal PR into `dev`. Three places must agree: `version` in `[workspace.package]` of `Cargo.toml`, `version` in `crates/oxide-app/tauri.conf.json`, and `version` in `web/package.json`. Run `cargo check` so `Cargo.lock` picks up the new version.
-2. **Promote** `dev` to `main` with a merge-commit PR. The `bundle` job must pass.
+2. **Promote** `dev` to `main` with a merge-commit PR, and wait for the `bundle` job to pass.
 3. **Tag** the merge commit on `main` and push the tag:
    ```sh
    git fetch origin && git tag -a vX.Y.Z origin/main -m "Oxide vX.Y.Z" && git push origin vX.Y.Z

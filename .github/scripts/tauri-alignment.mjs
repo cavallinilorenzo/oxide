@@ -26,23 +26,23 @@ function pnpmVersion(pnpmLock, name) {
 const majorMinor = (version) => version.split(".").slice(0, 2).join(".");
 
 export function checkTauriAlignment({ cargoLock, pnpmLock }) {
-  const crate = crateVersion(cargoLock, "tauri");
-  if (!crate) return { ok: false, message: "tauri crate not found in Cargo.lock" };
+  const tauriVersion = crateVersion(cargoLock, "tauri");
+  if (!tauriVersion) return { ok: false, message: "tauri crate not found in Cargo.lock" };
 
   const problems = [];
   for (const name of JS_PACKAGES) {
     const version = pnpmVersion(pnpmLock, name);
     if (!version) problems.push(`${name} not found in web/pnpm-lock.yaml`);
-    else if (majorMinor(version) !== majorMinor(crate)) problems.push(`${name} ${version}`);
+    else if (majorMinor(version) !== majorMinor(tauriVersion)) problems.push(`${name} ${version}`);
   }
 
   if (problems.length > 0) {
     return {
       ok: false,
-      message: `Tauri packages are misaligned with the tauri crate ${crate} (major.minor must match): ${problems.join(", ")}`,
+      message: `Tauri packages are misaligned with the tauri crate ${tauriVersion} (major.minor must match): ${problems.join(", ")}`,
     };
   }
-  return { ok: true, message: `Tauri packages aligned on ${majorMinor(crate)} (tauri ${crate})` };
+  return { ok: true, message: `Tauri packages aligned on ${majorMinor(tauriVersion)} (tauri ${tauriVersion})` };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -65,6 +65,9 @@ pub struct Settings {
     /// Bundle identifier of the editor "Open in editor" uses; empty or not detected means
     /// the first detected editor.
     pub editor: String,
+    /// Let Claude Code load the user's own `CLAUDE.md`, skills, plugins, hooks and MCP servers.
+    /// Off by default so a new Thread starts with a clean context window.
+    pub claude_customizations: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
             .into(),
             confirm_quit: true,
             editor: String::new(),
+            claude_customizations: false,
         }
     }
 }
@@ -278,6 +282,13 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             &mut errors,
         ),
         editor: field(&mut root, "", "editor", defaults.editor, &mut errors),
+        claude_customizations: field(
+            &mut root,
+            "",
+            "claudeCustomizations",
+            defaults.claude_customizations,
+            &mut errors,
+        ),
     };
     unknown_keys(&root, "", &mut errors);
     if errors.is_empty() {

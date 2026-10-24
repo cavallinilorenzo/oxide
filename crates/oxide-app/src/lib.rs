@@ -234,6 +234,7 @@ pub struct Settings {
     scan_roots: Vec<String>,
     confirm_quit: bool,
     editor: String,
+    claude_customizations: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

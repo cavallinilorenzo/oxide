@@ -689,6 +689,7 @@ export type Settings_Deserialize = {
 	scanRoots: string[],
 	confirmQuit: boolean,
 	editor: string,
+	claudeCustomizations: boolean,
 };
 
 export type Settings_Serialize = {
@@ -697,6 +698,7 @@ export type Settings_Serialize = {
 	scanRoots: string[],
 	confirmQuit: boolean,
 	editor: string,
+	claudeCustomizations: boolean,
 };
 
 export type Terminal = {

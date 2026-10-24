@@ -1376,9 +1376,11 @@ async fn set_thread_provider(
     thread_id: u32,
     provider: String,
 ) -> Result<Thread, AppError> {
-    git_blocking(&core, move |core| core.set_thread_provider(thread_id, &provider))
-        .await
-        .map(|summary| convert(&summary))
+    git_blocking(&core, move |core| {
+        core.set_thread_provider(thread_id, &provider)
+    })
+    .await
+    .map(|summary| convert(&summary))
 }
 
 #[tauri::command]
@@ -1441,9 +1443,11 @@ async fn get_model_catalog(
     provider: String,
     refresh: bool,
 ) -> Result<Vec<ModelInfo>, AppError> {
-    git_blocking(&core, move |core| core.get_model_catalog(&provider, refresh))
-        .await
-        .map(|models| convert(&models))
+    git_blocking(&core, move |core| {
+        core.get_model_catalog(&provider, refresh)
+    })
+    .await
+    .map(|models| convert(&models))
 }
 
 #[tauri::command]

@@ -35,6 +35,11 @@ if "--version" in sys.argv:
     print(f"claude {version}")
     sys.exit(0)
 
+if "--help" in sys.argv:
+    if os.environ.get("OXIDE_FAKE_NO_SAFE_MODE") != "1":
+        print("  --safe-mode    Start with all customizations disabled")
+    sys.exit(0)
+
 if len(sys.argv) >= 3 and sys.argv[1] == "auth" and sys.argv[2] == "status":
     logged_in = os.environ.get("OXIDE_FAKE_LOGGED_IN", "1") == "1"
     if logged_in:

@@ -345,6 +345,48 @@ fn claude_provider_resume_passes_session_id() {
     );
 }
 
+fn start_and_read_argv(configure: impl FnOnce(&mut ClaudeCodeProvider)) -> String {
+    use oxide_provider::{PermissionMode, ProviderEvent, StartContext};
+
+    let wire_log = tempfile::NamedTempFile::new().unwrap();
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    provider.set_env("OXIDE_WIRE_LOG", wire_log.path().to_str().unwrap());
+    configure(&mut provider);
+
+    let rx = provider
+        .start(&StartContext {
+            working_dir: PathBuf::from("."),
+            model: None,
+            effort: None,
+            permission_mode: PermissionMode::Ask,
+        })
+        .unwrap();
+    let evt = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(evt, ProviderEvent::SessionInfo { .. }));
+    provider.shutdown().unwrap();
+
+    std::fs::read_to_string(wire_log.path()).unwrap()
+}
+
+#[test]
+fn claude_session_starts_in_safe_mode_by_default() {
+    let argv = start_and_read_argv(|_| {});
+    assert!(argv.contains("--safe-mode"), "{argv}");
+}
+
+#[test]
+fn claude_session_keeps_user_customizations_when_enabled() {
+    let argv = start_and_read_argv(|p| p.set_user_customizations(true));
+    assert!(!argv.contains("--safe-mode"), "{argv}");
+}
+
+#[test]
+fn claude_session_skips_safe_mode_when_the_cli_does_not_know_it() {
+    let argv = start_and_read_argv(|p| p.set_env("OXIDE_FAKE_NO_SAFE_MODE", "1"));
+    assert!(!argv.contains("--safe-mode"), "{argv}");
+}
+
 fn pid_alive(pid: i32) -> bool {
     // `kill -0` also succeeds for zombies, so ask ps for the state.
     std::process::Command::new("ps")
@@ -379,7 +421,7 @@ fn shutdown_escalates_and_leaves_no_child_behind() {
     fs::write(
         &script_path,
         format!(
-            "#!/bin/sh\ntrap '' TERM\nsleep 300 &\necho $! > {}\nwait\n",
+            "#!/bin/sh\n[ \"$1\" = --help ] && exit 0\ntrap '' TERM\nsleep 300 &\necho $! > {}\nwait\n",
             pid_file.display()
         ),
     )

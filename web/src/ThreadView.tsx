@@ -250,6 +250,10 @@ export function ThreadView({
         return next;
       });
     });
+    // Events can reach the channel before the subscribe call returns its snapshot;
+    // hold them back and replay them on top of it instead of losing them.
+    let snapshotApplied = false;
+    const early: SequencedThreadEvent[] = [];
     const channel = new Channel<SequencedThreadEvent | DebugSequencedThreadEvent>();
     channel.onmessage = (event) => {
       if ("rawPayload" in event) {
@@ -258,7 +262,8 @@ export function ThreadView({
           events: [...(previous.threadId === threadId ? previous.events : []).slice(-199), event],
         }));
       }
-      batcher.push(event as SequencedThreadEvent);
+      if (snapshotApplied) batcher.push(event as SequencedThreadEvent);
+      else early.push(event as SequencedThreadEvent);
     };
 
     void (async () => {
@@ -266,7 +271,8 @@ export function ThreadView({
         ? await commands.subscribeThreadDebug(threadId, channel as Channel<DebugSequencedThreadEvent>)
         : await commands.subscribeThread(threadId, channel as Channel<SequencedThreadEvent>);
       if (active && res.status === "ok") {
-        const initial = initialTranscriptState(res.data);
+        const initial = early.reduce(applyThreadEvent, initialTranscriptState(res.data));
+        snapshotApplied = true;
         setTranscript(initial);
         setPages(new Map());
         onStatusChange(threadId, initial.status);

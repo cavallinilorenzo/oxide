@@ -880,6 +880,7 @@ impl Core {
             } else if snapshot.thread.provider == "claude" {
                 let mut claude = oxide_provider::claude::ClaudeCodeProvider::new();
                 claude.set_registry(Arc::clone(&self.processes));
+                claude.set_user_customizations(self.settings().settings.claude_customizations);
                 let detection = claude.detect().unwrap_or(oxide_provider::Detection {
                     available: false,
                     installed: false,

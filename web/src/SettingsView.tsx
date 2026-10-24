@@ -174,6 +174,17 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         {fieldErrors("confirmQuit")}
       </label>
 
+      <label className="inline">
+        <input
+          type="checkbox"
+          checked={draft.claudeCustomizations}
+          onChange={(e) => set({ claudeCustomizations: e.target.checked })}
+        />
+        Load Claude Code’s own CLAUDE.md, skills, plugins, hooks and MCP servers
+        {fieldErrors("claudeCustomizations")}
+      </label>
+      <p className="hint">Off keeps a new Thread’s context window clean. Applies to Threads started after saving.</p>
+
       <label>
         Editor for “Open in editor”
         <select value={draft.editor} onChange={(e) => set({ editor: e.target.value })}>

@@ -744,5 +744,6 @@ code { font-family: var(--mono); font-size: 12px; }
 .settings label.inline { flex-direction: row; align-items: center; gap: 6px; flex-wrap: wrap; }
 .settings fieldset { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--bg2); }
 .settings legend { color: var(--dim); padding: 0 4px; }
+.settings .hint { margin: -8px 0 0; font-size: 11px; color: var(--faint); }
 .settings .actions { display: flex; gap: 8px; }
 .settings .error { margin: 0; }

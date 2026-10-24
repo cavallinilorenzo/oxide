@@ -213,6 +213,7 @@ mod settings {
         );
         assert!(!state.settings.scan_roots.is_empty());
         assert!(state.settings.confirm_quit);
+        assert!(!state.settings.claude_customizations);
 
         let on_disk = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
         assert!(
@@ -244,7 +245,7 @@ mod settings {
 
         std::fs::write(
             tmp.path().join("settings.json"),
-            r#"{ "defaultProvider": "codex", "confirmQuit": false,
+            r#"{ "defaultProvider": "codex", "confirmQuit": false, "claudeCustomizations": true,
                  "providers": { "codex": { "model": "gpt-x", "permissionMode": "auto-edit" } } }"#,
         )
         .unwrap();
@@ -253,6 +254,7 @@ mod settings {
         assert!(state.errors.is_empty(), "{:?}", state.errors);
         assert_eq!(state.settings.default_provider, Provider::Codex);
         assert!(!state.settings.confirm_quit);
+        assert!(state.settings.claude_customizations);
         assert_eq!(
             state.settings.providers.codex.model.as_deref(),
             Some("gpt-x")

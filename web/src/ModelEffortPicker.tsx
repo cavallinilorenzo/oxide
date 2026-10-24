@@ -10,6 +10,9 @@ const PROVIDERS = [
   { id: "antigravity", name: "Antigravity" },
 ] as const;
 
+/** Last known catalog per Provider, so reopening the picker is instant. */
+const catalogCache = new Map<string, ModelInfo[]>();
+
 export interface ModelEffortPickerProps {
   open: boolean;
   onClose: () => void;
@@ -40,7 +43,9 @@ export function ModelEffortPicker({
   const [activeTab, setActiveTab] = useState<string>(currentProvider);
   const [search, setSearch] = useState("");
   const [favourites, setFavourites] = useState<string[]>([]);
-  const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>({});
+  const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>(() =>
+    Object.fromEntries(catalogCache)
+  );
   const [loading, setLoading] = useState(false);
   const [selectedEffort, setSelectedEffort] = useState<string | null>(currentEffort);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -60,37 +65,42 @@ export function ModelEffortPicker({
     let active = true;
 
     async function load() {
-      setLoading(true);
-      try {
-        const favRes = await commands.getFavouriteModels();
-        if (active && favRes.status === "ok") {
-          setFavourites(favRes.data);
-        }
-
-        const providersToFetch = [
-          "claude",
-          "codex",
-          "antigravity",
-          ...(currentProvider === "fake" ? ["fake"] : []),
-        ];
-
-        const results = await Promise.all(
-          providersToFetch.map(async (p) => {
-            const res = await commands.getModelCatalog(p, true);
-            return [p, res.status === "ok" ? res.data : []] as const;
-          })
-        );
-
-        if (active) {
-          const map: Record<string, ModelInfo[]> = {};
-          for (const [p, list] of results) {
-            map[p] = list;
-          }
-          setCatalogs(map);
-        }
-      } finally {
-        if (active) setLoading(false);
+      const favRes = await commands.getFavouriteModels();
+      if (active && favRes.status === "ok") {
+        setFavourites(favRes.data);
       }
+
+      const providersToFetch = [
+        "claude",
+        "codex",
+        "antigravity",
+        ...(currentProvider === "fake" ? ["fake"] : []),
+      ];
+
+      const apply = (p: string, list: ModelInfo[]) => {
+        catalogCache.set(p, list);
+        if (active) setCatalogs((prev) => ({ ...prev, [p]: list }));
+      };
+
+      // Each Provider lands as soon as it answers; the slow ones (spawning a CLI)
+      // never hold up the others. Cached lists show instantly, then refresh quietly.
+      let pending = providersToFetch.length;
+      if (!providersToFetch.every((p) => catalogCache.has(p))) setLoading(true);
+      await Promise.all(
+        providersToFetch.map(async (p) => {
+          try {
+            if (!catalogCache.has(p)) {
+              const cached = await commands.getModelCatalog(p, false);
+              if (cached.status === "ok") apply(p, cached.data);
+            }
+            const fresh = await commands.getModelCatalog(p, true);
+            if (fresh.status === "ok" && fresh.data.length > 0) apply(p, fresh.data);
+          } finally {
+            pending -= 1;
+            if (active && pending === 0) setLoading(false);
+          }
+        })
+      );
     }
 
     void load();
@@ -312,7 +322,7 @@ export function ModelEffortPicker({
             )}
 
             <div className="models-list-scroll">
-              {loading && <div className="models-loading">Loading catalog...</div>}
+              {loading && flatVisible.length === 0 && <div className="models-loading">Loading catalog...</div>}
 
               {!loading && flatVisible.length === 0 && (
                 <div className="models-empty">No models found.</div>

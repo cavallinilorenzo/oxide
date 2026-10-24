@@ -84,6 +84,7 @@ pub struct ItemSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApprovalSnapshot {
     pub id: u32,
     pub turn_id: u32,

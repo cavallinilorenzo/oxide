@@ -3,19 +3,19 @@ import { GitBranchIcon } from "@primer/octicons-react";
 import { Channel } from "@tauri-apps/api/core";
 import { commands, type ApprovalDecision, type BoardCard, type BoardEvent, type Thread } from "./bindings";
 import { DispatchDialog } from "./DispatchDialog";
-import { applyBoardEvent, groupBoard, mergeCard, pullRequestSummary, suggestsArchive } from "./board";
+import { applyBoardEvent, groupBoard, mergeCard, pullRequestSummary, suggestsDelete } from "./board";
 import { threadTitle } from "./threadList";
 
 interface BoardViewProps {
   projectId: number;
   onOpenThread: (threadId: number) => void;
-  onArchiveThread: (threadId: number) => void;
+  onDeleteThread: (threadId: number) => void;
   /** A task was dispatched: the new Thread, for the sidebar. */
   onDispatched: (thread: Thread) => void;
 }
 
 /** The Project's Thread Board: derived from Thread rows, so it only ever mirrors the feed. Mount per Project (`key`). */
-export function BoardView({ projectId, onOpenThread, onArchiveThread, onDispatched }: BoardViewProps) {
+export function BoardView({ projectId, onOpenThread, onDeleteThread, onDispatched }: BoardViewProps) {
   const [cards, setCards] = useState<BoardCard[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export function BoardView({ projectId, onOpenThread, onArchiveThread, onDispatch
             card={card}
             onOpen={() => onOpenThread(card.thread.id)}
             onStop={() => void stop(card.thread.id)}
-            onArchive={() => onArchiveThread(card.thread.id)}
+            onDelete={() => onDeleteThread(card.thread.id)}
             onRespond={(approvalId, decision) => void respond(card.thread.id, approvalId, decision)}
           />
         ))}
@@ -114,13 +114,13 @@ function BoardCardView({
   card,
   onOpen,
   onStop,
-  onArchive,
+  onDelete,
   onRespond,
 }: {
   card: BoardCard;
   onOpen: () => void;
   onStop: () => void;
-  onArchive: () => void;
+  onDelete: () => void;
   onRespond: (approvalId: string, decision: ApprovalDecision) => void;
 }) {
   const { thread } = card;
@@ -172,16 +172,16 @@ function BoardCardView({
           {card.pullRequest && card.pullRequest.checksFailed > 0 && <span className="board-pr-failing">failing</span>}
         </div>
       )}
-      {suggestsArchive(card) && (
-        <div className="board-archive-suggestion">
+      {suggestsDelete(card) && (
+        <div className="board-delete-suggestion">
           <span>This pull request was merged.</span>
-          <button onClick={onArchive}>Archive Thread</button>
+          <button onClick={onDelete}>Delete Thread</button>
         </div>
       )}
       <div className="board-card-actions">
         <button onClick={onOpen}>Open</button>
         {running && <button onClick={onStop}>Stop</button>}
-        <button onClick={onArchive}>Archive</button>
+        <button onClick={onDelete}>Delete</button>
       </div>
     </li>
   );

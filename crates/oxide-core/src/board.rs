@@ -35,8 +35,10 @@ pub struct BoardCard {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum BoardEvent {
-    /// A Thread appeared or changed (status, title, archived, pending Approvals).
-    ThreadChanged(BoardCard),
+    /// A Thread appeared or changed (status, title, pending Approvals).
+    ThreadChanged(Box<BoardCard>),
+    /// A Thread was deleted; its id is gone from the Board.
+    ThreadDeleted(u32),
 }
 
 pub(crate) struct BoardHub {
@@ -135,7 +137,24 @@ impl BoardHub {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|(project, tx)| {
-                *project != project_id || tx.send(BoardEvent::ThreadChanged(card.clone())).is_ok()
+                *project != project_id
+                    || tx
+                        .send(BoardEvent::ThreadChanged(Box::new(card.clone())))
+                        .is_ok()
+            });
+    }
+
+    /// Tells the Project's subscribers that the Thread is gone, and forgets its pull request.
+    pub(crate) fn publish_deleted(&self, project_id: u32, thread_id: u32) {
+        self.pull_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&thread_id);
+        self.subscribers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(project, tx)| {
+                *project != project_id || tx.send(BoardEvent::ThreadDeleted(thread_id)).is_ok()
             });
     }
 

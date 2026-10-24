@@ -338,8 +338,8 @@ pub enum ThreadStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
-pub enum ArchiveOutcome {
-    Archived,
+pub enum DeleteOutcome {
+    Deleted,
     NeedsConfirmation,
 }
 
@@ -372,7 +372,6 @@ pub struct Thread {
     pub effort: Option<String>,
     pub permission_mode: PermissionMode,
     pub status: ThreadStatus,
-    pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
     pub title: Option<String>,
@@ -429,7 +428,8 @@ pub struct BranchPullRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "payload")]
 pub enum BoardEvent {
-    ThreadChanged(BoardCard),
+    ThreadChanged(Box<BoardCard>),
+    ThreadDeleted(u32),
 }
 
 /// A new Thread continuing one whose Provider session is gone, and the recap to prefill.
@@ -1339,23 +1339,18 @@ fn continue_thread(
     Ok(convert(&core.continue_thread(thread_id)?))
 }
 
-/// Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
-/// changes that waits for `discard_changes`.
+/// Deletes a Thread and its Transcript. Deleting a Board Thread removes its worktree; with
+/// uncommitted changes that waits for `discard_changes`.
 #[tauri::command]
 #[specta::specta]
-fn set_thread_archived(
+fn delete_thread(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
-    archived: bool,
     discard_changes: bool,
-) -> Result<ArchiveOutcome, AppError> {
-    if !archived {
-        core.set_thread_archived(thread_id, false)?;
-        return Ok(ArchiveOutcome::Archived);
-    }
-    Ok(match core.archive_thread(thread_id, discard_changes)? {
-        oxide_core::ArchiveOutcome::Archived => ArchiveOutcome::Archived,
-        oxide_core::ArchiveOutcome::NeedsConfirmation => ArchiveOutcome::NeedsConfirmation,
+) -> Result<DeleteOutcome, AppError> {
+    Ok(match core.delete_thread(thread_id, discard_changes)? {
+        oxide_core::DeleteOutcome::Deleted => DeleteOutcome::Deleted,
+        oxide_core::DeleteOutcome::NeedsConfirmation => DeleteOutcome::NeedsConfirmation,
     })
 }
 
@@ -1752,7 +1747,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_project_setup_command,
         set_project_setup_command,
         continue_thread,
-        set_thread_archived,
+        delete_thread,
         set_thread_permission_mode,
         set_thread_provider,
         rename_thread,
@@ -1923,7 +1918,6 @@ mod tests {
                 effort: None,
                 permission_mode: oxide_core::PermissionMode::Ask,
                 status: oxide_core::ThreadStatus::Error,
-                archived: false,
                 created_at: "a".into(),
                 updated_at: "b".into(),
                 title: None,

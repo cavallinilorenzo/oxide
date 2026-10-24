@@ -50,7 +50,6 @@ pub struct ThreadSummary {
     pub effort: Option<String>,
     pub permission_mode: PermissionMode,
     pub status: ThreadStatus,
-    pub archived: bool,
     pub created_at: String,
     pub updated_at: String,
     pub title: Option<String>,
@@ -69,7 +68,7 @@ pub struct ThreadSummary {
 }
 
 /// The `threads` columns [`parse_thread_summary`] reads, in order.
-pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, archived, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number";
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,16 +260,15 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         effort: r.get(4)?,
         permission_mode: mode_str.parse().unwrap_or(PermissionMode::AutoEdit),
         status: status_str.parse().unwrap_or(ThreadStatus::Completed),
-        archived: r.get::<_, i64>(7)? != 0,
-        created_at: r.get(8)?,
-        updated_at: r.get(9)?,
-        session_lost: r.get::<_, i64>(10)? != 0,
-        continued_from: r.get(11)?,
-        continued_in: r.get(12)?,
-        title: r.get(13)?,
-        branch: r.get(14)?,
-        worktree_path: r.get(15)?,
-        setup_output: r.get(16)?,
-        issue_number: r.get(17)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
+        session_lost: r.get::<_, i64>(9)? != 0,
+        continued_from: r.get(10)?,
+        continued_in: r.get(11)?,
+        title: r.get(12)?,
+        branch: r.get(13)?,
+        worktree_path: r.get(14)?,
+        setup_output: r.get(15)?,
+        issue_number: r.get(16)?,
     })
 }

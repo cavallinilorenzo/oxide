@@ -79,11 +79,11 @@ fn free_name(checkout: &Path, parent: &Path, slug: &str) -> String {
         .expect("an unbounded range has a free name")
 }
 
-/// What archiving a Thread did.
+/// What deleting a Thread did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ArchiveOutcome {
-    Archived,
+pub enum DeleteOutcome {
+    Deleted,
     /// The Board Thread's worktree has uncommitted changes; nothing was changed.
     NeedsConfirmation,
 }
@@ -302,34 +302,45 @@ impl Core {
         )?)
     }
 
-    /// Archives a Thread. A Board Thread's worktree is removed with it and its branch kept, unless
-    /// the worktree has uncommitted changes: then nothing happens until the caller confirms with
-    /// `discard_changes`.
-    pub fn archive_thread(&self, thread_id: u32, discard_changes: bool) -> Result<ArchiveOutcome> {
+    /// Deletes a Thread and everything Oxide keeps of it. A running Turn is stopped. A Board
+    /// Thread's worktree is removed with it and its branch kept, unless the worktree has
+    /// uncommitted changes: then nothing happens until the caller confirms with `discard_changes`.
+    /// The Provider's own session files are left to the Provider.
+    pub fn delete_thread(&self, thread_id: u32, discard_changes: bool) -> Result<DeleteOutcome> {
         let (root, board) = self.thread_checkouts(thread_id)?;
-        if let Some((_, worktree)) = board.filter(|(_, w)| w.exists()) {
-            let removed = self.git.mutate(&root, || {
-                let dirty = !git::run(&worktree, &["status", "--porcelain"])?
+        let worktree = board.map(|(_, w)| w).filter(|w| w.exists());
+        if let Some(worktree) = &worktree {
+            let dirty = self.git.mutate(&root, || {
+                Ok(!git::run(worktree, &["status", "--porcelain"])?
                     .trim()
-                    .is_empty();
-                if dirty && !discard_changes {
-                    return Ok(false);
-                }
+                    .is_empty())
+            })?;
+            if dirty && !discard_changes {
+                return Ok(DeleteOutcome::NeedsConfirmation);
+            }
+        }
+        let actor = self
+            .thread_actors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&thread_id);
+        if let Some(actor) = actor {
+            actor.shutdown();
+        }
+        if let Some(worktree) = worktree {
+            self.git.mutate(&root, || {
                 git::run(
                     &root,
                     &["worktree", "remove", "--force", &worktree.to_string_lossy()],
-                )?;
-                Ok(true)
+                )
+                .map(drop)
             })?;
-            if !removed {
-                return Ok(ArchiveOutcome::NeedsConfirmation);
-            }
         }
-        self.set_thread_archived(thread_id, true)?;
-        Ok(ArchiveOutcome::Archived)
+        self.remove_thread_records(thread_id, &root)?;
+        Ok(DeleteOutcome::Deleted)
     }
 
-    /// Recreates a Board Thread's worktree from its branch when it is gone (archived, or deleted
+    /// Recreates a Board Thread's worktree from its branch when it is gone (deleted
     /// by hand). A chat Thread, or a worktree still there, is left alone.
     pub(crate) fn ensure_worktree(&self, thread_id: u32) -> Result<()> {
         let (root, board) = self.thread_checkouts(thread_id)?;

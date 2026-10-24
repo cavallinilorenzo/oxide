@@ -83,6 +83,26 @@ fn migration_bumps_user_version_after_backing_up_previous_version() {
 }
 
 #[test]
+fn threads_archived_before_deletion_existed_reappear_in_the_list() {
+    let tmp = tempfile::tempdir().unwrap();
+    let before_drop = &oxide_core::MIGRATIONS[..oxide_core::MIGRATIONS.len() - 1];
+    drop(Core::open_with_migrations(tmp.path(), before_drop).unwrap());
+    Connection::open(tmp.path().join("oxide.db"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO projects (id, name, path) VALUES (1, 'p', '/p');
+             INSERT INTO threads (id, project_id, provider, permission_mode, status, archived)
+             VALUES (5, 1, 'fake', 'ask', 'completed', 1);",
+        )
+        .unwrap();
+
+    let core = Core::open(tmp.path()).unwrap();
+
+    let threads = core.list_threads(1).unwrap();
+    assert_eq!(threads.iter().map(|t| t.id).collect::<Vec<_>>(), [5]);
+}
+
+#[test]
 fn refuses_a_database_from_a_newer_build() {
     let tmp = tempfile::tempdir().unwrap();
     drop(Core::open_with_migrations(tmp.path(), &["SELECT 1;", "SELECT 2;"]).unwrap());

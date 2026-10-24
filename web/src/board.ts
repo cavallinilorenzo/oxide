@@ -7,7 +7,7 @@ export type BoardColumns = { needsInput: BoardCard[]; working: BoardCard[]; comp
 export function groupBoard(cards: BoardCard[], query: string): BoardColumns {
   const needle = query.trim().toLowerCase();
   const sorted = cards
-    .filter((c) => !c.thread.archived && (!needle || threadTitle(c.thread).toLowerCase().includes(needle)))
+    .filter((c) => !needle || threadTitle(c.thread).toLowerCase().includes(needle))
     .sort((a, b) => {
       if (b.thread.updatedAt > a.thread.updatedAt) return 1;
       if (b.thread.updatedAt < a.thread.updatedAt) return -1;
@@ -31,6 +31,7 @@ export function mergeCard(cards: BoardCard[], next: BoardCard): BoardCard[] {
 }
 
 export function applyBoardEvent(cards: BoardCard[], event: BoardEvent): BoardCard[] {
+  if (event.type === "ThreadDeleted") return cards.filter((c) => c.thread.id !== event.payload);
   return mergeCard(cards, event.payload);
 }
 
@@ -47,7 +48,7 @@ export function pullRequestSummary(pr: BranchPullRequest | null | undefined): st
   return [`PR #${pr.number}`, PHASE_LABEL[pr.phase], ...(checks.length ? [checks.join(", ")] : [])].join(" · ");
 }
 
-/** A merged pull request means the work landed: the card offers to archive the Thread. */
-export function suggestsArchive(card: BoardCard): boolean {
-  return card.pullRequest?.phase === "merged" && !card.thread.archived;
+/** A merged pull request means the work landed: the card offers to delete the Thread. */
+export function suggestsDelete(card: BoardCard): boolean {
+  return card.pullRequest?.phase === "merged";
 }

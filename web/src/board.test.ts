@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BoardCard, BranchPullRequest, Thread } from "./bindings";
-import { applyBoardEvent, groupBoard, pullRequestSummary, suggestsArchive } from "./board";
+import { applyBoardEvent, groupBoard, pullRequestSummary, suggestsDelete } from "./board";
 
 const card = (id: number, over: Partial<Thread> = {}): BoardCard =>
   ({
-    thread: { id, status: "completed", archived: false, title: `T${id}`, updatedAt: `2026-01-01T00:00:0${id}Z`, ...over },
+    thread: { id, status: "completed", title: `T${id}`, updatedAt: `2026-01-01T00:00:0${id}Z`, ...over },
     pendingApprovals: [],
   }) as BoardCard;
 
@@ -28,8 +28,8 @@ describe("groupBoard", () => {
     expect(g.completed.map((c) => c.thread.id)).toEqual([3, 2, 1]);
   });
 
-  it("leaves Archived Threads off and filters by title", () => {
-    const g = groupBoard([card(1, { archived: true }), card(2, { title: "Fix login" }), card(3)], "LOGIN");
+  it("filters by title", () => {
+    const g = groupBoard([card(1), card(2, { title: "Fix login" }), card(3)], "LOGIN");
     expect(g.completed.map((c) => c.thread.id)).toEqual([2]);
   });
 });
@@ -54,15 +54,20 @@ describe("pullRequestSummary", () => {
   });
 });
 
-describe("suggestsArchive", () => {
-  it("suggests archiving once the pull request is merged, and not before", () => {
-    expect(suggestsArchive(withPr({ phase: "merged" }))).toBe(true);
-    expect(suggestsArchive(withPr({ phase: "open" }))).toBe(false);
-    expect(suggestsArchive(card(1))).toBe(false);
+describe("suggestsDelete", () => {
+  it("suggests deleting once the pull request is merged, and not before", () => {
+    expect(suggestsDelete(withPr({ phase: "merged" }))).toBe(true);
+    expect(suggestsDelete(withPr({ phase: "open" }))).toBe(false);
+    expect(suggestsDelete(card(1))).toBe(false);
   });
 });
 
 describe("applyBoardEvent", () => {
+  it("drops the card of a deleted Thread", () => {
+    const next = applyBoardEvent([card(1), card(2)], { type: "ThreadDeleted", payload: 1 });
+    expect(next.map((c) => c.thread.id)).toEqual([2]);
+  });
+
   it("replaces a changed card and adds a new one", () => {
     const start = [card(1), card(2)];
     const changed = applyBoardEvent(start, { type: "ThreadChanged", payload: card(1, { status: "working" }) });

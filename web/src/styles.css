@@ -276,10 +276,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .thread-row:hover .thread-item-age { display: none; }
 .thread-row .row-action { position: absolute; right: 2px; }
 .thread-row:not(:hover) .row-action { pointer-events: none; }
-.thread-list.archived .thread-item { opacity: 0.7; }
 .thread-rename-input { width: 100%; margin: 2px 0 2px 20px; padding: 3px 6px; font-size: 13px; }
-.sidebar-link { margin: 8px 6px 0; padding: 4px 6px; background: none; border: 0; color: var(--faint); font-size: 12px; }
-.sidebar-link:hover { color: var(--fg); }
 .sidebar-footer { flex: none; justify-content: flex-start; padding: 9px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; color: var(--faint); font-size: 12px; }
 .sidebar-footer:hover:not(:disabled) { color: var(--fg); }
 
@@ -661,7 +658,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .board-pr.merged { color: var(--purple); }
 .board-pr.closed { color: var(--dim); }
 .board-pr-failing { color: var(--red); }
-.board-archive-suggestion { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
+.board-delete-suggestion { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
 .setup-command { font-size: 12px; display: grid; gap: 6px; max-width: 40rem; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); }
 .setup-command summary { cursor: pointer; color: var(--dim); }
 .setup-command input { font-family: var(--mono); }

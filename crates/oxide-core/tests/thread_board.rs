@@ -37,7 +37,9 @@ fn snapshot_lists_the_projects_threads_and_events_follow_status_changes() {
     let second = core
         .create_thread(project, "fake", None, None, PermissionMode::AutoEdit)
         .unwrap();
-    let BoardEvent::ThreadChanged(card) = next(&rx);
+    let BoardEvent::ThreadChanged(card) = next(&rx) else {
+        panic!("expected ThreadChanged")
+    };
     assert_eq!(card.thread.id, second.id);
 
     core.send_prompt(second.id, "hello").unwrap();
@@ -45,7 +47,7 @@ fn snapshot_lists_the_projects_threads_and_events_follow_status_changes() {
     while let Ok(BoardEvent::ThreadChanged(card)) = rx.recv_timeout(Duration::from_secs(5)) {
         assert_eq!(card.thread.id, second.id);
         if statuses.is_empty() && card.thread.status != ThreadStatus::Working {
-            continue; // the prompt un-archives the Thread first: no change yet
+            continue; // a change before the Turn starts working
         }
         statuses.push(card.thread.status);
         if card.thread.status == ThreadStatus::Completed {
@@ -57,7 +59,7 @@ fn snapshot_lists_the_projects_threads_and_events_follow_status_changes() {
 }
 
 #[test]
-fn archiving_emits_an_event_and_other_projects_are_not_heard() {
+fn deleting_emits_an_event_and_other_projects_are_not_heard() {
     let (_dir, core, project) = core_with_project();
     let thread = core
         .create_thread(project, "fake", None, None, PermissionMode::AutoEdit)
@@ -65,10 +67,9 @@ fn archiving_emits_an_event_and_other_projects_are_not_heard() {
     let (_, rx) = core.subscribe_board(project).unwrap();
     let (_, other_rx) = core.subscribe_board(project + 100).unwrap();
 
-    core.set_thread_archived(thread.id, true).unwrap();
+    core.delete_thread(thread.id, false).unwrap();
 
-    let BoardEvent::ThreadChanged(card) = next(&rx);
-    assert!(card.thread.archived);
+    assert_eq!(next(&rx), BoardEvent::ThreadDeleted(thread.id));
     assert!(other_rx.try_recv().is_err());
 }
 
@@ -111,7 +112,9 @@ fn pending_approvals_are_on_the_card_and_answering_clears_them() {
 
     core.send_prompt(thread.id, "please").unwrap();
     let card = loop {
-        let BoardEvent::ThreadChanged(card) = next(&rx);
+        let BoardEvent::ThreadChanged(card) = next(&rx) else {
+            panic!("expected ThreadChanged")
+        };
         if card.thread.status == ThreadStatus::NeedsInput {
             break card;
         }
@@ -122,7 +125,9 @@ fn pending_approvals_are_on_the_card_and_answering_clears_them() {
     core.respond_to_approval(thread.id, "appr-1", ApprovalDecision::Allow)
         .unwrap();
     loop {
-        let BoardEvent::ThreadChanged(card) = next(&rx);
+        let BoardEvent::ThreadChanged(card) = next(&rx) else {
+            panic!("expected ThreadChanged")
+        };
         if card.thread.status == ThreadStatus::Completed {
             assert!(card.pending_approvals.is_empty());
             break;
@@ -148,19 +153,25 @@ fn renaming_and_stopping_a_thread_reach_the_board() {
     let (_, rx) = core.subscribe_board(project).unwrap();
 
     core.rename_thread(thread.id, "Fix login").unwrap();
-    let BoardEvent::ThreadChanged(card) = next(&rx);
+    let BoardEvent::ThreadChanged(card) = next(&rx) else {
+        panic!("expected ThreadChanged")
+    };
     assert_eq!(card.thread.title.as_deref(), Some("Fix login"));
 
     core.send_prompt(thread.id, "go").unwrap();
     loop {
-        let BoardEvent::ThreadChanged(card) = next(&rx);
+        let BoardEvent::ThreadChanged(card) = next(&rx) else {
+            panic!("expected ThreadChanged")
+        };
         if card.thread.status == ThreadStatus::Working {
             break;
         }
     }
     core.interrupt_thread(thread.id).unwrap();
     loop {
-        let BoardEvent::ThreadChanged(card) = next(&rx);
+        let BoardEvent::ThreadChanged(card) = next(&rx) else {
+            panic!("expected ThreadChanged")
+        };
         if card.thread.status == ThreadStatus::Interrupted {
             break;
         }

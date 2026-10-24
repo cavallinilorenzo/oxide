@@ -50,7 +50,6 @@ export function ModelEffortPicker({
   const [selectedEffort, setSelectedEffort] = useState<string | null>(currentEffort);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const providerLocked = turnCount > 0;
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
   useEffect(() => {
@@ -200,7 +199,7 @@ export function ModelEffortPicker({
         const target = applyModelShortcut(index, flatVisible);
         if (target) {
           const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
-          const isLocked = (providerLocked && isOtherProvider) || modelSwitchLocked;
+          const isLocked = !isOtherProvider && modelSwitchLocked;
           handleSelectModel(target, isLocked);
         }
       }
@@ -213,7 +212,6 @@ export function ModelEffortPicker({
     flatVisible,
     activeTab,
     currentProvider,
-    providerLocked,
     modelSwitchLocked,
     handleSelectModel,
     onClose,
@@ -222,7 +220,7 @@ export function ModelEffortPicker({
   if (!open) return null;
 
   const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
-  const tabIsLocked = providerLocked && isOtherProvider;
+  const startsNewThread = turnCount > 0 && isOtherProvider;
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Model and Effort Selector">
@@ -265,24 +263,17 @@ export function ModelEffortPicker({
               <span className="rail-text">Favourites</span>
             </button>
 
-            {PROVIDERS.map((p) => {
-              const isLocked = providerLocked && p.id !== currentProvider;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`rail-tab ${activeTab === p.id ? "active" : ""} ${
-                    isLocked ? "locked" : ""
-                  }`}
-                  onClick={() => setActiveTab(p.id)}
-                  title={isLocked ? "Provider locked after first turn" : undefined}
-                >
-                  <ProviderMark provider={p.id} size={14} />
-                  <span className="rail-text">{p.name}</span>
-                  {isLocked && <span className="lock-icon" aria-label="Locked"><LockIcon size={12} /></span>}
-                </button>
-              );
-            })}
+            {PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`rail-tab ${activeTab === p.id ? "active" : ""}`}
+                onClick={() => setActiveTab(p.id)}
+              >
+                <ProviderMark provider={p.id} size={14} />
+                <span className="rail-text">{p.name}</span>
+              </button>
+            ))}
 
             {currentProvider === "fake" && (
               <button
@@ -309,13 +300,13 @@ export function ModelEffortPicker({
               />
             </div>
 
-            {tabIsLocked && (
-              <div className="tab-locked-banner" role="status">
-                <LockIcon size={12} /> Provider locked after the first Turn. Models from other Providers cannot be selected.
+            {startsNewThread && (
+              <div className="tab-info-banner" role="status">
+                Picking a model from another Provider starts a new Thread.
               </div>
             )}
 
-            {modelSwitchLocked && !tabIsLocked && (
+            {modelSwitchLocked && !isOtherProvider && (
               <div className="tab-locked-banner" role="status">
                 <LockIcon size={12} /> Provider does not support mid-thread model switching.
               </div>
@@ -335,7 +326,7 @@ export function ModelEffortPicker({
                   {visibleCurrent.map((m, idx) => {
                     const isSelected = m.id === currentModel;
                     const isFav = favourites.includes(m.id);
-                    const isItemLocked = tabIsLocked || (modelSwitchLocked && !isSelected);
+                    const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
                     const shortcutNumber = idx + 1 <= 9 ? idx + 1 : null;
 
                     return (
@@ -385,7 +376,7 @@ export function ModelEffortPicker({
                   {visibleLegacy.map((m, idx) => {
                     const isSelected = m.id === currentModel;
                     const isFav = favourites.includes(m.id);
-                    const isItemLocked = tabIsLocked || (modelSwitchLocked && !isSelected);
+                    const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
                     const overallIndex = visibleCurrent.length + idx + 1;
                     const shortcutNumber = overallIndex <= 9 ? overallIndex : null;
 

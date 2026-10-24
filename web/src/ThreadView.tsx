@@ -488,6 +488,19 @@ export function ThreadView({
     newModel: string | null,
     newEffort: string | null
   ) => {
+    if (newProvider !== currentProvider && turnCount > 0) {
+      // A Thread keeps its Provider: another Provider's model starts a new Thread.
+      const created = await commands.createThread(
+        projectId,
+        newProvider,
+        newModel,
+        newEffort,
+        currentMode
+      );
+      if (created.status === "ok") onThreadCreated(created.data);
+      else console.error("Failed to create thread:", created.error);
+      return;
+    }
     if (newProvider !== currentProvider && turnCount === 0) {
       await handleProviderChange(newProvider);
     }

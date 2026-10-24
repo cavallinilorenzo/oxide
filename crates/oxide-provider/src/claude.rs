@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 
@@ -51,6 +51,8 @@ pub struct ClaudeCodeProvider {
     turn_counter: Arc<AtomicU32>,
     active_turn: Arc<Mutex<Option<u32>>>,
     registry: Option<Arc<ProcessRegistry>>,
+    user_customizations: bool,
+    safe_mode_supported: OnceLock<bool>,
 }
 
 impl Default for ClaudeCodeProvider {
@@ -86,6 +88,8 @@ impl ClaudeCodeProvider {
             turn_counter: Arc::new(AtomicU32::new(0)),
             active_turn: Arc::new(Mutex::new(None)),
             registry: None,
+            user_customizations: false,
+            safe_mode_supported: OnceLock::new(),
         }
     }
 
@@ -93,6 +97,27 @@ impl ClaudeCodeProvider {
     /// orphans can be found and killed on the next launch.
     pub fn set_registry(&mut self, registry: Arc<ProcessRegistry>) {
         self.registry = Some(registry);
+    }
+
+    /// By default a session starts with Claude Code's `--safe-mode`, so the user's `CLAUDE.md`,
+    /// skills, plugins, hooks and MCP servers stay out of the starting context window. Passing
+    /// `true` lets the CLI load them as it would in a terminal.
+    pub fn set_user_customizations(&mut self, enabled: bool) {
+        self.user_customizations = enabled;
+    }
+
+    /// Whether the installed CLI knows `--safe-mode`; older ones would refuse to start with it.
+    fn supports_safe_mode(&self) -> bool {
+        *self.safe_mode_supported.get_or_init(|| {
+            let mut cmd = Command::new(&self.command);
+            cmd.arg("--help").stdin(Stdio::null());
+            for (k, v) in &self.extra_env {
+                cmd.env(k, v);
+            }
+            cmd.output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).contains("--safe-mode"))
+                .unwrap_or(false)
+        })
     }
 
     pub fn set_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -120,6 +145,10 @@ impl ClaudeCodeProvider {
             .arg("stream-json")
             .arg("--verbose")
             .arg("--include-partial-messages");
+
+        if !self.user_customizations && self.supports_safe_mode() {
+            cmd.arg("--safe-mode");
+        }
 
         if let Some(ref model) = context.model {
             cmd.arg("--model").arg(model);

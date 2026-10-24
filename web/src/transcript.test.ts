@@ -378,6 +378,23 @@ describe("transcript reducer", () => {
     expect(state.turns[1].items[1].content).toBe("stream");
   });
 
+  it("replays events that arrived before the snapshot on top of it, skipping those it already holds", () => {
+    const base = initialTranscriptState(null);
+    const snapshot = {
+      ...base,
+      thread: sampleThread(),
+      status: "working" as const,
+      lastSeq: 1,
+      turns: applyThreadEvent(base, startTurn(1, "ciao")).turns,
+    };
+    const early = [startTurn(1, "ciao"), completeTurn(2)];
+
+    const state = early.reduce(applyThreadEvent, snapshot);
+
+    expect(state.turns.map((t) => [t.prompt, t.status])).toEqual([["ciao", "completed"]]);
+    expect(state.lastSeq).toBe(2);
+  });
+
   it("updates thread title on ThreadRenamed event", () => {
     let state = initialTranscriptState({
       thread: sampleThread(),

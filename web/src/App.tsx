@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import {
-  ArchiveIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CodeIcon,
@@ -22,6 +21,7 @@ import {
   ToolsIcon,
   XIcon,
   type Icon,
+  TrashIcon,
 } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
 import { isBoardThread } from "./dispatch";
@@ -34,7 +34,7 @@ import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
-import { relativeAge, sidebarProjects, splitThreads, threadTitle } from "./threadList";
+import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -283,24 +283,24 @@ export function App() {
     setOpenError(res.status === "error" ? res.error.message : null);
   }, [selected, currentThreadId]);
 
-  const onPromptSent = useCallback((threadId: number) => {
-    setThreads((prev) =>
-      prev?.map((t) => (t.id === threadId && t.archived ? { ...t, archived: false } : t)) ?? null);
-  }, []);
-
-  const setThreadArchived = useCallback(async (threadId: number, archived: boolean) => {
-    let res = await commands.setThreadArchived(threadId, archived, false);
+  const deleteThread = useCallback(async (threadId: number) => {
+    const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
+    if (!window.confirm(`Delete “${title}”? Its conversation is removed permanently.`)) return;
+    let res = await commands.deleteThread(threadId, false);
     if (res.status === "ok" && res.data === "needs-confirmation") {
       const proceed = window.confirm(
-        "This Thread's worktree has uncommitted changes. Archiving removes the worktree and discards them; the branch is kept. Archive anyway?",
+        "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept. Delete anyway?",
       );
       if (!proceed) return;
-      res = await commands.setThreadArchived(threadId, archived, true);
+      res = await commands.deleteThread(threadId, true);
     }
     if (res.status === "ok") {
-      setThreads((prev) => prev?.map((t) => (t.id === threadId ? { ...t, archived } : t)) ?? null);
+      setThreads((prev) => prev?.filter((t) => t.id !== threadId) ?? null);
+      setSelectedThreadId((current) => (current === threadId ? null : current));
+    } else {
+      setOpenError(res.error.message);
     }
-  }, []);
+  }, [threads]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -480,7 +480,7 @@ export function App() {
             setSelectedThreadId(threadId);
             if (selected) rememberTerminalContext(selected.id, threadId);
           }}
-          onArchiveThread={(threadId, archived) => void setThreadArchived(threadId, archived)}
+          onDeleteThread={(threadId) => void deleteThread(threadId)}
           onNewThread={() => {
             void startNewThread();
           }}
@@ -510,7 +510,7 @@ export function App() {
                 setSelectedThreadId(id);
                 rememberTerminalContext(selected.id, id);
               }}
-              onArchiveThread={(id) => void setThreadArchived(id, true)}
+              onDeleteThread={(id) => void deleteThread(id)}
               onDispatched={(thread) =>
                 setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
               }
@@ -535,7 +535,6 @@ export function App() {
                   }}
                   onThreadUpdated={onThreadUpdated}
                   onStatusChange={onThreadStatusChange}
-                  onPromptSent={onPromptSent}
                   onThreadTitleChange={onThreadTitleChange}
                   prefill={prefill}
                   onPrefillUsed={() => setPrefill(null)}
@@ -656,7 +655,7 @@ interface SidebarProps {
   threads: Thread[] | null;
   selectedThreadId: number | null;
   onSelectThread: (threadId: number) => void;
-  onArchiveThread: (threadId: number, archived: boolean) => void;
+  onDeleteThread: (threadId: number) => void;
   onNewThread: () => void;
   onRenameThread?: (threadId: number, newTitle: string) => void;
   /** ⌘⇧N: every known Project, scanned ones included, is found there. */
@@ -674,7 +673,7 @@ function Sidebar({
   threads,
   selectedThreadId,
   onSelectThread,
-  onArchiveThread,
+  onDeleteThread,
   onNewThread,
   onRenameThread,
   onOpenPalette,
@@ -682,7 +681,6 @@ function Sidebar({
   onOpenSettings,
 }: SidebarProps) {
   const [threadQuery, setThreadQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingThreadId, setEditingThreadId] = useState<number | null>(null);
   const [renameText, setRenameText] = useState("");
@@ -724,10 +722,10 @@ function Sidebar({
   // The selected Project always shows, even before the Core has marked it open.
   const listed = sidebarProjects(projects ?? []);
   const shown = selected && !listed.some((p) => p.id === selected.id) ? [selected, ...listed] : listed;
-  const { active: activeThreads, archived: archivedThreads } = splitThreads(threads ?? [], threadQuery);
+  const activeThreads = filterThreads(threads ?? [], threadQuery);
   const now = new Date();
 
-  const renderThread = (t: Thread, archived: boolean) => (
+  const renderThread = (t: Thread) => (
     <li key={t.id} className="thread-row">
       {editingThreadId === t.id ? (
         <input
@@ -766,11 +764,11 @@ function Sidebar({
       )}
       <button
         className="row-action"
-        onClick={() => onArchiveThread(t.id, !archived)}
-        aria-label={`${archived ? "Unarchive" : "Archive"} ${threadTitle(t)}`}
-        title={archived ? "Unarchive" : "Archive"}
+        onClick={() => onDeleteThread(t.id)}
+        aria-label={`Delete ${threadTitle(t)}`}
+        title="Delete"
       >
-        <ArchiveIcon size={12} />
+        <TrashIcon size={12} />
       </button>
     </li>
   );
@@ -831,25 +829,13 @@ function Sidebar({
                     {threads && activeThreads.length === 0 && (
                       <li className="sidebar-note">{threads.length === 0 ? "No Threads yet" : "No matching Threads"}</li>
                     )}
-                    {activeThreads.map((t) => renderThread(t, false))}
+                    {activeThreads.map((t) => renderThread(t))}
                   </ul>
                 )}
               </li>
             );
           })}
         </ul>
-        {selected && archivedThreads.length > 0 && (
-          <>
-            <button className="sidebar-link" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
-              <ArchiveIcon size={12} /> Archived Threads ({archivedThreads.length})
-            </button>
-            {showArchived && (
-              <ul className="thread-list archived" aria-label="Archived threads">
-                {archivedThreads.map((t) => renderThread(t, true))}
-              </ul>
-            )}
-          </>
-        )}
       </div>
       <button className="sidebar-footer" onClick={onOpenSettings} title="Settings (⌘,)">
         <GearIcon size={14} /> Settings

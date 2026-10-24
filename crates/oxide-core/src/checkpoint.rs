@@ -39,6 +39,17 @@ pub(crate) fn take(cwd: &Path, thread_id: u32, turn_index: u32, phase: Phase) {
     });
 }
 
+/// Drops every Checkpoint of the Thread. Best effort, like [`take`].
+pub(crate) fn forget(cwd: &Path, thread_id: u32) {
+    let prefix = format!("refs/oxide/checkpoints/{thread_id}/");
+    let Ok(refs) = run(cwd, &["for-each-ref", "--format=%(refname)", &prefix]) else {
+        return;
+    };
+    for name in refs.lines().filter(|l| !l.is_empty()) {
+        let _ = run(cwd, &["update-ref", "-d", name]);
+    }
+}
+
 /// What the Turn changed: its two Checkpoints diffed. While the Turn runs, its
 /// end is the working tree right now; a Turn with no start Checkpoint has no diff.
 pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<Diff> {

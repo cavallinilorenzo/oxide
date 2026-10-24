@@ -21,8 +21,8 @@ _Avoid_: Project switcher, quick open
 ## Threads
 
 **Thread**:
-One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in history.
-_Avoid_: Agent, session, chat
+One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in the sidebar until the user deletes it. A finished Thread is deleted, not archived: deleting removes its Transcript, Approvals, attachments and Checkpoints for good, and a Board Thread's worktree with them (its branch stays). The Provider's own session files are left to the Provider. See ADR-0005.
+_Avoid_: Agent, session, chat, Archived Thread
 
 **Thread status**:
 Where a Thread stands right now: working (a Turn is running), needs input (the Provider is waiting on an approval or answer), completed (the last Turn finished and it's the user's move), error (the Turn failed), or interrupted (the Turn was stopped by the user or by quitting Oxide).
@@ -30,10 +30,6 @@ _Avoid_: State, phase
 
 **Continue in new Thread**:
 What a Thread offers instead of its composer when resuming its Provider session fails because the session is gone. It creates a new Thread with the same Provider, Model, Effort and permission mode, whose first prompt is prefilled with a recap (user prompts and final agent messages, no tool output, cut to a fixed length). The two Threads link to each other.
-
-**Archived Thread**:
-A Thread hidden from the Thread Board and sidebar but kept in history, still readable and resumable. Threads are archived, never deleted.
-_Avoid_: Closed, deleted
 
 **Turn**:
 One user prompt in a Thread and everything the Provider does in response, until it completes, is interrupted, or fails.

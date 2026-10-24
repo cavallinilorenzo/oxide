@@ -108,7 +108,7 @@ fn pull_request_event(
     let deadline = Instant::now() + within;
     while let Ok(BoardEvent::ThreadChanged(card)) = rx.recv_deadline(deadline) {
         if card.thread.id == thread_id && card.pull_request.is_some() {
-            return Some(card);
+            return Some(*card);
         }
     }
     None

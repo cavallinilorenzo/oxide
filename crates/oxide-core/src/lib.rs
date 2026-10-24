@@ -47,7 +47,7 @@ use storage_actor::StorageHandle;
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
-pub use worktree::{ArchiveOutcome, DispatchRequest};
+pub use worktree::{DeleteOutcome, DispatchRequest};
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -634,16 +634,57 @@ impl Core {
         Ok(thread)
     }
 
-    /// Archives or unarchives a Thread. Threads are archived, never deleted:
-    /// an Archived Thread keeps its history and stays listed.
-    pub fn set_thread_archived(&self, thread_id: u32, archived: bool) -> Result<()> {
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.execute(
-            "UPDATE threads SET archived = ?2 WHERE id = ?1",
-            (thread_id, archived),
-        )?;
-        drop(db);
-        self.board.publish(thread_id);
+    /// Removes a Thread's Transcript, Approvals, attachments and Checkpoints, and the Thread
+    /// itself. The Thread's actor must already be stopped. Threads that continued it or were
+    /// continued by it simply lose the link.
+    pub(crate) fn remove_thread_records(
+        &self,
+        thread_id: u32,
+        checkpoint_root: &Path,
+    ) -> Result<()> {
+        // The storage actor may still hold writes for this Thread: let them land first.
+        let _ = self.storage.get_snapshot(thread_id, 0);
+
+        let (project_id, attachments) = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let project_id: u32 = db.query_row(
+                "SELECT project_id FROM threads WHERE id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )?;
+            let mut stmt = db.prepare("SELECT attachments FROM turns WHERE thread_id = ?1")?;
+            let attachments: Vec<PathBuf> = stmt
+                .query_map([thread_id], |r| r.get::<_, String>(0))?
+                .filter_map(|json| json.ok())
+                .filter_map(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+                .flatten()
+                .map(PathBuf::from)
+                .collect();
+            drop(stmt);
+            let tx = db.unchecked_transaction()?;
+            for table in ["approvals", "unknown_events", "items"] {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE turn_id IN (SELECT id FROM turns WHERE thread_id = ?1)"
+                    ),
+                    [thread_id],
+                )?;
+            }
+            tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
+            tx.execute(
+                "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",
+                [thread_id],
+            )?;
+            tx.execute("DELETE FROM threads WHERE id = ?1", [thread_id])?;
+            tx.commit()?;
+            (project_id, attachments)
+        };
+
+        checkpoint::forget(checkpoint_root, thread_id);
+        for path in attachments.iter().filter(|p| self.is_stored_attachment(p)) {
+            let _ = std::fs::remove_file(path);
+        }
+        self.board.publish_deleted(project_id, thread_id);
         Ok(())
     }
 
@@ -952,7 +993,6 @@ impl Core {
         }
         self.ensure_worktree(thread_id)?;
         let actor = self.get_or_create_thread_actor(thread_id)?;
-        self.set_thread_archived(thread_id, false)?;
         actor.send_prompt(prompt.to_string(), attachments.to_vec())
     }
 
@@ -1041,7 +1081,6 @@ impl Core {
         };
         let threads: Vec<(u32, String)> = cards
             .iter()
-            .filter(|c| !c.thread.archived)
             .filter_map(|c| Some((c.thread.id, c.thread.branch.clone()?)))
             .collect();
         if threads.is_empty() {

@@ -1,22 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Thread } from "./bindings";
-import { relativeAge, sidebarProjects, splitThreads } from "./threadList";
+import { filterThreads, relativeAge, sidebarProjects } from "./threadList";
 
-const thread = (id: number, archived = false) => ({ id, archived }) as Thread;
+const thread = (id: number) => ({ id }) as Thread;
 
-describe("splitThreads", () => {
-  const threads = [thread(1), thread(12, true), thread(3, true), thread(21)];
+describe("filterThreads", () => {
+  const threads = [thread(1), thread(12), thread(3), thread(21)];
 
-  it("keeps archived Threads out of the sidebar list", () => {
-    const { active, archived } = splitThreads(threads, "");
-    expect(active.map((t) => t.id)).toEqual([1, 21]);
-    expect(archived.map((t) => t.id)).toEqual([12, 3]);
+  it("keeps every Thread without a query", () => {
+    expect(filterThreads(threads, "").map((t) => t.id)).toEqual([1, 12, 3, 21]);
   });
 
-  it("filters both lists by title", () => {
-    const { active, archived } = splitThreads(threads, " #1");
-    expect(active.map((t) => t.id)).toEqual([1]);
-    expect(archived.map((t) => t.id)).toEqual([12]);
+  it("filters by title", () => {
+    expect(filterThreads(threads, " #1").map((t) => t.id)).toEqual([1, 12]);
   });
 });
 

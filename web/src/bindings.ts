@@ -39,10 +39,10 @@ export const commands = {
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	/**
-	 *  Archives or unarchives a Thread. Archiving a Board Thread removes its worktree; with uncommitted
-	 *  changes that waits for `discard_changes`.
+	 *  Deletes a Thread and its Transcript. Deleting a Board Thread removes its worktree; with
+	 *  uncommitted changes that waits for `discard_changes`.
 	 */
-	setThreadArchived: (threadId: number, archived: boolean, discardChanges: boolean) => typedError<ArchiveOutcome, AppError>(__TAURI_INVOKE("set_thread_archived", { threadId, archived, discardChanges })),
+	deleteThread: (threadId: number, discardChanges: boolean) => typedError<DeleteOutcome, AppError>(__TAURI_INVOKE("delete_thread", { threadId, discardChanges })),
 	setThreadPermissionMode: (threadId: number, permissionMode: PermissionMode) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_permission_mode", { threadId, permissionMode })),
 	setThreadProvider: (threadId: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("set_thread_provider", { threadId, provider })),
 	renameThread: (threadId: number, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_thread", { threadId, title })),
@@ -173,8 +173,6 @@ export type ApprovalSnapshot_Serialize = {
 	decidedAt: string | null,
 };
 
-export type ArchiveOutcome = "archived" | "needs-confirmation";
-
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
 
@@ -196,9 +194,9 @@ export type BoardCard_Serialize = {
 
 export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
 
-export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize };
+export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize } | { type: "ThreadDeleted"; payload: number };
 
-export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize };
+export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize } | { type: "ThreadDeleted"; payload: number };
 
 /**  A Board Thread's pull request: its state and a tally of its checks. */
 export type BranchPullRequest = {
@@ -240,6 +238,8 @@ export type DebugSequencedThreadEvent_Serialize = {
 	event: ThreadEvent_Serialize,
 	rawPayload: string | null,
 };
+
+export type DeleteOutcome = "deleted" | "needs-confirmation";
 
 export type Detection = Detection_Serialize | Detection_Deserialize;
 
@@ -828,7 +828,6 @@ export type Thread_Deserialize = {
 	effort?: string | null,
 	permissionMode: PermissionMode,
 	status: ThreadStatus,
-	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
 	title?: string | null,
@@ -849,7 +848,6 @@ export type Thread_Serialize = {
 	effort: string | null,
 	permissionMode: PermissionMode,
 	status: ThreadStatus,
-	archived: boolean,
 	createdAt: string,
 	updatedAt: string,
 	title: string | null,

@@ -122,6 +122,11 @@ pub const MIGRATIONS: &[&str] = &[
     UPDATE projects SET opened_at = created_at
         WHERE id IN (SELECT DISTINCT project_id FROM threads);
 ",
+    // Threads are deleted, not archived: a finished Thread leaves nothing behind in the sidebar
+    // or the context of the next one. Threads archived before this reappear in the list.
+    "
+    ALTER TABLE threads DROP COLUMN archived;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

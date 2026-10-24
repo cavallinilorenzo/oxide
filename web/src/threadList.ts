@@ -2,17 +2,10 @@ import type { Project, Thread } from "./bindings";
 
 export const threadTitle = (thread: Pick<Thread, "id" | "title">) => thread.title || `Thread #${thread.id}`;
 
-/** Splits Threads into the sidebar list and the Archived list, both filtered by title only. */
-export function splitThreads(threads: Thread[], query: string) {
+/** The sidebar's Threads, filtered by title only. */
+export function filterThreads(threads: Thread[], query: string): Thread[] {
   const needle = query.trim().toLowerCase();
-  const active: Thread[] = [];
-  const archived: Thread[] = [];
-  for (const t of threads) {
-    if (needle && !threadTitle(t).toLowerCase().includes(needle)) continue;
-    if (t.archived) archived.push(t);
-    else active.push(t);
-  }
-  return { active, archived };
+  return needle ? threads.filter((t) => threadTitle(t).toLowerCase().includes(needle)) : threads;
 }
 
 /** The sidebar lists only Projects the user opened; a scan just makes them findable in ⌘⇧N. */

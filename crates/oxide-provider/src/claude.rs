@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex};
 pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 
 /// Pinned version range for Claude Code tested with Oxide.
-/// Range: >= 0.2.0, < 2.0.0
+/// Range: >= 0.2.0, < 3.0.0
 pub const PINNED_VERSION_MIN: (u64, u64, u64) = (0, 2, 0);
-pub const PINNED_VERSION_MAX: (u64, u64, u64) = (2, 0, 0);
+pub const PINNED_VERSION_MAX: (u64, u64, u64) = (3, 0, 0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCatalogEntry {
@@ -445,7 +445,7 @@ impl Provider for ClaudeCodeProvider {
         let warning = if let Some(ref ver) = parsed_version {
             if !Self::is_version_within_pinned_range(ver) {
                 Some(format!(
-                    "Claude Code version {ver} is outside the pinned range tested with Oxide (>= 0.2.0, < 2.0.0)"
+                    "Claude Code version {ver} is outside the pinned range tested with Oxide (>= 0.2.0, < 3.0.0)"
                 ))
             } else {
                 None

@@ -1265,7 +1265,7 @@ async fn checkout_pull_request(
 
 #[tauri::command]
 #[specta::specta]
-fn create_thread(
+async fn create_thread(
     core: State<'_, Arc<Core>>,
     project_id: u32,
     provider: String,
@@ -1274,8 +1274,11 @@ fn create_thread(
     permission_mode: Option<PermissionMode>,
 ) -> Result<Thread, AppError> {
     let mode: Option<oxide_core::PermissionMode> = permission_mode.map(|m| convert(&m));
-    let summary = core.create_thread(project_id, &provider, model, effort, mode)?;
-    Ok(convert(&summary))
+    git_blocking(&core, move |core| {
+        core.create_thread(project_id, &provider, model, effort, mode)
+    })
+    .await
+    .map(|summary| convert(&summary))
 }
 
 /// A Board Thread handed off from the Thread Board.
@@ -1368,13 +1371,14 @@ fn set_thread_permission_mode(
 
 #[tauri::command]
 #[specta::specta]
-fn set_thread_provider(
+async fn set_thread_provider(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
     provider: String,
 ) -> Result<Thread, AppError> {
-    let summary = core.set_thread_provider(thread_id, &provider)?;
-    Ok(convert(&summary))
+    git_blocking(&core, move |core| core.set_thread_provider(thread_id, &provider))
+        .await
+        .map(|summary| convert(&summary))
 }
 
 #[tauri::command]
@@ -1411,9 +1415,13 @@ pub struct Detection {
 
 #[tauri::command]
 #[specta::specta]
-fn detect_provider(core: State<'_, Arc<Core>>, provider: String) -> Result<Detection, AppError> {
-    let det = core.detect_provider(&provider);
-    Ok(convert(&det))
+async fn detect_provider(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+) -> Result<Detection, AppError> {
+    git_blocking(&core, move |core| Ok(core.detect_provider(&provider)))
+        .await
+        .map(|det| convert(&det))
 }
 
 #[tauri::command]
@@ -1428,13 +1436,14 @@ fn get_provider_capabilities(
 
 #[tauri::command]
 #[specta::specta]
-fn get_model_catalog(
+async fn get_model_catalog(
     core: State<'_, Arc<Core>>,
     provider: String,
     refresh: bool,
 ) -> Result<Vec<ModelInfo>, AppError> {
-    let models = core.get_model_catalog(&provider, refresh)?;
-    Ok(convert(&models))
+    git_blocking(&core, move |core| core.get_model_catalog(&provider, refresh))
+        .await
+        .map(|models| convert(&models))
 }
 
 #[tauri::command]
@@ -1454,13 +1463,16 @@ fn set_favourite_models(
 
 #[tauri::command]
 #[specta::specta]
-fn set_thread_model_and_effort(
+async fn set_thread_model_and_effort(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
     model: Option<String>,
     effort: Option<String>,
 ) -> Result<(), AppError> {
-    Ok(core.set_thread_model_and_effort(thread_id, model, effort)?)
+    git_blocking(&core, move |core| {
+        core.set_thread_model_and_effort(thread_id, model, effort)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1474,14 +1486,17 @@ fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Threa
 
 #[tauri::command]
 #[specta::specta]
-fn send_prompt(
+async fn send_prompt(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
     prompt: String,
     attachments: Vec<String>,
 ) -> Result<(), AppError> {
     let paths: Vec<std::path::PathBuf> = attachments.into_iter().map(Into::into).collect();
-    Ok(core.send_prompt_with_attachments(thread_id, &prompt, &paths)?)
+    git_blocking(&core, move |core| {
+        core.send_prompt_with_attachments(thread_id, &prompt, &paths)
+    })
+    .await
 }
 
 /// Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path.

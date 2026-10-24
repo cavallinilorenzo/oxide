@@ -37,7 +37,7 @@ describe("providerHints", () => {
       installed: true,
       version: "3.0.0",
       authenticated: true,
-      warning: "Claude Code version 3.0.0 is outside the pinned range tested with Oxide (>= 0.2.0, < 2.0.0)",
+      warning: "Claude Code version 3.0.0 is outside the pinned range tested with Oxide (>= 0.2.0, < 3.0.0)",
     });
     expect(hint).not.toBeNull();
     expect(hint?.type).toBe("warning");

@@ -125,10 +125,7 @@ fn fixture() -> Fixture {
 
     let core = Core::open(root.join("home")).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![scan.to_string_lossy().into_owned()];
-    core.save_settings(&settings).unwrap();
-    let project = core.rescan_projects().unwrap().remove(0);
+    let project = core.add_project(&work.to_string_lossy()).unwrap();
     let system = Arc::new(RecordingSystem::default());
     core.set_system(system.clone());
     core.set_gh_search_path(Some(vec![gh_dir.clone()]));

@@ -97,12 +97,8 @@ export function App() {
       : [...previous, context]);
   }, []);
 
-  const [defaultParentFolder, setDefaultParentFolder] = useState("~/Developer");
   useEffect(() => {
     if (!showPalette) return;
-    void commands.getSettings().then((s) => {
-      if (s.settings.scanRoots[0]) setDefaultParentFolder(s.settings.scanRoots[0]);
-    });
     // Scanned repositories are only offered here, so refresh them while the palette is open.
     void commands.rescanProjects().then((res) => {
       if (res.status === "ok") setProjects(res.data);
@@ -434,7 +430,7 @@ export function App() {
       {showPalette && (
         <ProjectPalette
           projects={projects ?? []}
-          defaultParent={defaultParentFolder}
+          defaultParent="~/Developer"
           onClose={() => setShowPalette(false)}
           onStartThread={startThreadIn}
           onOpenProject={openProject}

@@ -7,14 +7,9 @@ fn setup() -> (tempfile::TempDir, Core, u32) {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project_id = projects[0].id;
+    let project_id = core.add_project(&project_dir.to_string_lossy()).unwrap().id;
 
     (dir, core, project_id)
 }

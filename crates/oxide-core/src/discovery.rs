@@ -24,6 +24,22 @@ const SKIPPED: &[&str] = &[
     "Pods",
 ];
 
+/// Conventional project folders, resolved against the user's home without configuration.
+pub fn default_roots(user_home: &Path) -> Vec<PathBuf> {
+    [
+        "Developer",
+        "Projects",
+        "Code",
+        "dev",
+        "src",
+        "workspace",
+        "repos",
+    ]
+    .iter()
+    .map(|folder| user_home.join(folder))
+    .collect()
+}
+
 /// Canonical (symlink-resolved) paths of every repository under `roots`, sorted.
 /// A repository is a folder holding a `.git` directory. Roots that don't exist
 /// are ignored.

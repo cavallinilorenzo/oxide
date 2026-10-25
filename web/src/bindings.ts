@@ -686,7 +686,6 @@ export type SettingsState_Serialize = {
 export type Settings_Deserialize = {
 	defaultProvider: Provider,
 	providers: Providers_Deserialize,
-	scanRoots: string[],
 	confirmQuit: boolean,
 	editor: string,
 	claudeCustomizations: boolean,
@@ -695,7 +694,6 @@ export type Settings_Deserialize = {
 export type Settings_Serialize = {
 	defaultProvider: Provider,
 	providers: Providers_Serialize,
-	scanRoots: string[],
 	confirmQuit: boolean,
 	editor: string,
 	claudeCustomizations: boolean,

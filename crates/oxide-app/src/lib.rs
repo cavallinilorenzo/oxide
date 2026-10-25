@@ -231,7 +231,6 @@ pub struct Providers {
 pub struct Settings {
     default_provider: Provider,
     providers: Providers,
-    scan_roots: Vec<String>,
     confirm_quit: bool,
     editor: String,
     claude_customizations: bool,

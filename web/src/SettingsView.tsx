@@ -268,30 +268,6 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         })}
       </section>
 
-      <section className="settings-section" aria-labelledby="settings-projects">
-        <header className="settings-section-header">
-          <h2 id="settings-projects">Projects</h2>
-          <p>Choose where Oxide looks for Git repositories.</p>
-        </header>
-        <div className="settings-card">
-          <label>
-            Scan roots (one per line)
-            <textarea
-              rows={3}
-              value={draft.scanRoots.join("\n")}
-              onChange={(e) =>
-                set({
-                  scanRoots: e.target.value
-                    .split("\n")
-                    .filter((l) => l.trim() !== ""),
-                })
-              }
-            />
-            {fieldErrors("scanRoots")}
-          </label>
-        </div>
-      </section>
-
       {saveError && <p className="error">{saveError}</p>}
       <div className="actions">
         <button className="primary" onClick={save}>

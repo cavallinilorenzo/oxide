@@ -60,7 +60,6 @@ pub struct Providers {
 pub struct Settings {
     pub default_provider: Provider,
     pub providers: Providers,
-    pub scan_roots: Vec<String>,
     pub confirm_quit: bool,
     /// Bundle identifier of the editor "Open in editor" uses; empty or not detected means
     /// the first detected editor.
@@ -75,17 +74,6 @@ impl Default for Settings {
         Self {
             default_provider: Provider::Claude,
             providers: Providers::default(),
-            scan_roots: [
-                "Developer",
-                "Projects",
-                "Code",
-                "dev",
-                "src",
-                "workspace",
-                "repos",
-            ]
-            .map(|d| format!("~/{d}"))
-            .into(),
             confirm_quit: true,
             editor: String::new(),
             claude_customizations: false,
@@ -261,6 +249,8 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
     let mut errors = vec![];
     let defaults = Settings::default();
     let mut root = root;
+    // Older versions exposed discovery roots as a setting. Ignore it, even if malformed.
+    root.remove("scanRoots");
     let settings = Settings {
         default_provider: field(
             &mut root,
@@ -273,7 +263,6 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             take_object(&mut root, "providers", &mut errors),
             &mut errors,
         ),
-        scan_roots: field(&mut root, "", "scanRoots", defaults.scan_roots, &mut errors),
         confirm_quit: field(
             &mut root,
             "",

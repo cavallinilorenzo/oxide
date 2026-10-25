@@ -11,15 +11,9 @@ fn creates_thread_and_lists_it() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    assert_eq!(projects.len(), 1);
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let thread = core
         .create_thread(project.id, "fake", None, None, PermissionMode::AutoEdit)
@@ -40,14 +34,9 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     // Create a fake provider with scripted events
     let fake = FakeProvider::default();
@@ -147,14 +136,9 @@ fn resubscribing_after_simulated_gap_returns_consistent_snapshot() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -219,14 +203,9 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -352,11 +331,11 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
 fn open_core_with_project(dir: &std::path::Path) -> (Core, u32) {
     let core = Core::open(dir).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     std::fs::create_dir_all(dir.join("my-project").join(".git")).unwrap();
-    let project_id = core.rescan_projects().unwrap()[0].id;
+    let project_id = core
+        .add_project(&dir.join("my-project").to_string_lossy())
+        .unwrap()
+        .id;
     (core, project_id)
 }
 
@@ -674,11 +653,11 @@ fn core_with_project() -> (tempfile::TempDir, Core, u32) {
     let dir = tempdir().unwrap();
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     std::fs::create_dir_all(dir.path().join("proj").join(".git")).unwrap();
-    let id = core.rescan_projects().unwrap()[0].id;
+    let id = core
+        .add_project(&dir.path().join("proj").to_string_lossy())
+        .unwrap()
+        .id;
     (dir, core, id)
 }
 
@@ -849,11 +828,10 @@ fn attachments_outside_the_attachments_folder_are_rejected_even_with_dotdot() {
 /// A Thread whose fake Provider answers every prompt with one completed Turn
 /// holding one agent message, `"answer to <prompt>"`.
 fn thread_with_answering_provider(core: &Core, dir: &std::path::Path) -> oxide_core::ThreadSummary {
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     std::fs::create_dir_all(dir.join("my-project").join(".git")).unwrap();
-    let project = core.rescan_projects().unwrap().remove(0);
+    let project = core
+        .add_project(&dir.join("my-project").to_string_lossy())
+        .unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -1004,7 +982,6 @@ fn switching_provider_before_first_turn_replaces_model_effort_and_permission_mod
     core.set_real_time_ticker(false);
 
     let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
     settings.providers.claude.model = Some("claude-3-7-sonnet".into());
     settings.providers.claude.effort = Some("high".into());
     settings.providers.claude.permission_mode = PermissionMode::AutoEdit;
@@ -1016,7 +993,9 @@ fn switching_provider_before_first_turn_replaces_model_effort_and_permission_mod
     core.save_settings(&settings).unwrap();
 
     std::fs::create_dir_all(dir.path().join("my-project").join(".git")).unwrap();
-    let project = core.rescan_projects().unwrap().remove(0);
+    let project = core
+        .add_project(&dir.path().join("my-project").to_string_lossy())
+        .unwrap();
 
     // Create thread with provider "claude" and no explicit model/effort/permission_mode
     let thread = core

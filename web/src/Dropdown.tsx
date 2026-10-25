@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon } from "@primer/octicons-react";
 export interface DropdownOption<T extends string> {
   value: T;
   label: string;
+  description?: string;
   icon?: ReactNode;
 }
 
@@ -83,7 +84,7 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
               select(option.value);
             }
           }}>
-          {option.icon}<span>{option.label}</span>
+          {option.icon}<span>{option.label}{option.description && <small className="dropdown-description">{option.description}</small>}</span>
           {option.value === value && <CheckIcon size={16} />}
         </div>)}
       </div>}

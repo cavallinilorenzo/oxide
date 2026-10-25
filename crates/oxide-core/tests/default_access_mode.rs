@@ -29,14 +29,13 @@ fn new_threads_use_persisted_provider_defaults_and_preserve_explicit_modes() {
     std::fs::create_dir_all(project.join(".git")).unwrap();
     let core = Core::open(home.path()).unwrap();
     let mut settings = core.settings().settings;
-    settings.scan_roots = vec![home.path().to_string_lossy().into_owned()];
     settings.providers.claude.permission_mode = PermissionMode::FullAccess;
     settings.providers.codex.permission_mode = PermissionMode::AutoEdit;
     settings.providers.antigravity.permission_mode = PermissionMode::FullAccess;
     core.save_settings(&settings).unwrap();
     drop(core);
     let core = Core::open(home.path()).unwrap();
-    let project_id = core.rescan_projects().unwrap()[0].id;
+    let project_id = core.add_project(&project.to_string_lossy()).unwrap().id;
     for (provider, expected) in [
         ("claude", PermissionMode::FullAccess),
         ("codex", PermissionMode::AutoEdit),

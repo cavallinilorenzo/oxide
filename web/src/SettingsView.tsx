@@ -4,6 +4,7 @@ import {
   commands,
   type Detection,
   type Editor,
+  type ModelInfo,
   type SettingsState,
   type Settings_Deserialize as Settings,
 } from "./bindings";
@@ -11,6 +12,9 @@ import {
   getClaudeCodeHint,
   CLAUDE_30_DAY_RETENTION_WARNING,
 } from "./providerHints";
+
+import { Dropdown } from "./Dropdown";
+import { ProviderMark } from "./ProviderMark";
 
 type Provider = Settings["defaultProvider"];
 type PermissionMode = Settings["providers"]["claude"]["permissionMode"];
@@ -26,8 +30,11 @@ const MODES: { id: PermissionMode; label: string }[] = [
   { id: "full-access", label: "Full access" },
 ];
 
-/** Empty input means "the Provider's own default". */
-const orNull = (v: string) => (v.trim() === "" ? null : v);
+/** Retain saved values when catalogs change or a Provider is offline. */
+const withSavedValue = (options: { value: string; label: string }[], value: string | null | undefined) =>
+  value && !options.some((option) => option.value === value)
+    ? [...options, { value, label: value }]
+    : options;
 
 export function SettingsView({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<SettingsState | null>(null);
@@ -35,6 +42,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [claudeDetection, setClaudeDetection] = useState<Detection | null>(null);
   const [editors, setEditors] = useState<Editor[]>([]);
+  const [catalogs, setCatalogs] = useState<Partial<Record<Provider, ModelInfo[]>>>({});
 
   useEffect(() => {
     // A valid change on disk replaces the draft (the file is the source of
@@ -52,8 +60,19 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     commands.detectedEditors().then((res) => {
       if (res.status === "ok") setEditors(res.data);
     });
+    let active = true;
+    for (const provider of PROVIDERS) {
+      commands.getModelCatalog(provider.id, false).then((result) => {
+        if (active && result.status === "ok") {
+          setCatalogs((previous) => ({ ...previous, [provider.id]: result.data }));
+        }
+      }).catch(() => { /* Offline Providers retain their saved defaults. */ });
+    }
     const unlisten = listen<SettingsState>("settings-changed", (e) => apply(e.payload));
-    return () => void unlisten.then((f) => f());
+    return () => {
+      active = false;
+      void unlisten.then((f) => f());
+    };
   }, []);
 
   if (!state || !draft) return <main className="settings" aria-label="Settings" />;
@@ -94,19 +113,19 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
       )}
 
-      <label>
-        Default Provider
-        <select value={draft.defaultProvider} onChange={(e) => set({ defaultProvider: e.target.value as Provider })}>
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+      <div className="settings-field">
+        <span>Default Provider</span>
+        <Dropdown label="Default Provider" value={draft.defaultProvider}
+          options={PROVIDERS.map((p) => ({ value: p.id, label: p.label, icon: <ProviderMark provider={p.id} /> }))}
+          onChange={(defaultProvider) => set({ defaultProvider })} />
         {fieldErrors("defaultProvider")}
-      </label>
+      </div>
 
       {PROVIDERS.map((p) => {
+        const models = catalogs[p.id] ?? [];
+        const current = draft.providers[p.id];
+        const model = models.find((m) => m.id === current.model);
+        const efforts = model?.supportedEfforts ?? [...new Set(models.flatMap((m) => m.supportedEfforts))];
         const hint = p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
         return (
           <fieldset key={p.id}>
@@ -122,38 +141,33 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
                 <strong>Session retention warning:</strong> {CLAUDE_30_DAY_RETENTION_WARNING}
               </div>
             )}
-            <label>
-              Model
-              <input
-                value={draft.providers[p.id].model ?? ""}
-                placeholder="Provider default"
-                onChange={(e) => setProvider(p.id, { model: orNull(e.target.value) })}
-              />
+            <div className="settings-field">
+              <span>Model</span>
+              <Dropdown label={`${p.label} Model`} value={current.model ?? ""}
+                options={withSavedValue([
+                  { value: "", label: "Provider default" },
+                  ...models.map((m) => ({ value: m.id, label: m.name })),
+                ], current.model)}
+                onChange={(value) => setProvider(p.id, { model: value || null })} />
               {fieldErrors(`providers.${p.id}.model`)}
-            </label>
-            <label>
-              Effort
-              <input
-                value={draft.providers[p.id].effort ?? ""}
-                placeholder="Provider default"
-                onChange={(e) => setProvider(p.id, { effort: orNull(e.target.value) })}
-              />
+            </div>
+            <div className="settings-field">
+              <span>Effort</span>
+              <Dropdown label={`${p.label} Effort`} value={current.effort ?? ""}
+                options={withSavedValue([
+                  { value: "", label: "Provider default" },
+                  ...efforts.map((effort) => ({ value: effort, label: effort })),
+                ], current.effort)}
+                onChange={(value) => setProvider(p.id, { effort: value || null })} />
               {fieldErrors(`providers.${p.id}.effort`)}
-            </label>
-            <label>
-              Permission mode
-              <select
-                value={draft.providers[p.id].permissionMode}
-                onChange={(e) => setProvider(p.id, { permissionMode: e.target.value as PermissionMode })}
-              >
-                {MODES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+            </div>
+            <div className="settings-field">
+              <span>Permission mode</span>
+              <Dropdown label={`${p.label} Permission mode`} value={current.permissionMode}
+                options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+                onChange={(permissionMode) => setProvider(p.id, { permissionMode })} />
               {fieldErrors(`providers.${p.id}.permissionMode`)}
-            </label>
+            </div>
           </fieldset>
         );
       })}
@@ -185,18 +199,16 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       </label>
       <p className="hint">Off keeps a new Thread’s context window clean. Applies to Threads started after saving.</p>
 
-      <label>
-        Editor for “Open in editor”
-        <select value={draft.editor} onChange={(e) => set({ editor: e.target.value })}>
-          <option value="">First detected editor</option>
-          {editors.map((editor) => (
-            <option key={editor.bundleId} value={editor.bundleId}>
-              {editor.name}
-            </option>
-          ))}
-        </select>
+      <div className="settings-field">
+        <span>Editor for "Open in editor"</span>
+        <Dropdown label="Editor for Open in editor" value={draft.editor}
+          options={withSavedValue([
+            { value: "", label: "First detected editor" },
+            ...editors.map((editor) => ({ value: editor.bundleId, label: editor.name })),
+          ], draft.editor)}
+          onChange={(editor) => set({ editor })} />
         {fieldErrors("editor")}
-      </label>
+      </div>
 
       {saveError && <p className="error">{saveError}</p>}
       <div className="actions">

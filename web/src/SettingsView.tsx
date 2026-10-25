@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { ProviderMark } from "./ProviderMark";
 import {
   commands,
   type Detection,
@@ -33,7 +34,9 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [claudeDetection, setClaudeDetection] = useState<Detection | null>(null);
+  const [claudeDetection, setClaudeDetection] = useState<Detection | null>(
+    null,
+  );
   const [editors, setEditors] = useState<Editor[]>([]);
 
   useEffect(() => {
@@ -52,17 +55,30 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     commands.detectedEditors().then((res) => {
       if (res.status === "ok") setEditors(res.data);
     });
-    const unlisten = listen<SettingsState>("settings-changed", (e) => apply(e.payload));
+    const unlisten = listen<SettingsState>("settings-changed", (e) =>
+      apply(e.payload),
+    );
     return () => void unlisten.then((f) => f());
   }, []);
 
-  if (!state || !draft) return <main className="settings" aria-label="Settings" />;
+  if (!state || !draft)
+    return <main className="settings" aria-label="Settings" />;
 
-  const errorsFor = (path: string) => state.errors.filter((e) => e.path === path);
+  const errorsFor = (path: string) =>
+    state.errors.filter((e) => e.path === path);
   const fileErrors = state.errors;
   const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
-  const setProvider = (p: Provider, patch: Partial<Settings["providers"][Provider]>) =>
-    setDraft({ ...draft, providers: { ...draft.providers, [p]: { ...draft.providers[p], ...patch } } });
+  const setProvider = (
+    p: Provider,
+    patch: Partial<Settings["providers"][Provider]>,
+  ) =>
+    setDraft({
+      ...draft,
+      providers: {
+        ...draft.providers,
+        [p]: { ...draft.providers[p], ...patch },
+      },
+    });
 
   const save = async () => {
     const r = await commands.saveSettings(draft);
@@ -78,11 +94,15 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
 
   return (
     <main className="settings" aria-label="Settings">
-      <h1>Settings</h1>
+      <header className="settings-header">
+        <h1>Settings</h1>
+        <p>Manage your defaults, Providers and Projects.</p>
+      </header>
       {fileErrors.length > 0 && (
         <section className="error-summary" role="alert">
           <p>
-            <strong>settings.json has errors.</strong> Oxide is using the last valid settings.
+            <strong>settings.json has errors.</strong> Oxide is using the last
+            valid settings.
           </p>
           <ul>
             {fileErrors.map((e) => (
@@ -94,113 +114,197 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
       )}
 
-      <label>
-        Default Provider
-        <select value={draft.defaultProvider} onChange={(e) => set({ defaultProvider: e.target.value as Provider })}>
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        {fieldErrors("defaultProvider")}
-      </label>
-
-      {PROVIDERS.map((p) => {
-        const hint = p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
-        return (
-          <fieldset key={p.id}>
-            <legend>{p.label}</legend>
-            {p.id === "claude" && hint && hint.type !== "ok" && (
-              <div className={`provider-hint ${hint.type}`} role="alert">
-                <span>{hint.message}</span>
-                {hint.command && <code>{hint.command}</code>}
-              </div>
-            )}
-            {p.id === "claude" && (
-              <div className="provider-warning" role="note" aria-label="Retention warning">
-                <strong>Session retention warning:</strong> {CLAUDE_30_DAY_RETENTION_WARNING}
-              </div>
-            )}
+      <section className="settings-section" aria-labelledby="settings-general">
+        <header className="settings-section-header">
+          <h2 id="settings-general">General</h2>
+          <p>Defaults for new Threads and the app.</p>
+        </header>
+        <div className="settings-card">
+          <div className="settings-fields settings-general-fields">
             <label>
-              Model
-              <input
-                value={draft.providers[p.id].model ?? ""}
-                placeholder="Provider default"
-                onChange={(e) => setProvider(p.id, { model: orNull(e.target.value) })}
-              />
-              {fieldErrors(`providers.${p.id}.model`)}
-            </label>
-            <label>
-              Effort
-              <input
-                value={draft.providers[p.id].effort ?? ""}
-                placeholder="Provider default"
-                onChange={(e) => setProvider(p.id, { effort: orNull(e.target.value) })}
-              />
-              {fieldErrors(`providers.${p.id}.effort`)}
-            </label>
-            <label>
-              Permission mode
+              Default Provider
               <select
-                value={draft.providers[p.id].permissionMode}
-                onChange={(e) => setProvider(p.id, { permissionMode: e.target.value as PermissionMode })}
+                value={draft.defaultProvider}
+                onChange={(e) =>
+                  set({ defaultProvider: e.target.value as Provider })
+                }
               >
-                {MODES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
+                {PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
                   </option>
                 ))}
               </select>
-              {fieldErrors(`providers.${p.id}.permissionMode`)}
+              {fieldErrors("defaultProvider")}
             </label>
-          </fieldset>
-        );
-      })}
 
-      <label>
-        Scan roots (one per line)
-        <textarea
-          rows={3}
-          value={draft.scanRoots.join("\n")}
-          onChange={(e) => set({ scanRoots: e.target.value.split("\n").filter((l) => l.trim() !== "") })}
-        />
-        {fieldErrors("scanRoots")}
-      </label>
+            <label>
+              Editor for “Open in editor”
+              <select
+                value={draft.editor}
+                onChange={(e) => set({ editor: e.target.value })}
+              >
+                <option value="">First detected editor</option>
+                {editors.map((editor) => (
+                  <option key={editor.bundleId} value={editor.bundleId}>
+                    {editor.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors("editor")}
+            </label>
+          </div>
+          <label className="inline">
+            <input
+              type="checkbox"
+              checked={draft.confirmQuit}
+              onChange={(e) => set({ confirmQuit: e.target.checked })}
+            />
+            Confirm before quitting
+            {fieldErrors("confirmQuit")}
+          </label>
+        </div>
+      </section>
 
-      <label className="inline">
-        <input type="checkbox" checked={draft.confirmQuit} onChange={(e) => set({ confirmQuit: e.target.checked })} />
-        Confirm before quitting
-        {fieldErrors("confirmQuit")}
-      </label>
+      <section
+        className="settings-section"
+        aria-labelledby="settings-providers"
+      >
+        <header className="settings-section-header">
+          <h2 id="settings-providers">Providers</h2>
+          <p>Leave Model and Effort blank to use the Provider’s defaults.</p>
+        </header>
+        {PROVIDERS.map((p) => {
+          const hint =
+            p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
+          return (
+            <section
+              className="settings-card"
+              key={p.id}
+              aria-labelledby={`settings-provider-${p.id}`}
+            >
+              <h3
+                className="settings-provider-title"
+                id={`settings-provider-${p.id}`}
+              >
+                <span aria-hidden="true">
+                  <ProviderMark provider={p.id} size={20} />
+                </span>
+                {p.label}
+              </h3>
+              {p.id === "claude" && hint && hint.type !== "ok" && (
+                <div className={`provider-hint ${hint.type}`} role="alert">
+                  <span>{hint.message}</span>
+                  {hint.command && <code>{hint.command}</code>}
+                </div>
+              )}
+              {p.id === "claude" && (
+                <div
+                  className="provider-warning"
+                  role="note"
+                  aria-label="Retention warning"
+                >
+                  <strong>Session retention warning:</strong>{" "}
+                  {CLAUDE_30_DAY_RETENTION_WARNING}
+                </div>
+              )}
+              <div className="settings-fields">
+                <label>
+                  Model
+                  <input
+                    value={draft.providers[p.id].model ?? ""}
+                    placeholder="Provider default"
+                    onChange={(e) =>
+                      setProvider(p.id, { model: orNull(e.target.value) })
+                    }
+                  />
+                  {fieldErrors(`providers.${p.id}.model`)}
+                </label>
+                <label>
+                  Effort
+                  <input
+                    value={draft.providers[p.id].effort ?? ""}
+                    placeholder="Provider default"
+                    onChange={(e) =>
+                      setProvider(p.id, { effort: orNull(e.target.value) })
+                    }
+                  />
+                  {fieldErrors(`providers.${p.id}.effort`)}
+                </label>
+                <label>
+                  Permission mode
+                  <select
+                    value={draft.providers[p.id].permissionMode}
+                    onChange={(e) =>
+                      setProvider(p.id, {
+                        permissionMode: e.target.value as PermissionMode,
+                      })
+                    }
+                  >
+                    {MODES.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  {fieldErrors(`providers.${p.id}.permissionMode`)}
+                </label>
+              </div>
+              {p.id === "claude" && (
+                <div className="settings-customizations">
+                  <label className="inline">
+                    <input
+                      type="checkbox"
+                      aria-describedby="settings-customizations-hint"
+                      checked={draft.claudeCustomizations}
+                      onChange={(e) =>
+                        set({ claudeCustomizations: e.target.checked })
+                      }
+                    />
+                    Load Claude Code’s own CLAUDE.md, skills, plugins, hooks and
+                    MCP servers
+                    {fieldErrors("claudeCustomizations")}
+                  </label>
+                  <p className="hint" id="settings-customizations-hint">
+                    Off keeps a new Thread’s context window clean. Applies to
+                    Threads started after saving.
+                  </p>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </section>
 
-      <label className="inline">
-        <input
-          type="checkbox"
-          checked={draft.claudeCustomizations}
-          onChange={(e) => set({ claudeCustomizations: e.target.checked })}
-        />
-        Load Claude Code’s own CLAUDE.md, skills, plugins, hooks and MCP servers
-        {fieldErrors("claudeCustomizations")}
-      </label>
-      <p className="hint">Off keeps a new Thread’s context window clean. Applies to Threads started after saving.</p>
-
-      <label>
-        Editor for “Open in editor”
-        <select value={draft.editor} onChange={(e) => set({ editor: e.target.value })}>
-          <option value="">First detected editor</option>
-          {editors.map((editor) => (
-            <option key={editor.bundleId} value={editor.bundleId}>
-              {editor.name}
-            </option>
-          ))}
-        </select>
-        {fieldErrors("editor")}
-      </label>
+      <section className="settings-section" aria-labelledby="settings-projects">
+        <header className="settings-section-header">
+          <h2 id="settings-projects">Projects</h2>
+          <p>Choose where Oxide looks for Git repositories.</p>
+        </header>
+        <div className="settings-card">
+          <label>
+            Scan roots (one per line)
+            <textarea
+              rows={3}
+              value={draft.scanRoots.join("\n")}
+              onChange={(e) =>
+                set({
+                  scanRoots: e.target.value
+                    .split("\n")
+                    .filter((l) => l.trim() !== ""),
+                })
+              }
+            />
+            {fieldErrors("scanRoots")}
+          </label>
+        </div>
+      </section>
 
       {saveError && <p className="error">{saveError}</p>}
       <div className="actions">
-        <button onClick={save}>Save</button>
+        <button className="primary" onClick={save}>
+          Save
+        </button>
         <button onClick={onClose}>Close</button>
       </div>
     </main>

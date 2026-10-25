@@ -27,6 +27,7 @@ import { BoardView } from "./BoardView";
 import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
+import { performThreadDelete, selectionAfterDelete, threadsAfterDelete } from "./deleteThread";
 import { GitHeader } from "./GitHeader";
 import { ProjectPalette } from "./ProjectPalette";
 import { QuitDialog } from "./QuitDialog";
@@ -71,6 +72,12 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [pendingDeleteThread, setPendingDeleteThread] = useState<{
+    id: number;
+    title: string;
+    discardChanges: boolean;
+  } | null>(null);
+  const [deletingThread, setDeletingThread] = useState(false);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
   const [showBoard, setShowBoard] = useState(false);
@@ -283,24 +290,38 @@ export function App() {
     setOpenError(res.status === "error" ? res.error.message : null);
   }, [selected, currentThreadId]);
 
-  const deleteThread = useCallback(async (threadId: number) => {
+  const deleteThread = useCallback((threadId: number) => {
     const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
-    if (!window.confirm(`Delete “${title}”? Its conversation is removed permanently.`)) return;
-    let res = await commands.deleteThread(threadId, false);
-    if (res.status === "ok" && res.data === "needs-confirmation") {
-      const proceed = window.confirm(
-        "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept. Delete anyway?",
-      );
-      if (!proceed) return;
-      res = await commands.deleteThread(threadId, true);
-    }
-    if (res.status === "ok") {
-      setThreads((prev) => prev?.filter((t) => t.id !== threadId) ?? null);
-      setSelectedThreadId((current) => (current === threadId ? null : current));
-    } else {
-      setOpenError(res.error.message);
-    }
+    setOpenError(null);
+    setPendingDeleteThread({ id: threadId, title, discardChanges: false });
   }, [threads]);
+
+  const confirmDeleteThread = useCallback(async () => {
+    if (!pendingDeleteThread || deletingThread) return;
+    setDeletingThread(true);
+    setOpenError(null);
+    try {
+      const result = await performThreadDelete(
+        pendingDeleteThread.id,
+        pendingDeleteThread.discardChanges,
+        commands.deleteThread,
+      );
+      if (result.status === "error") {
+        setOpenError(result.message);
+      } else if (result.status === "needs-confirmation") {
+        setPendingDeleteThread((current) => current ? { ...current, discardChanges: true } : null);
+      } else if (result.status === "deleted") {
+        const deletedId = pendingDeleteThread.id;
+        setThreads((prev) => threadsAfterDelete(prev, deletedId));
+        setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
+        setPendingDeleteThread(null);
+      }
+    } catch (error) {
+      setOpenError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingThread(false);
+    }
+  }, [deletingThread, pendingDeleteThread]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -389,6 +410,27 @@ export function App() {
   return (
     <div className="window">
       <QuitDialog />
+      {pendingDeleteThread && (
+        <div className="modal-backdrop">
+          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
+            <h2 id="delete-thread-title">
+              {pendingDeleteThread.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pendingDeleteThread.title}”?`}
+            </h2>
+            <p>
+              {pendingDeleteThread.discardChanges
+                ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept."
+                : "Its conversation is removed permanently."}
+            </p>
+            {openError && <p className="error" role="alert">{openError}</p>}
+            <div className="modal-actions">
+              <button autoFocus onClick={() => setPendingDeleteThread(null)} disabled={deletingThread}>Cancel</button>
+              <button onClick={() => void confirmDeleteThread()} disabled={deletingThread}>
+                {deletingThread ? "Deleting…" : "Delete Thread"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showPalette && (
         <ProjectPalette
           projects={projects ?? []}

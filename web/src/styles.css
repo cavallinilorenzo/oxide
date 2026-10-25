@@ -776,3 +776,14 @@ code { font-family: var(--mono); font-size: 12px; }
   .settings-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-card { padding: 16px; }
 }
+
+.settings-field { display: flex; flex-direction: column; min-width: 0; gap: 6px; color: var(--dim); }
+.dropdown { position: relative; min-width: 0; color: var(--fg); }
+.dropdown-trigger { width: 100%; padding: 6px 8px; background: var(--bg3); text-align: left; }
+.dropdown-trigger > span, .dropdown-option > span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.dropdown-trigger[aria-expanded="true"] { border-color: var(--acc); }
+.dropdown-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg2); box-shadow: 0 8px 24px #0006; }
+.dropdown-option { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+.dropdown-option:hover, .dropdown-option:focus { background: var(--bg4); outline: none; }
+.dropdown-option:focus-visible { box-shadow: inset 0 0 0 2px var(--acc); }
+.dropdown-option[aria-selected="true"] { color: var(--acc2); }

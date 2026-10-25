@@ -14,7 +14,7 @@ afterEach(async () => { await act(async () => root.render(null)); clearMocks(); 
 
 it("offers supported defaults with descriptions, warns about Full access and saves each Provider independently", async () => {
   const settings: Settings = {
-    defaultProvider: "claude", confirmQuit: true, editor: "", scanRoots: [], claudeCustomizations: false,
+    defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: false,
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },
       codex: { model: null, effort: null, permissionMode: "auto-edit" },

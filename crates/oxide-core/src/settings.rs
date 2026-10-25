@@ -48,11 +48,24 @@ impl Default for ProviderSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Providers {
     pub claude: ProviderSettings,
     pub codex: ProviderSettings,
     pub antigravity: ProviderSettings,
+}
+
+impl Default for Providers {
+    fn default() -> Self {
+        Self {
+            claude: ProviderSettings::default(),
+            codex: ProviderSettings::default(),
+            antigravity: ProviderSettings {
+                permission_mode: PermissionMode::AutoEdit,
+                ..ProviderSettings::default()
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,7 +302,7 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
 
 fn providers(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> Providers {
     let mut obj = obj.unwrap_or_default();
-    let providers = Providers {
+    let mut providers = Providers {
         claude: provider(
             take_object(&mut obj, "claude", errors),
             "providers.claude",
@@ -306,6 +319,10 @@ fn providers(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> P
             errors,
         ),
     };
+    // Older Settings offered Ask for agy, which cannot answer Approvals.
+    if providers.antigravity.permission_mode == PermissionMode::Ask {
+        providers.antigravity.permission_mode = PermissionMode::AutoEdit;
+    }
     unknown_keys(&obj, "providers", errors);
     providers
 }

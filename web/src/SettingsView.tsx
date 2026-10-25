@@ -23,10 +23,10 @@ const PROVIDERS: { id: Provider; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "antigravity", label: "Antigravity CLI" },
 ];
-const MODES: { id: PermissionMode; label: string }[] = [
-  { id: "ask", label: "Ask" },
-  { id: "auto-edit", label: "Auto-edit" },
-  { id: "full-access", label: "Full access" },
+const MODES: { id: PermissionMode; label: string; description: string }[] = [
+  { id: "ask", label: "Ask", description: "Asks before file edits and commands." },
+  { id: "auto-edit", label: "Auto-edit", description: "Edits files in the Thread’s folder; asks before other actions." },
+  { id: "full-access", label: "Full access", description: "Allows all actions without asking for approval." },
 ];
 
 /** Retain saved values when catalogs change or a Provider is offline. */
@@ -235,13 +235,24 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
                   {fieldErrors(`providers.${p.id}.effort`)}
                 </div>
                 <div className="settings-field">
-                  <span>Permission mode</span>
+                  <span>Default Permission mode</span>
                   <Dropdown label={`${p.label} Permission mode`} value={current.permissionMode}
-                    options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+                    options={MODES.filter((m) => p.id !== "antigravity" || m.id !== "ask").map((m) => ({
+                      value: m.id,
+                      label: p.id === "antigravity" && m.id === "auto-edit" ? "Auto-edit (soft-deny)" : m.label,
+                      description: p.id === "antigravity" && m.id === "auto-edit"
+                        ? "Edits files in the Thread’s folder; other actions are denied." : m.description,
+                    }))}
                     onChange={(permissionMode) => setProvider(p.id, { permissionMode })} />
                   {fieldErrors(`providers.${p.id}.permissionMode`)}
+                  <p className="hint">Applies to new Threads after saving.</p>
                 </div>
               </div>
+              {current.permissionMode === "full-access" && (
+                <div className="provider-warning" role="alert" aria-label={`${p.label} Full access warning`}>
+                  <strong>Full access:</strong> {p.label} can modify or delete files and run commands without asking for approval. Only use this with Projects you trust.
+                </div>
+              )}
               {p.id === "claude" && (
                 <div className="settings-customizations">
                   <label className="inline">

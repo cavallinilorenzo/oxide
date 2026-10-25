@@ -45,10 +45,7 @@ fn fixture() -> Fixture {
     let core = Core::open(tmp.path().join("home")).unwrap();
     core.set_real_time_ticker(false);
     core.set_gh_search_path(Some(vec![gh_dir.clone()]));
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![scan.to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-    let project = core.rescan_projects().unwrap().remove(0).id;
+    let project = core.add_project(&work.to_string_lossy()).unwrap().id;
     Fixture {
         _tmp: tmp,
         core,

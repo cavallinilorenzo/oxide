@@ -5,9 +5,6 @@ use tempfile::tempdir;
 fn setup() -> (tempfile::TempDir, Core, u32) {
     let dir = tempdir().unwrap();
     let core = Core::open(dir.path().join("home")).unwrap();
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     let project = dir.path().join("proj");
     fs::create_dir_all(project.join(".git")).unwrap();
     fs::create_dir_all(project.join("src")).unwrap();
@@ -17,7 +14,7 @@ fn setup() -> (tempfile::TempDir, Core, u32) {
     fs::create_dir_all(project.join("target")).unwrap();
     fs::write(project.join("target/out"), "x").unwrap();
     fs::write(project.join("README.md"), "# hi\n").unwrap();
-    let id = core.rescan_projects().unwrap()[0].id;
+    let id = core.add_project(&project.to_string_lossy()).unwrap().id;
     (dir, core, id)
 }
 

@@ -3,14 +3,9 @@ use oxide_provider::{FakeProvider, Provider, ProviderEvent};
 use tempfile::tempdir;
 
 fn setup_project(core: &Core, dir: &std::path::Path) -> u32 {
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    projects[0].id
+    core.add_project(&project_dir.to_string_lossy()).unwrap().id
 }
 
 #[test]

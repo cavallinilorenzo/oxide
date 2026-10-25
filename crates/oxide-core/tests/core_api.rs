@@ -231,7 +231,6 @@ mod settings {
             state.settings.providers.claude.permission_mode,
             PermissionMode::Ask
         );
-        assert!(!state.settings.scan_roots.is_empty());
         assert!(state.settings.confirm_quit);
         assert!(!state.settings.claude_customizations);
 
@@ -340,7 +339,6 @@ mod settings {
         let mut settings = core.settings().settings;
         settings.editor = "zed".into();
         settings.providers.claude.effort = Some("high".into());
-        settings.scan_roots = vec!["~/src".into()];
 
         core.save_settings(&settings).unwrap();
 
@@ -390,10 +388,7 @@ mod discovery {
     fn fixture() -> Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("dev").canonicalize_or_create();
-        let core = Core::open(tmp.path().join("home")).unwrap();
-        let mut settings = core.settings().settings;
-        settings.scan_roots = vec![root.to_string_lossy().into_owned()];
-        core.save_settings(&settings).unwrap();
+        let core = Core::open_with_user_home(tmp.path().join("home"), tmp.path()).unwrap();
         Fixture {
             _tmp: tmp,
             root,
@@ -462,9 +457,6 @@ mod discovery {
         let user_home = tmp.path().join("user").canonicalize_or_create();
         repo(&user_home.join("Developer/mine"));
         let core = Core::open_with_user_home(tmp.path().join("oxide"), &user_home).unwrap();
-        let mut settings = core.settings().settings;
-        settings.scan_roots = vec!["~/Developer".into(), "~/nope".into()];
-        core.save_settings(&settings).unwrap();
 
         assert_eq!(names(&core.rescan_projects().unwrap()), ["mine"]);
     }
@@ -526,13 +518,8 @@ mod discovery {
         let f = fixture();
         repo(&f.root.join("real"));
         std::os::unix::fs::symlink(f.root.join("real"), f.root.join("alias")).unwrap();
-        let second_root = f._tmp.path().join("other-root");
+        let second_root = f._tmp.path().join("Projects");
         std::os::unix::fs::symlink(&f.root, &second_root).unwrap();
-        let mut settings = f.core.settings().settings;
-        settings
-            .scan_roots
-            .push(second_root.to_string_lossy().into_owned());
-        f.core.save_settings(&settings).unwrap();
 
         let found = f.core.rescan_projects().unwrap();
 

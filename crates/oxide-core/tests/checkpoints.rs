@@ -51,10 +51,7 @@ fn fixture() -> Fixture {
 
     let core = Core::open(root.join("home")).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![scan.to_string_lossy().into_owned()];
-    core.save_settings(&settings).unwrap();
-    let project_id = core.rescan_projects().unwrap().remove(0).id;
+    let project_id = core.add_project(&work.to_string_lossy()).unwrap().id;
     Fixture {
         _tmp: tmp,
         core,

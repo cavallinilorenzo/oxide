@@ -8,14 +8,9 @@ fn core_runs_approval_end_to_end_and_persists_in_transcript() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -130,14 +125,9 @@ fn unanswered_approval_waits_indefinitely_and_resolves_when_interrupted() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -212,14 +202,12 @@ fn thread_permission_mode_defaults_and_updates_between_turns() {
     core.set_real_time_ticker(false);
 
     let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
     settings.providers.claude.permission_mode = PermissionMode::FullAccess;
     core.save_settings(&settings).unwrap();
 
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     // Create thread for claude with None mode -> defaults from settings (FullAccess)
     let thread = core
@@ -242,14 +230,9 @@ fn core_runs_approval_deny_end_to_end() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();
@@ -338,14 +321,9 @@ fn unanswered_approval_resolves_when_turn_completes() {
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
 
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
-
     let project_dir = dir.path().join("my-project");
     std::fs::create_dir_all(project_dir.join(".git")).unwrap();
-    let projects = core.rescan_projects().unwrap();
-    let project = &projects[0];
+    let project = core.add_project(&project_dir.to_string_lossy()).unwrap();
 
     let fake = FakeProvider::default();
     let sender = fake.sender();

@@ -14,11 +14,11 @@ const SESSION_GONE: &str = "Provider session no longer available";
 fn open_core_with_project(dir: &Path) -> (Core, u32) {
     let core = Core::open(dir).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     std::fs::create_dir_all(dir.join("my-project").join(".git")).unwrap();
-    let project_id = core.rescan_projects().unwrap()[0].id;
+    let project_id = core
+        .add_project(&dir.join("my-project").to_string_lossy())
+        .unwrap()
+        .id;
     (core, project_id)
 }
 

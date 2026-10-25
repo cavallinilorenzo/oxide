@@ -127,7 +127,7 @@ impl Core {
         Self::open_with_migrations(home, MIGRATIONS)
     }
 
-    /// Like [`Core::open`], with `~` in scan roots meaning `user_home`
+    /// Like [`Core::open`], with project discovery and `~` paths relative to `user_home`
     /// instead of `$HOME`.
     pub fn open_with_user_home(
         home: impl Into<PathBuf>,
@@ -155,6 +155,7 @@ impl Core {
         Ok(Self {
             home,
             user_home: std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(PathBuf::from)
                 .unwrap_or_default(),
             db: Mutex::new(db),
@@ -352,17 +353,11 @@ impl Core {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    /// Scans the configured scan roots for Git repositories, records new ones
+    /// Scans conventional folders in the user home for Git repositories, records new ones
     /// as Projects (keyed by canonical path) and returns all Projects.
     /// Existing records, hidden or missing, are left untouched.
     pub fn rescan_projects(&self) -> Result<Vec<ProjectSummary>> {
-        let roots: Vec<PathBuf> = self
-            .settings()
-            .settings
-            .scan_roots
-            .iter()
-            .map(|r| self.expand_home(r))
-            .collect();
+        let roots = discovery::default_roots(&self.user_home);
         let found = discovery::find_repositories(&roots);
         {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());

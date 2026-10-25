@@ -292,11 +292,8 @@ fn reveal_in_finder_reveals_the_checkout() {
 #[test]
 fn scanned_projects_stay_closed_until_opened_and_closing_keeps_them_known() {
     let f = fixture(vec![]);
-    make_repo(&f.root().join("code/scanned"));
-    make_repo(&f.root().join("code/added"));
-    let mut settings = f.core.settings().settings;
-    settings.scan_roots = vec![f.root().join("code").to_string_lossy().into_owned()];
-    f.core.save_settings(&settings).unwrap();
+    make_repo(&f.root().join("user/Code/scanned"));
+    make_repo(&f.root().join("user/Code/added"));
 
     let scanned = f.core.rescan_projects().unwrap();
     assert_eq!(scanned.len(), 2);
@@ -307,7 +304,7 @@ fn scanned_projects_stay_closed_until_opened_and_closing_keeps_them_known() {
 
     let added = f
         .core
-        .add_project(f.root().join("code/added").to_str().unwrap())
+        .add_project(f.root().join("user/Code/added").to_str().unwrap())
         .unwrap();
     assert!(added.open, "adding a folder opens it");
 

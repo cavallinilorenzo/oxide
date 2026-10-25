@@ -6,11 +6,10 @@ fn core_with_thread() -> (tempfile::TempDir, Core, u32, u32) {
     let dir = tempdir().unwrap();
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
-    let mut settings = core.settings().settings;
-    settings.scan_roots = vec![dir.path().to_string_lossy().to_string()];
-    core.save_settings(&settings).unwrap();
     std::fs::create_dir_all(dir.path().join("my-project/.git")).unwrap();
-    let project = core.rescan_projects().unwrap().remove(0);
+    let project = core
+        .add_project(&dir.path().join("my-project").to_string_lossy())
+        .unwrap();
     let thread = core
         .create_thread(project.id, "fake", None, None, PermissionMode::AutoEdit)
         .unwrap();

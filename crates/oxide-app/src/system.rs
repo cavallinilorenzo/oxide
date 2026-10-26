@@ -253,11 +253,10 @@ impl Drop for WindowsActivityToken {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn activity_token_lifecycle_controls_execution_state() {
         let (tx, rx) = std::sync::mpsc::channel::<()>();
@@ -284,7 +283,6 @@ mod tests {
         assert!(token.is_none());
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn editor_detection_delegates_to_oxide_core() {
         assert!(oxide_core::editor::is_installed_windows("dev.zed.Zed"));

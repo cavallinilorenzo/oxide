@@ -68,3 +68,44 @@ it("offers supported defaults with descriptions, warns about Full access and sav
   expect(container.querySelector('[role="status"]')?.textContent).toBe("");
   expect(saveButton.disabled).toBe(false);
 });
+
+
+it("groups model effort variants while keeping the saved effort selectable", async () => {
+  const settings: Settings = {
+    defaultProvider: "antigravity", confirmQuit: true, editor: "",
+    claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
+    providers: {
+      claude: { model: null, effort: null, permissionMode: "ask" },
+      codex: { model: null, effort: null, permissionMode: "auto-edit" },
+      antigravity: { model: "gemini-pro-low", effort: "low", permissionMode: "auto-edit" },
+    },
+  };
+  const variants = ["low", "high"].map((effort) => ({
+    id: `gemini-pro-${effort}`, name: `Gemini Pro (${effort})`, description: null,
+    supportedEfforts: [effort], defaultEffort: effort, isLegacy: false,
+  }));
+  let saved: Settings | undefined;
+  Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
+  mockIPC((command, args) => {
+    if (command === "get_settings") return { settings, errors: [] };
+    if (command === "save_settings") { saved = (args as { settings: Settings }).settings; return null; }
+    if (command === "get_model_catalog") return (args as { provider: string }).provider === "antigravity" ? variants : [];
+    if (command === "detected_editors") return [];
+    if (command === "detect_provider") return { installed: false, authenticated: false, available: false };
+    if (command === "plugin:event|listen") return 1;
+    if (command === "plugin:event|unlisten") return null;
+    throw new Error(`Unexpected command ${command}`);
+  });
+  await act(async () => root.render(<SettingsView onClose={() => {}} />));
+  const model = container.querySelector<HTMLButtonElement>('button[aria-label="Antigravity CLI Model: Gemini Pro"]')!;
+  expect(model).toBeTruthy();
+  act(() => model.click());
+  expect(Array.from(document.querySelectorAll('[role="option"]')).map((item) => item.textContent)).toEqual(["Provider default", "Gemini Pro"]);
+  act(() => (document.querySelector('[role="option"][aria-selected="true"]') as HTMLElement).click());
+  const effort = container.querySelector<HTMLButtonElement>('button[aria-label="Antigravity CLI Effort: low"]')!;
+  act(() => effort.click());
+  const high = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((item) => item.textContent === "high")!;
+  act(() => high.click());
+  await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Save")!.click());
+  expect(saved?.providers.antigravity.effort).toBe("high");
+});

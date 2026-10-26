@@ -40,6 +40,7 @@ import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
+import { loadDraftModel, saveDraftModel } from "./draftModel";
 import { parseSlashCommand, resolveDefaultModel } from "./modelPicker";
 import { readableModel } from "./headerLines";
 import { filterSlashCommands, slashQuery } from "./slashMenu";
@@ -58,6 +59,7 @@ const STICK_TO_BOTTOM = 48;
 const PAGE_LOAD_DELAY = 80;
 
 interface ThreadViewProps {
+  onInitialLoad?: () => void;
   threadId: number | null;
   projectId: number;
   /** The Project's checkout, shown in the header for a Thread that has no worktree of its own. */
@@ -132,6 +134,7 @@ export function getOfferedPermissionModes(
 }
 
 export function ThreadView({
+  onInitialLoad,
   threadId,
   projectId,
   projectPath,
@@ -223,13 +226,14 @@ export function ThreadView({
     void (async () => {
       const s = await commands.getSettings();
       if (!active) return;
-      const defProvider = s.settings.defaultProvider;
+      const saved = loadDraftModel(localStorage, projectId);
+      const defProvider = saved?.provider ?? s.settings.defaultProvider;
       setDraftProvider(defProvider);
-      const provSettings = s.settings.providers[defProvider];
+      const provSettings = s.settings.providers[defProvider as keyof typeof s.settings.providers];
       const defMode = provSettings?.permissionMode || "auto-edit";
       setDraftMode(defMode);
-      setDraftModel(provSettings?.model ?? null);
-      setDraftEffort(provSettings?.effort ?? null);
+      setDraftModel(saved ? saved.model : provSettings?.model ?? null);
+      setDraftEffort(saved ? saved.effort : provSettings?.effort ?? null);
 
       const capsRes = await commands.getProviderCapabilities(defProvider);
       if (active && capsRes.status === "ok") {
@@ -238,11 +242,11 @@ export function ThreadView({
           supportedPermissionModes: capsRes.data.supportedPermissionModes,
         }));
       }
-    })();
+    })().finally(() => { if (active) onInitialLoad?.(); });
     return () => {
       active = false;
     };
-  }, [threadId]);
+  }, [threadId, projectId, onInitialLoad]);
 
   // Subscribe to the thread when threadId changes
   useEffect(() => {
@@ -302,13 +306,13 @@ export function ThreadView({
           onThreadTitleChange?.(threadId, initial.thread.title);
         }
       }
-    })();
+    })().finally(() => { if (active) onInitialLoad?.(); });
 
     return () => {
       active = false;
       batcher.cancel();
     };
-  }, [threadId, onStatusChange, onThreadTitleChange]);
+  }, [threadId, onStatusChange, onThreadTitleChange, onInitialLoad]);
 
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {
@@ -583,6 +587,7 @@ export function ThreadView({
     } else {
       setDraftModel(newModel);
       setDraftEffort(newEffort);
+      saveDraftModel(localStorage, projectId, { provider: newProvider, model: newModel, effort: newEffort });
     }
   };
 

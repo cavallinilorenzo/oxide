@@ -122,11 +122,13 @@ export function applyModelShortcut(
   return visibleModels[index - 1] ?? null;
 }
 
-/**
- * The Model and Effort a Thread runs with when none was picked: the Provider's
- * first current Model and its default Effort, so the composer names them
- * instead of showing the Provider and "Default".
- */
+/** Resolve capabilities within the current provider; unknown models must not inherit another model's levels. */
+export function selectedModelInfo(models: ModelInfo[], modelId: string | null): ModelInfo | undefined {
+  if (!modelId) return undefined;
+  const family = modelFamilyId(modelId);
+  return collapseEffortVariants(models.filter((model) => modelFamilyId(model.id) === family), null)[0];
+}
+
 export function resolveDefaultModel(
   catalog: ModelInfo[] | null,
   model: string | null,

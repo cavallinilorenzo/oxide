@@ -38,7 +38,8 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
-body { margin: 0; overflow: hidden; -webkit-font-smoothing: antialiased; }
+body { margin: 0; overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none; }
+input, textarea, [contenteditable="true"], .xterm, .diff-content, .markdown-body, .message-content { user-select: text; }
 svg.octicon { flex: none; vertical-align: -2px; }
 
 /* ── Controls ─────────────────────────────────────────────── */
@@ -187,14 +188,27 @@ html.macos .header,
   /* Room for the macOS traffic lights of the overlay title bar. */
   padding: 0 12px 0 84px;
 }
-.header .title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 28%; white-space: nowrap; }
+.header .title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 220px; white-space: nowrap; }
 .header .title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--fg-bright); }
-.header > .icon-btn, .header > .seg { flex: none; }
+.header-project, .header-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.header-actions { justify-content: flex-end; }
+.header-actions > .icon-btn, .header-actions > .seg { flex: none; }
+.window.windows .header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); padding-right: 0; }
+.window.windows .header-project { justify-content: center; }
+.window.windows .header-project .title { max-width: 220px; }
+@media (max-width: 1240px) {
+  .window.windows .header { display: flex; }
+  .window.windows .header-project { flex: 1; min-width: 0; }
+  .window.windows .header-project .title { max-width: 96px; }
+}
 .header-error { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .header .seg { margin: 0 4px; }
-.header .seg button { min-height: 24px; padding: 2px 8px; }
+.header .seg { height: var(--control-sm); padding: 1px; }
+.header .seg button { min-height: 20px; padding: 0 8px; }
+.header-actions > .icon-btn { height: var(--control-sm); min-height: var(--control-sm); min-width: 28px; }
+.header .hdrbtn, .header .pull-button { min-height: var(--control-sm); padding-top: 2px; padding-bottom: 2px; }
 .body { flex: 1; display: flex; min-height: 0; }
-.sidebar-region { position: relative; width: var(--sidebar-width, 240px); flex: none; min-height: 0; }
+.sidebar-region { container-type: inline-size; position: relative; width: var(--sidebar-width, 240px); flex: none; min-height: 0; }
 .centre-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .centre { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .empty-thread { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--dim); text-align: center; }
@@ -236,14 +250,14 @@ html.macos .header,
 .branch-menu .branch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 .menu-check { width: 12px; display: inline-flex; color: var(--acc2); }
 .git-menu { right: 0; min-width: 180px; display: grid; gap: 1px; }
-.dirty-chip { gap: 8px; min-height: 24px; padding: 0 8px; border-radius: var(--radius-control); font: 12px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
+.dirty-chip { gap: 8px; min-height: var(--control-sm); padding: 0 8px; border-radius: var(--radius-control); font: 12px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; }
 .dirty-chip:hover { border-color: var(--line-strong); }
 .chip-added { color: var(--green); }
 .chip-removed { color: var(--red); }
 .split-button { position: relative; display: inline-flex; }
-.split-button > button { border-radius: 0; }
+.split-button > button { min-height: var(--control-sm); padding-top: 2px; padding-bottom: 2px; border-radius: 0; }
 .split-button .git-primary { border-radius: 6px 0 0 6px; }
-.split-button .git-menu-toggle { border-radius: 0 6px 6px 0; border-left: 0; padding: 4px 6px; }
+.split-button .git-menu-toggle { border-radius: 0 6px 6px 0; border-left: 0; padding: 2px 6px; }
 .split-button.primary > .git-primary, .split-button.primary > .git-menu-toggle {
   background: var(--acc);
   border-color: var(--acc);
@@ -912,6 +926,8 @@ html.macos .header,
 .palette-backdrop { place-items: start center; padding-top: 12vh; }
 .palette { width: min(620px, 90vw); background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 0 0 6px; display: grid; gap: 0; box-shadow: 0 20px 60px #000a; overflow: hidden; }
 .palette-title { padding: 10px 16px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+.palette:has(.palette-input:focus-visible) { border-color: color-mix(in srgb, var(--acc2) 45%, var(--line)); }
+.palette-input:focus-visible { outline: none; }
 .palette-input { width: 100%; border: 0 !important; border-bottom: 1px solid var(--line) !important; border-radius: 0; background: none; padding: 12px 16px; font-size: 15px; }
 .palette-hint { margin: 0; padding: 6px 16px; font-size: 11px; color: var(--faint); }
 .palette-error { margin: 0; padding: 6px 16px; font-size: 12px; }
@@ -1067,3 +1083,35 @@ html.macos .header,
   .resize-handle::after { transition: none; }
   .status-dot.working { animation: none; }
 }
+
+.app-menu { display: flex; align-items: center; gap: 2px; flex: none; margin-left: -6px; }
+.app-menu button { padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: default; }
+.app-menu button:hover, .app-menu button:focus-visible { background: var(--bg4); color: var(--fg-bright); }
+
+/* Keep actions comfortably inside narrow sidebars; shortcuts remain in their tooltips. */
+@container (max-width: 270px) {
+  .sidebar-actions kbd, .sidebar-empty-action kbd { display: none; }
+}
+
+
+.app-menu-item { position: relative; }
+.app-menu-popup { position: absolute; top: calc(100% + 3px); left: 0; z-index: 120; min-width: 180px; padding: 6px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px #0009; }
+.app-menu .app-menu-popup button { display: flex; width: 100%; text-align: left; padding: 5px 8px; }
+.effort-menu { max-height: calc(100vh - 24px); overflow-y: auto; }
+
+.window-controls { display: flex; align-self: stretch; flex: none; margin-left: 4px; }
+.window-controls button { justify-content: center; width: 38px; min-height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--fg); }
+.window-controls button:hover:not(:disabled) { background: var(--bg4); }
+.window-controls .window-close:hover:not(:disabled) { background: #c42b1c; color: #fff; }
+.window-controls svg { fill: none; stroke: currentColor; stroke-width: 1; }
+
+.window-resize { position: fixed; z-index: 1000; }
+.window-resize-north, .window-resize-south { left: 6px; right: 6px; height: 5px; cursor: ns-resize; }
+.window-resize-north { top: 0; } .window-resize-south { bottom: 0; }
+.window-resize-east, .window-resize-west { top: 6px; bottom: 6px; width: 5px; cursor: ew-resize; }
+.window-resize-east { right: 0; } .window-resize-west { left: 0; }
+.window-resize-northeast, .window-resize-northwest, .window-resize-southeast, .window-resize-southwest { width: 8px; height: 8px; }
+.window-resize-northeast { top: 0; right: 0; cursor: nesw-resize; }
+.window-resize-northwest { top: 0; left: 0; cursor: nwse-resize; }
+.window-resize-southeast { bottom: 0; right: 0; cursor: nwse-resize; }
+.window-resize-southwest { bottom: 0; left: 0; cursor: nesw-resize; }

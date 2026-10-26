@@ -1,8 +1,17 @@
 import type { ModelInfo } from "./bindings";
 import { modelFamilyId } from "./modelPicker";
 
+/** Remove Windows extended-length syntax only for presentation. */
+export function readablePath(path: string): string {
+  const slash = String.fromCharCode(92);
+  const prefix = slash + slash + "?" + slash;
+  if (path.startsWith(prefix + "UNC" + slash)) return slash + slash + path.slice(8);
+  if (path.startsWith(prefix) && /^[A-Za-z]:/.test(path.slice(4))) return path.slice(4);
+  return path;
+}
+
 /** The home directory shortened to `~`. */
-export const displayPath = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
+export const displayPath = (path: string) => readablePath(path).replace(/^\/(Users|home)\/[^/]+/, "~");
 
 /** Cuts a long path in the middle so the start and, above all, the folder name survive. */
 export function middleEllipsis(text: string, max: number): string {
@@ -62,7 +71,7 @@ export function threadHeaderLines(input: ThreadHeaderInput): ThreadHeaderLines {
   return {
     modelLine: input.effort ? `${name} · ${input.effort}` : name,
     folder: {
-      path,
+      path: readablePath(path),
       text: middleEllipsis(displayPath(path), FOLDER_MAX),
       branch: input.thread?.worktreePath ? (input.thread.branch ?? null) : null,
     },

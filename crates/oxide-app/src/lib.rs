@@ -1765,8 +1765,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(
         app,
         &[
-            &Submenu::with_items(
+            &Submenu::with_id_and_items(
                 app,
+                "oxide",
                 "Oxide",
                 true,
                 &[
@@ -1778,9 +1779,10 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                     &PredefinedMenuItem::quit(app, None)?,
                 ],
             )?,
-            &Submenu::with_items(app, "File", true, &[&new_thread])?,
-            &Submenu::with_items(
+            &Submenu::with_id_and_items(app, "file", "File", true, &[&new_thread])?,
+            &Submenu::with_id_and_items(
                 app,
+                "edit",
                 "Edit",
                 true,
                 &[
@@ -1793,8 +1795,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                     &PredefinedMenuItem::select_all(app, None)?,
                 ],
             )?,
-            &Submenu::with_items(
+            &Submenu::with_id_and_items(
                 app,
+                "window",
                 "Window",
                 true,
                 &[
@@ -1908,6 +1911,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .menu(build_menu)
         .on_menu_event(|app, event| {
@@ -1951,6 +1955,11 @@ pub fn run() {
             });
             core.set_system(Arc::new(system::MacSystem::new(app.handle().clone())));
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                #[cfg(target_os = "windows")]
+                {
+                    window.hide_menu()?;
+                    window.set_decorations(false)?;
+                }
                 core.set_window_active(window_is_active(&window));
             }
             app.manage(Arc::new(core));

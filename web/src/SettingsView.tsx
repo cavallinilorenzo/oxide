@@ -1,3 +1,4 @@
+﻿import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { EditorMark } from "./EditorMark";
@@ -205,8 +206,12 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         {PROVIDERS.map((p) => {
           const models = catalogs[p.id] ?? [];
           const current = draft.providers[p.id];
-          const model = models.find((m) => m.id === current.model);
-          const efforts = model?.supportedEfforts ?? [...new Set(models.flatMap((m) => m.supportedEfforts))];
+          const collapsedModels = collapseEffortVariants(models, current.effort ?? null);
+          const selectedModel = current.model
+            ? collapsedModels.find((item) => modelFamilyId(item.id) === modelFamilyId(current.model!))?.id ?? current.model
+            : "";
+          const model = selectedModelInfo(models, current.model ?? null);
+          const efforts = model?.supportedEfforts ?? [];
           const hint =
             p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
           return (
@@ -243,21 +248,24 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
               <div className="settings-fields">
                 <div className="settings-field">
                   <span>Model</span>
-                  <Dropdown label={`${p.label} Model`} value={current.model ?? ""}
+                  <Dropdown label={`${p.label} Model`} value={selectedModel}
                     options={withSavedValue([
                       { value: "", label: "Provider default" },
-                      ...models.map((m) => ({ value: m.id, label: m.name })),
-                    ], current.model)}
-                    onChange={(value) => setProvider(p.id, { model: value || null })} />
+                      ...collapsedModels.map((m) => ({ value: m.id, label: m.name })),
+                    ], selectedModel)}
+                    onChange={(value) => {
+                      const next = selectedModelInfo(models, value || null);
+                      setProvider(p.id, { model: value || null, effort: next?.supportedEfforts.includes(current.effort ?? "") ? current.effort : null });
+                    }} />
                   {fieldErrors(`providers.${p.id}.model`)}
                 </div>
                 <div className="settings-field">
                   <span>Effort</span>
-                  <Dropdown label={`${p.label} Effort`} value={current.effort ?? ""}
-                    options={withSavedValue([
+                  <Dropdown label={`${p.label} Effort`} value={efforts.includes(current.effort ?? "") ? current.effort! : ""}
+                    options={[
                       { value: "", label: "Provider default" },
                       ...efforts.map((effort) => ({ value: effort, label: effort })),
-                    ], current.effort)}
+                    ]}
                     onChange={(value) => setProvider(p.id, { effort: value || null })} />
                   {fieldErrors(`providers.${p.id}.effort`)}
                 </div>

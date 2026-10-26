@@ -514,7 +514,8 @@ fn claude_model_catalog_errors_when_the_cli_is_missing() {
 #[test]
 fn claude_slash_command_catalog_comes_from_the_cli_without_hidden_commands() {
     let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
-    let provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    provider.set_user_customizations(oxide_provider::claude::ClaudeCustomizations::ALL);
 
     let commands = provider.slash_commands(std::path::Path::new(".")).unwrap();
 

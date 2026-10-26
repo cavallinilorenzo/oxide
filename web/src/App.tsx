@@ -516,6 +516,7 @@ export function App() {
       )}
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); setShowBoard(false); setSelectedThreadId(null); }} />}
+        <div className="header-project" data-tauri-drag-region>
         {selected ? (
           <span className="title" data-tauri-drag-region>
             <strong title={readablePath(selected.path)}>{selected.name}</strong>
@@ -535,7 +536,9 @@ export function App() {
             onChanged={onGitChanged}
           />
         )}
-        <span className="grow" data-tauri-drag-region />
+        </div>
+        {!isWindows && <span className="grow" data-tauri-drag-region />}
+        <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
         {selected && !selected.missing && (
           <>
@@ -575,6 +578,7 @@ export function App() {
         >
           <TerminalIcon size={16} />
         </button>
+        </div>
       </header>
       <div className="body" ref={bodyRef} style={{
         "--sidebar-width": `${layout.sidebar.value}px`,

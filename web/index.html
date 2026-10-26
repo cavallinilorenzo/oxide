@@ -23,9 +23,9 @@
       .startup-content { display: flex; flex-direction: column; align-items: center; gap: 26px; }
       .startup-emblem { position: relative; width: 88px; height: 88px; display: grid; place-items: center; }
       .startup-emblem img { position: relative; z-index: 1; width: 48px; height: 48px; }
-      .startup-orbit { position: absolute; inset: 2px; animation: startup-orbit 1.8s linear infinite; }
-      .startup-orbit svg { width: 100%; height: 100%; }
-      .startup-orbit circle { fill: none; stroke: #4f83f3; stroke-width: 5; stroke-dasharray: 180 252; animation: startup-arc 1.8s ease-in-out infinite; }
+      .startup-orbit { position: absolute; inset: 2px; border: 2px solid #2a3040; border-radius: 50%; animation: startup-orbit 1.8s linear infinite; }
+      .startup-orbit svg { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); }
+      .startup-orbit circle { fill: none; stroke: #58a6ff; stroke-width: 2; stroke-dasharray: 180 252; animation: startup-arc 1.8s ease-in-out infinite; }
       @keyframes startup-arc { 0%, 100% { stroke-dasharray: 180 252; stroke-dashoffset: 0; } 50% { stroke-dasharray: 5 252; stroke-dashoffset: -175; } }
       @keyframes startup-orbit { to { transform: rotate(360deg); } }
       .startup-copy { display: flex; flex-direction: column; align-items: center; gap: 6px; }

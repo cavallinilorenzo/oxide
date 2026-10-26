@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use crossbeam_channel::Receiver;
 use oxide_core::{
     Core, ManualClock, PROVIDER_IDLE_TIMEOUT, PermissionMode, SequencedThreadEvent, ThreadEvent,

@@ -39,7 +39,7 @@ fn fixture() -> Fixture {
     // The fake keeps its state next to the script: work on a copy.
     let gh_dir = tmp.path().join("gh");
     std::fs::create_dir_all(&gh_dir).unwrap();
-    for name in ["gh", "gh.py"] {
+    for name in ["gh", "gh.cmd", "gh.py"] {
         std::fs::copy(Path::new(FAKE_GH_DIR).join(name), gh_dir.join(name)).unwrap();
     }
     let core = Core::open(tmp.path().join("home")).unwrap();

@@ -54,6 +54,13 @@ impl TerminalSession {
             .spawn_command(command)
             .map_err(|e| Error::Terminal(format!("start terminal shell: {e}")))?;
         let pid = child.process_id().unwrap_or_default();
+        if let Err(error) = oxide_provider::process::attach_running_to_job(pid) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::Terminal(format!(
+                "contain terminal shell process: {error}"
+            )));
+        }
         #[cfg(unix)]
         let process_group = pair.master.process_group_leader().unwrap_or(pid as i32);
         // The PTY child is a session leader, so it also leads its own process group.

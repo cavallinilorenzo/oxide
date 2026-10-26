@@ -113,6 +113,9 @@ for line in sys.stdin:
             }
             sys.stdout.write(json.dumps(appr) + "\n")
             sys.stdout.flush()
+        elif prompt_text.startswith("/context"):
+            print(json.dumps({"type": "assistant", "message": {"role": "assistant", "model": "<synthetic>", "content": [{"type": "text", "text": "## Context Usage\n\n| Category | Tokens |\n|---|---|\n| Messages | 12 |"}]}}), flush=True)
+            print(json.dumps({"type": "result", "subtype": "success", "session_id": "claude-session-1234", "is_error": False}), flush=True)
         elif "interrupt_test" in prompt_text:
             # Keep reading stdin so protocol interrupts can be handled on every platform.
             print(json.dumps({"type": "interrupt_ready"}), flush=True)

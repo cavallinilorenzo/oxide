@@ -386,6 +386,7 @@ pub enum ItemKind {
     ToolCall,
     FileChange,
     Subagent,
+    SlashCommandOutput,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]

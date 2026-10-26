@@ -36,7 +36,7 @@ One user prompt in a Thread and everything the Provider does in response, until 
 _Avoid_: Run, exchange, round
 
 **Item**:
-One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, or the output of a Slash command.
+One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, or the output of a Slash command. Slash command output is its own kind, never an agent message, and stays out of the Continue in new Thread recap.
 _Avoid_: Step, block, event (when meaning the unit)
 
 **Slash command**:

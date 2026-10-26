@@ -465,7 +465,7 @@ export type IssuesState_Serialize = {
 	guidance: string | null,
 };
 
-export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent";
+export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent" | "slash_command_output";
 
 export type ItemSnapshot = ItemSnapshot_Serialize | ItemSnapshot_Deserialize;
 

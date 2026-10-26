@@ -117,6 +117,8 @@ pub enum ItemKind {
     ToolCall,
     FileChange,
     Subagent,
+    /// What a Slash command printed; its own kind, never an agent message.
+    SlashCommandOutput,
 }
 
 impl ItemKind {
@@ -127,6 +129,7 @@ impl ItemKind {
             ItemKind::ToolCall => "tool_call",
             ItemKind::FileChange => "file_change",
             ItemKind::Subagent => "subagent",
+            ItemKind::SlashCommandOutput => "slash_command_output",
         }
     }
 }
@@ -141,6 +144,7 @@ impl std::str::FromStr for ItemKind {
             "tool_call" => Ok(ItemKind::ToolCall),
             "file_change" => Ok(ItemKind::FileChange),
             "subagent" => Ok(ItemKind::Subagent),
+            "slash_command_output" => Ok(ItemKind::SlashCommandOutput),
             _ => Err(()),
         }
     }

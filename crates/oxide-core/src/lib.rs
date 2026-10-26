@@ -1339,6 +1339,11 @@ impl Core {
         github::pull_request_state(&self.gh, &self.main_checkout(project_id)?)
     }
 
+    /// Branches on GitHub that can be selected as a pull request's base.
+    pub fn pull_request_base_branches(&self, project_id: u32) -> Result<Vec<String>> {
+        github::pull_request_base_branches(&self.gh, &self.main_checkout(project_id)?)
+    }
+
     /// Title, body and base prefilled for a new pull request of the current branch.
     pub fn pull_request_draft(&self, project_id: u32) -> Result<PullRequestDraft> {
         let cwd = self.main_checkout(project_id)?;

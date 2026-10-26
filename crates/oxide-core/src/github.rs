@@ -466,6 +466,30 @@ pub fn pull_request_state(gh: &Gh, cwd: &Path) -> Result<PullRequestState> {
     Ok(state)
 }
 
+/// Branches that exist in the GitHub repository, including pages beyond the first.
+/// Local-only branches cannot receive a pull request.
+pub fn pull_request_base_branches(gh: &Gh, cwd: &Path) -> Result<Vec<String>> {
+    gh.require_ready(cwd)?;
+    let names = gh.run(
+        cwd,
+        &[
+            "api",
+            "repos/{owner}/{repo}/branches?per_page=100",
+            "--paginate",
+            "--jq",
+            ".[].name",
+        ],
+    )?;
+    let mut branches: Vec<String> = names
+        .lines()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
+    branches.sort();
+    branches.dedup();
+    Ok(branches)
+}
+
 /// Title and body from the commits the branch adds to the default branch: a
 /// lone commit's own message, or the branch's name over a list of subjects.
 pub fn pull_request_draft(gh: &Gh, cwd: &Path) -> Result<PullRequestDraft> {

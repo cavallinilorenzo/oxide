@@ -1097,6 +1097,19 @@ async fn pull_request_state(
         .map(|state| convert(&state))
 }
 
+/// The repository's branches on GitHub, for choosing a pull request's base.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_base_branches(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<String>, AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_request_base_branches(project_id)
+    })
+    .await
+}
+
 /// Title, body and base prefilled from the branch's commits.
 #[tauri::command]
 #[specta::specta]
@@ -1878,6 +1891,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         commit,
         push,
         pull_request_state,
+        pull_request_base_branches,
         pull_request_draft,
         create_pull_request,
         open_pull_request,

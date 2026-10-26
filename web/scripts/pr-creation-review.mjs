@@ -50,6 +50,7 @@ try {
       const state = window.__PR_REVIEW__;
       if (command === "pull_request_state") return { availability: "ready", branch: head, defaultBranch: "main", guidance: null, pullRequest: state.created ? pr : null };
       if (command === "pull_request_draft") return { head, base: "main", title: "Polish pull request creation", body: "Refine the creation form and make GitHub errors actionable." };
+      if (command === "pull_request_base_branches") return ["develop", "main", "release/next", head];
       if (command === "git_status") return { branch: head, upstream: null, ahead: 1, behind: 0, added: 12, removed: 4, changedFiles: 2, protected: false, unpublished: true, pickerDisabledReason: null };
       if (command === "pull_request_detail") return { pullRequest: pr, body: "Refine the creation form.", checks: [], comments: [], mergeMethods: ["squash"], deleteBranchOnMerge: true, diff: { files: [] } };
       if (command === "create_pull_request") {
@@ -102,11 +103,15 @@ try {
   await tools.screenshot({ path: `${output}/short-window-${engine}.png` });
   await page.setViewportSize({ width: 1280, height: 800 });
   await tools.evaluate((el) => { el.style.width = "480px"; });
-  await form.getByRole("textbox", { name: "Base branch" }).focus();
+  await form.getByRole("button", { name: "Base branch: main", exact: true }).focus();
   await page.keyboard.press("Tab");
   assert.equal(await form.getByRole("textbox", { name: "Title", exact: true }).evaluate((el) => document.activeElement === el), true);
   await tools.screenshot({ path: `${output}/keyboard-focus-${engine}.png` });
-  await form.getByRole("textbox", { name: "Base branch" }).fill("develop");
+  await form.getByRole("button", { name: "Base branch: main", exact: true }).click();
+  const choices = page.getByRole("listbox", { name: "Base branch", exact: true });
+  assert.deepEqual(await choices.getByRole("option").allTextContents(), ["develop", "main", "release/next"]);
+  await tools.screenshot({ path: `${output}/base-branches-${engine}.png` });
+  await choices.getByRole("option", { name: "develop", exact: true }).click();
   assert.equal(await form.getByRole("alert").count(), 0);
   await form.getByRole("checkbox", { name: "Draft", exact: true }).check();
   await page.evaluate(() => { window.__PR_REVIEW__.mode = "pending"; });
@@ -118,19 +123,20 @@ try {
   await tools.screenshot({ path: `${output}/pending-${engine}.png` });
   await page.evaluate(() => { window.__PR_REVIEW__.release(); });
   await form.getByRole("alert").waitFor();
-  await form.getByRole("textbox", { name: "Base branch" }).fill("fix/polish-pull-request-creation-and-error-feedback");
-  assert.equal(await form.getByRole("button", { name: "Push & create PR", exact: true }).isDisabled(), true);
-  assert.match(await form.getByRole("alert").innerText(), /Choose a base branch/);
-  await form.getByRole("textbox", { name: "Base branch" }).fill("main");
+  await form.getByRole("button", { name: "Base branch: develop", exact: true }).press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  assert.equal(await form.getByRole("button", { name: "Base branch: main", exact: true }).count(), 1);
   await page.evaluate(() => { window.__PR_REVIEW__.mode = "success"; });
   await form.getByRole("button", { name: "Push & create PR", exact: true }).click();
   await page.getByRole("heading", { name: "Polish pull request creation #158" }).waitFor();
   assert.equal(await form.count(), 0);
   assert.equal(await page.evaluate(() => window.__PR_REVIEW__.args.draft), true);
+  assert.equal(await page.evaluate(() => window.__PR_REVIEW__.args.base), "main");
   await tools.screenshot({ path: `${output}/success-${engine}.png` });
   assert.deepEqual(errors, []);
   await writeFile(`${output}/verification-${engine}.json`, JSON.stringify({ engine, metrics, errors,
-    checked: ["long branch", "narrow panel", "short window", "keyboard focus", "error disclosure", "draft preservation", "Ctrl+Enter", "pending", "same-base validation", "creation success"] }, null, 2));
+    checked: ["long branch", "narrow panel", "short window", "keyboard focus", "error disclosure", "draft preservation", "Ctrl+Enter", "pending", "GitHub branch selection by pointer and keyboard", "current branch excluded", "creation success"] }, null, 2));
 } catch (cause) {
   await page.screenshot({ path: `${output}/failure-${engine}.png` });
   process.stderr.write(JSON.stringify({ errors, text: await page.locator("body").innerText() }, null, 2));

@@ -10,8 +10,11 @@ export interface DropdownOption<T extends string> {
 }
 
 /** A single-select listbox. Selection is committed only by click, Enter or Space. */
-export function Dropdown<T extends string>({ label, value, options, onChange }: {
+export function Dropdown<T extends string>({ label, value, options, onChange, triggerClassName, minMenuWidth, disabled }: {
   label: string;
+  triggerClassName?: string;
+  minMenuWidth?: number;
+  disabled?: boolean;
   value: T;
   options: DropdownOption<T>[];
   onChange: (value: T) => void;
@@ -46,8 +49,8 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
     const above = rect.top - 8;
     const upward = below < 240 && above > below;
     setPlacement({
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)),
-      width: Math.min(rect.width, window.innerWidth - 16),
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - Math.max(rect.width, minMenuWidth ?? 0) - 8)),
+      width: Math.min(Math.max(rect.width, minMenuWidth ?? 0), window.innerWidth - 16),
       maxHeight: Math.max(0, Math.min(240, upward ? above : below)),
       ...(upward ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
     });
@@ -86,9 +89,9 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
     <div className="dropdown" ref={container} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false);
     }}>
-      <button ref={trigger} type="button" className="dropdown-trigger"
+      <button ref={trigger} type="button" className={`dropdown-trigger${triggerClassName ? ` ${triggerClassName}` : ""}`}
         aria-label={`${label}: ${selected?.label ?? value}`} aria-haspopup="listbox" aria-expanded={open}
-        aria-controls={open ? id : undefined} disabled={options.length === 0}
+        aria-controls={open ? id : undefined} disabled={disabled || options.length === 0}
         title={selected?.label ?? value}
         onClick={() => { placeMenu(); setOpen(!open); }} onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {

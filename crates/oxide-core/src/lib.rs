@@ -23,6 +23,7 @@ pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
 pub use slash_commands::SlashCommand;
 mod thread_actor;
+mod usage;
 mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
@@ -60,7 +61,7 @@ pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 pub use oxide_provider::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, ProviderCapabilities,
-    TurnStatus,
+    TurnStatus, UsageStatus,
 };
 use settings::SettingsStore;
 pub use settings::{
@@ -71,6 +72,7 @@ pub use thread::{
     ThreadCapabilities, ThreadEvent, ThreadSnapshot, ThreadStatus, ThreadSummary, TurnError,
     TurnPage, TurnSnapshot, UnknownEventSnapshot,
 };
+pub use usage::{UsageLimitWindow, UsageLimits};
 
 const DB_FILE: &str = "oxide.db";
 const PROCESSES_FILE: &str = "processes.json";
@@ -121,6 +123,7 @@ pub struct Core {
     gh: Arc<github::Gh>,
     activity: Arc<activity::Activity>,
     board: Arc<board::BoardHub>,
+    usage: Arc<usage::UsageHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
 }
 
@@ -155,6 +158,7 @@ impl Core {
         mark_unfinished_work_interrupted(&db)?;
         let storage = StorageHandle::new(home.join(DB_FILE))?;
         let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
+        let usage = Arc::new(usage::UsageHub::new(home.join(DB_FILE)));
         Ok(Self {
             home,
             user_home: std::env::var_os("HOME")
@@ -176,6 +180,7 @@ impl Core {
             gh: Arc::new(github::Gh::default()),
             activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
             board,
+            usage,
             model_catalogs: Mutex::new(HashMap::new()),
         })
     }
@@ -774,6 +779,7 @@ impl Core {
                 image_attachments: false,
                 mid_thread_model_switch: true,
                 slash_command_passthrough: false,
+                reports_usage_limits: false,
             },
         }
     }
@@ -973,7 +979,11 @@ impl Core {
             self.storage.clone(),
             real_time,
             self.clock.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            Arc::clone(&self.activity),
+            usage::ActorServices {
+                activity: Arc::clone(&self.activity),
+                usage: Arc::clone(&self.usage),
+                provider: snapshot.thread.provider.clone(),
+            },
         )?;
 
         actors.insert(thread_id, actor.clone());
@@ -1123,6 +1133,22 @@ impl Core {
                 }
             }
         });
+    }
+
+    /// The last Usage limits Oxide saw for a Provider, shared by all its Threads.
+    pub fn usage_limits(&self, provider: &str) -> Option<UsageLimits> {
+        self.usage.get(provider)
+    }
+
+    /// The current Usage limits of a Provider and the updates that follow.
+    pub fn subscribe_usage_limits(
+        &self,
+        provider: &str,
+    ) -> (
+        Option<UsageLimits>,
+        crossbeam_channel::Receiver<UsageLimits>,
+    ) {
+        self.usage.subscribe(provider)
     }
 
     pub fn subscribe_thread(

@@ -62,9 +62,6 @@ const TOOL_TABS: { name: string; Icon: Icon }[] = [
   { name: "Issues", Icon: IssueOpenedIcon },
 ];
 
-/** `/Users/me/code/app` → `~/code/app`, as the header shows it. */
-const displayPath = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
-
 export function App() {
   const [showTools, setShowTools] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -515,8 +512,7 @@ export function App() {
       <header className="header" data-tauri-drag-region>
         {selected ? (
           <span className="title" data-tauri-drag-region>
-            <strong>{selected.name}</strong>
-            <span className="path" title={selected.path}>{displayPath(selected.path)}</span>
+            <strong title={selected.path}>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
         ) : (
@@ -661,6 +657,7 @@ export function App() {
                 <ThreadView
                   threadId={selectedThreadId}
                   projectId={selected.id}
+                  projectPath={selected.path}
                   draft={getDraft(drafts, selectedThreadId)}
                   onDraftChange={(text) =>
                     setDrafts((prev) => setDraft(prev, selectedThreadId, text))

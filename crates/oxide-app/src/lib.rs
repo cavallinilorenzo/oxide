@@ -333,6 +333,33 @@ pub struct ProviderCapabilities {
     pub image_attachments: bool,
     pub mid_thread_model_switch: bool,
     pub slash_command_passthrough: bool,
+    pub reports_usage_limits: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageStatus {
+    Ok,
+    Warning,
+    Limited,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimitWindow {
+    pub percent_used: Option<f64>,
+    /// Seconds since the Unix epoch (UTC).
+    pub resets_at: Option<f64>,
+    pub status: UsageStatus,
+    /// Seconds since the Unix epoch (UTC).
+    pub reported_at: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimits {
+    pub five_hour: Option<UsageLimitWindow>,
+    pub weekly: Option<UsageLimitWindow>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1612,6 +1639,25 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+/// A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`.
+#[tauri::command]
+#[specta::specta]
+fn subscribe_usage_limits(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+    on_event: tauri::ipc::Channel<UsageLimits>,
+) -> Result<Option<UsageLimits>, AppError> {
+    let (current, rx) = core.subscribe_usage_limits(&provider);
+    std::thread::spawn(move || {
+        while let Ok(limits) = rx.recv() {
+            if on_event.send(convert(&limits)).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(current.as_ref().map(convert))
+}
+
 /// The Project's Thread Board: its cards now, then every change on `on_event`.
 #[tauri::command]
 #[specta::specta]
@@ -1803,6 +1849,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         subscribe_thread,
         subscribe_thread_debug,
         subscribe_board,
+        subscribe_usage_limits,
         start_terminal,
         write_terminal,
         resize_terminal,

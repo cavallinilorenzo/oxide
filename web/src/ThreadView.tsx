@@ -3,14 +3,12 @@ import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowUpIcon,
-  BugIcon,
   ChevronDownIcon,
   FileDirectoryIcon,
   GitBranchIcon,
   LightBulbIcon,
   LockIcon,
   PaperclipIcon,
-  PencilIcon,
   RepoIcon,
   ShieldCheckIcon,
   SquareFillIcon,
@@ -33,6 +31,7 @@ import {
   type ProviderCapabilities,
 } from "./bindings";
 import { TurnView } from "./TurnView";
+import { ThreadHeader } from "./ThreadHeader";
 import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
@@ -59,6 +58,8 @@ const PAGE_LOAD_DELAY = 80;
 interface ThreadViewProps {
   threadId: number | null;
   projectId: number;
+  /** The Project's checkout, shown in the header for a Thread that has no worktree of its own. */
+  projectPath: string;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   onClearThread?: () => void;
@@ -122,6 +123,7 @@ export function getOfferedPermissionModes(
 export function ThreadView({
   threadId,
   projectId,
+  projectPath,
   draft,
   onDraftChange,
   onClearThread,
@@ -665,60 +667,24 @@ export function ThreadView({
 
   return (
     <div className="thread-container">
-      <div className="thread-header-bar">
-        {isEditingTitle ? (
-          <input
-            className="thread-title-input"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={() => void handleSaveRename()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void handleSaveRename();
-              if (e.key === "Escape") setIsEditingTitle(false);
-            }}
-            autoFocus
-            aria-label="Rename thread title"
-          />
-        ) : (
-          <div className="thread-title-display">
-            {thread && <span className={`status-dot ${thread.status}`} aria-label={`Status: ${thread.status}`} />}
-            <h2 className="thread-title" onClick={handleStartRename} title={`${threadTitle} · Click to rename`}>
-              {threadTitle}
-            </h2>
-            {thread?.issueNumber != null && (
-              <span className="chip" title={`Started from issue #${thread.issueNumber}`}>
-                #{thread.issueNumber}
-              </span>
-            )}
-            {threadId && (
-              <button
-                type="button"
-                className="icon-btn sm rename-thread-btn"
-                aria-label="Rename thread"
-                title="Rename thread"
-                onClick={handleStartRename}
-              >
-                <PencilIcon size={12} />
-              </button>
-            )}
-          </div>
-        )}
-        {thread && isBoardThread(thread) && (
-          <span className="thread-kind" title={`Works in its own worktree on ${thread.branch}`}>
-            <GitBranchIcon size={12} /> Board Thread · own worktree
-          </span>
-        )}
-        <button
-          type="button"
-          className="icon-btn sm"
-          onClick={() => setDebugOpen((open) => !open)}
-          aria-pressed={debugOpen}
-          aria-label={debugOpen ? "Close raw event debug" : "Open raw event debug"}
-          title={debugOpen ? "Close raw event debug" : "Raw event debug"}
-        >
-          <BugIcon size={14} />
-        </button>
-      </div>
+      <ThreadHeader
+        threadId={threadId}
+        thread={thread}
+        title={threadTitle}
+        provider={currentProvider}
+        model={currentModel}
+        effort={currentEffort}
+        projectPath={projectPath}
+        reportsUsage={providerCaps?.reportsUsageLimits ?? false}
+        editing={isEditingTitle}
+        editTitle={editTitle}
+        onEditTitleChange={setEditTitle}
+        onStartRename={handleStartRename}
+        onSaveRename={() => void handleSaveRename()}
+        onCancelRename={() => setIsEditingTitle(false)}
+        debugOpen={debugOpen}
+        onToggleDebug={() => setDebugOpen((open) => !open)}
+      />
       {debugOpen && (
         <section className="thread-debug-view" aria-label="Raw event debug view">
           <h3>Raw provider events</h3>

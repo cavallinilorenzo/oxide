@@ -73,6 +73,8 @@ export const commands = {
 	subscribeThreadDebug: (threadId: number, onEvent: Channel<DebugSequencedThreadEvent_Deserialize>) => typedError<ThreadSnapshot_Serialize, AppError>(__TAURI_INVOKE("subscribe_thread_debug", { threadId, onEvent })),
 	/**  The Project's Thread Board: its cards now, then every change on `on_event`. */
 	subscribeBoard: (projectId: number, onEvent: Channel<BoardEvent_Deserialize>) => typedError<BoardCard_Serialize[], AppError>(__TAURI_INVOKE("subscribe_board", { projectId, onEvent })),
+	/**  A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`. */
+	subscribeUsageLimits: (provider: string, onEvent: Channel<UsageLimits_Deserialize>) => typedError<UsageLimits_Serialize | null, AppError>(__TAURI_INVOKE("subscribe_usage_limits", { provider, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
@@ -547,6 +549,7 @@ export type ProviderCapabilities = {
 	imageAttachments: boolean,
 	midThreadModelSwitch: boolean,
 	slashCommandPassthrough: boolean,
+	reportsUsageLimits: boolean,
 };
 
 export type ProviderSettings = ProviderSettings_Serialize | ProviderSettings_Deserialize;
@@ -949,6 +952,40 @@ export type UnknownEventSnapshot = {
 	raw: string,
 	createdAt: string,
 };
+
+export type UsageLimitWindow = UsageLimitWindow_Serialize | UsageLimitWindow_Deserialize;
+
+export type UsageLimitWindow_Deserialize = {
+	percentUsed?: number | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	resetsAt?: number | null,
+	status: UsageStatus,
+	/**  Seconds since the Unix epoch (UTC). */
+	reportedAt: number | null,
+};
+
+export type UsageLimitWindow_Serialize = {
+	percentUsed: number | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	resetsAt: number | null,
+	status: UsageStatus,
+	/**  Seconds since the Unix epoch (UTC). */
+	reportedAt: number | null,
+};
+
+export type UsageLimits = UsageLimits_Serialize | UsageLimits_Deserialize;
+
+export type UsageLimits_Deserialize = {
+	fiveHour?: UsageLimitWindow_Deserialize | null,
+	weekly?: UsageLimitWindow_Deserialize | null,
+};
+
+export type UsageLimits_Serialize = {
+	fiveHour: UsageLimitWindow_Serialize | null,
+	weekly: UsageLimitWindow_Serialize | null,
+};
+
+export type UsageStatus = "ok" | "warning" | "limited";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

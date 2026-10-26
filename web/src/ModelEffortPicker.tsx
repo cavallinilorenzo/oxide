@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
+import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
-import { Dropdown } from "./Dropdown";
 import {
   applyModelShortcut,
   collapseEffortVariants,
@@ -112,7 +111,6 @@ export function ModelEffortPicker({
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (effortMenuRef.current?.contains(target) || anchorElement?.contains(target)) return;
-      if (target instanceof Element && target.closest(".dropdown-menu")) return;
       onClose();
     };
 
@@ -311,16 +309,44 @@ export function ModelEffortPicker({
         ) : (
           <div className="effort-select-row">
             <span className="effort-label">Reasoning effort</span>
-            <Dropdown
-              label="Reasoning effort"
-              value={effortValue}
-              triggerClassName="effort-select-trigger"
-              options={efforts.map((effort) => ({
-                value: effort,
-                label: effort.charAt(0).toUpperCase() + effort.slice(1),
-              }))}
-              onChange={handleSelectEffort}
-            />
+            <div
+              className="effort-options"
+              role="listbox"
+              aria-label="Reasoning effort"
+              onKeyDown={(event) => {
+                const options = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='option']")
+                );
+                const index = options.findIndex((option) => option === document.activeElement);
+                let next: number;
+                switch (event.key) {
+                  case "ArrowDown": next = (index + 1 + options.length) % options.length; break;
+                  case "ArrowUp": next = (index - 1 + options.length) % options.length; break;
+                  case "Home": next = 0; break;
+                  case "End": next = options.length - 1; break;
+                  default: return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                options[next]?.focus();
+              }}
+            >
+              {efforts.map((effort) => (
+                <button
+                  key={effort}
+                  type="button"
+                  role="option"
+                  aria-selected={effortValue === effort}
+                  tabIndex={effortValue === effort ? 0 : -1}
+                  autoFocus={effortValue === effort}
+                  className="effort-option"
+                  onClick={() => handleSelectEffort(effort)}
+                >
+                  <span>{effort.charAt(0).toUpperCase() + effort.slice(1)}</span>
+                  {effortValue === effort && <CheckIcon size={16} />}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

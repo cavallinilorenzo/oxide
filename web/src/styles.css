@@ -769,7 +769,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .effort-menu { position: fixed; z-index: 120; width: 208px; max-width: calc(100vw - 24px); padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg2); box-shadow: 0 8px 24px #0006; }
 .effort-label { font-size: 11px; color: var(--dim); }
 .effort-select-row { display: flex; flex-direction: column; gap: 6px; }
-.effort-select-trigger { width: 100%; justify-content: space-between; min-height: 34px; background: var(--bg3); }
+.effort-options { display: flex; flex-direction: column; gap: 2px; }
+.effort-option { width: 100%; justify-content: space-between; min-height: 32px; padding: 6px 8px; border-color: transparent; background: transparent; text-align: left; }
+.effort-option:hover:not(:disabled), .effort-option[aria-selected="true"] { background: var(--bg4); border-color: transparent; }
+.effort-option[aria-selected="true"] { color: var(--acc2); }
 .model-picker-layout { display: flex; height: 380px; }
 .provider-rail { width: 150px; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 8px; gap: 2px; background: var(--bg); }
 .rail-tab { justify-content: flex-start; gap: 8px; padding: 7px 10px; border: 0; background: none; color: var(--dim); font-size: 12.5px; }

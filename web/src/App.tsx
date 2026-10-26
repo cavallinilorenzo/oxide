@@ -39,6 +39,7 @@ import { EditorMark } from "./EditorMark";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
+import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -455,10 +456,17 @@ export function App() {
   if (starting) {
     return (
       <div className="startup-screen" role="status" aria-live="polite" aria-busy="true">
-        <span className="startup-wordmark">oxide</span>
-        <div className="startup-progress" aria-hidden="true" />
-        <p>Preparing your workspace</p>
-        <span className="startup-detail">Loading Projects and Threads</span>
+        <div className="startup-content">
+          <div className="startup-emblem" aria-hidden="true">
+            <span className="startup-orbit"><span /></span>
+            <img src={oxideMark} alt="" />
+          </div>
+          <div className="startup-copy">
+            <span className="startup-wordmark">oxide</span>
+            <p>Preparing your workspace</p>
+            <span className="startup-detail">Loading Projects and Threads</span>
+          </div>
+        </div>
       </div>
     );
   }

@@ -1,13 +1,36 @@
-import { ArrowLeftIcon, CheckIcon, DotFillIcon, XIcon } from "@primer/octicons-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckCircleFillIcon,
+  ChevronDownIcon,
+  CommentIcon,
+  DotFillIcon,
+  FileDiffIcon,
+  GitMergeIcon,
+  GitPullRequestDraftIcon,
+  GitPullRequestIcon,
+  LinkExternalIcon,
+  SearchIcon,
+  XCircleFillIcon,
+} from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import {
   commands,
   type GitStatus,
   type MergeMethod,
   type PullRequest,
+  type PullRequestCheck,
   type PullRequestDetail,
 } from "./bindings";
-import { defaultMergeMethod, mergeLabel, summarizeChecks } from "./pullRequestReview";
+import { Markdown } from "./PullRequestMarkdown";
+import {
+  countChecks,
+  dedupeChecks,
+  defaultMergeMethod,
+  mergeLabel,
+  readiness,
+  relativeTime,
+} from "./pullRequestReview";
 
 interface PullRequestBrowserProps {
   projectId: number;
@@ -20,6 +43,24 @@ interface PullRequestBrowserProps {
 }
 
 type List = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; prs: PullRequest[] };
+
+export function PullRequestStateIcon({ draft, size = 16 }: { draft: boolean; size?: number }) {
+  return draft ? (
+    <GitPullRequestDraftIcon size={size} className="pr-state-draft" />
+  ) : (
+    <GitPullRequestIcon size={size} className="pr-state-open" />
+  );
+}
+
+function Branches({ head, base }: { head: string; base: string }) {
+  return (
+    <span className="pr-branches" title={`${head} → ${base}`}>
+      <span className="pr-branch">{head}</span>
+      <ArrowRightIcon size={12} />
+      <span className="pr-branch">{base}</span>
+    </span>
+  );
+}
 
 /** Open pull requests of the repository: list, search, and one pull request to review. */
 export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles }: PullRequestBrowserProps) {
@@ -72,39 +113,57 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
           setSearch(query.trim());
         }}
       >
-        <input
-          aria-label="Search pull requests"
-          placeholder="Search pull requests"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <label>
-          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Mine
+        <label className="pr-search-field">
+          <SearchIcon size={14} />
+          <input
+            aria-label="Search pull requests"
+            placeholder="Search pull requests"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </label>
-        <button type="button" onClick={() => setManual((n) => n + 1)} title="Reload from GitHub">
-          Refresh
+        <button
+          type="button"
+          className="pr-chip"
+          aria-pressed={mine}
+          title="Only pull requests you opened"
+          onClick={() => setMine((m) => !m)}
+        >
+          Mine
         </button>
       </form>
-      {list.state === "loading" && <p className="pr-guidance">Loading…</p>}
-      {list.state === "error" && <p role="alert">{list.message}</p>}
-      {list.state === "ready" && list.prs.length === 0 && <p className="pr-guidance">No open pull requests.</p>}
-      {list.state === "ready" && (
-        <ul className="pr-list" aria-label="Open pull requests">
-          {list.prs.map((pr) => (
-            <li key={pr.number}>
-              <button className="pr-row" onClick={() => setOpened(pr.number)}>
-                <span className="pr-row-title">
-                  #{pr.number} {pr.title}
-                  {pr.draft && <span className="badge">draft</span>}
-                </span>
-                <span className="pr-row-meta">
-                  {pr.author} · {pr.head} → {pr.base}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="pr-scroll">
+        {list.state === "loading" && <p className="pr-empty">Loading…</p>}
+        {list.state === "error" && (
+          <p role="alert" className="pr-empty error">
+            {list.message}
+          </p>
+        )}
+        {list.state === "ready" && list.prs.length === 0 && (
+          <p className="pr-empty">{search || mine ? "No pull requests match." : "No open pull requests."}</p>
+        )}
+        {list.state === "ready" && list.prs.length > 0 && (
+          <ul className="pr-list" aria-label="Open pull requests">
+            {list.prs.map((pr) => (
+              <li key={pr.number}>
+                <button className="pr-row" onClick={() => setOpened(pr.number)}>
+                  <PullRequestStateIcon draft={pr.draft} />
+                  <span className="pr-row-body">
+                    <span className="pr-row-title">{pr.title}</span>
+                    <span className="pr-row-meta">
+                      <span>#{pr.number}</span>
+                      <span aria-hidden>·</span>
+                      <span className="pr-row-author">{pr.author}</span>
+                      {pr.draft && <span className="pr-tag">Draft</span>}
+                    </span>
+                    <Branches head={pr.head} base={pr.base} />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -118,12 +177,23 @@ interface PullRequestReviewProps {
   projectId: number;
   number: number;
   refreshKey: number;
-  onBack: () => void;
+  /** Absent when the pull request is the branch's own: there is no list to go back to. */
+  onBack?: () => void;
   onChanged: () => void;
   onReviewFiles: (number: number) => void;
+  /** Opens the pull request on GitHub; only offered for the branch's own. */
+  onOpenOnGithub?: () => void;
 }
 
-function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, onReviewFiles }: PullRequestReviewProps) {
+export function PullRequestReview({
+  projectId,
+  number,
+  refreshKey,
+  onBack,
+  onChanged,
+  onReviewFiles,
+  onOpenOnGithub,
+}: PullRequestReviewProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -152,23 +222,46 @@ function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, o
     };
   }, [projectId, number, refreshKey, reload]);
 
-  const back = (
-    <button className="pr-back" onClick={onBack}>
-      <ArrowLeftIcon size={14} /> Pull requests
-    </button>
+  const nav = (
+    <div className="pr-nav">
+      {onBack ? (
+        <button className="pr-back" onClick={onBack}>
+          <ArrowLeftIcon size={14} /> Pull requests
+        </button>
+      ) : (
+        <span className="pr-nav-title">This branch</span>
+      )}
+      <span className="grow" />
+      {onOpenOnGithub && (
+        <button className="icon-btn sm" onClick={onOpenOnGithub} title="Open on GitHub" aria-label="Open on GitHub">
+          <LinkExternalIcon size={14} />
+        </button>
+      )}
+    </div>
   );
-  if (loaded.state === "loading") return <div className="pr-review">{back}</div>;
+  if (loaded.state === "loading") {
+    return (
+      <div className="pr-review" aria-busy>
+        {nav}
+        <p className="pr-empty">Loading…</p>
+      </div>
+    );
+  }
   if (loaded.state === "error") {
     return (
       <div className="pr-review">
-        {back}
-        <p role="alert">{loaded.message}</p>
+        {nav}
+        <p role="alert" className="pr-empty error">
+          {loaded.message}
+        </p>
       </div>
     );
   }
 
   const { detail, git } = loaded;
   const pr = detail.pullRequest;
+  const status = readiness(detail.checks, pr.draft);
+  const canMerge = !pr.draft && method !== null && !busy;
 
   async function act(run: () => Promise<{ status: "ok" } | { status: "error"; error: { message: string } }>) {
     setBusy(true);
@@ -200,110 +293,227 @@ function PullRequestReview({ projectId, number, refreshKey, onBack, onChanged, o
 
   return (
     <div className="pr-review">
-      {back}
-      <h3>
-        #{pr.number} {pr.title}
-        {pr.draft && <span className="badge">draft</span>}
-      </h3>
-      <p>
-        {pr.author} · {pr.head} → {pr.base}
-      </p>
-      <div className="pr-actions">
-        <button onClick={() => onReviewFiles(number)}>
-          Review files ({detail.diff.files.length})
-        </button>
-        <button
-          disabled={busy || git.pickerDisabledReason !== null}
-          title={git.pickerDisabledReason ?? "Check this branch out in the main checkout"}
-          onClick={() => void checkout()}
-        >
-          Check out locally
-        </button>
-      </div>
-      {git.pickerDisabledReason && <p className="pr-guidance">{git.pickerDisabledReason}</p>}
-      {detail.body.trim() && <pre className="pr-body">{detail.body}</pre>}
+      {nav}
+      <div className="pr-scroll">
+        <header className="pr-hero">
+          <h3 className="pr-title">
+            {pr.title} <span className="pr-number">#{pr.number}</span>
+          </h3>
+          <div className="pr-hero-meta">
+            <span className={`pr-status ${merged ? "merged" : pr.draft ? "draft" : "open"}`}>
+              {merged ? <GitMergeIcon size={14} /> : <PullRequestStateIcon draft={pr.draft} size={14} />}
+              {merged ? "Merged" : pr.draft ? "Draft" : "Open"}
+            </span>
+            <span className="pr-row-author">{pr.author}</span>
+          </div>
+          <Branches head={pr.head} base={pr.base} />
+        </header>
 
-      <section aria-label="Checks">
-        <h4>Checks · {summarizeChecks(detail.checks)}</h4>
-        <ul className="pr-checks">
-          {detail.checks.map((check, i) => (
-            <li key={`${i}:${check.name}`} className={`pr-check pr-check-${check.state}`}>
-              <span aria-hidden>{check.state === "success" ? <CheckIcon size={12} /> : check.state === "failure" ? <XIcon size={12} /> : <DotFillIcon size={12} />}</span>{" "}
-              {check.name} <span className="pr-check-state">{check.state}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section aria-label="Conversation">
-        <h4>Conversation</h4>
-        {detail.comments.length === 0 && <p className="pr-guidance">No comments yet.</p>}
-        {detail.comments.map((c, i) => (
-          <article key={i} className="pr-comment">
-            <header>{c.author}</header>
-            <pre>{c.body}</pre>
-          </article>
-        ))}
-        <form
-          className="pr-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void sendComment();
-          }}
-        >
-          <textarea
-            aria-label="Comment"
-            placeholder="Leave a comment"
-            rows={3}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-          />
-          <button type="submit" disabled={busy || !comment.trim()}>
-            Comment
+        <div className="pr-actions">
+          <button className="primary" onClick={() => onReviewFiles(number)}>
+            <FileDiffIcon size={14} /> Review files
+            <span className="pr-count">{detail.diff.files.length}</span>
           </button>
-        </form>
-      </section>
+          <button
+            disabled={busy || git.pickerDisabledReason !== null}
+            title={git.pickerDisabledReason ?? "Check this branch out in the main checkout"}
+            onClick={() => void checkout()}
+          >
+            Check out
+          </button>
+        </div>
+        {git.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
 
-      <section aria-label="Merge">
-        <h4>Merge</h4>
-        {merged ? (
-          <p>Merged.</p>
-        ) : method === null ? (
-          <p className="pr-guidance">This repository allows no merge method.</p>
-        ) : (
+        {detail.body.trim() && <Description body={detail.body} />}
+        <Checks checks={detail.checks} />
+
+        <section className="pr-section" aria-label="Conversation">
+          <h4>
+            <CommentIcon size={14} /> Conversation
+            {detail.comments.length > 0 && <span className="pr-count">{detail.comments.length}</span>}
+          </h4>
+          {detail.comments.map((c, i) => (
+            <article key={i} className="pr-comment">
+              <header>
+                <strong>{c.author}</strong>
+                <time dateTime={c.createdAt}>{relativeTime(c.createdAt)}</time>
+              </header>
+              <Markdown source={c.body} />
+            </article>
+          ))}
           <form
-            className="pr-form"
+            className="pr-compose"
             onSubmit={(e) => {
               e.preventDefault();
-              void merge();
+              void sendComment();
             }}
           >
-            <select
-              aria-label="Merge method"
-              value={method}
-              onChange={(e) => setMethod(e.target.value as MergeMethod)}
-            >
-              {detail.mergeMethods.map((m) => (
-                <option key={m} value={m}>
-                  {mergeLabel(m)}
-                </option>
-              ))}
-            </select>
-            <label>
-              <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} />{" "}
-              Delete branch
-            </label>
-            <button type="submit" disabled={busy}>
-              {mergeLabel(method)}
-            </button>
+            <textarea
+              aria-label="Comment"
+              placeholder="Leave a comment"
+              rows={2}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.metaKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
+            {comment.trim() && (
+              <button type="submit" disabled={busy} title="Send (⌘↩)">
+                Comment
+              </button>
+            )}
           </form>
+        </section>
+        {error && (
+          <p role="alert" className="pr-error">
+            {error}
+          </p>
         )}
-      </section>
-      {error && (
-        <p role="alert" className="git-error-text">
-          {error}
-        </p>
-      )}
+      </div>
+
+      <footer className="pr-merge" aria-label="Merge">
+        {merged ? (
+          <p className="pr-merge-status ok">
+            <CheckCircleFillIcon size={14} /> Merged
+          </p>
+        ) : method === null ? (
+          <p className="pr-merge-status">This repository allows no merge method.</p>
+        ) : (
+          <>
+            <p className={`pr-merge-status ${status.tone}`}>
+              <StatusIcon tone={status.tone} />
+              {status.label}
+            </p>
+            <div className="pr-merge-row">
+              <div className="pr-split">
+                <button
+                  className={`primary${status.tone === "bad" ? " risky" : ""}`}
+                  disabled={!canMerge}
+                  onClick={() => void merge()}
+                >
+                  <GitMergeIcon size={14} /> {mergeLabel(method)}
+                </button>
+                {detail.mergeMethods.length > 1 && (
+                  <span className="pr-split-pick">
+                    <ChevronDownIcon size={14} />
+                    <select
+                      aria-label="Merge method"
+                      value={method}
+                      disabled={busy}
+                      onChange={(e) => setMethod(e.target.value as MergeMethod)}
+                    >
+                      {detail.mergeMethods.map((m) => (
+                        <option key={m} value={m}>
+                          {mergeLabel(m)}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                )}
+              </div>
+              <label className="pr-check-opt">
+                <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} />
+                Delete branch
+              </label>
+            </div>
+          </>
+        )}
+      </footer>
     </div>
+  );
+}
+
+function StatusIcon({ tone }: { tone: "ok" | "warn" | "bad" | "neutral" }) {
+  if (tone === "ok") return <CheckCircleFillIcon size={14} />;
+  if (tone === "bad") return <XCircleFillIcon size={14} />;
+  return <DotFillIcon size={14} />;
+}
+
+/** The description, clamped: bot and template boilerplate shouldn't push the rest off the screen. */
+function Description({ body }: { body: string }) {
+  const [open, setOpen] = useState(false);
+  const long = body.length > 320 || body.split("\n").length > 8;
+  return (
+    <section className="pr-section" aria-label="Description">
+      <div className={`pr-desc${long && !open ? " clamped" : ""}`}>
+        <Markdown source={body} />
+      </div>
+      {long && (
+        <button className="link" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Checks, triaged: what needs attention is listed, what passed is one line you can open. */
+function Checks({ checks }: { checks: PullRequestCheck[] }) {
+  const { failing, pending, passing } = countChecks(checks);
+  const all = dedupeChecks(checks);
+  const attention = all.filter((c) => c.state !== "success");
+  const passed = all.filter((c) => c.state === "success");
+  if (all.length === 0) return null;
+  return (
+    <section className="pr-section" aria-label="Checks">
+      <h4>
+        Checks
+        <span className="pr-bar" role="img" aria-label={`${failing} failing, ${pending} running, ${passing} passing`}>
+          {failing > 0 && <i className="failure" style={{ flexGrow: failing }} />}
+          {pending > 0 && <i className="pending" style={{ flexGrow: pending }} />}
+          {passing > 0 && <i className="success" style={{ flexGrow: passing }} />}
+        </span>
+      </h4>
+      {attention.length > 0 && (
+        <ul className="pr-checks">
+          {attention.map((c) => (
+            <CheckRow key={c.name} check={c} />
+          ))}
+        </ul>
+      )}
+      {passed.length > 0 &&
+        (attention.length === 0 && passed.length <= 3 ? (
+          <ul className="pr-checks">
+            {passed.map((c) => (
+              <CheckRow key={c.name} check={c} />
+            ))}
+          </ul>
+        ) : (
+          <details className="pr-passed">
+            <summary>
+              <CheckCircleFillIcon size={14} className="pr-check-success" />
+              {attention.length > 0 ? `${passed.length} passed` : `All ${passed.length} passed`}
+              <ChevronDownIcon size={14} className="pr-chev" />
+            </summary>
+            <ul className="pr-checks">
+              {passed.map((c) => (
+                <CheckRow key={c.name} check={c} />
+              ))}
+            </ul>
+          </details>
+        ))}
+    </section>
+  );
+}
+
+const CHECK_WORD = { success: "Passed", failure: "Failed", pending: "Running" } as const;
+
+function CheckRow({ check }: { check: PullRequestCheck }) {
+  return (
+    <li className={`pr-check pr-check-${check.state}`}>
+      {check.state === "success" ? (
+        <CheckCircleFillIcon size={14} />
+      ) : check.state === "failure" ? (
+        <XCircleFillIcon size={14} />
+      ) : (
+        <DotFillIcon size={14} className="pr-pulse" />
+      )}
+      <span className="pr-check-name">{check.name}</span>
+      <span className="pr-check-state">{CHECK_WORD[check.state]}</span>
+    </li>
   );
 }

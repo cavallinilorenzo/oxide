@@ -6,6 +6,7 @@ use crate::{
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -19,6 +20,34 @@ pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 /// Range: >= 0.2.0, < 3.0.0
 pub const PINNED_VERSION_MIN: (u64, u64, u64) = (0, 2, 0);
 pub const PINNED_VERSION_MAX: (u64, u64, u64) = (3, 0, 0);
+
+/// Which of the user's own Claude Code customizations a session may load. Everything is off by
+/// default, which starts the CLI in `--safe-mode`; each flag opts one category back in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ClaudeCustomizations {
+    /// `CLAUDE.md` files and auto-memory.
+    pub claude_md: bool,
+    /// Skills and custom slash commands.
+    pub skills: bool,
+    pub plugins: bool,
+    pub mcp_servers: bool,
+    pub hooks: bool,
+}
+
+impl ClaudeCustomizations {
+    pub const ALL: Self = Self {
+        claude_md: true,
+        skills: true,
+        plugins: true,
+        mcp_servers: true,
+        hooks: true,
+    };
+
+    pub fn any(&self) -> bool {
+        *self != Self::default()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCatalogEntry {
@@ -51,7 +80,7 @@ pub struct ClaudeCodeProvider {
     turn_counter: Arc<AtomicU32>,
     active_turn: Arc<Mutex<Option<u32>>>,
     registry: Option<Arc<ProcessRegistry>>,
-    user_customizations: bool,
+    customizations: ClaudeCustomizations,
     safe_mode_supported: OnceLock<bool>,
 }
 
@@ -88,7 +117,7 @@ impl ClaudeCodeProvider {
             turn_counter: Arc::new(AtomicU32::new(0)),
             active_turn: Arc::new(Mutex::new(None)),
             registry: None,
-            user_customizations: false,
+            customizations: ClaudeCustomizations::default(),
             safe_mode_supported: OnceLock::new(),
         }
     }
@@ -100,12 +129,12 @@ impl ClaudeCodeProvider {
     }
 
     /// By default a session starts with Claude Code's `--safe-mode`, so the user's `CLAUDE.md`,
-    /// skills, plugins, hooks and MCP servers stay out of the starting context window. Passing
-    /// `true` lets the CLI load them as it would in a terminal.
-    pub fn set_user_customizations(&mut self, enabled: bool) {
-        self.user_customizations = enabled;
-        // Skills and slash commands only exist for the CLI when it loads the customizations.
-        self.capabilities.lock().unwrap().slash_command_passthrough = enabled;
+    /// skills, plugins, hooks and MCP servers stay out of the starting context window. Each
+    /// enabled category lets the CLI load it as it would in a terminal.
+    pub fn set_user_customizations(&mut self, customizations: ClaudeCustomizations) {
+        self.customizations = customizations;
+        // Skills and slash commands only exist for the CLI when it loads them.
+        self.capabilities.lock().unwrap().slash_command_passthrough = customizations.skills;
     }
 
     /// Whether the installed CLI knows `--safe-mode`; older ones would refuse to start with it.
@@ -148,8 +177,27 @@ impl ClaudeCodeProvider {
             .arg("--verbose")
             .arg("--include-partial-messages");
 
-        if !self.user_customizations && self.supports_safe_mode() {
+        let c = self.customizations;
+        if !c.any() && self.supports_safe_mode() {
             cmd.arg("--safe-mode");
+        } else {
+            // `--safe-mode` is all-or-nothing, so a partial opt-in switches off the rest by hand.
+            if !c.claude_md {
+                cmd.env("CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1");
+            }
+            if !c.skills {
+                cmd.arg("--disable-slash-commands");
+            }
+            if !c.mcp_servers {
+                cmd.arg("--strict-mcp-config");
+            }
+            if !c.hooks {
+                cmd.arg("--settings").arg(r#"{"disableAllHooks":true}"#);
+            }
+            if !c.plugins {
+                // Plugins are enabled from the user's settings, which this leaves unread.
+                cmd.arg("--setting-sources").arg("project,local");
+            }
         }
 
         if let Some(ref model) = context.model {

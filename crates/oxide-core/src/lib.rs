@@ -20,6 +20,7 @@ mod slash_commands;
 mod storage_actor;
 mod terminal;
 pub mod thread;
+pub use oxide_provider::claude::ClaudeCustomizations;
 pub use slash_commands::SlashCommand;
 mod thread_actor;
 mod worktree;
@@ -1025,7 +1026,7 @@ impl Core {
         provider: &str,
         project_id: u32,
     ) -> Result<Vec<SlashCommand>> {
-        if provider != "claude" || !self.settings().settings.claude_customizations {
+        if provider != "claude" || !self.settings().settings.claude_customizations.skills {
             return Ok(Vec::new());
         }
         let project = self

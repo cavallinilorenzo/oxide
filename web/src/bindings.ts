@@ -212,6 +212,14 @@ export type BranchPullRequest = {
 
 export type CheckState = "success" | "failure" | "pending";
 
+export type ClaudeCustomizations = {
+	claudeMd: boolean,
+	skills: boolean,
+	plugins: boolean,
+	mcpServers: boolean,
+	hooks: boolean,
+};
+
 /**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
 export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
 
@@ -690,7 +698,7 @@ export type Settings_Deserialize = {
 	providers: Providers_Deserialize,
 	confirmQuit: boolean,
 	editor: string,
-	claudeCustomizations: boolean,
+	claudeCustomizations: ClaudeCustomizations,
 };
 
 export type Settings_Serialize = {
@@ -698,7 +706,7 @@ export type Settings_Serialize = {
 	providers: Providers_Serialize,
 	confirmQuit: boolean,
 	editor: string,
-	claudeCustomizations: boolean,
+	claudeCustomizations: ClaudeCustomizations,
 };
 
 export type SlashCommand = SlashCommand_Serialize | SlashCommand_Deserialize;

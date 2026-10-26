@@ -232,7 +232,7 @@ mod settings {
             PermissionMode::Ask
         );
         assert!(state.settings.confirm_quit);
-        assert!(!state.settings.claude_customizations);
+        assert!(!state.settings.claude_customizations.any());
 
         let on_disk = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
         assert!(
@@ -273,7 +273,11 @@ mod settings {
         assert!(state.errors.is_empty(), "{:?}", state.errors);
         assert_eq!(state.settings.default_provider, Provider::Codex);
         assert!(!state.settings.confirm_quit);
-        assert!(state.settings.claude_customizations);
+        // A legacy boolean switches every category on.
+        assert_eq!(
+            state.settings.claude_customizations,
+            oxide_core::ClaudeCustomizations::ALL
+        );
         assert_eq!(
             state.settings.providers.codex.model.as_deref(),
             Some("gpt-x")

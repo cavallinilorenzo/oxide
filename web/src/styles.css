@@ -172,7 +172,7 @@ code { font-family: var(--mono); font-size: 12px; }
 /* ── Window shell ─────────────────────────────────────────── */
 .window { display: flex; flex-direction: column; height: 100vh; }
 .header {
-  height: 44px;
+  height: 28px;
   flex: none;
   display: flex;
   align-items: center;
@@ -183,7 +183,7 @@ code { font-family: var(--mono); font-size: 12px; }
   background: var(--bg2);
   user-select: none;
 }
-.header .title { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 28%; white-space: nowrap; }
+.header .title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 28%; white-space: nowrap; }
 .header .title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--fg-bright); }
 .header > .icon-btn, .header > .seg { flex: none; }
 .header .path { font: 11.5px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; max-width: 260px; }

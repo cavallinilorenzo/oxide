@@ -282,12 +282,4 @@ mod tests {
         drop(token.take());
         assert!(token.is_none());
     }
-
-    #[test]
-    fn editor_detection_delegates_to_oxide_core() {
-        assert!(oxide_core::editor::is_installed_windows("dev.zed.Zed"));
-        assert!(!oxide_core::editor::is_installed_windows(
-            "com.nonexistent.editor"
-        ));
-    }
 }

@@ -39,6 +39,7 @@ import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
 import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
+import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { parseSlashCommand } from "./modelPicker";
 import { filterSlashCommands, slashQuery } from "./slashMenu";
@@ -927,27 +928,18 @@ export function ThreadView({
               <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
               <ChevronDownIcon size={12} className="cv" />
             </button>
-            <label className="cbtn compact" title={`Permission mode: ${currentModeConfig.label}`}>
-              {(() => {
-                const PermIcon = PERMISSION_ICONS[currentModeConfig.icon];
-                return <PermIcon size={14} />;
-              })()}
-              <select
-                id="permission-mode-select"
-                className="t permission-chip-select"
-                value={currentMode}
-                disabled={isTurnActive || sending}
-                onChange={(e) => handlePermissionChange(e.target.value as PermissionMode)}
-                aria-label="Permission mode"
-              >
-                {offeredModes.map((item) => (
-                  <option key={item.mode} value={item.mode}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDownIcon size={12} className="cv" />
-            </label>
+            <Dropdown
+              label="Permission mode"
+              triggerClassName="cbtn compact"
+              minMenuWidth={200}
+              disabled={isTurnActive || sending}
+              value={currentMode}
+              options={offeredModes.map((item) => {
+                const PermIcon = PERMISSION_ICONS[item.icon];
+                return { value: item.mode, label: item.label, icon: <PermIcon size={14} /> };
+              })}
+              onChange={(mode) => void handlePermissionChange(mode)}
+            />
           </div>
           {imagesOffered && (
             <>

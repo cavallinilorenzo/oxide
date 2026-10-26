@@ -77,6 +77,8 @@ for line in sys.stdin:
                 models = json.load(f)
             with open(os.path.join(fixtures_dir, "initialize_commands.json"), "r") as f:
                 commands = json.load(f)
+            if "--disable-slash-commands" in sys.argv or "--safe-mode" in sys.argv:
+                commands = [c for c in commands if c.get("builtin")]
             reply = {
                 "type": "control_response",
                 "response": {

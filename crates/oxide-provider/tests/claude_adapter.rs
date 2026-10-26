@@ -532,3 +532,23 @@ fn claude_slash_command_catalog_comes_from_the_cli_without_hidden_commands() {
     let clear = commands.iter().find(|c| c.name == "clear").unwrap();
     assert_eq!(clear.aliases, ["reset", "new"]);
 }
+
+#[test]
+fn claude_skills_and_custom_commands_only_appear_with_the_skills_customization() {
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let names = |p: &ClaudeCodeProvider| -> Vec<String> {
+        p.slash_commands(std::path::Path::new("."))
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    };
+
+    assert!(!names(&provider).contains(&"tdd".to_string()));
+    provider.set_user_customizations(oxide_provider::claude::ClaudeCustomizations {
+        skills: true,
+        ..Default::default()
+    });
+    assert!(names(&provider).contains(&"tdd".to_string()));
+}

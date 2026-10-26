@@ -595,10 +595,6 @@ pub fn parse_rate_limit_event(val: &serde_json::Value) -> Option<ProviderEvent> 
     })
 }
 
-/// Maps the CLI's `models` array to the catalog. The CLI reports no legacy flag, so an entry
-/// pinned to a concrete version (`value == resolvedModel`) that is not what its family's alias
-/// resolves to today counts as legacy. A `default` entry that merely repeats another entry's
-/// model is dropped.
 /// Commands that only make sense in the Claude Code terminal UI, so Oxide never offers them.
 const TERMINAL_ONLY_COMMANDS: [&str; 20] = [
     "color",
@@ -658,6 +654,10 @@ fn parse_slash_commands(commands: &[serde_json::Value]) -> Vec<SlashCommandInfo>
     out
 }
 
+/// Maps the CLI's `models` array to the catalog. The CLI reports no legacy flag, so an entry
+/// pinned to a concrete version (`value == resolvedModel`) that is not what its family's alias
+/// resolves to today counts as legacy. A `default` entry that merely repeats another entry's
+/// model is dropped.
 fn parse_models(models: &[serde_json::Value]) -> Vec<ModelInfo> {
     let field = |m: &serde_json::Value, key: &str| m[key].as_str().map(str::to_owned);
     let family = |m: &serde_json::Value| {

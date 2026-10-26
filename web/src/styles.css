@@ -172,7 +172,7 @@ code { font-family: var(--mono); font-size: 12px; }
 /* ── Window shell ─────────────────────────────────────────── */
 .window { display: flex; flex-direction: column; height: 100vh; }
 .header {
-  height: 44px;
+  height: 36px;
   flex: none;
   display: flex;
   align-items: center;
@@ -183,7 +183,6 @@ code { font-family: var(--mono); font-size: 12px; }
   background: var(--bg2);
   user-select: none;
 }
-.header > :not(.grow) { transform: translateY(-6px); }
 .header .title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 28%; white-space: nowrap; }
 .header .title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--fg-bright); }
 .header > .icon-btn, .header > .seg { flex: none; }

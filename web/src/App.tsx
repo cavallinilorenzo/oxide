@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
 import {
@@ -33,6 +33,9 @@ import { ProjectPalette } from "./ProjectPalette";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
+import { ResizeHandle } from "./ResizeHandle";
+import { workspaceLayout } from "./panelLayout";
+import { useElementSize, usePanelSize } from "./usePanelSize";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
@@ -70,6 +73,14 @@ export function App() {
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodySize = useElementSize(bodyRef, { width: window.innerWidth, height: window.innerHeight - 44 });
+  const sidebarSize = usePanelSize("sidebar");
+  const toolsSize = usePanelSize("tools");
+  const terminalSize = usePanelSize("terminal");
+  const layout = workspaceLayout(bodySize.width, bodySize.height, {
+    sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: terminalSize.preferred,
+  }, showTools && !showSettings);
   const [showPalette, setShowPalette] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [pendingDeleteThread, setPendingDeleteThread] = useState<{
@@ -498,45 +509,53 @@ export function App() {
           <TerminalIcon size={16} />
         </button>
       </header>
-      <div className="body">
-        <Sidebar
-          projects={projects}
-          onProjects={setProjects}
-          selected={selected}
-          onSelect={(p) => {
-            restore.current = null;
-            setShowSettings(false);
-            setSelectedId(p.id);
-            setThreads(null);
-            setSelectedThreadId(null);
-          }}
-          threads={threads}
-          selectedThreadId={selectedThreadId}
-          onSelectThread={(threadId) => {
-            setShowSettings(false);
-            setShowBoard(false);
-            setSelectedThreadId(threadId);
-            if (selected) rememberTerminalContext(selected.id, threadId);
-          }}
-          onDeleteThread={(threadId) => void deleteThread(threadId)}
-          onNewThread={() => {
-            void startNewThread();
-          }}
-          onRenameThread={onThreadTitleChange}
-          onOpenPalette={() => setShowPalette(true)}
-          onOpenBoard={(p) => {
-            if (p.id !== selected?.id) {
+      <div className="body" ref={bodyRef} style={{
+        "--sidebar-width": `${layout.sidebar.value}px`,
+        "--tools-width": `${layout.tools.value}px`,
+        "--terminal-height": `${layout.terminal.value}px`,
+      } as CSSProperties}>
+        <div className="sidebar-region" id="workspace-sidebar">
+          <Sidebar
+            projects={projects}
+            onProjects={setProjects}
+            selected={selected}
+            onSelect={(p) => {
               restore.current = null;
+              setShowSettings(false);
               setSelectedId(p.id);
               setThreads(null);
               setSelectedThreadId(null);
-            }
-            setShowSettings(false);
-            setShowBoard(true);
-          }}
-          onOpenSettings={() => setShowSettings(true)}
-          settingsOpen={showSettings}
-        />
+            }}
+            threads={threads}
+            selectedThreadId={selectedThreadId}
+            onSelectThread={(threadId) => {
+              setShowSettings(false);
+              setShowBoard(false);
+              setSelectedThreadId(threadId);
+              if (selected) rememberTerminalContext(selected.id, threadId);
+            }}
+            onDeleteThread={(threadId) => void deleteThread(threadId)}
+            onNewThread={() => {
+              void startNewThread();
+            }}
+            onRenameThread={onThreadTitleChange}
+            onOpenPalette={() => setShowPalette(true)}
+            onOpenBoard={(p) => {
+              if (p.id !== selected?.id) {
+                restore.current = null;
+                setSelectedId(p.id);
+                setThreads(null);
+                setSelectedThreadId(null);
+              }
+              setShowSettings(false);
+              setShowBoard(true);
+            }}
+            onOpenSettings={() => setShowSettings(true)}
+            settingsOpen={showSettings}
+          />
+          <ResizeHandle label="Resize sidebar" controls="workspace-sidebar" axis="x" edge="end"
+            {...layout.sidebar} onResize={sidebarSize.resize} onCommit={sidebarSize.commit} onReset={sidebarSize.reset} onCancel={sidebarSize.cancel} />
+        </div>
         <div className="centre-column">
           {showSettings ? (
             <SettingsView onClose={() => setShowSettings(false)} />
@@ -604,20 +623,26 @@ export function App() {
               </div>
             </main>
           )}
-          {terminalContextsToRender.map((context) => (
-            <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal && !showSettings ? <section className="terminal" aria-label="Terminal" /> : null}>
-              <TerminalPanel
-                projectId={context.projectId}
-                threadId={context.threadId}
-                contextKey={context.key}
-                visible={showTerminal && !showSettings && context.key === currentTerminalContext?.key}
-                onClose={() => setShowTerminal(false)}
-              />
-            </Suspense>
-          ))}
+          <div className="terminal-region" id="workspace-terminal" hidden={!showTerminal || showSettings || !currentTerminalContext}>
+            {showTerminal && !showSettings && currentTerminalContext && <ResizeHandle label="Resize Terminal" controls="workspace-terminal" axis="y" edge="start" direction={-1}
+              {...layout.terminal} onResize={terminalSize.resize} onCommit={terminalSize.commit} onReset={terminalSize.reset} onCancel={terminalSize.cancel} />}
+            {terminalContextsToRender.map((context) => (
+              <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal && !showSettings ? <section className="terminal" aria-label="Terminal" /> : null}>
+                <TerminalPanel
+                  projectId={context.projectId}
+                  threadId={context.threadId}
+                  contextKey={context.key}
+                  visible={showTerminal && !showSettings && context.key === currentTerminalContext?.key}
+                  onClose={() => setShowTerminal(false)}
+                />
+              </Suspense>
+            ))}
+          </div>
         </div>
         {showTools && !showSettings && (
-          <aside className="tools" aria-label="Tools panel">
+          <aside className="tools" aria-label="Tools panel" id="workspace-tools">
+            <ResizeHandle label="Resize Tools" controls="workspace-tools" axis="x" edge="start" direction={-1}
+              {...layout.tools} onResize={toolsSize.resize} onCommit={toolsSize.commit} onReset={toolsSize.reset} onCancel={toolsSize.cancel} />
             <nav className="tabs" role="tablist" aria-label="Surfaces">
               {TOOL_TABS.map(({ name, Icon }) => (
                 <button

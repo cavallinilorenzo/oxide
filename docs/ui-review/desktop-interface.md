@@ -4,6 +4,41 @@ Metodo: due valutazioni indipendenti, A (design) e B (detector, contrasto e brow
 
 L’interfaccia ha un’identità appropriata: superfici scure, Octicons, gerarchia Project → Thread e azioni Git vicine al lavoro. La densità è utile, ma nella baseline i pannelli sottraevano spazio al compito principale e alcuni dettagli operativi avevano contrasto insufficiente. I fix preservano struttura, contenuti e linguaggio visivo.
 
+## Zone ridimensionabili
+
+Trascinare i bordi tra le zone per distribuire lo spazio. Il bordo esistente rimane sottile a riposo; hover, focus e trascinamento lo evidenziano in blu, con un’area di presa da 8 px che non aggiunge gutter al layout.
+
+| Zona | Bordo da trascinare | Limiti |
+| --- | --- | --- |
+| Sidebar Projects/Threads | Bordo destro | 208–400 px |
+| Tools | Bordo sinistro | 288–800 px |
+| Terminal | Bordo superiore | Da 140 px, fino a 600 px dove c’è spazio |
+| Albero Files / anteprima | Divisore interno | Colonne oltre 560 px disponibili, righe sotto questa soglia; dimensioni memorizzate separatamente |
+
+I massimi effettivi dipendono dallo spazio disponibile: il Thread conserva almeno 360 px di larghezza e 280 px di altezza. L’anteprima Files conserva almeno 200 px in larghezza o 120 px in altezza. Nella finestra minima, dimensioni preferite più grandi vengono temporaneamente limitate: tornando a una finestra ampia si ripristinano senza aver sovrascritto le preferenze.
+
+Ogni divisore si raggiunge con Tab:
+
+- Frecce: spostano il divisore di 8 px; Shift + freccia usa passi da 32 px.
+- Home / End: raggiungono i limiti disponibili.
+- Doppio clic o Enter: ripristinano la dimensione automatica di quella zona.
+- Escape durante il trascinamento: annulla la modifica e conserva anche l’eventuale modalità automatica precedente.
+
+Le preferenze vengono conservate localmente sul dispositivo tra aperture dell’app e chiusura/riapertura dei pannelli, condivise tra i Project. Il salvataggio avviene a fine trascinamento o dopo una modifica da tastiera. Dati non validi o memoria locale non disponibile non impediscono il ridimensionamento. I separatori espongono nome, orientamento, valore e limiti alle tecnologie assistive.
+
+Implementazione: `ResizeHandle.tsx` gestisce input e pointer capture con aggiornamenti al massimo una volta per frame; `panelLayout.ts` applica i limiti combinati; `usePanelSize.ts` conserva preferenze e misura i contenitori. Non aggiunge dipendenze né cambia contratti IPC. Le sessioni Terminal restano montate: il ResizeObserver esistente adatta righe e colonne alle nuove dimensioni.
+
+Evidenze: [layout personalizzato con Files a colonne](resize/resized-workspace.png), [layout adattato a 900×560](resize/resized-minimum-window.png), [verifica Chromium](resize/verification-chromium.json), [verifica WebKit](resize/verification-webkit.json).
+
+Verifiche del ridimensionamento: **153 test frontend** passati, typecheck/lint/build riusciti (un warning preesistente su `useVirtualizer`). Chromium e WebKit verificano trascinamento di tutti i divisori, limiti combinati, cambio orientamento Files, tastiera, reset, Escape, pointer cancel, perdita della cattura, blur e rimozione del divisore durante il drag. Verificati anche reload, toggle dei pannelli, Settings, riduzione e ripristino della finestra, dati di layout corrotti e fallimento dello storage. Il mock IPC conferma invii di `resize_terminal` senza nuovi avvii durante i drag; questo non sostituisce il test PTY nativo. Touch drag verificato tramite il protocollo di input di Chromium; hardware touch non provato. Zero errori JavaScript nelle fixture. La suite browser precedente continua a verificare gli stati vuoto/lavoro/approvazione/errore.
+
+Per riprodurre, con lo stesso server Vite e `OXIDE_PLAYWRIGHT_MODULE` descritti sotto:
+
+```sh
+node web/scripts/resize-review.mjs /tmp/oxide-resize-chromium
+OXIDE_REVIEW_ENGINE=webkit node web/scripts/resize-review.mjs /tmp/oxide-resize-webkit
+```
+
 ## Polish finale della schermata principale
 
 Il passaggio finale mantiene palette, struttura, contenuti e flussi. Le immagini della prima revisione sotto rimangono disponibili come documentazione dell’audit; queste catture mostrano il risultato aggiornato.
@@ -179,6 +214,6 @@ Verifiche locali completate:
 
 ## Unica validazione manuale finale di release
 
-Da eseguire insieme sul target attualmente supportato, macOS Apple Silicon: finestra nativa 900×560 e fullscreen, traffic lights e drag della title bar, VoiceOver/Full Keyboard Access, zoom e testo lungo reale, dialog e recupero del focus, tooltips nativi, Provider in lavoro/errore/approval, Terminal reale con ripristino dopo Settings, salvataggio reale e riapertura delle impostazioni. Confermare anche errori di scrittura e reduced motion a livello di sistema.
+Da eseguire insieme sul target attualmente supportato, macOS Apple Silicon: finestra nativa 900×560 e fullscreen, traffic lights e drag della title bar, VoiceOver/Full Keyboard Access sui divisori, zoom e testo lungo reale, dialog e recupero del focus, tooltips nativi, Provider in lavoro/errore/approval, Terminal reale con reflow di righe/colonne durante il resize e ripristino dopo Settings, ripristino delle dimensioni dopo riavvio, salvataggio reale e riapertura delle impostazioni. Confermare anche errori di scrittura e reduced motion a livello di sistema.
 
 PC/Windows: prova nativa rinviata alla disponibilità del supporto Windows; non viene dichiarata verificata da Chromium. iOS: fuori dal target desktop attuale. Nessun controllo manuale intermedio aggiuntivo richiesto. CI non attesa.

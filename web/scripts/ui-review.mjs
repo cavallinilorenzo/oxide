@@ -9,6 +9,14 @@ import { pathToFileURL } from "node:url";
 
 const { chromium, webkit } = await import(process.env.OXIDE_PLAYWRIGHT_MODULE
   ? pathToFileURL(resolve(process.env.OXIDE_PLAYWRIGHT_MODULE)).href : "playwright");
+export async function waitForLayout(page) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  // The file split observes a region resized by the outer workspace observer.
+  await page.waitForFunction(() => {
+    const files = document.querySelector(".files");
+    return !files?.dataset.splitAxis || files.dataset.splitAxis === (files.getBoundingClientRect().width > 560 ? "x" : "y");
+  });
+}
 export async function openReview(engine = "chromium", scenario = "completed") {
   const browser = await ({ chromium, webkit }[engine]).launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
@@ -17,6 +25,8 @@ export async function openReview(engine = "chromium", scenario = "completed") {
   await page.addInitScript((scenario) => {
     let callbackId = 0;
     const callbacks = new Map();
+    const commandCounts = {};
+    window.__OXIDE_REVIEW_COMMAND_COUNTS__ = commandCounts;
     const project = { id: 1, name: "oxide", path: "/Users/demo/Developer/projects/oxide", hidden: false, open: true, missing: false };
     const base = { projectId: 1, provider: "claude", model: "claude-sonnet-4-6", effort: "medium", permissionMode: "auto-edit", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sessionLost: false, continuedFrom: null, continuedIn: null, branch: null, worktreePath: null, setupOutput: null, issueNumber: null };
     const threads = [
@@ -33,6 +43,7 @@ export async function openReview(engine = "chromium", scenario = "completed") {
       transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id; },
       unregisterCallback(id) { callbacks.delete(id); },
       async invoke(command, args = {}) {
+        commandCounts[command] = (commandCounts[command] ?? 0) + 1;
         if (command === "plugin:event|listen") return ++callbackId;
         if (["plugin:event|unlisten", "remember_selection", "resize_terminal", "close_terminal", "write_terminal"].includes(command)) return null;
         if (command === "list_projects" || command === "rescan_projects") return [project];
@@ -80,6 +91,7 @@ export async function openReview(engine = "chromium", scenario = "completed") {
   if (scenario !== "empty") await page.locator(".agent-message").waitFor();
   await page.locator(".files-row").first().waitFor();
   await page.locator(".terminal-host .xterm").waitFor();
+  await waitForLayout(page);
   return { browser, page, errors };
 }
 
@@ -87,6 +99,7 @@ export async function verifyReview(page, output) {
   const metrics = [];
   for (const [width, height] of [[1920, 1080], [1280, 800], [1024, 768], [900, 560]]) {
     await page.setViewportSize({ width, height });
+    await waitForLayout(page);
     const layout = await page.evaluate(() => {
       const bounds = (selector) => document.querySelector(selector).getBoundingClientRect();
       const obscured = [...document.querySelectorAll(".header button")].filter((button) => {
@@ -218,6 +231,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         if (scenario === "error") assert.equal(await page.getByRole("alert").isVisible(), true);
         for (const [width, height] of [[1280, 800], [900, 560]]) {
           await page.setViewportSize({ width, height });
+          await waitForLayout(page);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow in ${scenario}`);
           const controlsFit = await page.locator(".composer").evaluate((el) => {
             const r = el.getBoundingClientRect();

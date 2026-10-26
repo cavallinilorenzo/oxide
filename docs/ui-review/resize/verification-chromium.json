@@ -1,0 +1,31 @@
+{
+  "engine": "chromium",
+  "evidence": {
+    "wide": {
+      "centre": 384,
+      "thread": 456
+    },
+    "terminal": {
+      "initial": {
+        "starts": 2,
+        "resizes": 2
+      },
+      "after": {
+        "starts": 2,
+        "resizes": 38
+      }
+    },
+    "narrow": {
+      "centre": 360,
+      "thread": 280
+    },
+    "touch": "Chromium CDP touch drag passed"
+  },
+  "saved": {
+    "sidebar": 296,
+    "tools": 600,
+    "terminal": 300,
+    "treeWidth": 244
+  },
+  "errors": []
+}

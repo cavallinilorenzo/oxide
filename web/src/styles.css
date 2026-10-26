@@ -191,6 +191,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .header .seg { margin: 0 4px; }
 .header .seg button { min-height: 24px; padding: 2px 8px; }
 .body { flex: 1; display: flex; min-height: 0; }
+.sidebar-region { position: relative; width: var(--sidebar-width, 240px); flex: none; min-height: 0; }
 .centre-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .centre { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .empty-thread { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--dim); text-align: center; }
@@ -255,7 +256,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .git-error-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Sidebar ──────────────────────────────────────────────── */
-.sidebar { width: 240px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--bg2); min-height: 0; }
+.sidebar { width: 100%; height: 100%; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--bg2); min-height: 0; }
 .sidebar-actions { display: flex; gap: 8px; padding: var(--space-3); }
 .sidebar-actions .btn { gap: 4px; }
 .sidebar-actions kbd { margin-left: 2px; }
@@ -528,7 +529,9 @@ code { font-family: var(--mono); font-size: 12px; }
 .error-summary p { margin: 0; }
 
 /* ── Terminal ─────────────────────────────────────────────── */
-.terminal { height: clamp(140px, 25vh, 220px); min-height: 140px; flex: none; border-top: 1px solid var(--line); display: flex; flex-direction: column; background: #0a0b0e; }
+.terminal-region { position: relative; display: flex; flex-direction: column; height: var(--terminal-height, 200px); min-height: 140px; flex: none; }
+.terminal-region[hidden] { display: none; }
+.terminal { height: 100%; min-height: 0; flex: 1; border-top: 1px solid var(--line); display: flex; flex-direction: column; background: #0a0b0e; }
 .terminal.terminal-hidden { display: none; }
 .terminal-label { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--dim); font-size: 12px; }
 .terminal-error { color: var(--red); font-size: 12px; margin-left: 8px; }
@@ -537,7 +540,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .terminal-host .xterm-viewport { background: #0a0b0e !important; }
 
 /* ── Tools panel and its Surfaces ─────────────────────────── */
-.tools { width: clamp(288px, 32vw, 600px); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); container-type: inline-size; }
+.tools { position: relative; width: var(--tools-width, clamp(288px, 32vw, 600px)); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); container-type: inline-size; }
 .tools > section, .tools > .pr-views, .tools > .issues-surface { flex: 1; min-height: 0; }
 .surface-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex: none; }
 .surface-note { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); background: var(--bg2); }
@@ -545,7 +548,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .surface-foot { flex: none; padding: 8px 10px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; }
 
 /* Files */
-.files { display: grid; grid-template-columns: minmax(170px, 34%) minmax(0, 1fr); min-height: 0; font-size: 12.5px; }
+.files { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; font-size: 12.5px; }
 .files-tree { overflow: auto; padding: 6px 0; border-right: 1px solid var(--line); }
 .files-row {
   display: flex;
@@ -585,10 +588,8 @@ code { font-family: var(--mono); font-size: 12px; }
   color: var(--faint) !important;
   user-select: none;
 }
-@container (max-width: 560px) {
-  .files { grid-template-columns: 1fr; grid-template-rows: minmax(120px, 38%) 1fr; }
-  .files-tree { border-right: 0; border-bottom: 1px solid var(--line); }
-}
+.files[data-split-axis="y"] { grid-template-columns: minmax(0, 1fr); }
+.files[data-split-axis="y"] .files-tree { border-right: 0; border-bottom: 1px solid var(--line); }
 
 /* Diff */
 .diff { display: flex; flex-direction: column; min-height: 0; }
@@ -851,7 +852,7 @@ code { font-family: var(--mono); font-size: 12px; }
 
 /* Keep the primary task usable at the desktop window's 900px minimum. */
 @media (max-width: 1100px) {
-  .sidebar { width: 208px; }
+  .sidebar-region { width: var(--sidebar-width, 208px); }
   .header .path { display: none; }
   .header .title { max-width: 96px; }
   .branch-button .branch-name { max-width: 120px; }
@@ -860,7 +861,24 @@ code { font-family: var(--mono); font-size: 12px; }
   .tools .tab { padding: 0 8px; }
   .tools .tab:not([aria-selected="true"]) .tool-tab-label { display: none; }
 }
+
+/* The hit area overlaps the existing seam, so resizing adds no layout gutter. */
+.resize-handle { position: absolute; z-index: 10; touch-action: none; user-select: none; }
+.resize-handle-x { width: 8px; top: 0; bottom: 0; cursor: col-resize; }
+.resize-handle-x[data-edge="start"] { left: -4px; }
+.resize-handle-x[data-edge="end"] { right: -4px; }
+.resize-handle-y { height: 8px; left: 0; right: 0; cursor: row-resize; }
+.resize-handle-y[data-edge="start"] { top: -4px; }
+.resize-handle-y[data-edge="end"] { bottom: -4px; }
+.resize-handle::after { content: ""; position: absolute; background: transparent; transition: background-color var(--motion-fast) ease-out; }
+.resize-handle-x::after { width: 2px; top: 0; bottom: 0; left: 3px; }
+.resize-handle-y::after { height: 2px; left: 0; right: 0; top: 3px; }
+.resize-handle:is(:hover, :focus-visible, [data-dragging="true"])::after { background: var(--acc2); }
+.resize-handle:focus-visible { outline: none; background: color-mix(in srgb, var(--acc2) 12%, transparent); }
+.oxide-resizing-columns, .oxide-resizing-columns * { cursor: col-resize !important; user-select: none !important; }
+.oxide-resizing-rows, .oxide-resizing-rows * { cursor: row-resize !important; user-select: none !important; }
 @media (prefers-reduced-motion: reduce) {
   button, input, textarea, select, .dropdown-option, .thread-row { transition: none; }
+  .resize-handle::after { transition: none; }
   .status-dot.working { animation: none; }
 }

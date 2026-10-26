@@ -3,6 +3,7 @@ import {
   applyModelShortcut,
   filterModels,
   parseSlashCommand,
+  resolveDefaultModel,
   type ModelInfo,
 } from "./modelPicker";
 
@@ -116,5 +117,28 @@ describe("applyModelShortcut", () => {
     expect(applyModelShortcut(3, sampleModels)?.id).toBe("claude-3-opus");
     expect(applyModelShortcut(5, sampleModels)).toBeNull();
     expect(applyModelShortcut(0, sampleModels)).toBeNull();
+  });
+});
+
+describe("resolveDefaultModel", () => {
+  const catalog: ModelInfo[] = [
+    { id: "old", name: "Old", description: null, supportedEfforts: ["low"], defaultEffort: "low", isLegacy: true },
+    { id: "new", name: "New", description: null, supportedEfforts: ["low", "high"], defaultEffort: "high", isLegacy: false },
+  ];
+
+  it("names the first current Model and its default Effort when none is picked", () => {
+    expect(resolveDefaultModel(catalog, null, null)).toEqual({ model: "new", effort: "high" });
+  });
+
+  it("keeps a picked Model and Effort", () => {
+    expect(resolveDefaultModel(catalog, "old", "low")).toEqual({ model: "old", effort: "low" });
+  });
+
+  it("fills only the Effort when the Model is picked", () => {
+    expect(resolveDefaultModel(catalog, "new", null)).toEqual({ model: "new", effort: "high" });
+  });
+
+  it("leaves things as they are while the catalog is unknown", () => {
+    expect(resolveDefaultModel(null, null, null)).toEqual({ model: null, effort: null });
   });
 });

@@ -121,3 +121,25 @@ export function applyModelShortcut(
   }
   return visibleModels[index - 1] ?? null;
 }
+
+/**
+ * The Model and Effort a Thread runs with when none was picked: the Provider's
+ * first current Model and its default Effort, so the composer names them
+ * instead of showing the Provider and "Default".
+ */
+export function resolveDefaultModel(
+  catalog: ModelInfo[] | null,
+  model: string | null,
+  effort: string | null
+): { model: string | null; effort: string | null } {
+  if (!catalog || catalog.length === 0) return { model, effort };
+  const collapsed = collapseEffortVariants(catalog, effort);
+  const chosen = model
+    ? collapsed.find((m) => modelFamilyId(m.id) === modelFamilyId(model))
+    : (collapsed.find((m) => !m.isLegacy) ?? collapsed[0]);
+  if (!chosen) return { model, effort };
+  return {
+    model: model ?? chosen.id,
+    effort: effort ?? chosen.defaultEffort ?? chosen.supportedEfforts[0] ?? null,
+  };
+}

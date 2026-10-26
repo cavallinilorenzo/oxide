@@ -49,7 +49,7 @@ export interface ThreadHeaderLines {
 /** A catalog name can spell out the Effort, "Gemini 3.8 Flash (High)"; the Effort has its own place. */
 const EFFORT_SUFFIX = /\s*\((low|medium|high|xhigh|max)\)$/i;
 
-function readableModel(model: string, catalog: ModelInfo[] | null): string {
+export function readableModel(model: string, catalog: ModelInfo[] | null): string {
   const exact = catalog?.find((m) => m.id === model);
   const family = modelFamilyId(model);
   const name = exact?.name ?? catalog?.find((m) => modelFamilyId(m.id) === family)?.name ?? model;

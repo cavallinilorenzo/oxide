@@ -3,7 +3,8 @@
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
+    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
+    UsageWindow, UsageWindowKind,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,7 @@ impl ClaudeCodeProvider {
                 image_attachments: false,
                 mid_thread_model_switch: true,
                 slash_command_passthrough: false,
+                reports_usage_limits: true,
             })),
             child_process: Arc::new(Mutex::new(None)),
             child_stdin: Arc::new(Mutex::new(None)),
@@ -459,6 +461,13 @@ impl ClaudeCodeProvider {
                                     let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
                                 }
                             }
+                            "rate_limit_event" => match parse_rate_limit_event(&val) {
+                                Some(event) => {
+                                    let _ = tx.send(event);
+                                }
+                                // Per-Model and overage windows are not shown.
+                                None => {}
+                            },
                             "approval_request" => {
                                 let id = val
                                     .get("id")
@@ -558,6 +567,33 @@ impl ClaudeCodeProvider {
 /// pinned to a concrete version (`value == resolvedModel`) that is not what its family's alias
 /// resolves to today counts as legacy. A `default` entry that merely repeats another entry's
 /// model is dropped.
+/// Maps a stream-json `rate_limit_event` to a `UsageLimits` event. Only the 5-hour and the
+/// all-Models weekly windows are kept; `utilization` is a fraction and may be absent.
+pub fn parse_rate_limit_event(val: &serde_json::Value) -> Option<ProviderEvent> {
+    let info = val.get("rate_limit_info")?;
+    let kind = match info.get("rateLimitType")?.as_str()? {
+        "five_hour" => UsageWindowKind::FiveHour,
+        "seven_day" => UsageWindowKind::Weekly,
+        _ => return None,
+    };
+    let status = match info.get("status").and_then(|v| v.as_str()) {
+        Some("allowed_warning") => UsageStatus::Warning,
+        Some("rejected") => UsageStatus::Limited,
+        _ => UsageStatus::Ok,
+    };
+    Some(ProviderEvent::UsageLimits {
+        windows: vec![UsageWindow {
+            kind,
+            percent_used: info
+                .get("utilization")
+                .and_then(|v| v.as_f64())
+                .map(|u| u * 100.0),
+            resets_at: info.get("resetsAt").and_then(|v| v.as_i64()),
+            status,
+        }],
+    })
+}
+
 fn parse_models(models: &[serde_json::Value]) -> Vec<ModelInfo> {
     let field = |m: &serde_json::Value, key: &str| m[key].as_str().map(str::to_owned);
     let family = |m: &serde_json::Value| {

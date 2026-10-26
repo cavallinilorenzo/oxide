@@ -3,7 +3,8 @@
 use crate::process;
 use crate::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
+    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
+    UsageWindow, UsageWindowKind,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,43 @@ fn dispatch_to_thread(threads: &ThreadsMap, thread_id: Option<&str>, event: Prov
         for tx in threads_guard.values() {
             let _ = tx.send(event.clone());
         }
+    }
+}
+
+/// Maps Codex rate limits (the `account/rateLimits/updated` params or the
+/// `account/rateLimits/read` result) to a `UsageLimits` event. Windows are classified by
+/// duration, not by whether Codex calls them primary or secondary.
+pub fn parse_rate_limits(params: &serde_json::Value) -> Option<ProviderEvent> {
+    let limits = params.get("rateLimits")?;
+    let windows: Vec<UsageWindow> = ["primary", "secondary"]
+        .iter()
+        .filter_map(|key| {
+            let window = limits.get(key)?;
+            let kind = match window.get("windowDurationMins")?.as_i64()? {
+                300 => UsageWindowKind::FiveHour,
+                10080 => UsageWindowKind::Weekly,
+                _ => return None,
+            };
+            let percent = window.get("usedPercent")?.as_f64()?;
+            let status = if percent >= 100.0 {
+                UsageStatus::Limited
+            } else if percent >= 80.0 {
+                UsageStatus::Warning
+            } else {
+                UsageStatus::Ok
+            };
+            Some(UsageWindow {
+                kind,
+                percent_used: Some(percent),
+                resets_at: window.get("resetsAt").and_then(|v| v.as_i64()),
+                status,
+            })
+        })
+        .collect();
+    if windows.is_empty() {
+        None
+    } else {
+        Some(ProviderEvent::UsageLimits { windows })
     }
 }
 
@@ -280,13 +318,18 @@ impl CodexAppServer {
                         "thread/started"
                         | "thread/status/changed"
                         | "account/updated"
-                        | "account/rateLimits/updated"
                         | "mcpServer/startupStatus/updated"
                         | "hook/started"
                         | "hook/completed"
                         | "thread/tokenUsage/updated"
                         | "remoteControl/status/changed" => {
                             // Known app-server lifecycle and telemetry notifications
+                        }
+                        "account/rateLimits/updated" => {
+                            // Account-wide: goes to every Thread of this app-server.
+                            if let Some(event) = parse_rate_limits(&params) {
+                                dispatch_to_thread(&threads_clone, None, event);
+                            }
                         }
                         "item/started" => {
                             let item = params.get("item").cloned().unwrap_or_default();
@@ -759,6 +802,19 @@ impl Default for CodexProvider {
 }
 
 impl CodexProvider {
+    /// Asks Codex for the account's current limits so the ring is current before the first
+    /// prompt. Best effort: a failed read just leaves the last known figures.
+    fn request_usage_limits(&self, tx: Sender<ProviderEvent>) {
+        let app_server = self.app_server.clone();
+        std::thread::spawn(move || {
+            if let Ok(res) = app_server.send_request("account/rateLimits/read", json!({}))
+                && let Some(event) = parse_rate_limits(&res)
+            {
+                let _ = tx.send(event);
+            }
+        });
+    }
+
     pub fn new() -> Self {
         Self::with_app_server(CodexAppServer::shared())
     }
@@ -783,6 +839,7 @@ impl CodexProvider {
                 image_attachments: false,
                 mid_thread_model_switch: true,
                 slash_command_passthrough: false,
+                reports_usage_limits: true,
             })),
         }
     }
@@ -956,6 +1013,7 @@ impl Provider for CodexProvider {
 
         // Emit SessionInfo
         let _ = tx.send(ProviderEvent::SessionInfo { session_id: tid });
+        self.request_usage_limits(tx);
 
         Ok(rx)
     }
@@ -993,6 +1051,7 @@ impl Provider for CodexProvider {
         let _ = tx.send(ProviderEvent::SessionInfo {
             session_id: session_id.to_string(),
         });
+        self.request_usage_limits(tx);
 
         Ok(rx)
     }

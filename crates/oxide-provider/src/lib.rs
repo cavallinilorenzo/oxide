@@ -246,6 +246,39 @@ pub struct ProviderCapabilities {
     pub mid_thread_model_switch: bool,
     #[serde(default)]
     pub slash_command_passthrough: bool,
+    /// The Provider reports Usage limits (5-hour and weekly) through `UsageLimits` events.
+    #[serde(default)]
+    pub reports_usage_limits: bool,
+}
+
+/// Which rolling window a Usage limit covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageWindowKind {
+    FiveHour,
+    Weekly,
+}
+
+/// How close the Provider says the account is to a Usage limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageStatus {
+    Ok,
+    Warning,
+    Limited,
+}
+
+/// One Usage limit window as the Provider reported it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageWindow {
+    pub kind: UsageWindowKind,
+    /// Share of the limit used, 0 to 100. Absent when the Provider reports only a status.
+    #[serde(default)]
+    pub percent_used: Option<f64>,
+    /// When the window resets, as seconds since the Unix epoch (UTC).
+    #[serde(default)]
+    pub resets_at: Option<i64>,
+    pub status: UsageStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,7 +304,7 @@ pub enum ProviderError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum ProviderEvent {
     TurnStarted {
@@ -326,6 +359,11 @@ pub enum ProviderEvent {
         code: Option<i32>,
         /// The last lines the Provider wrote to stderr, if it wrote any.
         stderr_tail: Option<String>,
+    },
+    /// The Provider reported Usage limits. Not tied to a Turn or an Item; may carry only some of
+    /// the windows.
+    UsageLimits {
+        windows: Vec<UsageWindow>,
     },
     Unknown {
         raw: String,
@@ -521,6 +559,7 @@ impl Default for FakeProvider {
                 image_attachments: true,
                 mid_thread_model_switch: true,
                 slash_command_passthrough: false,
+                reports_usage_limits: false,
             },
             detection: Detection {
                 available: true,

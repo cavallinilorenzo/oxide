@@ -17,6 +17,7 @@ use crate::thread::{
     DebugSequencedThreadEvent, SequencedThreadEvent, ThreadCapabilities, ThreadEvent,
     ThreadSnapshot, ThreadStatus, TurnError,
 };
+use crate::usage::UsageHub;
 
 pub enum ThreadActorMsg {
     SendPrompt {
@@ -70,6 +71,8 @@ impl ThreadActorHandle {
         real_time_ticker: bool,
         clock: Arc<dyn Clock>,
         activity: Arc<Activity>,
+        usage: Arc<UsageHub>,
+        provider_name: String,
     ) -> Result<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -95,6 +98,8 @@ impl ThreadActorHandle {
                     storage,
                     clock,
                     activity,
+                    usage,
+                    provider_name,
                     rx,
                 );
             })
@@ -239,6 +244,9 @@ struct ActorState {
     debug_subscribers: Vec<Sender<DebugSequencedThreadEvent>>,
     clock: Arc<dyn Clock>,
     activity: Arc<Activity>,
+    usage: Arc<UsageHub>,
+    /// The Provider key Usage limits are filed under.
+    provider_name: String,
     /// A Provider process is running for this Thread.
     provider_live: bool,
     /// The Provider ended on its own; its adapter still has to be shut down before a restart.
@@ -261,11 +269,15 @@ impl ActorState {
         capabilities: ProviderCapabilities,
         clock: Arc<dyn Clock>,
         activity: Arc<Activity>,
+        usage: Arc<UsageHub>,
+        provider_name: String,
     ) -> Self {
         let idle_since = Some(clock.now());
         Self {
             clock,
             activity,
+            usage,
+            provider_name,
             provider_live: false,
             provider_exited: false,
             idle_since,
@@ -520,6 +532,9 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::Exited { code, stderr_tail } => {
             provider_exited(state, storage, code, stderr_tail, raw)
         }
+        ProviderEvent::UsageLimits { windows } => {
+            state.usage.report(&state.provider_name, &windows);
+        }
         ProviderEvent::Unknown { raw: raw_str } => {
             if let Some(turn_id) = state.current_turn_id() {
                 let _ = storage.write_unknown_event(turn_id, raw_str.clone());
@@ -624,6 +639,8 @@ fn run_thread_actor(
     storage: StorageHandle,
     clock: Arc<dyn Clock>,
     activity: Arc<Activity>,
+    usage: Arc<UsageHub>,
+    provider_name: String,
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
@@ -640,6 +657,8 @@ fn run_thread_actor(
         caps.clone(),
         clock,
         activity,
+        usage,
+        provider_name,
     );
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 

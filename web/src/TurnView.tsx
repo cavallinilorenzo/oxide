@@ -236,6 +236,9 @@ export const ApprovalView = memo(function ApprovalView({
   );
 });
 
+/** A Turn sent this moment, as opposed to one scrolled back into view. */
+const JUST_SENT_MS = 1500;
+
 export const TurnView = memo(function TurnView({
   turn,
   provider,
@@ -247,11 +250,14 @@ export const TurnView = memo(function TurnView({
   onRespond: (approvalId: string, decision: ApprovalDecision) => void;
   isWorking: boolean;
 }) {
+  const [justSent] = useState(
+    () => turn.status === "running" && Date.now() - Date.parse(turn.startedAt) < JUST_SENT_MS
+  );
   const blocks = groupTurnItems(turn.items);
   const approvals = turn.approvals ?? [];
   return (
     <section className="turn">
-      <div className="user-message">
+      <div className={justSent ? "user-message just-sent" : "user-message"}>
         <div className="user-meta">
           <PersonIcon size={12} /> You · {formatTime(turn.startedAt)}
         </div>

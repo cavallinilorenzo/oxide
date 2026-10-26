@@ -403,6 +403,18 @@ html.macos .header,
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Messages-style send: the bubble springs up from the composer, settling with a slight overshoot. */
+.user-message.just-sent .user-bubble { transform-origin: 100% 100%; animation: bubble-send 460ms cubic-bezier(0.34, 1.45, 0.5, 1) both; }
+.user-message.just-sent .user-meta { animation: meta-in 240ms ease-out 160ms both; }
+@keyframes bubble-send {
+  from { opacity: 0; transform: translateY(36px) scale(0.7); }
+  25% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes meta-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .user-message.just-sent .user-bubble, .user-message.just-sent .user-meta { animation: none; }
+}
 .user-meta { font-variant-numeric: tabular-nums; order: 2; display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .attachment { max-width: 240px; max-height: 160px; border-radius: 6px; }

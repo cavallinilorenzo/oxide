@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/src/styles.css"
+        ],
+        "createdAt": "2026-10-26T13:55:28.220Z",
+        "reason": "Repository UI review documents .rail as an intentional neutral grouping rail for tool calls, not a state accent (docs/ui-review/desktop-interface.md)."
+      }
+    ]
+  }
+}

@@ -473,3 +473,38 @@ fn shutdown_escalates_and_leaves_no_child_behind() {
     assert!(!pid_alive(grandchild), "the process group must be gone");
     assert_eq!(fs::read_to_string(&registry_path).unwrap(), "[]");
 }
+
+#[test]
+fn claude_model_catalog_comes_from_the_cli() {
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+
+    let models = provider.models().unwrap();
+
+    let summary: Vec<_> = models
+        .iter()
+        .map(|m| (m.id.as_str(), m.name.as_str(), m.is_legacy))
+        .collect();
+    // `default` repeats `beta`'s model, so it is dropped; the pinned older Beta is legacy.
+    assert_eq!(
+        summary,
+        [
+            ("alpha", "Alpha 2", false),
+            ("beta", "Beta 2", false),
+            ("model-b-1", "Beta 1", true),
+            ("model-a-2", "Alpha 2", false),
+        ]
+    );
+    assert_eq!(
+        models[0].supported_efforts,
+        ["low", "medium", "high", "max"]
+    );
+    assert_eq!(models[0].description.as_deref(), Some("For complex work"));
+    assert!(models[2].supported_efforts.is_empty());
+}
+
+#[test]
+fn claude_model_catalog_errors_when_the_cli_is_missing() {
+    let provider = ClaudeCodeProvider::with_command("nonexistent_binary_xyz_123");
+    assert!(provider.models().is_err());
+}

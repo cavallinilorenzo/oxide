@@ -2,5 +2,6 @@
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world!"}}}
 {"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+{"type":"assistant","message":{"role":"assistant","model":"claude-3-7-sonnet","content":[{"type":"text","text":"Hello world!"}]}}
 {"type":"custom_unrecognized_event","data":123}
 {"type":"result","subtype":"success","session_id":"claude-session-1234","result":"Hello world!","is_error":false}

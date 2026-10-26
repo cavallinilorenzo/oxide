@@ -31,15 +31,14 @@ fn enabling_customizations_lists_skills_and_commands_and_passes_slashes_through(
     let core = Core::open_with_user_home(home.path().join("oxide"), &user_home).unwrap();
     let project_id = core.add_project(project.to_str().unwrap()).unwrap().id;
 
-    // Off by default: nothing is listed and slashes are not passed through.
+    // Customizations off: nothing is listed, but built-in commands still pass through.
     assert!(
         core.list_slash_commands("claude", project_id)
             .unwrap()
             .is_empty()
     );
     assert!(
-        !core
-            .get_provider_capabilities("claude")
+        core.get_provider_capabilities("claude")
             .slash_command_passthrough
     );
 

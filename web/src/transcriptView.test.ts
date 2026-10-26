@@ -33,6 +33,11 @@ describe("groupTurnItems", () => {
     expect(messages.map((m) => m.type === "message" && m.final)).toEqual([false, true]);
   });
 
+  it("draws Slash command output as its own block, never a message", () => {
+    const blocks = groupTurnItems([item(0, "slash_command_output", "| a |")]);
+    expect(blocks.map((b) => b.type)).toEqual(["command"]);
+  });
+
   it("nests children under their Subagent and keeps them out of the top level", () => {
     const blocks = groupTurnItems([
       item(0, "subagent", "Explore"),

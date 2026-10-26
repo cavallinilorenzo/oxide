@@ -5,6 +5,7 @@ export type Block =
   | { type: "message"; item: ItemSnapshot; final: boolean }
   | { type: "reasoning"; item: ItemSnapshot }
   | { type: "file"; item: ItemSnapshot }
+  | { type: "command"; item: ItemSnapshot }
   | { type: "subagent"; item: ItemSnapshot; children: Block[] };
 
 /** Arranges a Turn's flat Items into what the Transcript draws, nesting Subagent children. */
@@ -48,6 +49,9 @@ function toBlocks(
         break;
       case "file_change":
         blocks.push({ type: "file", item: it });
+        break;
+      case "slash_command_output":
+        blocks.push({ type: "command", item: it });
         break;
       case "subagent":
         blocks.push({

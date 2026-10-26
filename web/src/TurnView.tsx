@@ -92,6 +92,12 @@ function BlockView({ block }: { block: Block }) {
           <ItemContent content={block.item.content} />
         </div>
       );
+    case "command":
+      return (
+        <div className="command-output" aria-label="Command output">
+          <ItemContent content={block.item.content} />
+        </div>
+      );
     case "reasoning":
       return (
         <Collapsible label="Reasoning" icon={<LightBulbIcon size={12} />} className="reasoning">

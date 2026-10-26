@@ -213,6 +213,10 @@ export function App() {
       // Projects may have loaded first.
       if (last) setSelectedId((current) => current ?? last.projectId);
       setLastSelectionLoaded(true);
+    }).catch((cause: unknown) => {
+      restore.current = null;
+      setOpenError(cause instanceof Error ? cause.message : String(cause));
+      setLastSelectionLoaded(true);
     });
   }, []);
 
@@ -453,9 +457,13 @@ export function App() {
 
   const starting = !startupDelayComplete || !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
+  useEffect(() => {
+    if (!starting) document.documentElement.dataset.appReady = "true";
+  }, [starting]);
+
   if (starting) {
     return (
-      <div className="startup-screen" role="status" aria-live="polite" aria-busy="true">
+      <div className="startup-screen" aria-hidden="true">
         <div className="startup-content">
           <div className="startup-emblem" aria-hidden="true">
             <span className="startup-orbit"><span /></span>

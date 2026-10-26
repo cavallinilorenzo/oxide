@@ -56,6 +56,7 @@ type ThreadsMap = Arc<Mutex<HashMap<String, Sender<ProviderEvent>>>>;
 struct ActiveTurn {
     index: u32,
     id: Option<String>,
+    interrupt_requested: bool,
 }
 
 type ActiveTurnsMap = Arc<Mutex<HashMap<String, ActiveTurn>>>;
@@ -734,6 +735,7 @@ impl CodexAppServer {
                 ActiveTurn {
                     index: turn_index,
                     id: None,
+                    interrupt_requested: false,
                 },
             );
         }
@@ -742,12 +744,22 @@ impl CodexAppServer {
     fn start_turn(&self, thread_id: &str, params: serde_json::Value) -> Result<(), ProviderError> {
         let response = self.send_request("turn/start", params)?;
         // A caller may interrupt immediately after send_prompt returns, before turn/started.
-        let guard = self.inner.lock().unwrap();
-        if let Some(inner) = guard.as_ref() {
-            let mut turns = inner.active_turns.lock().unwrap();
-            if let Some(turn) = turns.get_mut(thread_id) {
-                turn.id = response["turn"]["id"].as_str().map(str::to_owned);
+        let interrupt_requested = {
+            let guard = self.inner.lock().unwrap();
+            if let Some(inner) = guard.as_ref() {
+                let mut turns = inner.active_turns.lock().unwrap();
+                if let Some(turn) = turns.get_mut(thread_id) {
+                    turn.id = response["turn"]["id"].as_str().map(str::to_owned);
+                    turn.interrupt_requested
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        };
+        if interrupt_requested {
+            self.interrupt_turn(thread_id)?;
         }
         Ok(())
     }
@@ -772,6 +784,13 @@ impl CodexAppServer {
                     "turnId": turn_id,
                 }),
             )?;
+        } else {
+            let guard = self.inner.lock().unwrap();
+            if let Some(inner) = guard.as_ref() {
+                if let Some(turn) = inner.active_turns.lock().unwrap().get_mut(thread_id) {
+                    turn.interrupt_requested = true;
+                }
+            }
         }
         Ok(())
     }

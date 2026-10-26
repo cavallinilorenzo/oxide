@@ -97,6 +97,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
+  const [startupDelayComplete, setStartupDelayComplete] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
@@ -167,6 +168,11 @@ export function App() {
         setProjectsLoaded(true);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setStartupDelayComplete(true), 700);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
@@ -444,7 +450,7 @@ export function App() {
     };
   }, [selected, rememberTerminalContext, createThreadIn]);
 
-  const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
+  const starting = !startupDelayComplete || !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
   if (starting) {
     return (

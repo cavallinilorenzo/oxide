@@ -15,6 +15,7 @@
         "title": "Oxide",
         "width": 1280,
         "height": 800,
+        "backgroundColor": "#0f1115",
         "maximized": true,
         "minWidth": 900,
         "minHeight": 560,

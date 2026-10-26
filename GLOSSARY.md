@@ -15,7 +15,7 @@ A Project the user opened (from the Project palette, by adding or cloning it, or
 _Avoid_: Pinned, recent, favourite Project
 
 **Project palette**:
-The keyboard-only overlay opened with ⌘⇧N. It searches Projects (Enter starts a new Thread in the pick, with Settings defaults) and registers new ones: an existing folder, a new folder with `git init`, a clone from a Git URL, or a clone of one of the user's GitHub repositories found through `gh`.
+The overlay opened with ⌘⇧N. It searches Projects (clicking a result or pressing Enter starts a new Thread in the pick, with Settings defaults) and registers new ones: an existing folder, a new folder with `git init`, a clone from a Git URL, or a clone of one of the user's GitHub repositories found through `gh`.
 _Avoid_: Project switcher, quick open
 
 ## Threads

@@ -1,0 +1,8 @@
+{
+  "engine": "webkit",
+  "createdThreads": 3,
+  "projectSelection": "pointer + keyboard",
+  "actions": "local folder + GitHub repository",
+  "slashMenu": "retained and keyboard-selectable",
+  "errors": []
+}

@@ -4,6 +4,18 @@ Metodo: due valutazioni indipendenti, A (design) e B (detector, contrasto e brow
 
 L’interfaccia ha un’identità appropriata: superfici scure, Octicons, gerarchia Project → Thread e azioni Git vicine al lavoro. La densità è utile, ma nella baseline i pannelli sottraevano spazio al compito principale e alcuni dettagli operativi avevano contrasto insufficiente. I fix preservano struttura, contenuti e linguaggio visivo.
 
+## Selezione dei Project nella palette
+
+Il clic sulle righe non eseguiva alcuna azione: la palette era collegata soltanto a Enter, pur mostrando cursore e stato hover da controllo cliccabile. La correzione collega ogni riga al proprio Project, azione o repository GitHub, condividendo lo stesso percorso con la tastiera. Il puntatore aggiorna la selezione senza togliere il focus da Search; la navigazione mantiene visibile la riga attiva e ne espone l’identità tramite `aria-activedescendant`. Gli indici restano validi quando i risultati asincroni si riducono.
+
+Il test di regressione clicca sul secondo Project mentre il primo è evidenziato: prima della correzione registrava zero chiamate, dopo avvia il Thread nel Project cliccato. Otto test mirati coprono anche tastiera, hover/focus, azioni di aggiunta/clonazione, scelta del repository GitHub e riduzione dei risultati. Lo script `web/scripts/palette-review.mjs` verifica nell’App reale con IPC simulato il passaggio a un altro Project, la creazione nel Project corrente e il percorso da tastiera: tre selezioni, tre Thread creati, zero errori JavaScript in Chromium e WebKit.
+
+Evidenze: [riga selezionata](palette/palette-selection.png), [Project aperto dopo il clic](palette/selected-project.png), [Chromium](palette/verification-chromium.json), [WebKit](palette/verification-webkit.json). Le fixture non registrano o clonano repository reali.
+
+Verifica complessiva dopo l’integrazione con `main`: **164 test frontend e 220 test Rust** passati, 3 live smoke test ignorati; build, typecheck, lint, formattazione e Clippy riusciti. Bindings invariati rispetto a `main`; resta il warning frontend preesistente su `useVirtualizer`.
+
+Integrato `origin/main` con i nuovi comandi slash: il conflitto in `styles.css` è risolto conservando sia il menu slash sia padding e focus del composer. La verifica browser conferma anche apertura e selezione da tastiera del menu slash dopo l’integrazione. Per riprodurre: `node web/scripts/palette-review.mjs /tmp/oxide-palette` con il server e il modulo Playwright configurati come sotto.
+
 ## Zone ridimensionabili
 
 Trascinare i bordi tra le zone per distribuire lo spazio. Il bordo esistente rimane sottile a riposo; hover, focus e trascinamento lo evidenziano in blu, con un’area di presa da 8 px che non aggiunge gutter al layout.

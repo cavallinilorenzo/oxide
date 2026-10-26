@@ -28,6 +28,9 @@ export async function openReview(engine = "chromium", scenario = "completed") {
     const commandCounts = {};
     window.__OXIDE_REVIEW_COMMAND_COUNTS__ = commandCounts;
     const project = { id: 1, name: "oxide", path: "/Users/demo/Developer/projects/oxide", hidden: false, open: true, missing: false };
+    const projects = scenario === "palette"
+      ? [project, { ...project, id: 2, name: "uni", path: "/Users/demo/Developer/uni", open: false }]
+      : [project];
     const base = { projectId: 1, provider: "claude", model: "claude-sonnet-4-6", effort: "medium", permissionMode: "auto-edit", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sessionLost: false, continuedFrom: null, continuedIn: null, branch: null, worktreePath: null, setupOutput: null, issueNumber: null };
     const threads = [
       { ...base, id: 1, title: "Review desktop interface consistency", status: "completed" },
@@ -36,7 +39,9 @@ export async function openReview(engine = "chromium", scenario = "completed") {
       { ...base, id: 4, title: "Investigate provider connection", status: "error" },
     ];
     const provider = { model: null, effort: null, permissionMode: "auto-edit" };
-    const settings = { defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: false, providers: { claude: provider, codex: provider, antigravity: provider } };
+    const settings = { defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {
+      claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false,
+    }, providers: { claude: provider, codex: provider, antigravity: provider } };
     const caps = { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true, slashCommandPassthrough: false };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
@@ -46,9 +51,21 @@ export async function openReview(engine = "chromium", scenario = "completed") {
         commandCounts[command] = (commandCounts[command] ?? 0) + 1;
         if (command === "plugin:event|listen") return ++callbackId;
         if (["plugin:event|unlisten", "remember_selection", "resize_terminal", "close_terminal", "write_terminal"].includes(command)) return null;
-        if (command === "list_projects" || command === "rescan_projects") return [project];
+        if (command === "list_projects" || command === "rescan_projects") return projects;
         if (command === "last_selection") return { projectId: 1, threadId: ({ completed: 1, approval: 2, working: 3, error: 4, empty: null })[scenario] };
-        if (command === "list_threads") return scenario === "empty" ? [] : threads;
+        if (command === "list_threads") return scenario === "empty" ? [] : threads.filter((thread) => thread.projectId === args.projectId);
+        if (command === "create_thread") {
+          const thread = { ...base, id: 100 + threads.length, projectId: args.projectId, provider: args.provider,
+            model: args.model, effort: args.effort, permissionMode: args.permissionMode ?? "auto-edit", title: null, status: "completed" };
+          threads.push(thread);
+          window.__OXIDE_REVIEW_LAST_CREATED_THREAD__ = thread;
+          return thread;
+        }
+        if (command === "search_github_repositories") return [
+          { nameWithOwner: "demo/oxide", description: "Desktop app", isPrivate: false },
+          { nameWithOwner: "demo/uni", description: "Another Project", isPrivate: false },
+        ];
+        if (command === "list_slash_commands") return [{ name: "review", description: "Review the current changes" }];
         if (command === "get_settings") return { settings, errors: [], scanRoots: [] };
         if (command === "set_thread_permission_mode") {
           threads.find((thread) => thread.id === args.threadId).permissionMode = args.permissionMode;
@@ -73,6 +90,8 @@ export async function openReview(engine = "chromium", scenario = "completed") {
         ];
         if (command === "subscribe_thread") {
           const thread = threads.find((thread) => thread.id === args.threadId);
+          if (thread.id >= 100) return { thread, capabilities: { reasoningText: true, imageAttachments: true },
+            turnOffset: 0, turnCount: 0, lastSeq: 0, turns: [], supportedPermissionModes: caps.supportedPermissionModes };
           const running = ["working", "needs-input"].includes(thread.status);
           return {
             thread, capabilities: { reasoningText: true, imageAttachments: true }, turnOffset: 0, turnCount: 1, lastSeq: 0, supportedPermissionModes: caps.supportedPermissionModes,

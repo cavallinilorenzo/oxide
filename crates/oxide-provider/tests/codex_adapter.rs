@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use oxide_provider::Provider;
 use oxide_provider::codex::CodexProvider;
 use std::fs;

@@ -155,14 +155,18 @@ impl AgyProvider {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         process::spawn_in_own_group(&mut cmd);
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
         let pgid = child.id() as i32;
+        process::attach_child_to_job(&mut child)?;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(child.wait_with_output());
         });
         match rx.recv_timeout(PROBE_TIMEOUT) {
-            Ok(result) => result,
+            Ok(result) => {
+                process::release_job(pgid);
+                result
+            }
             Err(_) => {
                 process::terminate_group(pgid, SHUTDOWN_GRACE, || {});
                 Err(std::io::Error::new(
@@ -326,6 +330,12 @@ impl Provider for AgyProvider {
             }
         };
         let pgid = child.id() as i32;
+        if let Err(error) = process::attach_child_to_job(&mut child) {
+            self.turn_running.store(false, Ordering::SeqCst);
+            return Err(ProviderError::CommandFailed(format!(
+                "Failed to contain Antigravity CLI process: {error}"
+            )));
+        }
         if let Some(registry) = &self.registry {
             registry.register(pgid, &self.command);
         }

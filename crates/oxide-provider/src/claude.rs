@@ -128,7 +128,7 @@ impl ClaudeCodeProvider {
             for (k, v) in &self.extra_env {
                 cmd.env(k, v);
             }
-            cmd.output()
+            process::output_in_own_group(&mut cmd)
                 .map(|out| String::from_utf8_lossy(&out.stdout).contains("--safe-mode"))
                 .unwrap_or(false)
         })
@@ -159,6 +159,9 @@ impl ClaudeCodeProvider {
                 "Failed to spawn Claude Code binary `{}`: {e}",
                 self.command
             ))
+        })?;
+        process::attach_child_to_job(&mut child).map_err(|e| {
+            ProviderError::StartFailed(format!("Failed to contain Claude Code process: {e}"))
         })?;
         let pgid = child.id() as i32;
         let mut stdin = child.stdin.take().expect("stdin must be piped");
@@ -296,6 +299,9 @@ impl ClaudeCodeProvider {
                 "Failed to spawn Claude Code binary `{}`: {e}",
                 self.command
             ))
+        })?;
+        process::attach_child_to_job(&mut child).map_err(|e| {
+            ProviderError::StartFailed(format!("Failed to contain Claude Code process: {e}"))
         })?;
 
         let stdin = child.stdin.take().expect("stdin must be piped");
@@ -605,7 +611,7 @@ impl Provider for ClaudeCodeProvider {
             cmd.env(k, v);
         }
 
-        let version_output = match cmd.output() {
+        let version_output = match process::output_in_own_group(&mut cmd) {
             Ok(out) if out.status.success() => out,
             _ => {
                 return Ok(Detection {
@@ -646,7 +652,7 @@ impl Provider for ClaudeCodeProvider {
             auth_cmd.env(k, v);
         }
 
-        let auth_output = auth_cmd.output();
+        let auth_output = process::output_in_own_group(&mut auth_cmd);
 
         let authenticated = match auth_output {
             Ok(out) => out.status.success(),

@@ -1,5 +1,6 @@
 //! Codex native provider adapter.
 
+use crate::process;
 use crate::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
@@ -138,12 +139,16 @@ impl CodexAppServer {
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        process::spawn_in_own_group(&mut cmd);
 
         let mut child = cmd.spawn().map_err(|e| {
             ProviderError::StartFailed(format!(
                 "Failed to spawn Codex app-server `{}`: {e}",
                 self.command
             ))
+        })?;
+        process::attach_child_to_job(&mut child).map_err(|e| {
+            ProviderError::StartFailed(format!("Failed to contain Codex app-server process: {e}"))
         })?;
 
         let stdin = Arc::new(Mutex::new(child.stdin.take().expect("stdin must be piped")));
@@ -725,7 +730,10 @@ impl CodexAppServer {
             inner.threads.lock().unwrap().clear();
             inner.pending_requests.lock().unwrap().clear();
             inner.pending_server_requests.lock().unwrap().clear();
-            let _ = inner.process.child.kill();
+            let pid = inner.process.child.id() as i32;
+            process::terminate_group(pid, process::SHUTDOWN_GRACE, || {
+                let _ = inner.process.child.try_wait();
+            });
             let _ = inner.process.child.wait();
         }
         Ok(())
@@ -840,7 +848,7 @@ impl Provider for CodexProvider {
             cmd.env(k, v);
         }
 
-        let version_output = match cmd.output() {
+        let version_output = match process::output_in_own_group(&mut cmd) {
             Ok(out) if out.status.success() => out,
             _ => {
                 return Ok(Detection {
@@ -883,7 +891,7 @@ impl Provider for CodexProvider {
             auth_cmd.env(k, v);
         }
 
-        let auth_output = auth_cmd.output();
+        let auth_output = process::output_in_own_group(&mut auth_cmd);
         let authenticated = match auth_output {
             Ok(out) if out.status.success() => {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();

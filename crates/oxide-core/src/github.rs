@@ -233,6 +233,20 @@ impl Gh {
 
     fn run(&self, cwd: &Path, args: &[&str]) -> std::result::Result<String, GhError> {
         let path = self.path_var();
+        let mut child_path = path.clone();
+        #[cfg(windows)]
+        if self
+            .search_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+            && let Some(inherited_path) = std::env::var_os("PATH")
+        {
+            // The test shim is found through the explicit search path, but its .cmd launcher
+            // needs tools such as Python from the runner's PATH.
+            child_path.push(";");
+            child_path.push(inherited_path);
+        }
         let mut command = Command::new(
             find_in(
                 &path,
@@ -258,7 +272,7 @@ impl Gh {
         command
             .args(args)
             .current_dir(cwd)
-            .env("PATH", &path)
+            .env("PATH", &child_path)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
             .stdin(Stdio::null());

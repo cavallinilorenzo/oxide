@@ -172,7 +172,7 @@ code { font-family: var(--mono); font-size: 12px; }
 /* ── Window shell ─────────────────────────────────────────── */
 .window { display: flex; flex-direction: column; height: 100vh; }
 .header {
-  height: 36px;
+  height: 34px;
   flex: none;
   display: flex;
   align-items: center;

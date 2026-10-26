@@ -80,6 +80,10 @@ _Avoid_: Sandbox, approval policy, trust level
 A Provider's request, during a Turn, for the user to allow or deny one action (a command, a file change, a tool call). A pending Approval puts the Thread in needs input and waits until answered or the Turn ends.
 _Avoid_: Permission prompt, confirmation
 
+**Usage limit**:
+A cap the Provider's account puts on how much the user can run over a rolling window, reported by the Provider as a share used and a reset time. Oxide shows two: the 5-hour limit and the weekly limit (all Models); per-Model weekly caps and paid overage are not shown. It belongs to the Provider account, not to a Thread, so every Thread of a Provider shows the same figures. A Provider that reports none (Antigravity) shows none.
+_Avoid_: Quota, rate limit (a rate limit is the Provider refusing a request; a Usage limit is the budget behind it), plan usage
+
 ## Layout
 
 **Surface**:

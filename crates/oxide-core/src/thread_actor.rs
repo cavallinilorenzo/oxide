@@ -17,7 +17,7 @@ use crate::thread::{
     DebugSequencedThreadEvent, SequencedThreadEvent, ThreadCapabilities, ThreadEvent,
     ThreadSnapshot, ThreadStatus, TurnError,
 };
-use crate::usage::UsageHub;
+use crate::usage::{ActorServices, UsageHub};
 
 pub enum ThreadActorMsg {
     SendPrompt {
@@ -70,9 +70,7 @@ impl ThreadActorHandle {
         storage: StorageHandle,
         real_time_ticker: bool,
         clock: Arc<dyn Clock>,
-        activity: Arc<Activity>,
-        usage: Arc<UsageHub>,
-        provider_name: String,
+        services: ActorServices,
     ) -> Result<Self> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -97,9 +95,7 @@ impl ThreadActorHandle {
                     provider,
                     storage,
                     clock,
-                    activity,
-                    usage,
-                    provider_name,
+                    services,
                     rx,
                 );
             })
@@ -268,10 +264,13 @@ impl ActorState {
         next_turn_index: u32,
         capabilities: ProviderCapabilities,
         clock: Arc<dyn Clock>,
-        activity: Arc<Activity>,
-        usage: Arc<UsageHub>,
-        provider_name: String,
+        services: ActorServices,
     ) -> Self {
+        let ActorServices {
+            activity,
+            usage,
+            provider: provider_name,
+        } = services;
         let idle_since = Some(clock.now());
         Self {
             clock,
@@ -638,9 +637,7 @@ fn run_thread_actor(
     mut provider: Box<dyn Provider>,
     storage: StorageHandle,
     clock: Arc<dyn Clock>,
-    activity: Arc<Activity>,
-    usage: Arc<UsageHub>,
-    provider_name: String,
+    services: ActorServices,
     rx: Receiver<ThreadActorMsg>,
 ) {
     let next_turn_index = storage
@@ -656,9 +653,7 @@ fn run_thread_actor(
         next_turn_index,
         caps.clone(),
         clock,
-        activity,
-        usage,
-        provider_name,
+        services,
     );
     let mut prx: Receiver<ProviderEvent> = crossbeam_channel::never();
 

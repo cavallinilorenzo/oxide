@@ -55,6 +55,15 @@ impl UsageLimits {
     }
 }
 
+/// What a Thread actor shares with the rest of Core: its status feed and the Usage limits of its
+/// Provider.
+pub struct ActorServices {
+    pub activity: std::sync::Arc<crate::activity::Activity>,
+    pub usage: std::sync::Arc<UsageHub>,
+    /// The Provider key Usage limits are filed under.
+    pub provider: String,
+}
+
 pub struct UsageHub {
     db_path: PathBuf,
     limits: Mutex<HashMap<String, UsageLimits>>,

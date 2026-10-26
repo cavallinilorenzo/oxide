@@ -979,9 +979,11 @@ impl Core {
             self.storage.clone(),
             real_time,
             self.clock.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            Arc::clone(&self.activity),
-            Arc::clone(&self.usage),
-            snapshot.thread.provider.clone(),
+            usage::ActorServices {
+                activity: Arc::clone(&self.activity),
+                usage: Arc::clone(&self.usage),
+                provider: snapshot.thread.provider.clone(),
+            },
         )?;
 
         actors.insert(thread_id, actor.clone());

@@ -461,13 +461,12 @@ impl ClaudeCodeProvider {
                                     let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
                                 }
                             }
-                            "rate_limit_event" => match parse_rate_limit_event(&val) {
-                                Some(event) => {
+                            "rate_limit_event" => {
+                                // Per-Model and overage windows are not shown.
+                                if let Some(event) = parse_rate_limit_event(&val) {
                                     let _ = tx.send(event);
                                 }
-                                // Per-Model and overage windows are not shown.
-                                None => {}
-                            },
+                            }
                             "approval_request" => {
                                 let id = val
                                     .get("id")

@@ -20,7 +20,6 @@ import {
   commands,
   type ApprovalDecision,
   type ContinuedThread,
-  type DebugSequencedThreadEvent,
   type Detection,
   type PermissionMode,
   type SequencedThreadEvent,
@@ -144,11 +143,6 @@ export function ThreadView({
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
-  const [debugOpen, setDebugOpen] = useState(false);
-  const [debugState, setDebugState] = useState<{
-    threadId: number | null;
-    events: DebugSequencedThreadEvent[];
-  }>({ threadId: null, events: [] });
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [draftModel, setDraftModel] = useState<string | null>(null);
@@ -276,22 +270,14 @@ export function ThreadView({
     // hold them back and replay them on top of it instead of losing them.
     let snapshotApplied = false;
     const early: SequencedThreadEvent[] = [];
-    const channel = new Channel<SequencedThreadEvent | DebugSequencedThreadEvent>();
+    const channel = new Channel<SequencedThreadEvent>();
     channel.onmessage = (event) => {
-      if ("rawPayload" in event) {
-        setDebugState((previous) => ({
-          threadId,
-          events: [...(previous.threadId === threadId ? previous.events : []).slice(-199), event],
-        }));
-      }
-      if (snapshotApplied) batcher.push(event as SequencedThreadEvent);
-      else early.push(event as SequencedThreadEvent);
+      if (snapshotApplied) batcher.push(event);
+      else early.push(event);
     };
 
     void (async () => {
-      const res = debugOpen
-        ? await commands.subscribeThreadDebug(threadId, channel as Channel<DebugSequencedThreadEvent>)
-        : await commands.subscribeThread(threadId, channel as Channel<SequencedThreadEvent>);
+      const res = await commands.subscribeThread(threadId, channel);
       if (active && res.status === "ok") {
         const initial = early.reduce(applyThreadEvent, initialTranscriptState(res.data));
         snapshotApplied = true;
@@ -308,7 +294,7 @@ export function ThreadView({
       active = false;
       batcher.cancel();
     };
-  }, [threadId, onStatusChange, debugOpen, onThreadTitleChange]);
+  }, [threadId, onStatusChange, onThreadTitleChange]);
 
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {
@@ -317,8 +303,6 @@ export function ThreadView({
       onPrefillUsed();
     }
   }, [prefill, threadId, onPrefillUsed]);
-
-  const debugEvents = debugState.threadId === threadId ? debugState.events : [];
 
   // Before a Thread exists, ask what the Provider it will use supports.
   useEffect(() => {
@@ -682,26 +666,7 @@ export function ThreadView({
         onStartRename={handleStartRename}
         onSaveRename={() => void handleSaveRename()}
         onCancelRename={() => setIsEditingTitle(false)}
-        debugOpen={debugOpen}
-        onToggleDebug={() => setDebugOpen((open) => !open)}
       />
-      {debugOpen && (
-        <section className="thread-debug-view" aria-label="Raw event debug view">
-          <h3>Raw provider events</h3>
-          {transcript.turns.flatMap((turn) => turn.unknownEvents ?? []).map((unknown) => (
-            <pre key={`persisted-${unknown.id}`}><strong>Persisted Unknown</strong>{"\n"}{unknown.raw}</pre>
-          ))}
-          {debugEvents.map((entry) => (
-            <pre key={entry.seq}>
-              <strong>#{entry.seq} {entry.event.type}</strong>{"\n"}
-              {entry.rawPayload ?? "No provider payload (synthetic event)"}
-            </pre>
-          ))}
-          {debugEvents.length === 0 && transcript.turns.every((turn) => !(turn.unknownEvents?.length)) && (
-            <p>Raw provider events will appear while a Turn is running.</p>
-          )}
-        </section>
-      )}
       {transcript.thread?.setupOutput != null && (
         <details className="setup-output" open={transcript.thread.status === "needs-input" && turnCount === 0}>
           <summary>

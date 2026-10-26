@@ -46,11 +46,14 @@ export interface ThreadHeaderLines {
   };
 }
 
+/** A catalog name can spell out the Effort, "Gemini 3.8 Flash (High)"; the Effort has its own place. */
+const EFFORT_SUFFIX = /\s*\((low|medium|high|xhigh|max)\)$/i;
+
 function readableModel(model: string, catalog: ModelInfo[] | null): string {
   const exact = catalog?.find((m) => m.id === model);
-  if (exact) return exact.name;
   const family = modelFamilyId(model);
-  return catalog?.find((m) => modelFamilyId(m.id) === family)?.name ?? model;
+  const name = exact?.name ?? catalog?.find((m) => modelFamilyId(m.id) === family)?.name ?? model;
+  return name.replace(EFFORT_SUFFIX, "");
 }
 
 export function threadHeaderLines(input: ThreadHeaderInput): ThreadHeaderLines {

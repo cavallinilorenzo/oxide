@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { usageView, type UsageSeverity } from "./usageLimits";
+import { usageView, type UsageSeverity, type UsageWindowView } from "./usageLimits";
 import { SESSION_START_MS, useNow, useUsageLimits } from "./useUsageLimits";
 
 const RADIUS = 7;
@@ -11,26 +11,12 @@ const STROKE: Record<UsageSeverity, string> = {
   critical: "var(--red)",
 };
 
-/**
- * A small ring showing how much of the Provider's 5-hour usage limit is used. Hovering or
- * focusing it opens a popover with the 5-hour and weekly limits. Hidden for a Provider that
- * reports no Usage limits.
- */
-export function UsageRing({ provider, reportsUsage }: { provider: string; reportsUsage: boolean }) {
-  const limits = useUsageLimits(provider, reportsUsage);
-  const now = useNow();
-  const popoverId = useId();
-  const view = usageView(limits, reportsUsage, now, SESSION_START_MS);
-  if (view.kind === "hidden") return null;
-
-  const summary =
-    view.kind === "ready" ? view.rows[0].ariaLabel : `Usage limits: ${view.message}`;
-  const fraction = view.kind === "ready" ? view.fraction : 0;
-  const severity = view.kind === "ready" ? view.severity : "normal";
-
+function Ring({ window, updatedLabel }: { window: UsageWindowView; updatedLabel: string | null }) {
+  const tooltipId = useId();
   return (
-    <div className="usage-ring">
-      <button type="button" className="icon-btn sm usage-ring-btn" aria-label={summary} aria-describedby={popoverId}>
+    <div className="usage-item">
+      <button type="button" className="usage-btn" aria-label={window.ariaLabel} aria-describedby={tooltipId}>
+        <span className="usage-label">{window.label}</span>
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
           <circle className="usage-ring-track" cx="9" cy="9" r={RADIUS} fill="none" strokeWidth="2.5" />
           <circle
@@ -41,30 +27,37 @@ export function UsageRing({ provider, reportsUsage }: { provider: string; report
             fill="none"
             strokeWidth="2.5"
             strokeLinecap="round"
-            stroke={STROKE[severity]}
-            strokeDasharray={`${fraction * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+            stroke={STROKE[window.severity]}
+            strokeDasharray={`${window.fraction * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
             transform="rotate(-90 9 9)"
           />
         </svg>
+        <span className="usage-countdown">{window.countdown}</span>
       </button>
-      <div className="usage-popover" id={popoverId} role="tooltip">
-        {view.kind === "empty" ? (
-          <p className="usage-empty">{view.message}</p>
-        ) : (
-          <>
-            {view.rows.map((row) => (
-              <div className="usage-row" key={row.label}>
-                <span className="usage-row-label">{row.label}</span>
-                <span className="usage-row-value">
-                  {row.percentLabel}
-                  {row.resetLabel && ` · ${row.resetLabel}`}
-                </span>
-              </div>
-            ))}
-            {view.updatedLabel && <p className="usage-updated">{view.updatedLabel}</p>}
-          </>
-        )}
+      <div className="usage-popover" id={tooltipId} role="tooltip">
+        <strong className="usage-title">{window.title}</strong>
+        <p className="usage-detail">{window.detail}</p>
+        {updatedLabel && <p className="usage-updated">{updatedLabel}</p>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The Provider's 5-hour and weekly Usage limits, each as a labelled ring with the time left until
+ * it resets; hovering a ring gives the exact percentage. Hidden for a Provider that reports no
+ * Usage limits.
+ */
+export function UsageRing({ provider, reportsUsage }: { provider: string; reportsUsage: boolean }) {
+  const limits = useUsageLimits(provider, reportsUsage);
+  const now = useNow();
+  const view = usageView(limits, reportsUsage, now, SESSION_START_MS);
+  if (view.kind === "hidden") return null;
+  return (
+    <div className="usage-rings">
+      {view.windows.map((window) => (
+        <Ring key={window.key} window={window} updatedLabel={view.updatedLabel} />
+      ))}
     </div>
   );
 }

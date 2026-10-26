@@ -74,7 +74,28 @@ describe("threadHeaderLines", () => {
       effort: "high",
       catalog: [model("gemini-pro-high", "Gemini Pro (high)")],
     });
-    expect(lines.modelLine).toContain("Gemini Pro");
+    expect(lines.modelLine).toBe("Gemini Pro · high");
+  });
+
+  it("drops an effort the name carries in parentheses, as the Effort follows it", () => {
+    const lines = threadHeaderLines({
+      ...base,
+      provider: "antigravity",
+      model: "gemini-3-8-flash-high",
+      effort: "high",
+      catalog: [model("gemini-3-8-flash-high", "Gemini 3.8 Flash (High)")],
+    });
+    expect(lines.modelLine).toBe("Gemini 3.8 Flash · high");
+  });
+
+  it("keeps other parentheses in a Model name", () => {
+    const lines = threadHeaderLines({
+      ...base,
+      model: "claude-sonnet-4-6",
+      effort: null,
+      catalog: [model("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)")],
+    });
+    expect(lines.modelLine).toBe("Claude Sonnet 4.6 (Thinking)");
   });
 
   it("shows the Project path for an ordinary Thread", () => {

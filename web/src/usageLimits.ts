@@ -2,23 +2,29 @@ import type { UsageLimitWindow, UsageLimits } from "./bindings";
 
 export type UsageSeverity = "normal" | "warning" | "critical";
 
-export interface UsageRow {
+/** One window's ring and what hovering it says. */
+export interface UsageWindowView {
+  key: "five-hour" | "weekly";
+  /** The short name shown next to the ring. */
   label: string;
-  percentLabel: string;
-  /** "Resets in 2 h 13 min", "Reset", or empty when there is no reset time. */
-  resetLabel: string;
+  /** The full name, for the tooltip heading. */
+  title: string;
+  /** Share used, 0 to 1. */
+  fraction: number;
+  severity: UsageSeverity;
+  /** Shown beside the ring: "2 h 13 min", "Reset", or "—" when unknown. */
+  countdown: string;
+  /** The tooltip: exact percentage and reset time. */
+  detail: string;
   ariaLabel: string;
 }
 
 export type UsageView =
   | { kind: "hidden" }
-  | { kind: "empty"; message: string }
   | {
       kind: "ready";
-      /** Share of the 5-hour limit used, 0 to 1. */
-      fraction: number;
-      severity: UsageSeverity;
-      rows: UsageRow[];
+      /** The 5-hour window, then the weekly one; a window never reported is empty. */
+      windows: UsageWindowView[];
       /** "Updated 3 h ago" when the figures predate this session. */
       updatedLabel: string | null;
     };
@@ -42,7 +48,8 @@ function split(seconds: number): { days: number; hours: number; minutes: number 
 /** "5 min", "2 h 13 min", "3 d 4 h": two units at most, never less than a minute. */
 function duration(seconds: number, long: boolean): string {
   const { days, hours, minutes } = split(seconds);
-  const unit = (n: number, short: string, one: string) => (long ? `${n} ${n === 1 ? one : `${one}s`}` : `${n} ${short}`);
+  const unit = (n: number, short: string, one: string) =>
+    long ? `${n} ${n === 1 ? one : `${one}s`}` : `${n} ${short}`;
   const parts: string[] = [];
   if (days > 0) {
     parts.push(unit(days, "d", "day"));
@@ -61,19 +68,32 @@ export function formatCountdown(resetsAt: number, nowMs: number): string {
   return duration(resetsAt - nowMs / 1000, false);
 }
 
+/** "42%" or "42.5%": exact, without trailing zeros. */
+function percentText(percent: number): string {
+  return `${Number(percent.toFixed(1))}%`;
+}
+
 interface Resolved {
   percent: number | null;
   severity: UsageSeverity;
   percentLabel: string;
   resetLabel: string;
   resetAria: string;
+  countdown: string;
 }
 
 function resolve(window: UsageLimitWindow, nowMs: number): Resolved {
   const hasReset = window.resetsAt != null;
   if (hasReset && window.resetsAt! * 1000 <= nowMs) {
     // Reset since the last report: the old pressure is gone until the Provider reports again.
-    return { percent: 0, severity: "normal", percentLabel: "0% used", resetLabel: "Reset", resetAria: "reset" };
+    return {
+      percent: 0,
+      severity: "normal",
+      percentLabel: "0% used",
+      resetLabel: "Reset",
+      resetAria: "reset",
+      countdown: "Reset",
+    };
   }
   const percent = window.percentUsed == null ? null : Math.min(Math.max(window.percentUsed, 0), 100);
   const severity: UsageSeverity =
@@ -85,22 +105,48 @@ function resolve(window: UsageLimitWindow, nowMs: number): Resolved {
   return {
     percent,
     severity,
-    percentLabel: percent == null ? "Usage not reported" : `${Math.round(percent)}% used`,
+    percentLabel: percent == null ? "Usage not reported" : `${percentText(percent)} used`,
     resetLabel: hasReset ? `Resets in ${formatCountdown(window.resetsAt!, nowMs)}` : "",
     resetAria: hasReset ? `resets in ${duration(window.resetsAt! - nowMs / 1000, true)}` : "",
+    countdown: hasReset ? formatCountdown(window.resetsAt!, nowMs) : "—",
   };
 }
 
-function row(label: string, window: UsageLimitWindow | null | undefined, nowMs: number): UsageRow {
-  if (!window) return { label, percentLabel: "Not reported yet", resetLabel: "", ariaLabel: `${label} not reported yet` };
+function windowView(
+  key: UsageWindowView["key"],
+  label: string,
+  title: string,
+  window: UsageLimitWindow | null | undefined,
+  nowMs: number,
+): UsageWindowView {
+  if (!window) {
+    return {
+      key,
+      label,
+      title,
+      fraction: 0,
+      severity: "normal",
+      countdown: "—",
+      detail: "No usage reported yet",
+      ariaLabel: `${title} not reported yet`,
+    };
+  }
   const r = resolve(window, nowMs);
-  const aria = [`${label} ${r.percentLabel}`, r.resetAria].filter(Boolean).join(", ");
-  return { label, percentLabel: r.percentLabel, resetLabel: r.resetLabel, ariaLabel: aria };
+  return {
+    key,
+    label,
+    title,
+    fraction: (r.percent ?? 0) / 100,
+    severity: r.severity,
+    countdown: r.countdown,
+    detail: [r.percentLabel, r.resetLabel].filter(Boolean).join(" · "),
+    ariaLabel: [`${title} ${r.percentLabel}`, r.resetAria].filter(Boolean).join(", "),
+  };
 }
 
 /**
- * What the usage ring and its popover show. `sessionStartMs` marks the start of this run of
- * Oxide: figures reported before it are labelled with their age.
+ * What the usage rings show. `sessionStartMs` marks the start of this run of Oxide: figures
+ * reported before it are labelled with their age.
  */
 export function usageView(
   limits: UsageLimits | null,
@@ -109,16 +155,14 @@ export function usageView(
   sessionStartMs: number = nowMs,
 ): UsageView {
   if (!reportsUsage) return { kind: "hidden" };
-  if (!limits || (!limits.fiveHour && !limits.weekly)) {
-    return { kind: "empty", message: "No usage reported yet" };
-  }
-  const five = limits.fiveHour ? resolve(limits.fiveHour, nowMs) : null;
-  const newest = Math.max(limits.fiveHour?.reportedAt ?? 0, limits.weekly?.reportedAt ?? 0) * 1000;
+  const newest = Math.max(limits?.fiveHour?.reportedAt ?? 0, limits?.weekly?.reportedAt ?? 0) * 1000;
   return {
     kind: "ready",
-    fraction: (five?.percent ?? 0) / 100,
-    severity: five?.severity ?? "normal",
-    rows: [row("5-hour limit", limits.fiveHour, nowMs), row("Weekly limit", limits.weekly, nowMs)],
-    updatedLabel: newest < sessionStartMs ? `Updated ${duration((nowMs - newest) / 1000, false)} ago` : null,
+    windows: [
+      windowView("five-hour", "5h", "5-hour limit", limits?.fiveHour, nowMs),
+      windowView("weekly", "Weekly", "Weekly limit", limits?.weekly, nowMs),
+    ],
+    updatedLabel:
+      newest > 0 && newest < sessionStartMs ? `Updated ${duration((nowMs - newest) / 1000, false)} ago` : null,
   };
 }

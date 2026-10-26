@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BugIcon, FileDirectoryIcon, GitBranchIcon, PencilIcon } from "@primer/octicons-react";
+import { FileDirectoryIcon, GitBranchIcon, PencilIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo, type Thread } from "./bindings";
 import { ProviderAvatar } from "./ProviderAvatar";
 import { UsageRing } from "./UsageRing";
@@ -20,8 +20,6 @@ interface ThreadHeaderProps {
   onStartRename: () => void;
   onSaveRename: () => void;
   onCancelRename: () => void;
-  debugOpen: boolean;
-  onToggleDebug: () => void;
 }
 
 /** The banner at the top of a Thread: Provider avatar, title, Model, folder and usage ring. */
@@ -40,8 +38,6 @@ export function ThreadHeader({
   onStartRename,
   onSaveRename,
   onCancelRename,
-  debugOpen,
-  onToggleDebug,
 }: ThreadHeaderProps) {
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
@@ -118,16 +114,6 @@ export function ThreadHeader({
         </div>
       </div>
       <div className="thread-header-actions">
-        <button
-          type="button"
-          className="icon-btn sm"
-          onClick={onToggleDebug}
-          aria-pressed={debugOpen}
-          aria-label={debugOpen ? "Close raw event debug" : "Open raw event debug"}
-          title={debugOpen ? "Close raw event debug" : "Raw event debug"}
-        >
-          <BugIcon size={14} />
-        </button>
         <UsageRing provider={provider} reportsUsage={reportsUsage} />
       </div>
     </div>

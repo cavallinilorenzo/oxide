@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@primer/octicons-react": "^19.41.0",
-    "@tanstack/react-virtual": "^3.14.21",
+    "@tanstack/react-virtual": "^3.14.22",
     "@tauri-apps/api": "^2.12.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",

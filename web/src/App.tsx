@@ -66,8 +66,8 @@ const TOOL_TABS: { name: string; Icon: Icon }[] = [
 const displayPath = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
 
 export function App() {
-  const [showTools, setShowTools] = useState(true);
-  const [showTerminal, setShowTerminal] = useState(true);
+  const [showTools, setShowTools] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
   // The user's pick, for the Thread it was made in: elsewhere that Thread's default applies.
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
@@ -412,11 +412,8 @@ export function App() {
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
-        const restored =
-          wanted?.projectId === selected.id && res.data.some((t) => t.id === wanted.threadId)
-            ? wanted.threadId
-            : null;
-        const initialThreadId = restored ?? res.data[0]?.id ?? null;
+        // The last Project reopens, but on a new Thread rather than the one it left off on.
+        const initialThreadId = wanted?.projectId === selected.id ? null : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
         rememberTerminalContext(selected.id, initialThreadId);
       }

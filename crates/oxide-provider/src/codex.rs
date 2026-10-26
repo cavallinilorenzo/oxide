@@ -786,10 +786,10 @@ impl CodexAppServer {
             )?;
         } else {
             let guard = self.inner.lock().unwrap();
-            if let Some(inner) = guard.as_ref() {
-                if let Some(turn) = inner.active_turns.lock().unwrap().get_mut(thread_id) {
-                    turn.interrupt_requested = true;
-                }
+            if let Some(inner) = guard.as_ref()
+                && let Some(turn) = inner.active_turns.lock().unwrap().get_mut(thread_id)
+            {
+                turn.interrupt_requested = true;
             }
         }
         Ok(())

@@ -1,6 +1,6 @@
 //! Antigravity CLI (`agy`) native provider adapter.
 //!
-//! `agy -p <prompt> --output-format stream-json` runs one Turn and exits, so every Turn is its
+//! Print mode (or one stdin message on Windows) runs one Turn and exits, so every Turn is its
 //! own process; Turns after the first resume the conversation with `--conversation <id>`.
 //! Headless `agy` cannot ask for Approval, so only Auto-edit (soft-deny) and Full access are
 //! offered (ADR-0004), and Oxide never touches `agy`'s settings file.
@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -148,9 +148,8 @@ impl AgyProvider {
     }
 
     fn run_probe(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.args(args)
-            .envs(&self.extra_env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -295,11 +294,14 @@ impl Provider for AgyProvider {
             ));
         }
 
-        let mut cmd = Command::new(&self.command);
-        cmd.arg("-p")
-            .arg(prompt)
-            .arg("--output-format")
-            .arg("stream-json");
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
+        // Batch shims cannot carry multiline prompts or arbitrarily long arguments. One
+        // streamed user message followed by EOF keeps the same one-process-per-Turn lifecycle.
+        #[cfg(windows)]
+        cmd.args(["--input-format", "stream-json"]);
+        #[cfg(not(windows))]
+        cmd.arg("-p").arg(prompt);
+        cmd.args(["--output-format", "stream-json"]);
         if let Some(model) = &context.model {
             cmd.arg("--model").arg(model);
         }
@@ -313,8 +315,11 @@ impl Provider for AgyProvider {
             cmd.arg("--dangerously-skip-permissions");
         }
         cmd.current_dir(&context.working_dir)
-            .envs(&self.extra_env)
-            .stdin(Stdio::null())
+            .stdin(if cfg!(windows) {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         process::spawn_in_own_group(&mut cmd);
@@ -364,17 +369,28 @@ impl Provider for AgyProvider {
             closed: Arc::clone(&self.closed),
             registry: self.registry.clone(),
         };
-        std::thread::spawn(move || turn.run(child, pgid, stdout, stderr));
+        let prompt_input = cfg!(windows).then(|| {
+            serde_json::json!({
+                "event": "user", "message": { "content": prompt }
+            })
+            .to_string()
+        });
+        std::thread::spawn(move || turn.run(child, pgid, stdout, stderr, prompt_input));
         Ok(())
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
-        if let Some(_pgid) = *self.group.lock().unwrap() {
+        let pgid = *self.group.lock().unwrap();
+        if let Some(_pgid) = pgid {
             self.interrupted.store(true, Ordering::SeqCst);
             #[cfg(unix)]
             unsafe {
                 libc::kill(-_pgid, libc::SIGINT)
             };
+            // Print mode has no input/control channel. End the whole contained process tree;
+            // the reader reports the interrupted Turn and preserves its conversation id.
+            #[cfg(windows)]
+            process::terminate_group(_pgid, Duration::ZERO, || {});
         }
         Ok(())
     }
@@ -524,7 +540,22 @@ impl TurnRun {
         pgid: i32,
         stdout: std::process::ChildStdout,
         stderr: std::process::ChildStderr,
+        prompt_input: Option<String>,
     ) {
+        // Drain startup output while feeding stdin: neither pipe may block the other, and
+        // send_prompt must return so the user can interrupt even a CLI that stops reading.
+        let prompt_writer = prompt_input.map(|prompt| {
+            use std::io::Write;
+            let mut stdin = child.stdin.take().expect("stdin must be piped");
+            std::thread::spawn(move || {
+                let sent = writeln!(stdin, "{prompt}");
+                if sent.is_err() {
+                    // Closing the Windows job terminates the CLI without racing a reused pid.
+                    process::release_job(pgid);
+                }
+                sent
+            })
+        });
         let stderr_reader = std::thread::spawn(move || {
             let mut tail = VecDeque::new();
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -575,10 +606,22 @@ impl TurnRun {
         }
 
         let code = child.wait().ok().and_then(|s| s.code());
+        if let Some(writer) = prompt_writer
+            && let Ok(Err(error)) = writer.join()
+            && !self.closed.load(Ordering::SeqCst)
+            && !self.interrupted.load(Ordering::SeqCst)
+        {
+            let _ = self.tx.send(ProviderEvent::Error {
+                message: format!("Failed to send Antigravity CLI prompt: {error}"),
+                code: None,
+                retrying: false,
+            });
+        }
         let stderr_tail = stderr_reader.join().ok().filter(|t| !t.is_empty());
         if let Some(registry) = &self.registry {
             registry.unregister(pgid);
         }
+        process::release_job(pgid);
         {
             let mut group = self.group.lock().unwrap();
             if *group == Some(pgid) {

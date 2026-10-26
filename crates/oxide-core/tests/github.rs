@@ -193,6 +193,53 @@ fn logged_out_gh_is_reported_with_login_guidance_and_git_still_works() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn gh_is_available_through_a_bat_shim() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    std::fs::rename(f.gh_dir.join("gh.cmd"), f.gh_dir.join("gh.bat")).unwrap();
+    let state = f.core.pull_request_state(f.project.id).unwrap();
+    assert_eq!(state.availability, GithubAvailability::Ready);
+    assert_eq!(state.default_branch.as_deref(), Some("main"));
+}
+
+#[cfg(windows)]
+#[test]
+fn gh_uses_pathext_order_when_multiple_shims_are_installed() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let first = extensions
+        .split(';')
+        .find(|e| e.eq_ignore_ascii_case(".BAT") || e.eq_ignore_ascii_case(".CMD"))
+        .unwrap();
+    let other = if first.eq_ignore_ascii_case(".BAT") {
+        "cmd"
+    } else {
+        "bat"
+    };
+    if other != "cmd" {
+        std::fs::copy(
+            f.gh_dir.join("gh.cmd"),
+            f.gh_dir.join(format!("gh.{other}")),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        f.gh_dir.join(format!("gh{first}")),
+        "@echo off\r\nexit /b 1\r\n",
+    )
+    .unwrap();
+    assert_eq!(
+        f.core
+            .pull_request_state(f.project.id)
+            .unwrap()
+            .availability,
+        GithubAvailability::LoggedOut
+    );
+}
+
 #[test]
 fn state_reports_the_default_branch_and_the_open_pull_request_of_the_branch() {
     let f = fixture();
@@ -851,10 +898,17 @@ fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
     let draft = f.core.pull_request_draft(f.project.id).unwrap();
     assert!(draft.body.contains("Closes #51"), "{}", draft.body);
 
-    f.core
+    let pr = f
+        .core
         .create_pull_request(f.project.id, &input("T", "main", false))
         .unwrap();
-    assert_eq!(f.create_calls()[0][5], "Body\n\nCloses #51");
+    assert_eq!(
+        f.core
+            .pull_request_detail(f.project.id, pr.number)
+            .unwrap()
+            .body,
+        "Body\n\nCloses #51"
+    );
 }
 
 #[test]
@@ -889,6 +943,12 @@ fn closes_is_not_repeated_when_the_body_already_has_it() {
 
     let mut with = input("T", "main", false);
     with.body = "Fixes it.\n\ncloses #51".into();
-    f.core.create_pull_request(f.project.id, &with).unwrap();
-    assert_eq!(f.create_calls()[0][5], "Fixes it.\n\ncloses #51");
+    let pr = f.core.create_pull_request(f.project.id, &with).unwrap();
+    assert_eq!(
+        f.core
+            .pull_request_detail(f.project.id, pr.number)
+            .unwrap()
+            .body,
+        "Fixes it.\n\ncloses #51"
+    );
 }

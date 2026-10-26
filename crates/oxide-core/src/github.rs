@@ -5,6 +5,7 @@
 use crate::git;
 use crate::git_diff::{Diff, parse_patch};
 use crate::{Error, Result};
+use oxide_provider::command::find_in;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -232,18 +233,56 @@ impl Gh {
 
     fn run(&self, cwd: &Path, args: &[&str]) -> std::result::Result<String, GhError> {
         let path = self.path_var();
-        let output = Command::new(find_in(&path, "gh").ok_or(GhError::Missing)?)
+        let mut command = Command::new(
+            find_in(
+                &path,
+                std::ffi::OsStr::new("gh"),
+                std::env::var_os("PATHEXT").as_deref(),
+            )
+            .ok_or(GhError::Missing)?,
+        );
+        // cmd.exe cannot safely carry newlines in a batch argument. gh accepts body text
+        // on stdin, preserving descriptions and comments when it is installed as a shim.
+        #[cfg(windows)]
+        let mut args = args.to_vec();
+        #[cfg(windows)]
+        let body = args.iter().position(|arg| *arg == "--body").and_then(|at| {
+            let body = *args.get(at + 1)?;
+            if !body.contains(['\r', '\n']) {
+                return None;
+            }
+            args[at] = "--body-file";
+            args[at + 1] = "-";
+            Some(body)
+        });
+        command
             .args(args)
             .current_dir(cwd)
             .env("PATH", &path)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => GhError::Missing,
-                _ => GhError::Failed(format!("could not run gh: {e}")),
-            })?;
+            .stdin(Stdio::null());
+        #[cfg(windows)]
+        let output = if let Some(body) = body {
+            use std::io::Write;
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            command.spawn().and_then(|mut child| {
+                let sent = child.stdin.take().unwrap().write_all(body.as_bytes());
+                let output = child.wait_with_output();
+                sent.and(output)
+            })
+        } else {
+            command.output()
+        };
+        #[cfg(not(windows))]
+        let output = command.output();
+        let output = output.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => GhError::Missing,
+            _ => GhError::Failed(format!("could not run gh: {e}")),
+        })?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -376,25 +415,6 @@ impl From<GhError> for Error {
 
 fn parse(json: &str) -> Result<serde_json::Value> {
     serde_json::from_str(json).map_err(|e| Error::Github(format!("unexpected gh output: {e}")))
-}
-
-fn find_in(path: &OsString, program: &str) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let candidates = [
-        format!("{program}.cmd"),
-        format!("{program}.exe"),
-        format!("{program}.bat"),
-        program.to_string(),
-    ];
-    #[cfg(not(windows))]
-    let candidates = [program.to_string()];
-
-    std::env::split_paths(path).find_map(|dir| {
-        candidates
-            .iter()
-            .map(|c| dir.join(c))
-            .find(|candidate| candidate.is_file())
-    })
 }
 
 pub fn pull_request_state(gh: &Gh, cwd: &Path) -> Result<PullRequestState> {

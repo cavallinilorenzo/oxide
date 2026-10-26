@@ -84,7 +84,7 @@ fn make_repo(dir: &Path) {
 fn install_gh(f: &Fixture, repos: serde_json::Value) {
     let bin = f.root().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    for name in ["gh", "gh.py"] {
+    for name in ["gh", "gh.py", "gh.cmd"] {
         std::fs::copy(Path::new(FAKE_GH).with_file_name(name), bin.join(name)).unwrap();
     }
     std::fs::write(

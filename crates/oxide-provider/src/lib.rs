@@ -4,6 +4,7 @@
 pub mod agy;
 pub mod claude;
 pub mod codex;
+pub mod command;
 pub mod contract_suite;
 pub mod process;
 

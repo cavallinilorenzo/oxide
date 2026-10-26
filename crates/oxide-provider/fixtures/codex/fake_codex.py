@@ -210,6 +210,7 @@ for line in sys.stdin:
                 }
             })
             # Wait for turn/interrupt without sleeping
+            send_msg({"method": "interrupt_ready", "params": {"threadId": t_id}})
         else:
             # Standard prompt replay
             send_msg({
@@ -262,6 +263,10 @@ for line in sys.stdin:
             })
     elif method == "turn/interrupt":
         t_id = params.get("threadId", "thread-codex-1")
+        if params.get("turnId") != "turn-1":
+            send_msg({"jsonrpc": "2.0", "id": msg_id,
+                      "error": {"code": -32602, "message": "turnId is required"}})
+            continue
         send_msg({
             "jsonrpc": "2.0",
             "id": msg_id,

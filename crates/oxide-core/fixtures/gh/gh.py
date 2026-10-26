@@ -27,6 +27,12 @@ def flag(name):
     return args[args.index(name) + 1] if name in args else None
 
 
+def read_body():
+    if flag("--body-file") == "-":
+        return sys.stdin.read()
+    return flag("--body") or ""
+
+
 def save():
     with open(state_path, "w") as f:
         json.dump(state, f)
@@ -93,7 +99,7 @@ if args[:2] == ["pr", "diff"]:
 if args[:2] == ["pr", "comment"]:
     pr = by_number(number_arg())
     pr.setdefault("comments", []).append(
-        {"author": {"login": "me"}, "body": flag("--body"), "createdAt": "2026-01-01T00:00:00Z"}
+        {"author": {"login": "me"}, "body": read_body(), "createdAt": "2026-01-01T00:00:00Z"}
     )
     save()
     sys.exit(0)
@@ -140,7 +146,7 @@ if args[:2] == ["pr", "view"]:
 
 if args[:2] == ["issue", "create"]:
     title = flag("--title")
-    body = flag("--body") or ""
+    body = read_body()
     num = state.get("next_number", 1)
     state["next_number"] = num + 1
     issue = {
@@ -160,7 +166,7 @@ if args[:2] == ["issue", "create"]:
 
 if args[:2] == ["issue", "comment"]:
     num = args[2]
-    body = flag("--body") or ""
+    body = read_body()
     for issue in state.get("issues", []):
         if str(issue.get("number")) == str(num):
             issue.setdefault("comments", []).append({
@@ -215,6 +221,7 @@ if args[:2] == ["pr", "create"]:
     pr = {
         "number": number,
         "title": flag("--title"),
+        "body": read_body(),
         "url": "https://github.com/fake/repo/pull/%d" % number,
         "state": "OPEN",
         "isDraft": "--draft" in args,

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -54,6 +54,11 @@ impl ClaudeCustomizations {
 const INITIALIZE_REQUEST_ID: &str = "oxide-initialize";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(20);
 
+struct ActiveTurn {
+    index: u32,
+    interrupted: bool,
+}
+
 pub struct ClaudeCodeProvider {
     command: String,
     extra_env: HashMap<String, String>,
@@ -62,7 +67,7 @@ pub struct ClaudeCodeProvider {
     child_stdin: Arc<Mutex<Option<ChildStdin>>>,
     event_sender: Arc<Mutex<Option<Sender<ProviderEvent>>>>,
     turn_counter: Arc<AtomicU32>,
-    active_turn: Arc<Mutex<Option<u32>>>,
+    active_turn: Arc<Mutex<Option<ActiveTurn>>>,
     registry: Option<Arc<ProcessRegistry>>,
     customizations: ClaudeCustomizations,
     safe_mode_supported: OnceLock<bool>,
@@ -125,11 +130,8 @@ impl ClaudeCodeProvider {
     /// Whether the installed CLI knows `--safe-mode`; older ones would refuse to start with it.
     fn supports_safe_mode(&self) -> bool {
         *self.safe_mode_supported.get_or_init(|| {
-            let mut cmd = Command::new(&self.command);
+            let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
             cmd.arg("--help").stdin(Stdio::null());
-            for (k, v) in &self.extra_env {
-                cmd.env(k, v);
-            }
             process::output_in_own_group(&mut cmd)
                 .map(|out| String::from_utf8_lossy(&out.stdout).contains("--safe-mode"))
                 .unwrap_or(false)
@@ -138,7 +140,7 @@ impl ClaudeCodeProvider {
 
     /// Starts a throwaway CLI process, sends `initialize` and returns the response payload.
     fn query_initialize(&self) -> Result<serde_json::Value, ProviderError> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("-p")
             .arg("--input-format")
             .arg("stream-json")
@@ -147,9 +149,6 @@ impl ClaudeCodeProvider {
             .arg("--verbose");
         if self.supports_safe_mode() {
             cmd.arg("--safe-mode");
-        }
-        for (k, v) in &self.extra_env {
-            cmd.env(k, v);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -231,7 +230,7 @@ impl ClaudeCodeProvider {
         context: &StartContext,
         resume_session_id: Option<&str>,
     ) -> Result<Receiver<ProviderEvent>, ProviderError> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("-p")
             .arg("--input-format")
             .arg("stream-json")
@@ -287,9 +286,6 @@ impl ClaudeCodeProvider {
         }
 
         cmd.current_dir(&context.working_dir);
-        for (k, v) in &self.extra_env {
-            cmd.env(k, v);
-        }
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -511,7 +507,10 @@ impl ClaudeCodeProvider {
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
 
-                                let status = if subtype == "interrupted" {
+                                let Some(turn) = active_turn_clone.lock().unwrap().take() else {
+                                    continue;
+                                };
+                                let status = if turn.interrupted || subtype == "interrupted" {
                                     TurnStatus::Interrupted
                                 } else if is_error {
                                     TurnStatus::Error
@@ -519,9 +518,8 @@ impl ClaudeCodeProvider {
                                     TurnStatus::Completed
                                 };
 
-                                let t_idx = active_turn_clone.lock().unwrap().unwrap_or(0);
                                 let _ = tx.send(ProviderEvent::TurnCompleted {
-                                    turn_index: t_idx,
+                                    turn_index: turn.index,
                                     status,
                                 });
                             }
@@ -640,11 +638,8 @@ fn parse_models(models: &[serde_json::Value]) -> Vec<ModelInfo> {
 
 impl Provider for ClaudeCodeProvider {
     fn detect(&self) -> Result<Detection, ProviderError> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("--version");
-        for (k, v) in &self.extra_env {
-            cmd.env(k, v);
-        }
 
         let version_output = match process::output_in_own_group(&mut cmd) {
             Ok(out) if out.status.success() => out,
@@ -681,11 +676,8 @@ impl Provider for ClaudeCodeProvider {
             None
         };
 
-        let mut auth_cmd = Command::new(&self.command);
+        let mut auth_cmd = crate::command::provider_command(&self.command, &self.extra_env);
         auth_cmd.args(["auth", "status"]);
-        for (k, v) in &self.extra_env {
-            auth_cmd.env(k, v);
-        }
 
         let auth_output = process::output_in_own_group(&mut auth_cmd);
 
@@ -719,7 +711,10 @@ impl Provider for ClaudeCodeProvider {
 
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
         let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
-        *self.active_turn.lock().unwrap() = Some(turn_index);
+        *self.active_turn.lock().unwrap() = Some(ActiveTurn {
+            index: turn_index,
+            interrupted: false,
+        });
 
         // Emit TurnStarted event
         if let Some(ref sender) = *self.event_sender.lock().unwrap() {
@@ -740,22 +735,18 @@ impl Provider for ClaudeCodeProvider {
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
-        // Send SIGINT to child process
-        #[cfg(unix)]
-        if let Some(ref child) = *self.child_process.lock().unwrap() {
-            let pid = child.id() as i32;
-            unsafe {
-                libc::kill(pid, libc::SIGINT);
-            }
-        }
-
-        // Also write control interrupt to stdin as fallback
+        let mut active = self.active_turn.lock().unwrap();
+        let Some(turn) = active.as_mut() else {
+            return Ok(());
+        };
+        // The streaming control protocol works without a console or POSIX signals.
         let payload = json!({
-            "type": "control",
-            "command": "interrupt"
+            "type": "control_request",
+            "request_id": format!("oxide-interrupt-{}", turn.index),
+            "request": { "subtype": "interrupt" }
         });
-        let _ = self.write_to_stdin(&payload);
-
+        self.write_to_stdin(&payload)?;
+        turn.interrupted = true;
         Ok(())
     }
 

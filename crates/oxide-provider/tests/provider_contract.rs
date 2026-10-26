@@ -3,6 +3,86 @@ use oxide_provider::{
     contract_suite::verify_provider_contract,
 };
 
+mod support;
+
+fn interrupt_and_continue(provider: &mut dyn Provider, ready: impl Fn(&ProviderEvent) -> bool) {
+    use oxide_provider::StartContext;
+    use std::time::{Duration, Instant};
+
+    let context = StartContext {
+        working_dir: ".".into(),
+        model: None,
+        effort: None,
+        permission_mode: PermissionMode::AutoEdit,
+    };
+    let rx = provider.start(&context).unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        provider.send_prompt("interrupt_test").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let event = rx
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+            if ready(&event) {
+                break;
+            }
+        }
+        provider.interrupt().unwrap();
+        for (index, expected) in [(0, TurnStatus::Interrupted), (1, TurnStatus::Completed)] {
+            if index == 1 {
+                provider.send_prompt("Hello after interrupt").unwrap();
+            }
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                match rx
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .unwrap()
+                {
+                    ProviderEvent::TurnCompleted { turn_index, status } => {
+                        assert_eq!((turn_index, status), (index, expected));
+                        break;
+                    }
+                    ProviderEvent::Exited { .. } => panic!("interrupt must preserve the session"),
+                    _ => {}
+                }
+            }
+        }
+    }));
+    provider.shutdown().unwrap();
+    if let Err(error) = result {
+        std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
+fn claude_interrupts_without_signals_and_accepts_the_next_turn() {
+    let fake_cli = support::fake_cli("claude");
+    let mut provider = oxide_provider::claude::ClaudeCodeProvider::with_command(fake_cli.command());
+    interrupt_and_continue(
+        &mut provider,
+        |e| matches!(e, ProviderEvent::Unknown { raw } if raw.contains("interrupt_ready")),
+    );
+}
+
+#[test]
+fn codex_interrupts_the_active_turn_and_accepts_the_next_turn() {
+    let fake_cli = support::fake_cli("codex");
+    let mut provider = oxide_provider::codex::CodexProvider::with_command(fake_cli.command());
+    interrupt_and_continue(
+        &mut provider,
+        |e| matches!(e, ProviderEvent::Unknown { raw } if raw.contains("interrupt_ready")),
+    );
+}
+
+#[test]
+fn agy_interrupts_the_process_tree_and_accepts_the_next_turn() {
+    let fake_cli = support::fake_cli("agy");
+    let mut provider = oxide_provider::agy::AgyProvider::with_command(fake_cli.command());
+    interrupt_and_continue(&mut provider, |e| {
+        matches!(e, ProviderEvent::SessionInfo { .. })
+    });
+}
+
 #[test]
 fn fake_provider_satisfies_contract_capabilities_and_detect() {
     let provider = FakeProvider::default();
@@ -67,20 +147,110 @@ fn fake_provider_passes_shared_contract_suite() {
 
 #[test]
 fn claude_code_provider_passes_shared_contract_suite() {
-    use std::path::PathBuf;
-    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let fake_cli = support::fake_cli("claude");
     verify_provider_contract(|| {
-        oxide_provider::claude::ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap())
+        oxide_provider::claude::ClaudeCodeProvider::with_command(fake_cli.command())
     });
 }
 
 #[test]
 fn codex_provider_passes_shared_contract_suite() {
-    use std::path::PathBuf;
-    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/codex/fake_codex.py");
+    let fake_cli = support::fake_cli("codex");
     verify_provider_contract(|| {
-        oxide_provider::codex::CodexProvider::with_command(fake_cli.to_str().unwrap())
+        oxide_provider::codex::CodexProvider::with_command(fake_cli.command())
     });
+}
+
+#[cfg(windows)]
+#[test]
+fn providers_detect_and_run_shims_from_their_search_path() {
+    use oxide_provider::{agy::AgyProvider, claude::ClaudeCodeProvider, codex::CodexProvider};
+
+    for extension in ["cmd", "bat"] {
+        let dir = tempfile::Builder::new()
+            .prefix("oxide CLI shims ")
+            .tempdir()
+            .unwrap();
+        for name in ["claude", "codex", "agy"] {
+            let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("fixtures/{name}/fake_{name}.py"));
+            std::fs::write(
+                dir.path().join(format!("oxide-{name}.{extension}")),
+                format!(
+                    "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+                    support::python().display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
+        }
+        let path = std::env::join_paths(
+            [dir.path().to_path_buf()]
+                .into_iter()
+                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap()
+        .into_string()
+        .unwrap();
+        let pathext = format!(".{extension};.EXE");
+        let mut claude = ClaudeCodeProvider::with_command("oxide-claude");
+        claude.set_env("PATH", &path);
+        claude.set_env("PATHEXT", &pathext);
+        verify_provider_contract(|| claude);
+
+        let mut codex = CodexProvider::with_command("oxide-codex");
+        codex.set_env("PATH", &path);
+        codex.set_env("PATHEXT", &pathext);
+        verify_provider_contract(|| codex);
+
+        let mut agy = AgyProvider::with_command("oxide-agy");
+        agy.set_env("PATH", &path);
+        agy.set_env("PATHEXT", &pathext);
+        verify_provider_contract(|| agy);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn provider_detection_honours_pathext_order_and_explicit_paths() {
+    use oxide_provider::claude::ClaudeCodeProvider;
+    let dir = tempfile::Builder::new()
+        .prefix("oxide CLI order ")
+        .tempdir()
+        .unwrap();
+    for (extension, version) in [("cmd", "1.0.0"), ("bat", "2.0.0")] {
+        std::fs::write(
+            dir.path().join(format!("oxide-claude.{extension}")),
+            format!(
+                "@echo off\r\nif \"%~1\"==\"--version\" echo claude {version}\r\nexit /b 0\r\n"
+            ),
+        )
+        .unwrap();
+    }
+    let mut provider = ClaudeCodeProvider::with_command("oxide-claude");
+    provider.set_env("PATH", dir.path().to_str().unwrap());
+    provider.set_env("PATHEXT", ".BAT;.CMD;.EXE");
+    assert_eq!(provider.detect().unwrap().version.as_deref(), Some("2.0.0"));
+
+    let mut provider =
+        ClaudeCodeProvider::with_command(dir.path().join("oxide-claude.cmd").to_str().unwrap());
+    provider.set_env("PATHEXT", ".BAT;.EXE");
+    assert_eq!(provider.detect().unwrap().version.as_deref(), Some("1.0.0"));
+}
+
+#[cfg(windows)]
+#[test]
+fn provider_detection_resolves_native_executables() {
+    // Python is a native CLI with a version probe, so this also catches accidental shell use.
+    let mut provider = oxide_provider::claude::ClaudeCodeProvider::with_command("python");
+    provider.set_env(
+        "PATH",
+        support::python().parent().unwrap().to_str().unwrap(),
+    );
+    provider.set_env("PATHEXT", ".EXE");
+    let detection = provider.detect().unwrap();
+    assert!(detection.installed);
+    assert!(!detection.authenticated);
 }
 
 #[test]

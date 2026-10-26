@@ -818,6 +818,7 @@ export function ThreadView({
         )}
         <textarea
           className="composer-input"
+          aria-label="Message to agent"
           rows={Math.max(2, Math.min(10, input.split("\n").length))}
           placeholder={
             isTurnActive
@@ -942,8 +943,8 @@ export function ThreadView({
           </span>
         )}
         <span className="grow" />
-        <span className="branch-badge mono">
-          <GitBranchIcon size={12} /> {(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}
+        <span className="branch-badge mono" title={(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}>
+          <GitBranchIcon size={12} /> <span className="branch-badge-text">{(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}</span>
         </span>
       </div>
       </div>

@@ -336,14 +336,14 @@ export function App() {
       const toggle = toggleForKey(e);
       if (!toggle) return;
       e.preventDefault();
-      if (toggle === "tools") setShowTools((v) => !v);
-      else if (toggle === "terminal") setShowTerminal((v) => !v);
+      if (toggle === "tools") setShowTools(showSettings || !showTools);
+      else if (toggle === "terminal") setShowTerminal(showSettings || !showTerminal);
       else if (toggle === "board") setShowBoard((v) => !v);
-      else setShowSettings(true);
+      setShowSettings(toggle === "settings");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, startNewThread]);
+  }, [selected, startNewThread, showSettings, showTools, showTerminal]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -471,29 +471,29 @@ export function App() {
         )}
         {selected && (
           <span role="group" aria-label="View" className="seg">
-            <button aria-pressed={!showBoard} title="Chat (⌘B)" onClick={() => setShowBoard(false)}>
+            <button aria-pressed={!showBoard && !showSettings} title="Chat (⌘B)" onClick={() => { setShowBoard(false); setShowSettings(false); }}>
               <CommentDiscussionIcon size={14} /> Chat
             </button>
-            <button aria-pressed={showBoard} title="Thread Board (⌘B)" onClick={() => setShowBoard(true)}>
+            <button aria-pressed={showBoard && !showSettings} title="Thread Board (⌘B)" onClick={() => { setShowBoard(true); setShowSettings(false); }}>
               <ProjectIcon size={14} /> Board
             </button>
           </span>
         )}
         <button
           className="icon-btn"
-          aria-pressed={showTools}
+          aria-pressed={showTools && !showSettings}
           title="Tools: Files, Diff, Pull request, Issues (⌘\)"
           aria-label="Toggle tools panel"
-          onClick={() => setShowTools((v) => !v)}
+          onClick={() => { setShowTools(showSettings || !showTools); setShowSettings(false); }}
         >
           <ToolsIcon size={16} />
         </button>
         <button
           className="icon-btn"
-          aria-pressed={showTerminal}
+          aria-pressed={showTerminal && !showSettings}
           title="Terminal (⌘J)"
           aria-label="Toggle Terminal"
-          onClick={() => setShowTerminal((v) => !v)}
+          onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
         >
           <TerminalIcon size={16} />
         </button>
@@ -604,18 +604,18 @@ export function App() {
             </main>
           )}
           {terminalContextsToRender.map((context) => (
-            <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal ? <section className="terminal" aria-label="Terminal" /> : null}>
+            <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal && !showSettings ? <section className="terminal" aria-label="Terminal" /> : null}>
               <TerminalPanel
                 projectId={context.projectId}
                 threadId={context.threadId}
                 contextKey={context.key}
-                visible={showTerminal && context.key === currentTerminalContext?.key}
+                visible={showTerminal && !showSettings && context.key === currentTerminalContext?.key}
                 onClose={() => setShowTerminal(false)}
               />
             </Suspense>
           ))}
         </div>
-        {showTools && (
+        {showTools && !showSettings && (
           <aside className="tools" aria-label="Tools panel">
             <nav className="tabs" role="tablist" aria-label="Surfaces">
               {TOOL_TABS.map(({ name, Icon }) => (
@@ -623,10 +623,12 @@ export function App() {
                   key={name}
                   role="tab"
                   className="tab"
+                  aria-label={name}
+                  title={name}
                   aria-selected={activeTool === name}
                   onClick={() => setActiveTool(name)}
                 >
-                  <Icon size={14} /> {name}
+                  <Icon size={14} /> <span className="tool-tab-label">{name}</span>
                 </button>
               ))}
               <span className="grow" />

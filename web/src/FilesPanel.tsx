@@ -53,7 +53,7 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   }
 
   function renderDir(path: string, depth: number) {
-    const indent = { paddingLeft: 8 + depth * 14 };
+    const indent = { paddingLeft: 8 + depth * 16 };
     const listing = listings[path];
     if (listing === undefined) return <div className="files-note" style={indent}>Loading…</div>;
     if ("error" in listing) return <div className="files-note error" style={indent}>{listing.error}</div>;

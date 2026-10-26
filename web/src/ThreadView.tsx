@@ -41,7 +41,7 @@ import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
-import { parseSlashCommand } from "./modelPicker";
+import { modelFamilyId, parseSlashCommand } from "./modelPicker";
 import { filterSlashCommands, slashQuery } from "./slashMenu";
 import {
   applyThreadEvent,
@@ -141,6 +141,7 @@ export function ThreadView({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugState, setDebugState] = useState<{
     threadId: number | null;
@@ -494,6 +495,7 @@ export function ThreadView({
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
   const currentModel = threadId ? transcript.thread?.model ?? null : draftModel;
+  const displayModel = currentModel ? modelFamilyId(currentModel) : currentProvider;
   const currentEffort = threadId ? transcript.thread?.effort ?? null : draftEffort;
 
   useEffect(() => {
@@ -905,22 +907,28 @@ export function ThreadView({
                 setModelPickerOpen(true);
               }}
               disabled={isTurnActive || sending}
-              aria-label="Model"
-              title={`Model: ${currentModel || currentProvider} (/model)`}
+              aria-label={`Model: ${displayModel}`}
+              title={`Model: ${displayModel} (/model)`}
             >
               <ProviderMark provider={currentProvider} size={14} />
-              <span className="t">{currentModel || currentProvider}</span>
+              <span className="t">{displayModel}</span>
               <ChevronDownIcon size={12} />
             </button>
             <button
               type="button"
               className="cbtn compact"
+              ref={effortPickerTriggerRef}
               onClick={() => {
-                setModelPickerMode("effort");
-                setModelPickerOpen(true);
+                if (modelPickerOpen && modelPickerMode === "effort") {
+                  setModelPickerOpen(false);
+                } else {
+                  setModelPickerMode("effort");
+                  setModelPickerOpen(true);
+                }
               }}
               disabled={isTurnActive || sending}
               aria-label="Effort"
+              aria-expanded={modelPickerOpen && modelPickerMode === "effort"}
               title={`Effort: ${currentEffort || "Default"} (/effort)`}
             >
               <LightBulbIcon size={14} />
@@ -1005,6 +1013,7 @@ export function ThreadView({
           midThreadModelSwitch={providerCaps?.midThreadModelSwitch ?? true}
           onSelectModelAndEffort={handleSelectModelAndEffort}
           initialMode={modelPickerMode}
+          anchorElement={modelPickerMode === "effort" ? effortPickerTriggerRef.current : null}
         />
       )}
     </div>

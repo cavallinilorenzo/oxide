@@ -6,7 +6,7 @@
 
 Oxide is a desktop app for agentic engineering. You open a Project and drive coding agents from a chat, switching between the agent CLIs already installed on your machine, with Git and GitHub at hand.
 
-> **Status: pre-release.** Oxide runs on **macOS with Apple Silicon** only. Expect rough edges and breaking changes between versions.
+> **Status: pre-release.** Official release builds currently target **macOS with Apple Silicon**. You can also build and run Oxide from source on Windows; expect rough edges and breaking changes between versions.
 
 ## Supported Providers
 
@@ -58,6 +58,33 @@ web/node_modules/.bin/tauri build
 ```
 
 The Tauri CLI must run from the repository root: that is where it finds `crates/oxide-app/tauri.conf.json`.
+
+### Windows
+
+There are no official Windows installers yet. To build and run Oxide from source, install:
+
+- Windows 10 (version 1803 or later) or Windows 11. These include the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); on older or customized installations, install the Evergreen Runtime manually.
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **Desktop development with C++** workload.
+- [rustup](https://rustup.rs). The pinned toolchain in [`rust-toolchain.toml`](rust-toolchain.toml) is installed automatically.
+- Node.js 22 and pnpm through [Corepack](https://nodejs.org/api/corepack.html). Enable Corepack with `corepack enable`; the pnpm version is pinned in `web/package.json`.
+- `git`, and optionally the [GitHub CLI](https://cli.github.com) (`gh`, logged in) for GitHub features.
+- At least one [Provider](#supported-providers), installed and logged in, and available on `PATH`.
+
+In PowerShell, from the directory where you want the repository:
+
+```powershell
+git clone https://github.com/cavallinilorenzo/oxide.git
+Set-Location oxide
+pnpm --dir web install
+
+# Run the app in development mode (hot-reloading frontend).
+.\web\node_modules\.bin\tauri.cmd dev
+
+# Build a Windows installer (NSIS `.exe`) into target\release\bundle\nsis\.
+.\web\node_modules\.bin\tauri.cmd build --bundles nsis
+```
+
+Run the Tauri CLI from the repository root so it can find `crates/oxide-app/tauri.conf.json`. To build an MSI instead, use `--bundles msi`; if that fails with a `light.exe` error, enable the **VBScript** optional Windows feature and try again.
 
 ## Tests
 

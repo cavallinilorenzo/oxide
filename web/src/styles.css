@@ -411,7 +411,8 @@ html.macos .header,
 .agent-header .provider-mark { width: 24px; height: 24px; border-radius: var(--radius-control); background: var(--bg3); border: 1px solid var(--line); display: grid; place-items: center; }
 .provider-mark { display: inline-flex; }
 .agent-message { margin-left: 32px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: var(--fg); }
-.command-output { margin-left: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.55; color: var(--dim); overflow-x: auto; }
+.command-output { margin-left: 32px; border: 1px solid var(--line); border-radius: var(--radius-control); padding: 8px 12px; font: 12px/1.55 var(--mono); color: var(--dim); overflow-x: auto; white-space: pre; }
+.command-output .message-content { white-space: pre; }
 .agent-message.final { font-size: 14px; line-height: 1.65; color: #e8ebf1; }
 .collapsible { margin-left: 32px; }
 .collapsible .collapsible { margin-left: 0; }

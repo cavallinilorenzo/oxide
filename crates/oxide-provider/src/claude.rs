@@ -479,6 +479,9 @@ impl ClaudeCodeProvider {
                                             .join("\n")
                                     })
                                     .unwrap_or_default();
+                                if content.is_empty() {
+                                    continue;
+                                }
                                 let item_index = SLASH_OUTPUT_INDEX_BASE + slash_outputs;
                                 slash_outputs += 1;
                                 let _ = tx.send(ProviderEvent::ItemStarted {

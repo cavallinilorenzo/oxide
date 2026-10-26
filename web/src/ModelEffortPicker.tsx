@@ -52,6 +52,8 @@ export function ModelEffortPicker({
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
+  const effortMode = initialMode === "effort";
+
   useEffect(() => {
     if (open) {
       searchInputRef.current?.focus();
@@ -178,7 +180,7 @@ export function ModelEffortPicker({
   const handleSelectEffort = (effort: string) => {
     setSelectedEffort(effort);
     onSelectModelAndEffort(currentProvider, currentModel, effort);
-    if (initialMode === "effort") {
+    if (effortMode) {
       onClose();
     }
   };
@@ -222,34 +224,54 @@ export function ModelEffortPicker({
   const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
   const startsNewThread = turnCount > 0 && isOtherProvider;
 
+  if (effortMode) {
+    const efforts = activeModelInfo?.supportedEfforts ?? [];
+    return (
+      <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Effort Selector">
+        <div className="modal effort-picker-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="model-picker-header">
+            <h2>Reasoning Effort</h2>
+            <button type="button" className="close-button" onClick={onClose} aria-label="Close">
+              <XIcon size={16} />
+            </button>
+          </div>
+          <div className="effort-selector-section">
+            {efforts.length === 0 ? (
+              <span className="effort-label">
+                {loading ? "Loading..." : "This model has no effort levels."}
+              </span>
+            ) : (
+              <div className="effort-pills" role="radiogroup" aria-label="Reasoning Effort">
+                {efforts.map((eff) => (
+                  <button
+                    key={eff}
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedEffort === eff}
+                    autoFocus={selectedEffort === eff || (!selectedEffort && eff === efforts[0])}
+                    className={`effort-pill ${selectedEffort === eff ? "selected" : ""}`}
+                    onClick={() => handleSelectEffort(eff)}
+                  >
+                    {eff.charAt(0).toUpperCase() + eff.slice(1)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Model and Effort Selector">
+    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Model Selector">
       <div className="modal model-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="model-picker-header">
-          <h2>Model &amp; Effort</h2>
+          <h2>Model</h2>
           <button type="button" className="close-button" onClick={onClose} aria-label="Close">
             <XIcon size={16} />
           </button>
         </div>
-
-        {/* Effort Section (shown when model supports effort) */}
-        {activeModelInfo && activeModelInfo.supportedEfforts.length > 0 && (
-          <div className="effort-selector-section">
-            <span className="effort-label">Reasoning Effort:</span>
-            <div className="effort-pills">
-              {activeModelInfo.supportedEfforts.map((eff) => (
-                <button
-                  key={eff}
-                  type="button"
-                  className={`effort-pill ${selectedEffort === eff ? "selected" : ""}`}
-                  onClick={() => handleSelectEffort(eff)}
-                >
-                  {eff.charAt(0).toUpperCase() + eff.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="model-picker-layout">
           {/* Provider Rail */}

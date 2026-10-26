@@ -265,8 +265,13 @@ code { font-family: var(--mono); font-size: 12px; }
 .sidebar-search input { flex: 1; min-width: 0; border: 0; background: none; padding: 4px 0; font-size: 12px; }
 .sidebar-scroll { flex: 1; overflow: auto; padding-bottom: 8px; }
 .sidebar-note { padding: 4px 12px; margin: 0; font-size: 12px; color: var(--faint); list-style: none; }
-.sidebar-empty { padding: 16px 12px; color: var(--dim); display: grid; gap: 10px; justify-items: start; }
+.sidebar-empty { padding: 22px 20px 18px; color: var(--dim); display: grid; gap: 10px; justify-items: start; }
+.sidebar-empty-icon { color: var(--faint); margin-bottom: 2px; }
+.sidebar-empty-copy { display: grid; gap: 3px; margin-bottom: 2px; }
 .sidebar-empty p { margin: 0; }
+.sidebar-empty-title { color: var(--fg); font-size: 13px; font-weight: 600; }
+.sidebar-empty-hint { color: var(--dim); font-size: 12px; }
+.sidebar-empty-action { justify-content: center; width: 100%; margin-top: 2px; }
 .sidebar ul { list-style: none; margin: 0; padding: 0; }
 .project-row { display: flex; align-items: center; padding: 4px 8px 0 0; }
 .project-row .project {

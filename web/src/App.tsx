@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type AppError, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -42,7 +42,6 @@ import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./thre
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
-type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 type TerminalContext = { key: string; projectId: number; threadId: number | null };
 const terminalContextKey = (projectId: number, threadId: number | null) =>
   `${projectId}:${threadId ?? "draft"}`;
@@ -529,6 +528,24 @@ export function App() {
             projects={projects}
             onProjects={setProjects}
             selected={selected}
+            onCloseProject={async (projectId) => {
+              const closed = await commands.setProjectOpen(projectId, false);
+              if (closed.status === "error") return closed.error.message;
+              const listed = await commands.listProjects();
+              const updatedProjects = listed.status === "ok"
+                ? listed.data
+                : (projects ?? []).map((project) => project.id === projectId ? { ...project, open: false } : project);
+              setProjects(updatedProjects);
+              if (selectedId === projectId) {
+                const next = sidebarProjects(updatedProjects).find((project) => project.id !== projectId);
+                restore.current = null;
+                setSelectedId(next?.id ?? null);
+                setThreads(null);
+                setSelectedThreadId(null);
+                setShowBoard(false);
+              }
+              return listed.status === "error" ? listed.error.message : null;
+            }}
             onSelect={(p) => {
               restore.current = null;
               setShowSettings(false);
@@ -727,6 +744,7 @@ interface SidebarProps {
   projects: Project[] | null;
   onProjects: (projects: Project[]) => void;
   selected: Project | null;
+  onCloseProject: (projectId: number) => Promise<string | null>;
   onSelect: (p: Project) => void;
   threads: Thread[] | null;
   selectedThreadId: number | null;
@@ -746,6 +764,7 @@ function Sidebar({
   projects,
   onProjects,
   selected,
+  onCloseProject,
   onSelect,
   threads,
   selectedThreadId,
@@ -760,6 +779,7 @@ function Sidebar({
 }: SidebarProps) {
   const [threadQuery, setThreadQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [closingProjectId, setClosingProjectId] = useState<number | null>(null);
   const [editingThreadId, setEditingThreadId] = useState<number | null>(null);
   const [renameText, setRenameText] = useState("");
 
@@ -769,13 +789,6 @@ function Sidebar({
     if (!trimmed) return;
     await commands.renameThread(threadId, trimmed);
     onRenameThread?.(threadId, trimmed);
-  };
-
-  const apply = (r: Result<Project[], AppError>) => {
-    if (r.status === "ok") {
-      onProjects(r.data);
-      setError(null);
-    } else setError(r.error.message);
   };
 
   // Show what's known right away, then scan on launch so ⌘⇧N can offer new
@@ -792,9 +805,17 @@ function Sidebar({
   }, []);
 
   const close = async (p: Project) => {
-    const r = await commands.setProjectOpen(p.id, false);
-    if (r.status === "error") setError(r.error.message);
-    else apply(await commands.listProjects());
+    if (closingProjectId !== null) return;
+    setClosingProjectId(p.id);
+    try {
+      const message = await onCloseProject(p.id);
+      if (message) setError(message);
+      else setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setClosingProjectId(null);
+    }
   };
 
   // The selected Project always shows, even before the Core has marked it open.
@@ -877,8 +898,12 @@ function Sidebar({
       <div className="sidebar-scroll">
         {projects && shown.length === 0 && (
           <div className="sidebar-empty">
-            <p>No open Projects.</p>
-            <button className="btn" onClick={onOpenPalette}>
+            <RepoIcon className="sidebar-empty-icon" size={18} />
+            <div className="sidebar-empty-copy">
+              <p className="sidebar-empty-title">No open Projects</p>
+              <p className="sidebar-empty-hint">Open a project to see its Threads here.</p>
+            </div>
+            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette}>
               <RepoIcon size={14} /> Open a Project <kbd>⌘⇧N</kbd>
             </button>
           </div>
@@ -898,7 +923,7 @@ function Sidebar({
                   <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title="Thread Board">
                     <ProjectIcon size={13} />
                   </button>
-                  <button className="row-action" onClick={() => void close(p)} aria-label={`Close ${p.name}`} title="Close Project (it stays in ⌘⇧N)">
+                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : "Close Project (it stays in ⌘⇧N)"}>
                     <XIcon size={13} />
                   </button>
                 </div>

@@ -62,8 +62,6 @@ const TOOL_TABS: { name: string; Icon: Icon }[] = [
   { name: "Issues", Icon: IssueOpenedIcon },
 ];
 
-/** `/Users/me/code/app` → `~/code/app`, as the header shows it. */
-
 export function App() {
   const [showTools, setShowTools] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);

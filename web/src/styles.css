@@ -39,7 +39,7 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body { margin: 0; overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none; }
-input, textarea, [contenteditable="true"], .xterm, .diff-content, .markdown-body, .message-content { user-select: text; }
+input, textarea, [contenteditable="true"], .xterm, .diff-content, .markdown-body, .message-content, .user-bubble { -webkit-user-select: text; user-select: text; }
 svg.octicon { flex: none; vertical-align: -2px; }
 
 /* ── Controls ─────────────────────────────────────────────── */

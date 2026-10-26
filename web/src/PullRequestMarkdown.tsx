@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { parseMarkdown, type Inline } from "./prMarkdown";
+import { limitBlocks, parseMarkdown, type Inline } from "./prMarkdown";
 
 function inline(parts: Inline[]): ReactNode[] {
   return parts.map((p, i) => {
@@ -11,8 +11,11 @@ function inline(parts: Inline[]): ReactNode[] {
 }
 
 /** A pull request description or comment, read for the narrow panel. */
-export function Markdown({ source }: { source: string }) {
-  const blocks = useMemo(() => parseMarkdown(source), [source]);
+export function Markdown({ source, maxLines }: { source: string; maxLines?: number }) {
+  const blocks = useMemo(() => {
+    const all = parseMarkdown(source);
+    return maxLines === undefined ? all : limitBlocks(all, maxLines).blocks;
+  }, [source, maxLines]);
   return (
     <div className="md">
       {blocks.map((b, i) => {

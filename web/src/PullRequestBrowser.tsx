@@ -13,7 +13,8 @@ import {
   SearchIcon,
   XCircleFillIcon,
 } from "@primer/octicons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { limitBlocks, parseMarkdown } from "./prMarkdown";
 import {
   commands,
   type GitStatus,
@@ -433,15 +434,15 @@ function StatusIcon({ tone }: { tone: "ok" | "warn" | "bad" | "neutral" }) {
   return <DotFillIcon size={14} />;
 }
 
+const DESCRIPTION_LINES = 9;
+
 /** The description, clamped: bot and template boilerplate shouldn't push the rest off the screen. */
 function Description({ body }: { body: string }) {
   const [open, setOpen] = useState(false);
-  const long = body.length > 320 || body.split("\n").length > 8;
+  const long = useMemo(() => limitBlocks(parseMarkdown(body), DESCRIPTION_LINES).truncated, [body]);
   return (
     <section className="pr-section" aria-label="Description">
-      <div className={`pr-desc${long && !open ? " clamped" : ""}`}>
-        <Markdown source={body} />
-      </div>
+      <Markdown source={body} maxLines={open ? undefined : DESCRIPTION_LINES} />
       {long && (
         <button className="link" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           {open ? "Show less" : "Show more"}

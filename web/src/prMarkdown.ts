@@ -42,6 +42,49 @@ export function parseInline(text: string): Inline[] {
   return out;
 }
 
+const COLUMNS = 36;
+
+function textLines(parts: Inline[]): number {
+  return Math.max(1, Math.ceil(parts.reduce((n, p) => n + p.text.length, 0) / COLUMNS));
+}
+
+function cost(block: Block): number {
+  switch (block.kind) {
+    case "heading":
+      return 1;
+    case "paragraph":
+      return textLines(block.inline);
+    case "list":
+      return block.items.reduce((n, item) => n + textLines(item.inline), 0);
+    case "code":
+      return block.text.split("\n").length;
+    case "rule":
+      return 0;
+  }
+}
+
+/** The first `budget` visual lines of a document, cut between lines, never through one.
+ *  A code block is the only thing cut inside, and keeps whole lines. */
+export function limitBlocks(blocks: Block[], budget: number): { blocks: Block[]; truncated: boolean } {
+  const out: Block[] = [];
+  let left = budget;
+  for (const block of blocks) {
+    const c = cost(block);
+    if (c <= left) {
+      out.push(block);
+      left -= c;
+      continue;
+    }
+    if (block.kind === "code" && left >= 2) {
+      out.push({ kind: "code", text: block.text.split("\n").slice(0, left).join("\n") });
+    } else if (out.length === 0) out.push(block);
+    // A heading with nothing under it reads as a mistake.
+    while (out[out.length - 1]?.kind === "heading" || out[out.length - 1]?.kind === "rule") out.pop();
+    return { blocks: out, truncated: true };
+  }
+  return { blocks, truncated: false };
+}
+
 export function parseMarkdown(src: string): Block[] {
   const blocks: Block[] = [];
   const lines = clean(src).split("\n");

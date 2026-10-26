@@ -93,8 +93,10 @@ export function App() {
   const pendingNewThread = useRef<number | null>(null);
   const [showBoard, setShowBoard] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
@@ -149,6 +151,24 @@ export function App() {
     ? [...terminalContexts, currentTerminalContext]
     : terminalContexts;
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const known = await commands.listProjects();
+        if (known.status === "ok") setProjects(known.data);
+        else setOpenError(known.error.message);
+
+        const scanned = await commands.rescanProjects();
+        if (scanned.status === "ok") setProjects(scanned.data);
+        else setOpenError(scanned.error.message);
+      } catch (cause) {
+        setOpenError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setProjectsLoaded(true);
+      }
+    })();
+  }, []);
+
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
   // A commit or push bumps it too, so the header and the Diff Surface reload.
   const [gitRevision, setGitRevision] = useState(0);
@@ -185,6 +205,7 @@ export function App() {
       restore.current = last && { projectId: last.projectId, threadId: last.threadId };
       // Projects may have loaded first.
       if (last) setSelectedId((current) => current ?? last.projectId);
+      setLastSelectionLoaded(true);
     });
   }, []);
 
@@ -423,6 +444,19 @@ export function App() {
     };
   }, [selected, rememberTerminalContext, createThreadIn]);
 
+  const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
+
+  if (starting) {
+    return (
+      <div className="startup-screen" role="status" aria-live="polite" aria-busy="true">
+        <span className="startup-wordmark">oxide</span>
+        <div className="startup-progress" aria-hidden="true" />
+        <p>Preparing your workspace</p>
+        <span className="startup-detail">Loading Projects and Threads</span>
+      </div>
+    );
+  }
+
   return (
     <div className="window">
       <QuitDialog />
@@ -526,7 +560,6 @@ export function App() {
         <div className="sidebar-region" id="workspace-sidebar">
           <Sidebar
             projects={projects}
-            onProjects={setProjects}
             selected={selected}
             onCloseProject={async (projectId) => {
               const closed = await commands.setProjectOpen(projectId, false);
@@ -742,7 +775,6 @@ export function App() {
 
 interface SidebarProps {
   projects: Project[] | null;
-  onProjects: (projects: Project[]) => void;
   selected: Project | null;
   onCloseProject: (projectId: number) => Promise<string | null>;
   onSelect: (p: Project) => void;
@@ -762,7 +794,6 @@ interface SidebarProps {
 /** Open Projects, each with its Threads. Scanned repositories stay out until opened from ⌘⇧N. */
 function Sidebar({
   projects,
-  onProjects,
   selected,
   onCloseProject,
   onSelect,
@@ -790,19 +821,6 @@ function Sidebar({
     await commands.renameThread(threadId, trimmed);
     onRenameThread?.(threadId, trimmed);
   };
-
-  // Show what's known right away, then scan on launch so ⌘⇧N can offer new
-  // repositories. Sequential, so the scan can't be overwritten by the staler list.
-  useEffect(() => {
-    void (async () => {
-      const known = await commands.listProjects();
-      if (known.status === "ok") onProjects(known.data);
-      const scanned = await commands.rescanProjects();
-      if (scanned.status === "ok") onProjects(scanned.data);
-      else setError(scanned.error.message);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const close = async (p: Project) => {
     if (closingProjectId !== null) return;

@@ -115,7 +115,9 @@ fn dispatch_creates_a_worktree_on_an_oxide_branch_from_the_base_branch() {
             .join("fix-the-login-bug")
     );
     assert_eq!(
-        std::fs::read_to_string(worktree.join("a.txt")).unwrap(),
+        std::fs::read_to_string(worktree.join("a.txt"))
+            .unwrap()
+            .replace("\r\n", "\n"),
         "committed\n"
     );
     assert!(!worktree.join("untracked.txt").exists());
@@ -157,10 +159,8 @@ fn a_name_collision_gets_a_suffix() {
     assert_eq!(second.branch.as_deref(), Some("oxide/same-task-2"));
     assert_eq!(third.branch.as_deref(), Some("oxide/same-task-3"));
     assert!(
-        second
-            .worktree_path
-            .unwrap()
-            .ends_with("my-project/same-task-2")
+        Path::new(&second.worktree_path.unwrap())
+            .ends_with(Path::new("my-project").join("same-task-2"))
     );
 }
 
@@ -181,7 +181,11 @@ fn the_setup_command_runs_in_the_worktree_with_the_project_root_and_its_output_i
     f.core
         .set_project_setup_command(
             f.project.id,
-            Some("pwd; echo root=$OXIDE_PROJECT_ROOT; echo oops >&2; touch .setup-ran"),
+            Some(if cfg!(windows) {
+                "cd & echo root=%OXIDE_PROJECT_ROOT% & echo oops 1>&2 & type nul > .setup-ran"
+            } else {
+                "pwd; echo root=$OXIDE_PROJECT_ROOT; echo oops >&2; touch .setup-ran"
+            }),
         )
         .unwrap();
 
@@ -189,13 +193,23 @@ fn the_setup_command_runs_in_the_worktree_with_the_project_root_and_its_output_i
 
     let worktree = PathBuf::from(thread.worktree_path.clone().unwrap());
     assert!(worktree.join(".setup-ran").exists());
-    let output = thread.setup_output.clone().unwrap();
-    let canonical = worktree.canonicalize().unwrap().display().to_string();
+    let output = thread.setup_output.clone().unwrap().replace("\\\\?\\", "");
+    let canonical = worktree
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .replace("\\\\?\\", "");
     assert!(output.contains(&canonical), "{output}");
     assert!(
         output.contains(&format!(
             "root={}",
-            f.work.canonicalize().unwrap().display()
+            f.work
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
+                .replace("\\\\?\\", "")
         )),
         "{output}"
     );
@@ -209,7 +223,11 @@ fn a_failing_setup_command_leaves_the_thread_in_needs_input_without_a_turn() {
     f.core
         .set_project_setup_command(
             f.project.id,
-            Some("echo installing; echo broken >&2; exit 3"),
+            Some(if cfg!(windows) {
+                "echo installing & echo broken 1>&2 & exit /b 3"
+            } else {
+                "echo installing; echo broken >&2; exit 3"
+            }),
         )
         .unwrap();
 

@@ -13,6 +13,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 
@@ -49,26 +50,8 @@ impl ClaudeCustomizations {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelCatalogEntry {
-    pub alias: &'static str,
-    pub efforts: &'static [&'static str],
-}
-
-pub const CLAUDE_MODEL_CATALOG: &[ModelCatalogEntry] = &[
-    ModelCatalogEntry {
-        alias: "opus",
-        efforts: &["low", "medium", "high", "max"],
-    },
-    ModelCatalogEntry {
-        alias: "sonnet",
-        efforts: &["low", "medium", "high", "max"],
-    },
-    ModelCatalogEntry {
-        alias: "haiku",
-        efforts: &["low", "medium", "high"],
-    },
-];
+const INITIALIZE_REQUEST_ID: &str = "oxide-initialize";
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct ClaudeCodeProvider {
     command: String,
@@ -149,6 +132,81 @@ impl ClaudeCodeProvider {
                 .map(|out| String::from_utf8_lossy(&out.stdout).contains("--safe-mode"))
                 .unwrap_or(false)
         })
+    }
+
+    /// Starts a throwaway CLI process, sends `initialize` and returns the response payload.
+    fn query_initialize(&self) -> Result<serde_json::Value, ProviderError> {
+        let mut cmd = Command::new(&self.command);
+        cmd.arg("-p")
+            .arg("--input-format")
+            .arg("stream-json")
+            .arg("--output-format")
+            .arg("stream-json")
+            .arg("--verbose");
+        if self.supports_safe_mode() {
+            cmd.arg("--safe-mode");
+        }
+        for (k, v) in &self.extra_env {
+            cmd.env(k, v);
+        }
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        process::spawn_in_own_group(&mut cmd);
+        let mut child = cmd.spawn().map_err(|e| {
+            ProviderError::StartFailed(format!(
+                "Failed to spawn Claude Code binary `{}`: {e}",
+                self.command
+            ))
+        })?;
+        let pgid = child.id() as i32;
+        let mut stdin = child.stdin.take().expect("stdin must be piped");
+        let stdout = child.stdout.take().expect("stdout must be piped");
+
+        let request = json!({
+            "type": "control_request",
+            "request_id": INITIALIZE_REQUEST_ID,
+            "request": { "subtype": "initialize" }
+        });
+        let sent = writeln!(stdin, "{request}").and_then(|_| stdin.flush());
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                    continue;
+                };
+                if value["type"] == "control_response"
+                    && value["response"]["request_id"] == INITIALIZE_REQUEST_ID
+                {
+                    let _ = tx.send(value["response"].clone());
+                    return;
+                }
+            }
+        });
+
+        let reply = match sent {
+            Ok(()) => rx.recv_timeout(INITIALIZE_TIMEOUT).ok(),
+            Err(_) => None,
+        };
+
+        drop(stdin);
+        process::terminate_group(pgid, SHUTDOWN_GRACE, || {
+            let _ = child.try_wait();
+        });
+        let _ = child.wait();
+
+        let reply = reply.ok_or_else(|| {
+            ProviderError::CommandFailed("Claude Code did not answer the initialize request".into())
+        })?;
+        if reply["subtype"] != "success" {
+            return Err(ProviderError::CommandFailed(format!(
+                "Claude Code rejected the initialize request: {}",
+                reply["error"].as_str().unwrap_or("unknown error")
+            )));
+        }
+        Ok(reply["response"].clone())
     }
 
     pub fn set_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
@@ -490,6 +548,55 @@ impl ClaudeCodeProvider {
     }
 }
 
+/// Maps the CLI's `models` array to the catalog. The CLI reports no legacy flag, so an entry
+/// pinned to a concrete version (`value == resolvedModel`) that is not what its family's alias
+/// resolves to today counts as legacy. A `default` entry that merely repeats another entry's
+/// model is dropped.
+fn parse_models(models: &[serde_json::Value]) -> Vec<ModelInfo> {
+    let field = |m: &serde_json::Value, key: &str| m[key].as_str().map(str::to_owned);
+    let family = |m: &serde_json::Value| {
+        field(m, "displayName")
+            .and_then(|n| n.split_whitespace().next().map(str::to_lowercase))
+            .unwrap_or_default()
+    };
+    // What each family's alias (e.g. `opus`) resolves to right now.
+    let current: HashMap<String, String> = models
+        .iter()
+        .filter(|m| m["value"] != m["resolvedModel"])
+        .filter_map(|m| Some((family(m), field(m, "resolvedModel")?)))
+        .collect();
+
+    models
+        .iter()
+        .filter(|m| {
+            m["value"] != "default"
+                || !models
+                    .iter()
+                    .any(|o| o["value"] != "default" && o["resolvedModel"] == m["resolvedModel"])
+        })
+        .filter_map(|m| {
+            let id = field(m, "value")?;
+            let is_legacy = field(m, "resolvedModel").as_deref() == Some(id.as_str())
+                && current.get(&family(m)).is_some_and(|latest| *latest != id);
+            Some(ModelInfo {
+                name: field(m, "displayName").unwrap_or_else(|| id.clone()),
+                description: field(m, "description"),
+                supported_efforts: m["supportedEffortLevels"]
+                    .as_array()
+                    .map(|l| {
+                        l.iter()
+                            .filter_map(|e| e.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                default_effort: None,
+                is_legacy,
+                id,
+            })
+        })
+        .collect()
+}
+
 impl Provider for ClaudeCodeProvider {
     fn detect(&self) -> Result<Detection, ProviderError> {
         let mut cmd = Command::new(&self.command);
@@ -646,49 +753,16 @@ impl Provider for ClaudeCodeProvider {
         self.write_to_stdin(&payload)
     }
 
+    /// The catalog is whatever the installed CLI reports for its `initialize` control request.
     fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        Ok(vec![
-            ModelInfo {
-                id: "opus".into(),
-                name: "Claude 3.7 Opus".into(),
-                description: Some("Most capable model for coding and complex reasoning".into()),
-                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
-                default_effort: Some("high".into()),
-                is_legacy: false,
-            },
-            ModelInfo {
-                id: "sonnet".into(),
-                name: "Claude 3.7 Sonnet".into(),
-                description: Some("Balanced speed and capability for daily coding".into()),
-                supported_efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
-                default_effort: Some("medium".into()),
-                is_legacy: false,
-            },
-            ModelInfo {
-                id: "haiku".into(),
-                name: "Claude 3.5 Haiku".into(),
-                description: Some("Fastest model for lightweight tasks".into()),
-                supported_efforts: vec!["low".into(), "medium".into(), "high".into()],
-                default_effort: Some("low".into()),
-                is_legacy: false,
-            },
-            ModelInfo {
-                id: "claude-3-opus".into(),
-                name: "Claude 3 Opus".into(),
-                description: None,
-                supported_efforts: vec![],
-                default_effort: None,
-                is_legacy: true,
-            },
-            ModelInfo {
-                id: "claude-3-sonnet".into(),
-                name: "Claude 3 Sonnet".into(),
-                description: None,
-                supported_efforts: vec![],
-                default_effort: None,
-                is_legacy: true,
-            },
-        ])
+        let response = self.query_initialize()?;
+        let models = response
+            .get("models")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| {
+                ProviderError::CommandFailed("Claude Code reported no model list".into())
+            })?;
+        Ok(parse_models(models))
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {

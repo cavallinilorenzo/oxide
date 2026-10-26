@@ -5,6 +5,22 @@ use std::time::Duration;
 
 #[test]
 #[ignore = "Opt-in live smoke test against real installed claude CLI. Run with `cargo test --test claude_live_smoke -- --ignored`"]
+fn live_smoke_model_catalog_from_real_claude_cli() {
+    let provider = ClaudeCodeProvider::new();
+    if !provider.detect().map(|d| d.available).unwrap_or(false) {
+        eprintln!("Skipping live test: real claude is not installed or not logged in");
+        return;
+    }
+
+    let models = provider.models().expect("the CLI must report its models");
+    for m in &models {
+        eprintln!("{} | {} | legacy={}", m.id, m.name, m.is_legacy);
+    }
+    assert!(!models.is_empty());
+}
+
+#[test]
+#[ignore = "Opt-in live smoke test against real installed claude CLI. Run with `cargo test --test claude_live_smoke -- --ignored`"]
 fn live_smoke_thread_with_real_claude_cli() {
     let mut provider = ClaudeCodeProvider::new();
     let detection = match provider.detect() {

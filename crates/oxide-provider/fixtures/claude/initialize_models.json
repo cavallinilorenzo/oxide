@@ -1,0 +1,7 @@
+[
+  {"value": "default", "resolvedModel": "model-b-2", "displayName": "Default (recommended)", "description": "Model B 2 · Efficient", "supportedEffortLevels": ["low", "high"]},
+  {"value": "alpha", "resolvedModel": "model-a-2", "displayName": "Alpha 2", "description": "For complex work", "supportedEffortLevels": ["low", "medium", "high", "max"]},
+  {"value": "beta", "resolvedModel": "model-b-2", "displayName": "Beta 2", "description": "For routine tasks", "supportedEffortLevels": ["low", "high"]},
+  {"value": "model-b-1", "resolvedModel": "model-b-1", "displayName": "Beta 1", "description": "For routine tasks"},
+  {"value": "model-a-2", "resolvedModel": "model-a-2", "displayName": "Alpha 2", "description": "For complex work", "supportedEffortLevels": ["low", "medium", "high", "max"]}
+]

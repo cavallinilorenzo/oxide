@@ -71,6 +71,22 @@ for line in sys.stdin:
 
     log_wire({"type": "stdin", "data": data})
 
+    if data.get("type") == "control_request":
+        if (data.get("request") or {}).get("subtype") == "initialize":
+            with open(os.path.join(fixtures_dir, "initialize_models.json"), "r") as f:
+                models = json.load(f)
+            reply = {
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": data.get("request_id"),
+                    "response": {"models": models},
+                },
+            }
+            sys.stdout.write(json.dumps(reply) + "\n")
+            sys.stdout.flush()
+        continue
+
     # Check for prompt
     if data.get("type") == "user" or "prompt" in data:
         prompt_text = ""

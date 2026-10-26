@@ -809,10 +809,14 @@ impl Core {
             }
         };
 
-        self.model_catalogs
-            .lock()
-            .unwrap()
-            .insert(provider.to_string(), models.clone());
+        // An empty catalog means the Provider could not be asked; keep it out of the cache so the
+        // next call tries again.
+        if !models.is_empty() {
+            self.model_catalogs
+                .lock()
+                .unwrap()
+                .insert(provider.to_string(), models.clone());
+        }
         Ok(models)
     }
 

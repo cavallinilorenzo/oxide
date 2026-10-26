@@ -1,9 +1,11 @@
 import { shortcutLabel } from "./shortcuts";
-import { useCallback, useEffect, useState } from "react";
-import { GitPullRequestIcon, SyncIcon } from "@primer/octicons-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ArrowLeftIcon, GitBranchIcon, GitPullRequestIcon, SyncIcon } from "@primer/octicons-react";
 import { commands, type GitStatus, type PullRequestDraft, type PullRequestState } from "./bindings";
 import { createPrBlockedReason } from "./gitAction";
 import { PullRequestBrowser, PullRequestReview } from "./PullRequestBrowser";
+import { PullRequestError } from "./PullRequestError";
+import { describeCreatePrError } from "./createPullRequestError";
 
 interface PullRequestPanelProps {
   projectId: number;
@@ -111,7 +113,7 @@ function PullRequestBody({
   if (loaded.state === "error") {
     return (
       <section className="pr-panel" aria-label="Pull request">
-        <p role="alert" className="error">{loaded.message}</p>
+        <PullRequestError title="Couldn’t load the pull request" message={loaded.message} onRetry={onRefresh} />
       </section>
     );
   }
@@ -152,9 +154,7 @@ function PullRequestBody({
         />
       )}
       {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
+        <PullRequestError title="Couldn’t open the pull request" message={error} />
       )}
     </section>
   );
@@ -169,6 +169,8 @@ interface CreateFormProps {
 }
 
 function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormProps) {
+  const id = useId();
+  const submitting = useRef(false);
   const blocked = createPrBlockedReason(git);
   const [form, setForm] = useState<Pick<PullRequestDraft, "title" | "body" | "base">>({
     title: prefill?.title ?? "",
@@ -182,75 +184,116 @@ function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormPro
   if (blocked) return <p className="pr-guidance">{blocked}</p>;
 
   const pushFirst = git.unpublished || git.ahead > 0;
+  const sameBranch = form.base.trim() === git.branch;
+  const canSubmit = !!form.title.trim() && !!form.base.trim() && !sameBranch;
+  const feedback = error ? describeCreatePrError(error, form.base.trim()) : null;
   async function create() {
+    if (submitting.current || !canSubmit) return;
+    submitting.current = true;
     setBusy(true);
     setError(null);
-    const result = await commands.createPullRequest(projectId, form.title, form.body, form.base, draft);
-    setBusy(false);
-    if (result.status === "error") setError(result.error.message);
-    else onCreated();
+    try {
+      const result = await commands.createPullRequest(projectId, form.title.trim(), form.body, form.base.trim(), draft);
+      if (result.status === "error") setError(result.error.message);
+      else onCreated();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
   }
 
   return (
     <form
       className="pr-form"
+      aria-label="Create pull request"
+      aria-busy={busy}
       onSubmit={(e) => {
         e.preventDefault();
         void create();
       }}
     >
-      <p className="dim">
-        No pull request for <span className="mono">{git.branch}</span> yet.
-      </p>
-      <input
-        aria-label="Title"
-        placeholder="Title"
-        value={form.title}
-        autoFocus
-        onChange={(e) => setForm({ ...form, title: e.target.value })}
-      />
-      <textarea
-        aria-label="Description"
-        placeholder="Description"
-        rows={8}
-        value={form.body}
-        onChange={(e) => setForm({ ...form, body: e.target.value })}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && e.metaKey) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
-        }}
-      />
-      <div className="pr-form-row">
-        <label className="pr-base">
-          base
+      <header className="pr-create-heading">
+        <GitPullRequestIcon size={18} />
+        <h3>Create pull request</h3>
+      </header>
+      <div className="pr-create-branches" aria-label="Branch comparison">
+        <div className="pr-create-base">
+          <label htmlFor={`${id}-base`}>Base branch</label>
           <input
-            aria-label="Base branch"
+            id={`${id}-base`}
             className="mono"
             value={form.base}
-            onChange={(e) => setForm({ ...form, base: e.target.value })}
+            required
+            disabled={busy}
+            aria-invalid={sameBranch || undefined}
+            aria-describedby={sameBranch ? `${id}-base-error` : undefined}
+            onChange={(e) => {
+              setForm({ ...form, base: e.target.value });
+              setError(null);
+            }}
           />
-        </label>
-        <label className="pr-draft">
-          <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} /> Draft
-        </label>
-        <span className="grow" />
-        <button
-          type="submit"
-          className="btn primary"
-          disabled={busy || !form.title.trim() || !form.base.trim()}
-          title={`Create the pull request (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"} in the description)`}
-        >
-          <GitPullRequestIcon size={14} />
-          {busy ? "Creating…" : pushFirst ? "Push & create PR" : "Create PR"}
-        </button>
+        </div>
+        <ArrowLeftIcon size={16} className="pr-create-arrow" aria-label="receives changes from" />
+        <div className="pr-create-head">
+          <span>Compare branch</span>
+          <span className="pr-create-branch" title={git.branch ?? undefined}>
+            <GitBranchIcon size={14} />
+            <span className="mono">{git.branch}</span>
+          </span>
+        </div>
       </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
+      {sameBranch && <p id={`${id}-base-error`} className="pr-field-error" role="alert">Choose a base branch other than the current branch.</p>}
+      <div className="pr-create-field">
+        <label htmlFor={`${id}-title`}>Title</label>
+        <input
+          id={`${id}-title`}
+          placeholder="A short summary of your changes"
+          value={form.title}
+          required
+          disabled={busy}
+          autoFocus
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
+        />
+      </div>
+      <div className="pr-create-field">
+        <label htmlFor={`${id}-description`}>Description <span className="pr-field-optional">optional</span></label>
+        <textarea
+          id={`${id}-description`}
+          placeholder="What changed and why?"
+          rows={8}
+          value={form.body}
+          disabled={busy}
+          aria-describedby={`${id}-description-hint`}
+          onChange={(e) => setForm({ ...form, body: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+        />
+        <span id={`${id}-description-hint`} className="pr-create-hint">Markdown supported</span>
+      </div>
+      {feedback && error && <PullRequestError {...feedback} message={error} />}
+      <footer className="pr-create-footer">
+        {pushFirst && <p className="pr-create-hint">Your branch will be pushed before the pull request is created.</p>}
+        <div className="pr-create-actions">
+          <label className="pr-draft">
+            <input type="checkbox" checked={draft} disabled={busy} onChange={(e) => setDraft(e.target.checked)} /> Draft
+          </label>
+          <button
+            type="submit"
+            className="btn primary"
+            disabled={busy || !canSubmit}
+            title={`Create the pull request (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"} in the description)`}
+          >
+            {busy ? <SyncIcon size={14} className="spin" /> : <GitPullRequestIcon size={14} />}
+            {busy ? "Creating…" : pushFirst ? "Push & create PR" : "Create PR"}
+          </button>
+        </div>
+      </footer>
     </form>
   );
 }

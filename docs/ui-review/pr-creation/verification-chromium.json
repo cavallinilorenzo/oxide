@@ -1,0 +1,33 @@
+{
+  "engine": "chromium",
+  "metrics": [
+    {
+      "panel": 288,
+      "client": 263,
+      "scroll": 263
+    },
+    {
+      "panel": 480,
+      "client": 455,
+      "scroll": 455
+    },
+    {
+      "panel": 800,
+      "client": 775,
+      "scroll": 775
+    }
+  ],
+  "errors": [],
+  "checked": [
+    "long branch",
+    "narrow panel",
+    "short window",
+    "keyboard focus",
+    "error disclosure",
+    "draft preservation",
+    "Ctrl+Enter",
+    "pending",
+    "same-base validation",
+    "creation success"
+  ]
+}

@@ -6,7 +6,7 @@ The reference contains 163 frames over 6.51 seconds. The blue arc completes six 
 
 `web/src/startup.css` records the measured arc angles instead of approximating the reference with independent rotation and dash animations. The SVG's `pathLength="360"` expresses arc lengths and offsets in degrees. Redundant samples within half a degree were removed; the raster reference's 3.5-degree endpoint discrepancy is distributed across the cycle so the native SVG loops continuously.
 
-The existing Oxide mark and loading copy remain. Both the initial HTML splash and the React loading screen share the same stylesheet. The splash still disappears as soon as Project/Thread loading completes, without a minimum animation duration. Hidden windows pause the loop; reduced motion keeps a static arc.
+The existing Oxide mark, loading copy, 2px pale-blue arc, dark track and original 84px SVG geometry remain. Only the motion follows the reference. Both the initial HTML splash and the React loading screen share the same stylesheet. The splash still disappears as soon as Project/Thread loading completes, without a minimum animation duration. Hidden windows pause the loop; reduced motion keeps a static arc.
 
 `web/scripts/startup-review.mjs` exercises the real HTML bootstrap with synthetic IPC. It captures the previous implementation from commit `db4381a`, scrubs the new animation at fixed timestamps, checks the loop seam, tests reduced motion and visibility changes, and releases startup to verify immediate dismissal.
 

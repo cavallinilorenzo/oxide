@@ -438,7 +438,7 @@ export function App() {
       <div className="startup-screen" aria-hidden="true">
         <div className="startup-content">
           <div className="startup-emblem" aria-hidden="true">
-            <span className="startup-orbit"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="45" pathLength="360" /></svg></span>
+            <span className="startup-orbit"><svg viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="40" pathLength="360" /></svg></span>
             <img src={oxideMark} alt="" />
           </div>
           <div className="startup-copy">

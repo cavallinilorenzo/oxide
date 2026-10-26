@@ -60,11 +60,16 @@ try {
       animation.pause();
       animation.currentTime = time;
       const style = getComputedStyle(circle);
+      const track = getComputedStyle(circle.closest(".startup-orbit"));
       return { time, duration: animation.effect.getTiming().duration, dash: style.strokeDasharray,
-        offset: parseFloat(style.strokeDashoffset), color: style.stroke, cap: style.strokeLinecap };
+        offset: parseFloat(style.strokeDashoffset), color: style.stroke, width: style.strokeWidth,
+        trackColor: track.borderTopColor, trackWidth: track.borderTopWidth, cap: style.strokeLinecap };
     }, time);
     assert.equal(pose.duration, 6510);
-    assert.equal(pose.color, "rgb(66, 133, 244)");
+    assert.equal(pose.color, "rgb(88, 166, 255)");
+    assert.equal(pose.width, "2px");
+    assert.equal(pose.trackColor, "rgb(42, 48, 64)");
+    assert.equal(pose.trackWidth, "2px");
     assert.equal(pose.cap, "butt");
     if (time === 600) assert.ok(parseFloat(pose.dash) < 25, "The reference contracts to a short arc");
     if (time === 1000) assert.ok(parseFloat(pose.dash) > 250, "The reference expands to a long arc");

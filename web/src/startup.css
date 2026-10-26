@@ -8,9 +8,9 @@
 .startup-content { display: flex; flex-direction: column; align-items: center; gap: 26px; }
 .startup-emblem { position: relative; width: 88px; height: 88px; display: grid; place-items: center; }
 .startup-emblem img { position: relative; z-index: 1; width: 48px; height: 48px; }
-.startup-orbit { position: absolute; inset: 0; }
-.startup-orbit svg { display: block; width: 100%; height: 100%; }
-.startup-orbit circle { fill: none; stroke: #4285f4; stroke-width: 10; stroke-linecap: butt; stroke-dasharray: 268 92; stroke-dashoffset: -70.5; animation: startup-sweep 6.51s linear infinite; }
+.startup-orbit { position: absolute; inset: 2px; border: 2px solid #2a3040; border-radius: 50%; }
+.startup-orbit svg { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); }
+.startup-orbit circle { fill: none; stroke: #58a6ff; stroke-width: 2; stroke-linecap: butt; stroke-dasharray: 268 92; stroke-dashoffset: -70.5; animation: startup-sweep 6.51s linear infinite; }
 .startup-copy { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .startup-wordmark { margin-bottom: 4px; color: #f1f4f9; font-size: 18px; font-weight: 650; letter-spacing: -0.03em; }
 .startup-screen p { margin: 0; color: #d7dbe4; font-size: 13px; font-weight: 550; }

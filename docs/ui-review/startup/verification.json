@@ -6,7 +6,10 @@
       "duration": 6510,
       "dash": "268px, 92px",
       "offset": -70.5,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -14,7 +17,10 @@
       "duration": 6510,
       "dash": "181.489px, 178.511px",
       "offset": -187.904,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -22,7 +28,10 @@
       "duration": 6510,
       "dash": "15.9997px, 344px",
       "offset": -406.671,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -30,7 +39,10 @@
       "duration": 6510,
       "dash": "266.999px, 93.0007px",
       "offset": -456.462,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -38,7 +50,10 @@
       "duration": 6510,
       "dash": "26.1225px, 333.878px",
       "offset": -845.547,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -46,7 +61,10 @@
       "duration": 6510,
       "dash": "22.6236px, 337.376px",
       "offset": -1271.81,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -54,7 +72,10 @@
       "duration": 6510,
       "dash": "273px, 87px",
       "offset": -1762.81,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -62,7 +83,10 @@
       "duration": 6510,
       "dash": "267.003px, 92.9975px",
       "offset": -2230.5,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     },
     {
@@ -70,7 +94,10 @@
       "duration": 6510,
       "dash": "268px, 92px",
       "offset": -70.5,
-      "color": "rgb(66, 133, 244)",
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
       "cap": "butt"
     }
   ],

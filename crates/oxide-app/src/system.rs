@@ -65,7 +65,7 @@ impl System for HostSystem {
                 .name("oxide-activity-hold".into())
                 .spawn(move || {
                     use windows_sys::Win32::System::Power::{
-                        SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
+                        ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
                     };
                     unsafe {
                         SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
@@ -217,9 +217,7 @@ impl System for HostSystem {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn reveal_in_finder(&self, path: &std::path::Path) {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn();
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
     }
 
     fn set_badge(&self, count: u32) {
@@ -265,13 +263,16 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         let handle = std::thread::spawn(move || {
             use windows_sys::Win32::System::Power::{
-                SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
+                ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
             };
             let prev = unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
             assert_ne!(prev, 0, "SetThreadExecutionState must succeed");
             let _ = rx.recv();
             let restored = unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-            assert_ne!(restored, 0, "SetThreadExecutionState must succeed on release");
+            assert_ne!(
+                restored, 0,
+                "SetThreadExecutionState must succeed on release"
+            );
         });
         let mut token = Some(WindowsActivityToken {
             _stop: tx,
@@ -287,7 +288,8 @@ mod tests {
     #[test]
     fn editor_detection_delegates_to_oxide_core() {
         assert!(oxide_core::editor::is_installed_windows("dev.zed.Zed"));
-        assert!(!oxide_core::editor::is_installed_windows("com.nonexistent.editor"));
+        assert!(!oxide_core::editor::is_installed_windows(
+            "com.nonexistent.editor"
+        ));
     }
 }
-

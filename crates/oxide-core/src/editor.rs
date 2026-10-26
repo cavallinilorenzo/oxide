@@ -2,8 +2,8 @@
 //! identified by bundle identifier. Which are installed is the shell's to say on macOS,
 //! or detected via PATH and Registry on Windows.
 
-use std::path::{Path, PathBuf};
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,8 +80,14 @@ const WINDOWS_SPECS: &[WindowsEditorSpec] = &[
         app_paths: &["code-insiders.exe"],
         uninstall_names: &["Visual Studio Code Insiders"],
         env_fallbacks: &[
-            ("LOCALAPPDATA", "Programs/Microsoft VS Code Insiders/Code - Insiders.exe"),
-            ("ProgramFiles", "Microsoft VS Code Insiders/Code - Insiders.exe"),
+            (
+                "LOCALAPPDATA",
+                "Programs/Microsoft VS Code Insiders/Code - Insiders.exe",
+            ),
+            (
+                "ProgramFiles",
+                "Microsoft VS Code Insiders/Code - Insiders.exe",
+            ),
         ],
     },
     WindowsEditorSpec {
@@ -192,7 +198,8 @@ pub fn find_windows_editor_with(
     // 3. Check Registry Uninstall
     #[cfg(windows)]
     for name in spec.uninstall_names {
-        if let Some(found) = query_uninstall_display_icon_or_location(name).filter(|f| f.is_file()) {
+        if let Some(found) = query_uninstall_display_icon_or_location(name).filter(|f| f.is_file())
+        {
             return Some(found);
         }
     }
@@ -268,7 +275,7 @@ fn scan_uninstall_subkeys(
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, HKEY, KEY_READ,
+        HKEY, KEY_READ, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW,
     };
 
     let wide_prefix: Vec<u16> = std::ffi::OsStr::new(prefix)
@@ -312,17 +319,19 @@ fn scan_uninstall_subkeys(
                     continue;
                 }
                 if let Some(icon) = read_reg_string(root, &full_subkey, Some("DisplayIcon")) {
-                    let candidate =
-                        icon.split(',').next().unwrap_or(&icon).trim().trim_matches('"');
+                    let candidate = icon
+                        .split(',')
+                        .next()
+                        .unwrap_or(&icon)
+                        .trim()
+                        .trim_matches('"');
                     let p = PathBuf::from(candidate);
                     if p.is_file() {
                         RegCloseKey(parent_key);
                         return Some(p);
                     }
                 }
-                if let Some(loc) =
-                    read_reg_string(root, &full_subkey, Some("InstallLocation"))
-                {
+                if let Some(loc) = read_reg_string(root, &full_subkey, Some("InstallLocation")) {
                     let loc_path = PathBuf::from(loc.trim().trim_matches('"'));
                     if loc_path.is_dir() {
                         for file in [
@@ -356,7 +365,7 @@ fn read_reg_string(
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, KEY_READ,
+        HKEY, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
     };
 
     let wide_subkey: Vec<u16> = std::ffi::OsStr::new(subkey)
@@ -457,7 +466,9 @@ mod tests {
     #[test]
     fn unknown_editor_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(find_windows_editor_with("com.unknown.editor", Some(tmp.path().as_os_str())).is_none());
+        assert!(
+            find_windows_editor_with("com.unknown.editor", Some(tmp.path().as_os_str())).is_none()
+        );
     }
 
     #[cfg(windows)]

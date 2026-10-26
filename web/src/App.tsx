@@ -4,7 +4,6 @@ import { commands, type AppError, type Project, type Thread, type ThreadStatus }
 import {
   ChevronDownIcon,
   ChevronRightIcon,
-  CodeIcon,
   CommentDiscussionIcon,
   FileDiffIcon,
   FileDirectoryIcon,
@@ -33,6 +32,7 @@ import { ProjectPalette } from "./ProjectPalette";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
 import { SettingsView } from "./SettingsView";
+import { EditorMark } from "./EditorMark";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
@@ -70,6 +70,7 @@ export function App() {
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [editorBundleId, setEditorBundleId] = useState("");
   const [showPalette, setShowPalette] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [pendingDeleteThread, setPendingDeleteThread] = useState<{
@@ -278,6 +279,18 @@ export function App() {
     openProject(project);
   }, [selectedId, startNewThread, openProject]);
 
+  // The editor "Open in editor" uses: the configured one if detected, else the first detected.
+  useEffect(() => {
+    if (showSettings) return;
+    void (async () => {
+      const settingsRes = await commands.getSettings();
+      const editorsRes = await commands.detectedEditors();
+      const detected = editorsRes.status === "ok" ? editorsRes.data : [];
+      const chosen = detected.find((e) => e.bundleId === settingsRes.settings.editor) ?? detected[0];
+      setEditorBundleId(chosen?.bundleId ?? "");
+    })();
+  }, [showSettings]);
+
   const openCheckout = useCallback(async (how: "editor" | "finder") => {
     if (!selected) return;
     const res = how === "editor"
@@ -462,7 +475,7 @@ export function App() {
         {selected && !selected.missing && (
           <>
             <button className="icon-btn" title="Open in editor" aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
-              <CodeIcon size={16} />
+              <EditorMark bundleId={editorBundleId} />
             </button>
             <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
               <FileDirectoryIcon size={16} />

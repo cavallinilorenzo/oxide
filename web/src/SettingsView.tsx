@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { EditorMark } from "./EditorMark";
 import { ProviderMark } from "./ProviderMark";
-import { Dropdown } from "./Dropdown";
+import { Dropdown, type DropdownOption } from "./Dropdown";
 import {
   commands,
   type Detection,
@@ -38,7 +39,7 @@ const MODES: { id: PermissionMode; label: string; description: string }[] = [
 ];
 
 /** Retain saved values when catalogs change or a Provider is offline. */
-const withSavedValue = (options: { value: string; label: string }[], value: string | null | undefined) =>
+const withSavedValue = (options: DropdownOption<string>[], value: string | null | undefined) =>
   value && !options.some((option) => option.value === value)
     ? [...options, { value, label: value }]
     : options;
@@ -156,8 +157,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
               <span>Editor for "Open in editor"</span>
               <Dropdown label="Editor for Open in editor" value={draft.editor}
                 options={withSavedValue([
-                  { value: "", label: "First detected editor" },
-                  ...editors.map((editor) => ({ value: editor.bundleId, label: editor.name })),
+                  { value: "", label: "First detected editor", icon: <EditorMark bundleId="" /> },
+                  ...editors.map((editor) => ({ value: editor.bundleId, label: editor.name, icon: <EditorMark bundleId={editor.bundleId} /> })),
                 ], draft.editor)}
                 onChange={(editor) => set({ editor })} />
               {fieldErrors("editor")}

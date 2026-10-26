@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./shortcuts";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -127,7 +128,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
           type="button"
           className="pr-chip"
           aria-pressed={mine}
-          title="Only pull requests you opened"
+          title={`Only pull requests you opened`}
           onClick={() => setMine((m) => !m)}
         >
           Mine
@@ -234,7 +235,7 @@ export function PullRequestReview({
       )}
       <span className="grow" />
       {onOpenOnGithub && (
-        <button className="icon-btn sm" onClick={onOpenOnGithub} title="Open on GitHub" aria-label="Open on GitHub">
+        <button className="icon-btn sm" onClick={onOpenOnGithub} title={`Open on GitHub`} aria-label="Open on GitHub">
           <LinkExternalIcon size={14} />
         </button>
       )}
@@ -363,7 +364,7 @@ export function PullRequestReview({
               }}
             />
             {comment.trim() && (
-              <button type="submit" disabled={busy} title="Send (⌘↩)">
+              <button type="submit" disabled={busy} title={`Send (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"})`}>
                 Comment
               </button>
             )}

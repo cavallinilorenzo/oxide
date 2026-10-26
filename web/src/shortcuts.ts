@@ -54,3 +54,6 @@ export function isModelShortcut(e: KeyPress): number | null {
   const match = /^[1-9]$/.exec(e.key);
   return match ? parseInt(match[0], 10) : null;
 }
+
+/** A platform-appropriate primary modifier for shortcut labels. */
+export const shortcutLabel = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform) ? "\u2318" : "Ctrl+";

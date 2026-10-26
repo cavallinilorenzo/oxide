@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./shortcuts";
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
@@ -125,7 +126,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
         {error && <span className="terminal-error">{error}</span>}
         <span className="grow" />
         {onClose && (
-          <button className="icon-btn sm" title="Close Terminal (⌘J)" aria-label="Close Terminal" onClick={onClose}>
+          <button className="icon-btn sm" title={`Close Terminal (${shortcutLabel}J)`} aria-label="Close Terminal" onClick={onClose}>
             <XIcon size={14} />
           </button>
         )}

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
 import {
@@ -35,6 +36,7 @@ import { SettingsView } from "./SettingsView";
 import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
+import { readablePath } from "./headerLines";
 import { EditorMark } from "./EditorMark";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
@@ -42,6 +44,10 @@ import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./thre
 import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
+
+const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+const shortcut = isMac ? "\u2318" : "Ctrl+";
+const shortcutShift = isMac ? "\u2318\u21e7" : "Ctrl+Shift+";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -81,23 +87,25 @@ export function App() {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: terminalSize.preferred,
   }, showTools && !showSettings);
   const [editorBundleId, setEditorBundleId] = useState("");
-  const [showPalette, setShowPalette] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
-  const [pendingDeleteThread, setPendingDeleteThread] = useState<{
-    id: number;
-    title: string;
-    discardChanges: boolean;
-  } | null>(null);
-  const [deletingThread, setDeletingThread] = useState(false);
+  const overlays = useRef<WorkspaceOverlaysHandle>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
   const [showBoard, setShowBoard] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const onProjectsScanned = useCallback((next: Project[]) => {
+    setProjects((previous) => previous && previous.length === next.length && previous.every((project, index) => {
+      const other = next[index];
+      return project.id === other.id && project.name === other.name && project.path === other.path &&
+        project.open === other.open && project.hidden === other.hidden && project.missing === other.missing;
+    }) ? previous : next);
+  }, []);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
-  const [startupDelayComplete, setStartupDelayComplete] = useState(false);
+  const [startupThreadLoaded, setStartupThreadLoaded] = useState(false);
+  const onStartupThreadLoaded = useCallback(() => setStartupThreadLoaded(true), []);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
@@ -110,14 +118,6 @@ export function App() {
       ? previous
       : [...previous, context]);
   }, []);
-
-  useEffect(() => {
-    if (!showPalette) return;
-    // Scanned repositories are only offered here, so refresh them while the palette is open.
-    void commands.rescanProjects().then((res) => {
-      if (res.status === "ok") setProjects(res.data);
-    });
-  }, [showPalette]);
 
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
@@ -168,11 +168,6 @@ export function App() {
         setProjectsLoaded(true);
       }
     })();
-  }, []);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setStartupDelayComplete(true), 700);
-    return () => window.clearTimeout(timeout);
   }, []);
 
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
@@ -342,42 +337,19 @@ export function App() {
 
   const deleteThread = useCallback((threadId: number) => {
     const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
-    setOpenError(null);
-    setPendingDeleteThread({ id: threadId, title, discardChanges: false });
+    overlays.current?.openDelete(threadId, title);
   }, [threads]);
 
-  const confirmDeleteThread = useCallback(async () => {
-    if (!pendingDeleteThread || deletingThread) return;
-    setDeletingThread(true);
-    setOpenError(null);
-    try {
-      const result = await performThreadDelete(
-        pendingDeleteThread.id,
-        pendingDeleteThread.discardChanges,
-        commands.deleteThread,
-      );
-      if (result.status === "error") {
-        setOpenError(result.message);
-      } else if (result.status === "needs-confirmation") {
-        setPendingDeleteThread((current) => current ? { ...current, discardChanges: true } : null);
-      } else if (result.status === "deleted") {
-        const deletedId = pendingDeleteThread.id;
-        setThreads((prev) => threadsAfterDelete(prev, deletedId));
-        setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
-        setPendingDeleteThread(null);
-      }
-    } catch (error) {
-      setOpenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeletingThread(false);
-    }
-  }, [deletingThread, pendingDeleteThread]);
+  const onThreadDeleted = useCallback((deletedId: number) => {
+    setThreads((prev) => threadsAfterDelete(prev, deletedId));
+    setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isProjectPaletteShortcut(e)) {
         e.preventDefault();
-        setShowPalette(true);
+        overlays.current?.openPalette();
         return;
       }
       if (isNewThreadShortcut(e)) {
@@ -442,8 +414,9 @@ export function App() {
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
-        // The last Project reopens, but on a new Thread rather than the one it left off on.
-        const initialThreadId = wanted?.projectId === selected.id ? null : res.data[0]?.id ?? null;
+        const initialThreadId = wanted?.projectId === selected.id
+          ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
+          : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
         rememberTerminalContext(selected.id, initialThreadId);
       }
@@ -454,18 +427,18 @@ export function App() {
     };
   }, [selected, rememberTerminalContext, createThreadIn]);
 
-  const starting = !startupDelayComplete || !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
+  const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
   useEffect(() => {
-    if (!starting) document.documentElement.dataset.appReady = "true";
-  }, [starting]);
+    if (!starting && (!selected || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
+  }, [starting, selected, startupThreadLoaded]);
 
   if (starting) {
     return (
       <div className="startup-screen" aria-hidden="true">
         <div className="startup-content">
           <div className="startup-emblem" aria-hidden="true">
-            <span className="startup-orbit"><span /></span>
+            <span className="startup-orbit"><svg viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="40" /></svg></span>
             <img src={oxideMark} alt="" />
           </div>
           <div className="startup-copy">
@@ -480,48 +453,23 @@ export function App() {
 
   return (
     <div className={`window ${isMac ? "macos" : "windows"}`}>
+      {isWindows && <WindowResizeHandles />}
       <QuitDialog />
-      {pendingDeleteThread && (
-        <div className="modal-backdrop">
-          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
-            <h2 id="delete-thread-title">
-              {pendingDeleteThread.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pendingDeleteThread.title}”?`}
-            </h2>
-            <p>
-              {pendingDeleteThread.discardChanges
-                ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept."
-                : "Its conversation is removed permanently."}
-            </p>
-            {openError && <p className="error" role="alert">{openError}</p>}
-            <div className="modal-actions">
-              <button autoFocus onClick={() => setPendingDeleteThread(null)} disabled={deletingThread}>Cancel</button>
-              <button onClick={() => void confirmDeleteThread()} disabled={deletingThread}>
-                {deletingThread ? "Deleting…" : "Delete Thread"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showPalette && (
-        <ProjectPalette
-          projects={projects ?? []}
-          defaultParent="~/Developer"
-          onClose={() => setShowPalette(false)}
-          onStartThread={startThreadIn}
-          onOpenProject={openProject}
-        />
-      )}
+      <WorkspaceOverlays ref={overlays} projects={projects ?? []} onProjectsScanned={onProjectsScanned}
+        onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
+        {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); setShowBoard(false); setSelectedThreadId(null); }} />}
+        <div className="header-project" data-tauri-drag-region>
         {selected ? (
           <span className="title" data-tauri-drag-region>
-            <strong title={selected.path}>{selected.name}</strong>
+            <strong title={readablePath(selected.path)}>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
-        ) : (
+        ) : !isWindows ? (
           <span className="title" data-tauri-drag-region>
             <strong>Oxide</strong>
           </span>
-        )}
+        ) : null}
         {selected && !selected.missing && (
           <GitHeader
             projectId={selected.id}
@@ -531,24 +479,26 @@ export function App() {
             onChanged={onGitChanged}
           />
         )}
-        <span className="grow" data-tauri-drag-region />
+        </div>
+        {!isWindows && <span className="grow" data-tauri-drag-region />}
+        <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
         {selected && !selected.missing && (
           <>
-            <button className="icon-btn" title="Open in editor" aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
+            <button className="icon-btn" title={`Open in editor`} aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
               <EditorMark bundleId={editorBundleId} />
             </button>
-            <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
+            <button className="icon-btn" title={`Reveal in Finder`} aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
               <FileDirectoryIcon size={16} />
             </button>
           </>
         )}
         {selected && (
           <span role="group" aria-label="View" className="seg">
-            <button aria-pressed={!showBoard && !showSettings} title="Chat (⌘B)" onClick={() => { setShowBoard(false); setShowSettings(false); }}>
+            <button aria-pressed={!showBoard && !showSettings} title={`Chat (${shortcut}B)`} onClick={() => { setShowBoard(false); setShowSettings(false); }}>
               <CommentDiscussionIcon size={14} /> Chat
             </button>
-            <button aria-pressed={showBoard && !showSettings} title="Thread Board (⌘B)" onClick={() => { setShowBoard(true); setShowSettings(false); }}>
+            <button aria-pressed={showBoard && !showSettings} title={`Thread Board (${shortcut}B)`} onClick={() => { setShowBoard(true); setShowSettings(false); }}>
               <ProjectIcon size={14} /> Board
             </button>
           </span>
@@ -556,7 +506,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTools && !showSettings}
-          title="Tools: Files, Diff, Pull request, Issues (⌘\)"
+          title={`Tools: Files, Diff, Pull request, Issues (${shortcut}\\)`}
           aria-label="Toggle tools panel"
           onClick={() => { setShowTools(showSettings || !showTools); setShowSettings(false); }}
         >
@@ -565,12 +515,14 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTerminal && !showSettings}
-          title="Terminal (⌘J)"
+          title={`Terminal (${shortcut}J)`}
           aria-label="Toggle Terminal"
           onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
         >
           <TerminalIcon size={16} />
         </button>
+        {isWindows && <WindowControls />}
+        </div>
       </header>
       <div className="body" ref={bodyRef} style={{
         "--sidebar-width": `${layout.sidebar.value}px`,
@@ -619,7 +571,7 @@ export function App() {
               void startNewThread();
             }}
             onRenameThread={onThreadTitleChange}
-            onOpenPalette={() => setShowPalette(true)}
+            onOpenPalette={() => overlays.current?.openPalette()}
             onOpenBoard={(p) => {
               if (p.id !== selected?.id) {
                 restore.current = null;
@@ -657,6 +609,7 @@ export function App() {
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
+                  onInitialLoad={onStartupThreadLoaded}
                   threadId={selectedThreadId}
                   projectId={selected.id}
                   projectPath={selected.path}
@@ -698,8 +651,8 @@ export function App() {
               <div className="empty-state">
                 <RepoIcon size={24} />
                 <p>Open a Project to begin.</p>
-                <button className="btn primary" onClick={() => setShowPalette(true)}>
-                  Open a Project <kbd>⌘⇧N</kbd>
+                <button className="btn primary" onClick={() => overlays.current?.openPalette()}>
+                  Open a Project <kbd>{shortcutShift}N</kbd>
                 </button>
               </div>
             </main>
@@ -739,7 +692,7 @@ export function App() {
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title="Close panel (⌘\)" aria-label="Close tools panel" onClick={() => setShowTools(false)}>
+              <button className="icon-btn sm" title={`Close panel (${shortcut}\\)`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
                 <XIcon size={14} />
               </button>
             </nav>
@@ -904,7 +857,7 @@ function Sidebar({
         className="row-action"
         onClick={() => onDeleteThread(t.id)}
         aria-label={`Delete ${threadTitle(t)}`}
-        title="Delete"
+        title={`Delete`}
       >
         <TrashIcon size={12} />
       </button>
@@ -914,10 +867,10 @@ function Sidebar({
   return (
     <nav className="sidebar" aria-label="Projects">
       <div className="sidebar-actions">
-        <button className="btn grow" onClick={onNewThread} disabled={!selected} title="New Thread in this Project (⌘N)">
-          <PlusIcon size={14} /> New Thread <kbd>⌘N</kbd>
+        <button className="btn grow" onClick={onNewThread} disabled={!selected} title={`New Thread in this Project (${shortcut}N)`}>
+          <PlusIcon size={14} /> New Thread <kbd>{shortcut}N</kbd>
         </button>
-        <button className="btn" onClick={onOpenPalette} title="Open a Project, or a new Thread in another one (⌘⇧N)" aria-label="Open a Project">
+        <button className="btn" onClick={onOpenPalette} title={`Open a Project, or a new Thread in another one (${shortcutShift}N)`} aria-label="Open a Project">
           <RepoIcon size={14} />
         </button>
       </div>
@@ -942,8 +895,8 @@ function Sidebar({
               <p className="sidebar-empty-title">No open Projects</p>
               <p className="sidebar-empty-hint">Open a project to see its Threads here.</p>
             </div>
-            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette}>
-              <RepoIcon size={14} /> Open a Project <kbd>⌘⇧N</kbd>
+            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette} title={`Open a Project (${shortcutShift}N)`}>
+              <RepoIcon size={14} /> Open a Project <kbd>{shortcutShift}N</kbd>
             </button>
           </div>
         )}
@@ -953,16 +906,16 @@ function Sidebar({
             return (
               <li key={p.id} className={`project-node${p.missing ? " missing" : ""}`}>
                 <div className="project-row">
-                  <button className="project" aria-current={isSelected} aria-expanded={isSelected} onClick={() => onSelect(p)} title={p.path}>
+                  <button className="project" aria-current={isSelected} aria-expanded={isSelected} onClick={() => onSelect(p)} title={readablePath(p.path)}>
                     {isSelected ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
                     <RepoIcon size={13} />
                     <span className="project-name">{p.name}</span>
                     {p.missing && <span className="badge">missing</span>}
                   </button>
-                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title="Thread Board">
+                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title={`Thread Board`}>
                     <ProjectIcon size={13} />
                   </button>
-                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : "Close Project (it stays in ⌘⇧N)"}>
+                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${shortcutShift}N)`}>
                     <XIcon size={13} />
                   </button>
                 </div>
@@ -979,9 +932,113 @@ function Sidebar({
           })}
         </ul>
       </div>
-      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title="Settings (⌘,)">
+      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title={`Settings (${shortcut},)`}>
         <GearIcon size={14} /> Settings
       </button>
     </nav>
   );
+}
+
+function AppMenu({ onNewThread }: { onNewThread: () => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const pointer = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(null); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(null); };
+    document.addEventListener("pointerdown", pointer); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", pointer); document.removeEventListener("keydown", key); };
+  }, [open]);
+  const win = getCurrentWindow();
+  const menus: Record<string, { label: string; action: () => void }[]> = {
+    Oxide: [{ label: "Quit Oxide", action: () => { void win.close(); } }],
+    File: [{ label: "New Thread", action: onNewThread }],
+    Edit: ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"].map((label) => ({ label, action: () => { document.execCommand(label === "Select All" ? "selectAll" : label.toLowerCase()); } })),
+    Window: [{ label: "Minimize", action: () => { void win.minimize(); } }, { label: "Maximize / Restore", action: () => { void win.toggleMaximize(); } }],
+  };
+  return <nav ref={root} className="app-menu" aria-label="Application menu">
+    {Object.entries(menus).map(([name, items]) => <div className="app-menu-item" key={name}>
+      <button type="button" aria-haspopup="menu" aria-expanded={open === name} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen(open === name ? null : name)}>{name}</button>
+      {open === name && <div className="app-menu-popup" role="menu">
+        {items.map(({ label, action }) => <button key={label} role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { action(); setOpen(null); }}>{label}</button>)}
+      </div>}
+    </div>)}
+  </nav>;
+}
+
+function WindowControls() {
+  const window = getCurrentWindow();
+  return <div className="window-controls" role="group" aria-label="Window controls">
+    <button type="button" aria-label="Minimize" title="Minimize" onClick={() => void window.minimize()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10" /></svg>
+    </button>
+    <button type="button" aria-label="Maximize or restore" title="Maximize or restore" onClick={() => void window.toggleMaximize()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" /></svg>
+    </button>
+    <button type="button" className="window-close" aria-label="Close window" title="Close" onClick={() => void window.close()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" /></svg>
+    </button>
+  </div>;
+}
+
+function WindowResizeHandles() {
+  const directions = ["North", "NorthEast", "East", "SouthEast", "South", "SouthWest", "West", "NorthWest"] as const;
+  return <div className="window-resize-handles" aria-hidden="true">
+    {directions.map((direction) => <div key={direction} className={`window-resize window-resize-${direction.toLowerCase()}`}
+      onMouseDown={(event) => { if (event.button === 0) void getCurrentWindow().startResizeDragging(direction); }} />)}
+  </div>;
+}
+
+type WorkspaceOverlaysHandle = { openPalette: () => void; openDelete: (id: number, title: string) => void };
+
+function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, onOpenProject, onThreadDeleted }: {
+  ref: Ref<WorkspaceOverlaysHandle>;
+  projects: Project[];
+  onProjectsScanned: (projects: Project[]) => void;
+  onStartThread: (project: Project) => void;
+  onOpenProject: (project: Project) => void;
+  onThreadDeleted: (id: number) => void;
+}) {
+  const [showPalette, setShowPalette] = useState(false);
+  const [pending, setPending] = useState<{ id: number; title: string; discardChanges: boolean } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useImperativeHandle(ref, () => ({
+    openPalette: () => setShowPalette(true),
+    openDelete: (id, title) => { setError(null); setPending({ id, title, discardChanges: false }); },
+  }), []);
+  useEffect(() => {
+    if (!showPalette) return;
+    let active = true;
+    void commands.rescanProjects().then((result) => {
+      if (active && result.status === "ok") onProjectsScanned(result.data);
+    });
+    return () => { active = false; };
+  }, [showPalette, onProjectsScanned]);
+  async function confirmDelete() {
+    if (!pending || deleting) return;
+    setDeleting(true); setError(null);
+    try {
+      const result = await performThreadDelete(pending.id, pending.discardChanges, commands.deleteThread);
+      if (result.status === "error") setError(result.message);
+      else if (result.status === "needs-confirmation") setPending((current) => current ? { ...current, discardChanges: true } : null);
+      else { onThreadDeleted(pending.id); setPending(null); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setDeleting(false); }
+  }
+  return <>
+    {pending && <div className="modal-backdrop">
+      <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
+        <h2 id="delete-thread-title">{pending.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pending.title}”?`}</h2>
+        <p>{pending.discardChanges ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept." : "Its conversation is removed permanently."}</p>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="modal-actions">
+          <button autoFocus onClick={() => setPending(null)} disabled={deleting}>Cancel</button>
+          <button onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "Deleting…" : "Delete Thread"}</button>
+        </div>
+      </div>
+    </div>}
+    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => setShowPalette(false)}
+      onStartThread={onStartThread} onOpenProject={onOpenProject} />}
+  </>;
 }

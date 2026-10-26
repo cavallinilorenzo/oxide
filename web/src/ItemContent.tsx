@@ -1,13 +1,16 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { parseSegments } from "./codeSegments";
 import { highlighter } from "./highlighter";
+import { useTypewriter } from "./typewriter";
 
 /**
  * An Item's text with its code blocks highlighted. Memoized on `content`, so
  * finalized Items never re-render or re-parse; only the streaming one does.
+ * Text that streams in is typed out one character at a time.
  */
 export const ItemContent = memo(function ItemContent({ content }: { content: string }) {
-  const segments = useMemo(() => parseSegments(content), [content]);
+  const typed = useTypewriter(content);
+  const segments = useMemo(() => parseSegments(typed), [typed]);
   return (
     <div className="message-content">
       {segments.map((s, i) =>

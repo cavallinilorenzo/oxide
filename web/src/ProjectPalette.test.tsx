@@ -3,7 +3,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { open } from "@tauri-apps/plugin-dialog";
 import { ProjectPalette } from "./ProjectPalette";
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
@@ -60,7 +63,6 @@ it("updates the active row on pointer movement without moving focus from Search"
 });
 
 it.each([
-  ["Add a local folder as a Project", "Folder to add"],
   ["Create a new Project (git init)", "Project name"],
   ["Clone a repository from a Git URL", "Git URL"],
 ])("opens the clicked action %s independently of the highlighted Project", (label, field) => {
@@ -71,6 +73,41 @@ it.each([
   act(() => action.click());
   expect(container.querySelector("input")?.getAttribute("aria-label")).toBe(field);
   expect(onStartThread).not.toHaveBeenCalled();
+});
+
+it("opens the native folder picker and registers the chosen folder", async () => {
+  vi.mocked(open).mockResolvedValueOnce("C:/projects/demo");
+  const onOpenProject = vi.fn();
+  const onClose = vi.fn();
+  mockIPC((command, args) => {
+    if (command === "add_project") {
+      expect(args).toMatchObject({ path: "C:/projects/demo" });
+      return projects[0];
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  });
+  act(() => root.render(<ProjectPalette projects={projects} defaultParent="/code"
+    onStartThread={() => {}} onOpenProject={onOpenProject} onClose={onClose} />));
+  await act(async () => {
+    Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find((row) => row.textContent === "Add a local folder as a Project")!.click();
+  });
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
+  expect(onOpenProject).toHaveBeenCalledWith(projects[0]);
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("keeps the palette open when the folder picker is cancelled", async () => {
+  vi.mocked(open).mockResolvedValueOnce(null);
+  const onClose = vi.fn();
+  act(() => root.render(<ProjectPalette projects={[]} defaultParent="/code"
+    onStartThread={() => {}} onOpenProject={() => {}} onClose={onClose} />));
+  await act(async () => {
+    Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find((row) => row.textContent === "Add a local folder as a Project")!.click();
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  expect(container.querySelector('input')?.getAttribute('aria-label')).toBe('Search');
 });
 
 it("chooses the clicked GitHub repository rather than the first result", async () => {

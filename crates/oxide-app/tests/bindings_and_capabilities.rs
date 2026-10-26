@@ -18,11 +18,21 @@ fn webview_capabilities_grant_no_filesystem_or_shell_access() {
     let cap: serde_json::Value = serde_json::from_str(&raw).unwrap();
     for p in cap["permissions"].as_array().unwrap() {
         let p = p.as_str().unwrap();
-        for denied in ["fs", "shell", "opener", "process", "http", "dialog"] {
+        for denied in ["fs", "shell", "opener", "process", "http"] {
             assert!(
                 !p.contains(denied),
                 "capability `{p}` grants `{denied}` access"
             );
         }
+        if p.starts_with("dialog:") {
+            assert_eq!(p, "dialog:allow-open", "unexpected dialog capability `{p}`");
+        }
     }
+    assert!(
+        cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == "dialog:allow-open")
+    );
 }

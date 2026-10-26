@@ -30,6 +30,13 @@ describe("displayPath", () => {
   });
 });
 
+it("shows Windows canonical paths without the extended-length prefix", () => {
+  const lines = threadHeaderLines({ ...base, projectPath: String.raw`\\?\C:\Users\mbena\Documents\spotify_analysis` });
+  expect(lines.folder.text).toBe(String.raw`C:\Users\mbena\Documents\spotify_analysis`);
+  expect(lines.folder.path).toBe(String.raw`C:\Users\mbena\Documents\spotify_analysis`);
+  expect(displayPath(String.raw`\\?\UNC\server\share\repo`)).toBe(String.raw`\\server\share\repo`);
+});
+
 describe("middleEllipsis", () => {
   it("leaves a short path alone", () => {
     expect(middleEllipsis("~/Developer/oxide", 40)).toBe("~/Developer/oxide");

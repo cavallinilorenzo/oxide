@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./shortcuts";
 import { useCallback, useEffect, useState } from "react";
 import { GitPullRequestIcon, SyncIcon } from "@primer/octicons-react";
 import { commands, type GitStatus, type PullRequestDraft, type PullRequestState } from "./bindings";
@@ -47,7 +48,7 @@ function PullRequestViews(props: PullRequestPanelProps) {
           ))}
         </div>
         <span className="grow" />
-        <button className="icon-btn sm" onClick={refresh} title="Reload from GitHub" aria-label="Reload from GitHub">
+        <button className="icon-btn sm" onClick={refresh} title={`Reload from GitHub`} aria-label="Reload from GitHub">
           <SyncIcon size={14} />
         </button>
       </div>
@@ -239,7 +240,7 @@ function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormPro
           type="submit"
           className="btn primary"
           disabled={busy || !form.title.trim() || !form.base.trim()}
-          title="Create the pull request (⌘↩ in the description)"
+          title={`Create the pull request (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"} in the description)`}
         >
           <GitPullRequestIcon size={14} />
           {busy ? "Creating…" : pushFirst ? "Push & create PR" : "Create PR"}

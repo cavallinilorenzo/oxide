@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, UnfoldIcon } from "@primer/octicons-react";
 import { commands, type Diff, type DiffFile } from "./bindings";
@@ -258,7 +259,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
             <button type="submit" className="btn" disabled={!ready}>
               <GitCommitIcon size={14} /> Commit
             </button>
-            <button type="button" className="btn primary" disabled={!ready} onClick={() => void runCommit(true)} title="Commit & Push (⌘↩)">
+            <button type="button" className="btn primary" disabled={!ready} onClick={() => void runCommit(true)} title={`Commit & Push (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"})`}>
               <RepoPushIcon size={14} /> Commit &amp; Push
             </button>
           </div>

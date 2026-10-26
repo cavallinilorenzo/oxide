@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="color-scheme" content="dark" />
     <title>Oxide</title>
+    <script>
+      if (typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform)) {
+        document.documentElement.classList.add("macos");
+      }
+    </script>
     <style>
       :root { color-scheme: dark; background: #0f1115; }
       html, body, #root { height: 100%; margin: 0; background: #0f1115; }

@@ -11,15 +11,19 @@ type KeyPress = {
   shiftKey: boolean;
 };
 
+function isPrimaryModifier(e: KeyPress): boolean {
+  return (e.metaKey || e.ctrlKey) && !(e.metaKey && e.ctrlKey);
+}
+
 /** Esc in the composer stops a running Turn. */
 export function stopsTurn(e: KeyPress, status: ThreadStatus): boolean {
   if (e.key !== "Escape" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return false;
   return turnIsRunning(status);
 }
 
-/** ⌘\ toggles the tools panel, ⌘J toggles the Terminal area, ⌘B switches Chat / Board, ⌘, opens Settings. */
+/** ⌘\ / Ctrl+\ toggles the tools panel, ⌘J / Ctrl+J toggles the Terminal area, ⌘B / Ctrl+B switches Chat / Board, ⌘, / Ctrl+, opens Settings. */
 export function toggleForKey(e: KeyPress): LayoutToggle | null {
-  if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null;
+  if (!isPrimaryModifier(e) || e.altKey || e.shiftKey) return null;
   if (e.key === "\\") return "tools";
   if (e.key === "j") return "terminal";
   if (e.key === "b") return "board";
@@ -27,15 +31,15 @@ export function toggleForKey(e: KeyPress): LayoutToggle | null {
   return null;
 }
 
-/** ⌘⇧N opens the Project palette. */
+/** ⌘⇧N / Ctrl+Shift+N opens the Project palette. */
 export function isProjectPaletteShortcut(e: KeyPress): boolean {
-  if (!e.metaKey || e.ctrlKey || e.altKey || !e.shiftKey) return false;
+  if (!isPrimaryModifier(e) || e.altKey || !e.shiftKey) return false;
   return e.key === "n" || e.key === "N";
 }
 
-/** ⌘N starts a new Thread in the current Project. (⌘⇧N is the Project palette). */
+/** ⌘N / Ctrl+N starts a new Thread in the current Project. (⌘⇧N / Ctrl+Shift+N is the Project palette). */
 export function isNewThreadShortcut(e: KeyPress): boolean {
-  if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return false;
+  if (!isPrimaryModifier(e) || e.altKey || e.shiftKey) return false;
   return e.key === "n" || e.key === "N";
 }
 

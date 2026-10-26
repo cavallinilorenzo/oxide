@@ -48,6 +48,11 @@ if args[:1] == ["models"]:
     sys.exit(0)
 
 prompt = option("-p") or option("--print") or ""
+if option("--input-format") == "stream-json":
+    message = json.loads(sys.stdin.readline())
+    assert message["event"] == "user"
+    prompt = message["message"]["content"]
+log_wire({"type": "prompt", "prompt": prompt})
 conversation = option("--conversation")
 
 

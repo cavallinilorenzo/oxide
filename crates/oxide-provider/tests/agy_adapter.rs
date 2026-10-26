@@ -53,6 +53,16 @@ fn wire_argv(log: &std::path::Path) -> Vec<(u64, Vec<String>)> {
         .collect()
 }
 
+fn wire_prompts(log: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|entry| entry["type"] == "prompt")
+        .map(|entry| entry["prompt"].as_str().unwrap().to_owned())
+        .collect()
+}
+
 fn provider_with_log() -> (AgyProvider, tempfile::NamedTempFile, support::FakeCli) {
     let log = tempfile::NamedTempFile::new().unwrap();
     let fake = fake_agy();
@@ -170,7 +180,7 @@ fn permission_mode_model_and_effort_map_to_flags_on_every_turn() {
             .windows(2)
             .any(|w| w == ["--output-format", "stream-json"])
     );
-    assert!(first.windows(2).any(|w| w == ["-p", "one"]));
+    assert_eq!(wire_prompts(log.path()), ["one", "two"]);
     assert!(second.contains(&"--dangerously-skip-permissions".to_string()));
     assert!(
         second
@@ -234,14 +244,13 @@ fn steps_map_to_items() {
 }
 
 #[test]
-fn prompt_arguments_preserve_quotes_and_shell_characters() {
+fn prompts_preserve_newlines_quotes_and_shell_characters() {
     let (mut provider, log, _fake) = provider_with_log();
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
-    let prompt = "Explain \"a & b\" | <input> ^ !literal! %PATH%";
+    let prompt = "Explain \"a & b\" | <input> ^ !literal! %PATH%\r\nA second line\nA third line";
     provider.send_prompt(prompt).unwrap();
     collect_turn(&rx);
-    let runs = wire_argv(log.path());
-    assert!(runs[0].1.windows(2).any(|args| args == ["-p", prompt]));
+    assert_eq!(wire_prompts(log.path()), [prompt]);
     provider.shutdown().unwrap();
 }
 

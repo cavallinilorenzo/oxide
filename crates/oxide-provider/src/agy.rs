@@ -1,6 +1,6 @@
 //! Antigravity CLI (`agy`) native provider adapter.
 //!
-//! `agy -p <prompt> --output-format stream-json` runs one Turn and exits, so every Turn is its
+//! Print mode (or one stdin message on Windows) runs one Turn and exits, so every Turn is its
 //! own process; Turns after the first resume the conversation with `--conversation <id>`.
 //! Headless `agy` cannot ask for Approval, so only Auto-edit (soft-deny) and Full access are
 //! offered (ADR-0004), and Oxide never touches `agy`'s settings file.
@@ -295,10 +295,13 @@ impl Provider for AgyProvider {
         }
 
         let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
-        cmd.arg("-p")
-            .arg(prompt)
-            .arg("--output-format")
-            .arg("stream-json");
+        // Batch shims cannot carry multiline prompts or arbitrarily long arguments. One
+        // streamed user message followed by EOF keeps the same one-process-per-Turn lifecycle.
+        #[cfg(windows)]
+        cmd.args(["--input-format", "stream-json"]);
+        #[cfg(not(windows))]
+        cmd.arg("-p").arg(prompt);
+        cmd.args(["--output-format", "stream-json"]);
         if let Some(model) = &context.model {
             cmd.arg("--model").arg(model);
         }
@@ -312,7 +315,11 @@ impl Provider for AgyProvider {
             cmd.arg("--dangerously-skip-permissions");
         }
         cmd.current_dir(&context.working_dir)
-            .stdin(Stdio::null())
+            .stdin(if cfg!(windows) {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         process::spawn_in_own_group(&mut cmd);
@@ -333,6 +340,30 @@ impl Provider for AgyProvider {
             return Err(ProviderError::CommandFailed(format!(
                 "Failed to contain Antigravity CLI process: {error}"
             )));
+        }
+        #[cfg(windows)]
+        {
+            use std::io::Write;
+            let sent = {
+                let mut stdin = child.stdin.take().expect("stdin must be piped");
+                writeln!(
+                    stdin,
+                    "{}",
+                    serde_json::json!({
+                        "event": "user", "message": { "content": prompt }
+                    })
+                )
+            };
+            if let Err(error) = sent {
+                process::terminate_group(pgid, SHUTDOWN_GRACE, || {
+                    let _ = child.try_wait();
+                });
+                let _ = child.wait();
+                self.turn_running.store(false, Ordering::SeqCst);
+                return Err(ProviderError::CommandFailed(format!(
+                    "Failed to send Antigravity CLI prompt: {error}"
+                )));
+            }
         }
         if let Some(registry) = &self.registry {
             registry.register(pgid, &self.command);

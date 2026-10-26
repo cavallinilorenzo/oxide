@@ -233,6 +233,7 @@ impl Gh {
 
     fn run(&self, cwd: &Path, args: &[&str]) -> std::result::Result<String, GhError> {
         let path = self.path_var();
+        #[cfg(windows)]
         let mut child_path = path.clone();
         #[cfg(windows)]
         if self
@@ -247,6 +248,8 @@ impl Gh {
             child_path.push(";");
             child_path.push(inherited_path);
         }
+        #[cfg(not(windows))]
+        let child_path = path.clone();
         let mut command = Command::new(
             find_in(
                 &path,

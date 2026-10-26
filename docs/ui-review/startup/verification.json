@@ -1,0 +1,115 @@
+{
+  "reference": "https://miro.medium.com/1*X8HyF0-2dqv6DKYb-hzfpw.gif",
+  "metrics": [
+    {
+      "time": 0,
+      "duration": 6510,
+      "dash": "268px, 92px",
+      "offset": -70.5,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 200,
+      "duration": 6510,
+      "dash": "181.489px, 178.511px",
+      "offset": -187.904,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 600,
+      "duration": 6510,
+      "dash": "15.9997px, 344px",
+      "offset": -406.671,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 1000,
+      "duration": 6510,
+      "dash": "266.999px, 93.0007px",
+      "offset": -456.462,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 2000,
+      "duration": 6510,
+      "dash": "26.1225px, 333.878px",
+      "offset": -845.547,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 3255,
+      "duration": 6510,
+      "dash": "22.6236px, 337.376px",
+      "offset": -1271.81,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 5000,
+      "duration": 6510,
+      "dash": "273px, 87px",
+      "offset": -1762.81,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 6500,
+      "duration": 6510,
+      "dash": "267.003px, 92.9975px",
+      "offset": -2230.5,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    },
+    {
+      "time": 6510,
+      "duration": 6510,
+      "dash": "268px, 92px",
+      "offset": -70.5,
+      "color": "rgb(88, 166, 255)",
+      "width": "2px",
+      "trackColor": "rgb(42, 48, 64)",
+      "trackWidth": "2px",
+      "cap": "butt"
+    }
+  ],
+  "checked": [
+    "initial HTML before React",
+    "shared bootstrap/React styling",
+    "six-turn loop seam",
+    "short and long arcs",
+    "900/1280/1920px",
+    "reduced motion",
+    "hidden window pause/resume",
+    "no artificial minimum startup time"
+  ],
+  "errors": []
+}

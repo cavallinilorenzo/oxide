@@ -1,0 +1,180 @@
+.startup-screen {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; overflow: hidden;
+  background: #0f1115; color: #a0a8ba; text-align: center;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+}
+.startup-content { display: flex; flex-direction: column; align-items: center; gap: 26px; }
+.startup-emblem { position: relative; width: 88px; height: 88px; display: grid; place-items: center; }
+.startup-emblem img { position: relative; z-index: 1; width: 48px; height: 48px; }
+.startup-orbit { position: absolute; inset: 2px; border: 2px solid #2a3040; border-radius: 50%; }
+.startup-orbit svg { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); }
+.startup-orbit circle { fill: none; stroke: #58a6ff; stroke-width: 2; stroke-linecap: butt; stroke-dasharray: 268 92; stroke-dashoffset: -70.5; animation: startup-sweep 6.51s linear infinite; }
+.startup-copy { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.startup-wordmark { margin-bottom: 4px; color: #f1f4f9; font-size: 18px; font-weight: 650; letter-spacing: -0.03em; }
+.startup-screen p { margin: 0; color: #d7dbe4; font-size: 13px; font-weight: 550; }
+.startup-detail { color: #8994a9; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .startup-orbit circle { animation: none; } }
+html[data-app-ready="true"] #boot-splash { display: none; }
+html[data-window-hidden="true"] .startup-orbit circle { animation-play-state: paused; }
+
+/* Measured from the supplied Google spinner GIF (6.51s, six clockwise turns).
+   pathLength=360 makes dash values degrees; linear segments retain its easing.
+   Reference: https://miro.medium.com/1*X8HyF0-2dqv6DKYb-hzfpw.gif */
+@keyframes startup-sweep {
+  0% { stroke-dasharray: 268 92; stroke-dashoffset: -70.5; }
+  0.614% { stroke-dasharray: 256 104; stroke-dashoffset: -92.978; }
+  1.229% { stroke-dasharray: 249 111; stroke-dashoffset: -103.957; }
+  1.843% { stroke-dasharray: 239 121; stroke-dashoffset: -117.935; }
+  2.458% { stroke-dasharray: 226 134; stroke-dashoffset: -134.914; }
+  3.072% { stroke-dasharray: 181.5 178.5; stroke-dashoffset: -187.892; }
+  3.687% { stroke-dasharray: 147 213; stroke-dashoffset: -226.871; }
+  4.301% { stroke-dasharray: 113.5 246.5; stroke-dashoffset: -264.349; }
+  4.916% { stroke-dasharray: 69 291; stroke-dashoffset: -316.828; }
+  5.53% { stroke-dasharray: 54.5 305.5; stroke-dashoffset: -335.806; }
+  6.144% { stroke-dasharray: 44 316; stroke-dashoffset: -350.285; }
+  6.759% { stroke-dasharray: 28.5 331.5; stroke-dashoffset: -373.763; }
+  7.373% { stroke-dasharray: 23 337; stroke-dashoffset: -383.242; }
+  7.988% { stroke-dasharray: 18.5 341.5; stroke-dashoffset: -391.22; }
+  8.602% { stroke-dasharray: 15.5 344.5; stroke-dashoffset: -398.198; }
+  9.217% { stroke-dasharray: 16 344; stroke-dashoffset: -406.677; }
+  10.445% { stroke-dasharray: 21.5 338.5; stroke-dashoffset: -414.634; }
+  11.06% { stroke-dasharray: 35 325; stroke-dashoffset: -422.112; }
+  11.674% { stroke-dasharray: 45.5 314.5; stroke-dashoffset: -425.591; }
+  12.289% { stroke-dasharray: 63 297; stroke-dashoffset: -429.569; }
+  12.903% { stroke-dasharray: 91.5 268.5; stroke-dashoffset: -433.548; }
+  13.518% { stroke-dasharray: 184 176; stroke-dashoffset: -441.026; }
+  14.132% { stroke-dasharray: 220 140; stroke-dashoffset: -445.005; }
+  14.747% { stroke-dasharray: 241.5 118.5; stroke-dashoffset: -448.983; }
+  15.361% { stroke-dasharray: 267 93; stroke-dashoffset: -456.462; }
+  15.975% { stroke-dasharray: 275 85; stroke-dashoffset: -460.44; }
+  16.59% { stroke-dasharray: 280 80; stroke-dashoffset: -463.918; }
+  17.204% { stroke-dasharray: 279.5 80.5; stroke-dashoffset: -467.897; }
+  17.819% { stroke-dasharray: 278.5 81.5; stroke-dashoffset: -476.875; }
+  19.048% { stroke-dasharray: 274.5 85.5; stroke-dashoffset: -488.832; }
+  19.662% { stroke-dasharray: 268.5 91.5; stroke-dashoffset: -502.811; }
+  20.276% { stroke-dasharray: 264.5 95.5; stroke-dashoffset: -510.789; }
+  20.891% { stroke-dasharray: 258.5 101.5; stroke-dashoffset: -520.268; }
+  21.505% { stroke-dasharray: 240 120; stroke-dashoffset: -546.746; }
+  22.273% { stroke-dasharray: 225.5 134.5; stroke-dashoffset: -565.219; }
+  22.888% { stroke-dasharray: 204 156; stroke-dashoffset: -590.698; }
+  23.502% { stroke-dasharray: 124.5 235.5; stroke-dashoffset: -679.676; }
+  24.117% { stroke-dasharray: 95 265; stroke-dashoffset: -714.155; }
+  24.731% { stroke-dasharray: 73.5 286.5; stroke-dashoffset: -739.133; }
+  25.346% { stroke-dasharray: 52 308; stroke-dashoffset: -766.112; }
+  25.96% { stroke-dasharray: 41.5 318.5; stroke-dashoffset: -780.59; }
+  27.189% { stroke-dasharray: 27.5 332.5; stroke-dashoffset: -802.547; }
+  27.803% { stroke-dasharray: 18 342; stroke-dashoffset: -820.025; }
+  28.418% { stroke-dasharray: 15.5 344.5; stroke-dashoffset: -826.504; }
+  29.032% { stroke-dasharray: 15 345; stroke-dashoffset: -830.982; }
+  29.647% { stroke-dasharray: 19.5 340.5; stroke-dashoffset: -840.961; }
+  30.261% { stroke-dasharray: 22 338; stroke-dashoffset: -842.939; }
+  30.876% { stroke-dasharray: 27.5 332.5; stroke-dashoffset: -846.418; }
+  31.49% { stroke-dasharray: 35.5 324.5; stroke-dashoffset: -850.396; }
+  32.258% { stroke-dasharray: 65 295; stroke-dashoffset: -858.369; }
+  32.873% { stroke-dasharray: 95.5 264.5; stroke-dashoffset: -862.348; }
+  33.487% { stroke-dasharray: 190.5 169.5; stroke-dashoffset: -869.826; }
+  34.101% { stroke-dasharray: 224 136; stroke-dashoffset: -873.805; }
+  34.716% { stroke-dasharray: 243.5 116.5; stroke-dashoffset: -877.783; }
+  35.33% { stroke-dasharray: 257 103; stroke-dashoffset: -881.762; }
+  35.945% { stroke-dasharray: 275 85; stroke-dashoffset: -889.74; }
+  36.559% { stroke-dasharray: 280 80; stroke-dashoffset: -892.718; }
+  37.174% { stroke-dasharray: 278 82; stroke-dashoffset: -898.197; }
+  37.788% { stroke-dasharray: 277 83; stroke-dashoffset: -907.175; }
+  38.402% { stroke-dasharray: 275.5 84.5; stroke-dashoffset: -912.654; }
+  39.017% { stroke-dasharray: 273 87; stroke-dashoffset: -918.632; }
+  39.631% { stroke-dasharray: 269.5 90.5; stroke-dashoffset: -926.111; }
+  40.246% { stroke-dasharray: 261 99; stroke-dashoffset: -942.589; }
+  40.86% { stroke-dasharray: 255 105; stroke-dashoffset: -952.568; }
+  41.475% { stroke-dasharray: 245 115; stroke-dashoffset: -966.546; }
+  42.089% { stroke-dasharray: 219.5 140.5; stroke-dashoffset: -1000.025; }
+  42.704% { stroke-dasharray: 198.5 161.5; stroke-dashoffset: -1025.003; }
+  43.318% { stroke-dasharray: 171 189; stroke-dashoffset: -1056.482; }
+  43.932% { stroke-dasharray: 106.5 253.5; stroke-dashoffset: -1128.96; }
+  44.547% { stroke-dasharray: 84 276; stroke-dashoffset: -1155.438; }
+  45.161% { stroke-dasharray: 67 293; stroke-dashoffset: -1176.917; }
+  45.776% { stroke-dasharray: 43.5 316.5; stroke-dashoffset: -1208.395; }
+  46.39% { stroke-dasharray: 35 325; stroke-dashoffset: -1220.874; }
+  47.005% { stroke-dasharray: 28 332; stroke-dashoffset: -1231.352; }
+  47.619% { stroke-dasharray: 23 337; stroke-dashoffset: -1240.831; }
+  48.233% { stroke-dasharray: 15.5 344.5; stroke-dashoffset: -1256.309; }
+  48.848% { stroke-dasharray: 15 345; stroke-dashoffset: -1261.288; }
+  49.462% { stroke-dasharray: 16.5 343.5; stroke-dashoffset: -1265.266; }
+  50.077% { stroke-dasharray: 23.5 336.5; stroke-dashoffset: -1272.745; }
+  50.691% { stroke-dasharray: 28.5 331.5; stroke-dashoffset: -1277.223; }
+  51.306% { stroke-dasharray: 38 322; stroke-dashoffset: -1280.702; }
+  51.92% { stroke-dasharray: 49.5 310.5; stroke-dashoffset: -1285.18; }
+  52.535% { stroke-dasharray: 98.5 261.5; stroke-dashoffset: -1293.158; }
+  53.763% { stroke-dasharray: 188.5 171.5; stroke-dashoffset: -1301.115; }
+  54.378% { stroke-dasharray: 240 120; stroke-dashoffset: -1309.594; }
+  54.992% { stroke-dasharray: 254 106; stroke-dashoffset: -1313.572; }
+  55.607% { stroke-dasharray: 264 96; stroke-dashoffset: -1318.051; }
+  56.221% { stroke-dasharray: 270.5 89.5; stroke-dashoffset: -1322.529; }
+  56.836% { stroke-dasharray: 275 85; stroke-dashoffset: -1330.508; }
+  58.065% { stroke-dasharray: 272 88; stroke-dashoffset: -1341.465; }
+  58.679% { stroke-dasharray: 267.5 92.5; stroke-dashoffset: -1352.943; }
+  59.293% { stroke-dasharray: 265.5 94.5; stroke-dashoffset: -1359.922; }
+  59.908% { stroke-dasharray: 261.5 98.5; stroke-dashoffset: -1367.9; }
+  60.522% { stroke-dasharray: 250 110; stroke-dashoffset: -1387.878; }
+  61.137% { stroke-dasharray: 241.5 118.5; stroke-dashoffset: -1400.357; }
+  61.751% { stroke-dasharray: 230.5 129.5; stroke-dashoffset: -1415.835; }
+  62.366% { stroke-dasharray: 216.5 143.5; stroke-dashoffset: -1434.314; }
+  62.98% { stroke-dasharray: 172.5 187.5; stroke-dashoffset: -1486.292; }
+  63.594% { stroke-dasharray: 140.5 219.5; stroke-dashoffset: -1522.771; }
+  64.209% { stroke-dasharray: 111 249; stroke-dashoffset: -1556.249; }
+  64.823% { stroke-dasharray: 69.5 290.5; stroke-dashoffset: -1606.728; }
+  65.438% { stroke-dasharray: 56 304; stroke-dashoffset: -1624.206; }
+  66.052% { stroke-dasharray: 45.5 314.5; stroke-dashoffset: -1639.185; }
+  66.667% { stroke-dasharray: 37 323; stroke-dashoffset: -1652.163; }
+  67.281% { stroke-dasharray: 24.5 335.5; stroke-dashoffset: -1673.142; }
+  67.896% { stroke-dasharray: 20 340; stroke-dashoffset: -1682.12; }
+  68.51% { stroke-dasharray: 16.5 343.5; stroke-dashoffset: -1689.598; }
+  69.124% { stroke-dasharray: 17.5 342.5; stroke-dashoffset: -1698.077; }
+  70.353% { stroke-dasharray: 23.5 336.5; stroke-dashoffset: -1707.034; }
+  70.968% { stroke-dasharray: 29.5 330.5; stroke-dashoffset: -1711.012; }
+  71.582% { stroke-dasharray: 50 310; stroke-dashoffset: -1719.491; }
+  72.197% { stroke-dasharray: 67 293; stroke-dashoffset: -1723.469; }
+  72.811% { stroke-dasharray: 95.5 264.5; stroke-dashoffset: -1727.448; }
+  73.425% { stroke-dasharray: 182.5 177.5; stroke-dashoffset: -1735.926; }
+  74.04% { stroke-dasharray: 214.5 145.5; stroke-dashoffset: -1740.405; }
+  74.654% { stroke-dasharray: 234 126; stroke-dashoffset: -1744.383; }
+  75.269% { stroke-dasharray: 249.5 110.5; stroke-dashoffset: -1748.362; }
+  75.883% { stroke-dasharray: 267.5 92.5; stroke-dashoffset: -1756.34; }
+  76.498% { stroke-dasharray: 273 87; stroke-dashoffset: -1760.818; }
+  77.112% { stroke-dasharray: 273 87; stroke-dashoffset: -1764.797; }
+  77.727% { stroke-dasharray: 271.5 88.5; stroke-dashoffset: -1774.775; }
+  78.341% { stroke-dasharray: 270.5 89.5; stroke-dashoffset: -1780.254; }
+  79.57% { stroke-dasharray: 265 95; stroke-dashoffset: -1793.711; }
+  80.184% { stroke-dasharray: 257.5 102.5; stroke-dashoffset: -1809.689; }
+  81.413% { stroke-dasharray: 244 116; stroke-dashoffset: -1831.646; }
+  82.028% { stroke-dasharray: 234 126; stroke-dashoffset: -1846.125; }
+  82.642% { stroke-dasharray: 202.5 157.5; stroke-dashoffset: -1886.603; }
+  83.257% { stroke-dasharray: 178 182; stroke-dashoffset: -1915.082; }
+  83.871% { stroke-dasharray: 146.5 213.5; stroke-dashoffset: -1951.06; }
+  84.485% { stroke-dasharray: 90.5 269.5; stroke-dashoffset: -2016.038; }
+  85.1% { stroke-dasharray: 71 289; stroke-dashoffset: -2039.517; }
+  85.714% { stroke-dasharray: 58 302; stroke-dashoffset: -2057.495; }
+  86.329% { stroke-dasharray: 46 314; stroke-dashoffset: -2073.474; }
+  86.943% { stroke-dasharray: 30 330; stroke-dashoffset: -2097.452; }
+  87.558% { stroke-dasharray: 24 336; stroke-dashoffset: -2107.931; }
+  88.172% { stroke-dasharray: 20 340; stroke-dashoffset: -2115.909; }
+  88.786% { stroke-dasharray: 16 344; stroke-dashoffset: -2128.388; }
+  90.015% { stroke-dasharray: 18.5 341.5; stroke-dashoffset: -2136.845; }
+  90.63% { stroke-dasharray: 23 337; stroke-dashoffset: -2140.323; }
+  91.244% { stroke-dasharray: 36 324; stroke-dashoffset: -2148.802; }
+  91.859% { stroke-dasharray: 46.5 313.5; stroke-dashoffset: -2153.28; }
+  92.473% { stroke-dasharray: 63.5 296.5; stroke-dashoffset: -2157.258; }
+  93.088% { stroke-dasharray: 133.5 226.5; stroke-dashoffset: -2164.737; }
+  93.702% { stroke-dasharray: 179.5 180.5; stroke-dashoffset: -2168.715; }
+  94.316% { stroke-dasharray: 214.5 145.5; stroke-dashoffset: -2172.194; }
+  94.931% { stroke-dasharray: 236.5 123.5; stroke-dashoffset: -2176.172; }
+  95.545% { stroke-dasharray: 263.5 96.5; stroke-dashoffset: -2184.151; }
+  96.16% { stroke-dasharray: 271 89; stroke-dashoffset: -2188.129; }
+  96.774% { stroke-dasharray: 276.5 83.5; stroke-dashoffset: -2191.608; }
+  97.389% { stroke-dasharray: 276 84; stroke-dashoffset: -2196.086; }
+  98.003% { stroke-dasharray: 276 84; stroke-dashoffset: -2205.065; }
+  99.232% { stroke-dasharray: 272 88; stroke-dashoffset: -2217.022; }
+  99.846% { stroke-dasharray: 267 93; stroke-dashoffset: -2230.5; }
+  100% { stroke-dasharray: 268 92; stroke-dashoffset: -2230.5; }
+}

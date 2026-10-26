@@ -49,6 +49,7 @@ import {
   SESSION_LOST_MESSAGE,
   turnIsRunning,
   type TranscriptState,
+  type TranscriptTurn,
 } from "./transcript";
 
 /** How close to the bottom (px) still counts as following the stream. */
@@ -83,6 +84,15 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
   "image/bmp": "bmp",
 };
+
+interface Outgoing {
+  threadId: number | null;
+  prompt: string;
+  attachments: string[];
+  /** Turns present when it was sent; the real Turn lands at this index. */
+  baseCount: number;
+  startedAt: string;
+}
 
 interface PendingImage {
   path: string;
@@ -141,6 +151,8 @@ export function ThreadView({
   const [pages, setPages] = useState<TranscriptPages>(new Map());
   const [input, setInput] = useState(draft ?? "");
   const [sending, setSending] = useState(false);
+  // The prompt just sent, shown before Core confirms the Turn so sending feels instant.
+  const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -349,6 +361,25 @@ export function ThreadView({
   };
 
   const turnCount = transcript.turnOffset + transcript.turns.length;
+  // Until the real Turn arrives, the sent prompt stands in for it.
+  const pendingOutgoing =
+    outgoing && outgoing.threadId === threadId && turnCount <= outgoing.baseCount ? outgoing : null;
+  const outgoingTurn: TranscriptTurn | null = pendingOutgoing && {
+    id: 0,
+    turnIndex: pendingOutgoing.baseCount,
+    prompt: pendingOutgoing.prompt,
+    model: null,
+    effort: null,
+    attachments: pendingOutgoing.attachments,
+    status: "running",
+    startedAt: pendingOutgoing.startedAt,
+    completedAt: null,
+    items: [],
+    error: null,
+    retryNotice: null,
+    approvals: [],
+    unknownEvents: [],
+  };
   const virtualizer = useVirtualizer({
     count: turnCount,
     getScrollElement: () => scrollRef.current,
@@ -398,7 +429,7 @@ export function ThreadView({
     if (pinnedAt !== null && Math.abs(el.scrollTop - pinnedAt) > 1) return;
     el.scrollTop = el.scrollHeight;
     pinnedAtRef.current = el.scrollTop;
-  }, [transcript.turns, totalSize]);
+  }, [transcript.turns, totalSize, pendingOutgoing]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -615,6 +646,14 @@ export function ThreadView({
 
     setSending(true);
     handleInputChange("");
+    followRef.current = true;
+    setOutgoing({
+      threadId,
+      prompt,
+      attachments: pendingImages.map((i) => i.path),
+      baseCount: turnCount,
+      startedAt: new Date().toISOString(),
+    });
 
     try {
       let targetThreadId = threadId;
@@ -633,9 +672,11 @@ export function ThreadView({
         );
         if (created.status === "ok") {
           targetThreadId = created.data.id;
+          setOutgoing((o) => o && { ...o, threadId: targetThreadId });
           onThreadCreated(created.data);
         } else {
           console.error("Failed to create thread:", created.error);
+          setOutgoing(null);
           setSending(false);
           return;
         }
@@ -645,7 +686,11 @@ export function ThreadView({
       pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
       setPendingImages([]);
 
-      await commands.sendPrompt(targetThreadId, prompt, attachments);
+      const sent = await commands.sendPrompt(targetThreadId, prompt, attachments);
+      if (sent.status !== "ok") setOutgoing(null);
+    } catch (err) {
+      setOutgoing(null);
+      throw err;
     } finally {
       setSending(false);
     }
@@ -692,7 +737,7 @@ export function ThreadView({
         </details>
       )}
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
-        {turnCount === 0 ? (
+        {turnCount === 0 && !outgoingTurn ? (
           <div className="empty-thread">
             <p>Type a prompt below and watch the agent's answer stream in.</p>
           </div>
@@ -711,6 +756,9 @@ export function ThreadView({
                   {turn ? (
                     <TurnView
                       turn={turn}
+                      instant={
+                        outgoing?.threadId === threadId && row.index === outgoing.baseCount
+                      }
                       provider={transcript.thread?.provider ?? draftProvider}
                       onRespond={handleRespond}
                       isWorking={isTurnActive}
@@ -721,6 +769,16 @@ export function ThreadView({
                 </div>
               );
             })}
+          </div>
+        )}
+        {outgoingTurn && (
+          <div className="transcript-outgoing">
+            <TurnView
+              turn={outgoingTurn}
+              provider={transcript.thread?.provider ?? draftProvider}
+              onRespond={handleRespond}
+              isWorking
+            />
           </div>
         )}
       </div>

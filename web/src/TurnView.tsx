@@ -244,14 +244,17 @@ export const TurnView = memo(function TurnView({
   provider,
   onRespond,
   isWorking,
+  instant = false,
 }: {
   turn: TranscriptTurn;
   provider: string;
   onRespond: (approvalId: string, decision: ApprovalDecision) => void;
   isWorking: boolean;
+  /** Skips the send animation: the prompt is already on screen as the outgoing Turn. */
+  instant?: boolean;
 }) {
   const [justSent] = useState(
-    () => turn.status === "running" && Date.now() - Date.parse(turn.startedAt) < JUST_SENT_MS
+    () => !instant && turn.status === "running" && Date.now() - Date.parse(turn.startedAt) < JUST_SENT_MS
   );
   const blocks = groupTurnItems(turn.items);
   const approvals = turn.approvals ?? [];

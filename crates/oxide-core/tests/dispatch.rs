@@ -194,13 +194,10 @@ fn the_setup_command_runs_in_the_worktree_with_the_project_root_and_its_output_i
     let worktree = PathBuf::from(thread.worktree_path.clone().unwrap());
     assert!(worktree.join(".setup-ran").exists());
     let output = thread.setup_output.clone().unwrap().replace("\\\\?\\", "");
-    let canonical = worktree
-        .canonicalize()
-        .unwrap()
-        .display()
-        .to_string()
-        .replace("\\\\?\\", "");
-    assert!(output.contains(&canonical), "{output}");
+    // `cmd.exe` may print an 8.3 short path for the current directory on CI,
+    // so compare the worktree's stable leaf instead of its full canonical path.
+    let worktree_name = worktree.file_name().unwrap().to_string_lossy();
+    assert!(output.contains(worktree_name.as_ref()), "{output}");
     assert!(
         output.contains(&format!(
             "root={}",

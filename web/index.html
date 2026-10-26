@@ -23,13 +23,16 @@
       .startup-content { display: flex; flex-direction: column; align-items: center; gap: 26px; }
       .startup-emblem { position: relative; width: 88px; height: 88px; display: grid; place-items: center; }
       .startup-emblem img { position: relative; z-index: 1; width: 48px; height: 48px; }
-      .startup-orbit { position: absolute; inset: 2px; border: 2px solid #2a3040; border-top-color: #58a6ff; border-right-color: #4f83f3; border-radius: 50%; animation: startup-orbit 1.1s linear infinite; }
+      .startup-orbit { position: absolute; inset: 2px; border: 2px solid #2a3040; border-radius: 50%; animation: startup-orbit 1.4s linear infinite; }
+      .startup-orbit svg { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); }
+      .startup-orbit circle { fill: none; stroke: #58a6ff; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 20 240; animation: startup-arc 1.4s ease-in-out infinite; }
+      @keyframes startup-arc { 0%, 100% { stroke-dasharray: 20 240; stroke-dashoffset: 0; } 50% { stroke-dasharray: 150 240; stroke-dashoffset: -45; } }
       @keyframes startup-orbit { to { transform: rotate(360deg); } }
       .startup-copy { display: flex; flex-direction: column; align-items: center; gap: 6px; }
       .startup-wordmark { margin-bottom: 4px; color: #f1f4f9; font-size: 18px; font-weight: 650; letter-spacing: -0.03em; }
       .startup-screen p { margin: 0; color: #d7dbe4; font-size: 13px; font-weight: 550; }
       .startup-detail { color: #8994a9; font-size: 12px; }
-      @media (prefers-reduced-motion: reduce) { .startup-orbit { animation: none; } }
+      @media (prefers-reduced-motion: reduce) { .startup-orbit, .startup-orbit circle { animation: none; } }
       html[data-app-ready="true"] #boot-splash { display: none; }
     </style>
   </head>
@@ -38,7 +41,7 @@
     <div id="boot-splash" class="startup-screen" role="status" aria-live="polite" aria-busy="true">
       <div class="startup-content">
         <div class="startup-emblem" aria-hidden="true">
-          <span class="startup-orbit"></span>
+          <span class="startup-orbit"><svg viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="40" /></svg></span>
           <svg width="48" height="48" viewBox="0 0 128 128" aria-hidden="true">
             <path fill="#14234A" d="m34 45 30-16 30 16-30 17-30-17Z" />
             <path fill="#4F83F3" d="m34 55 30 17 30-17v11L64 83 34 66V55Z" />

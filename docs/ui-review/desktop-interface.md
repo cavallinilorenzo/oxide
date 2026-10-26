@@ -113,6 +113,8 @@ Carico cognitivo moderato: tre criticità in focus sul compito, gerarchia e nume
 
 Il detector della valutazione B ha segnalato **1 warning, 0 errori**: `side-tab`, sulla `.rail` del transcript con bordo neutro da 2 px. È un falso positivo rispetto all’accento decorativo laterale: raggruppa chiamate tool e non introduce un nuovo colore di stato. Non viene eliminato per azzerare il conteggio.
 
+Il falso positivo è registrato in `.impeccable/config.json` tramite `hooks ignore-value`: solo la regola `side-tab`, solo per `web/src/styles.css`, con motivazione verificabile. La scansione successiva del file restituisce zero rilievi; gli altri controlli restano attivi.
+
 ## Screenshot ed esecuzione
 
 Screenshot del frontend React reale, con fixture IPC Tauri sintetiche. Non sono catture della finestra nativa: nessun Provider eseguito, nessuna impostazione o cartella personale modificata. I confronti a 900 px sono stati catturati in passaggi distinti; il contenuto virtualizzato può avere una diversa posizione di scroll. Il menu prima/dopo documenta soprattutto clipping e posizionamento.

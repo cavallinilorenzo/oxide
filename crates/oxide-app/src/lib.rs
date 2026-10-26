@@ -1956,7 +1956,10 @@ pub fn run() {
             core.set_system(Arc::new(system::MacSystem::new(app.handle().clone())));
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 #[cfg(target_os = "windows")]
-                window.hide_menu()?;
+                {
+                    window.hide_menu()?;
+                    window.set_decorations(false)?;
+                }
                 core.set_window_active(window_is_active(&window));
             }
             app.manage(Arc::new(core));

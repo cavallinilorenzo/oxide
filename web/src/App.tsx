@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
@@ -87,18 +87,19 @@ export function App() {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: terminalSize.preferred,
   }, showTools && !showSettings);
   const [editorBundleId, setEditorBundleId] = useState("");
-  const [showPalette, setShowPalette] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
-  const [pendingDeleteThread, setPendingDeleteThread] = useState<{
-    id: number;
-    title: string;
-    discardChanges: boolean;
-  } | null>(null);
-  const [deletingThread, setDeletingThread] = useState(false);
+  const overlays = useRef<WorkspaceOverlaysHandle>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
   const [showBoard, setShowBoard] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const onProjectsScanned = useCallback((next: Project[]) => {
+    setProjects((previous) => previous && previous.length === next.length && previous.every((project, index) => {
+      const other = next[index];
+      return project.id === other.id && project.name === other.name && project.path === other.path &&
+        project.open === other.open && project.hidden === other.hidden && project.missing === other.missing;
+    }) ? previous : next);
+  }, []);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
@@ -117,14 +118,6 @@ export function App() {
       ? previous
       : [...previous, context]);
   }, []);
-
-  useEffect(() => {
-    if (!showPalette) return;
-    // Scanned repositories are only offered here, so refresh them while the palette is open.
-    void commands.rescanProjects().then((res) => {
-      if (res.status === "ok") setProjects(res.data);
-    });
-  }, [showPalette]);
 
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
@@ -344,42 +337,19 @@ export function App() {
 
   const deleteThread = useCallback((threadId: number) => {
     const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
-    setOpenError(null);
-    setPendingDeleteThread({ id: threadId, title, discardChanges: false });
+    overlays.current?.openDelete(threadId, title);
   }, [threads]);
 
-  const confirmDeleteThread = useCallback(async () => {
-    if (!pendingDeleteThread || deletingThread) return;
-    setDeletingThread(true);
-    setOpenError(null);
-    try {
-      const result = await performThreadDelete(
-        pendingDeleteThread.id,
-        pendingDeleteThread.discardChanges,
-        commands.deleteThread,
-      );
-      if (result.status === "error") {
-        setOpenError(result.message);
-      } else if (result.status === "needs-confirmation") {
-        setPendingDeleteThread((current) => current ? { ...current, discardChanges: true } : null);
-      } else if (result.status === "deleted") {
-        const deletedId = pendingDeleteThread.id;
-        setThreads((prev) => threadsAfterDelete(prev, deletedId));
-        setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
-        setPendingDeleteThread(null);
-      }
-    } catch (error) {
-      setOpenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDeletingThread(false);
-    }
-  }, [deletingThread, pendingDeleteThread]);
+  const onThreadDeleted = useCallback((deletedId: number) => {
+    setThreads((prev) => threadsAfterDelete(prev, deletedId));
+    setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isProjectPaletteShortcut(e)) {
         e.preventDefault();
-        setShowPalette(true);
+        overlays.current?.openPalette();
         return;
       }
       if (isNewThreadShortcut(e)) {
@@ -483,37 +453,10 @@ export function App() {
 
   return (
     <div className={`window ${isMac ? "macos" : "windows"}`}>
+      {isWindows && <WindowResizeHandles />}
       <QuitDialog />
-      {pendingDeleteThread && (
-        <div className="modal-backdrop">
-          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
-            <h2 id="delete-thread-title">
-              {pendingDeleteThread.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pendingDeleteThread.title}”?`}
-            </h2>
-            <p>
-              {pendingDeleteThread.discardChanges
-                ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept."
-                : "Its conversation is removed permanently."}
-            </p>
-            {openError && <p className="error" role="alert">{openError}</p>}
-            <div className="modal-actions">
-              <button autoFocus onClick={() => setPendingDeleteThread(null)} disabled={deletingThread}>Cancel</button>
-              <button onClick={() => void confirmDeleteThread()} disabled={deletingThread}>
-                {deletingThread ? "Deleting…" : "Delete Thread"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showPalette && (
-        <ProjectPalette
-          projects={projects ?? []}
-          defaultParent="~/Developer"
-          onClose={() => setShowPalette(false)}
-          onStartThread={startThreadIn}
-          onOpenProject={openProject}
-        />
-      )}
+      <WorkspaceOverlays ref={overlays} projects={projects ?? []} onProjectsScanned={onProjectsScanned}
+        onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); setShowBoard(false); setSelectedThreadId(null); }} />}
         <div className="header-project" data-tauri-drag-region>
@@ -578,6 +521,7 @@ export function App() {
         >
           <TerminalIcon size={16} />
         </button>
+        {isWindows && <WindowControls />}
         </div>
       </header>
       <div className="body" ref={bodyRef} style={{
@@ -627,7 +571,7 @@ export function App() {
               void startNewThread();
             }}
             onRenameThread={onThreadTitleChange}
-            onOpenPalette={() => setShowPalette(true)}
+            onOpenPalette={() => overlays.current?.openPalette()}
             onOpenBoard={(p) => {
               if (p.id !== selected?.id) {
                 restore.current = null;
@@ -707,7 +651,7 @@ export function App() {
               <div className="empty-state">
                 <RepoIcon size={24} />
                 <p>Open a Project to begin.</p>
-                <button className="btn primary" onClick={() => setShowPalette(true)}>
+                <button className="btn primary" onClick={() => overlays.current?.openPalette()}>
                   Open a Project <kbd>{shortcutShift}N</kbd>
                 </button>
               </div>
@@ -1020,4 +964,81 @@ function AppMenu({ onNewThread }: { onNewThread: () => void }) {
       </div>}
     </div>)}
   </nav>;
+}
+
+function WindowControls() {
+  const window = getCurrentWindow();
+  return <div className="window-controls" role="group" aria-label="Window controls">
+    <button type="button" aria-label="Minimize" title="Minimize" onClick={() => void window.minimize()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10" /></svg>
+    </button>
+    <button type="button" aria-label="Maximize or restore" title="Maximize or restore" onClick={() => void window.toggleMaximize()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" /></svg>
+    </button>
+    <button type="button" className="window-close" aria-label="Close window" title="Close" onClick={() => void window.close()}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10" /></svg>
+    </button>
+  </div>;
+}
+
+function WindowResizeHandles() {
+  const directions = ["North", "NorthEast", "East", "SouthEast", "South", "SouthWest", "West", "NorthWest"] as const;
+  return <div className="window-resize-handles" aria-hidden="true">
+    {directions.map((direction) => <div key={direction} className={`window-resize window-resize-${direction.toLowerCase()}`}
+      onMouseDown={(event) => { if (event.button === 0) void getCurrentWindow().startResizeDragging(direction); }} />)}
+  </div>;
+}
+
+type WorkspaceOverlaysHandle = { openPalette: () => void; openDelete: (id: number, title: string) => void };
+
+function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, onOpenProject, onThreadDeleted }: {
+  ref: Ref<WorkspaceOverlaysHandle>;
+  projects: Project[];
+  onProjectsScanned: (projects: Project[]) => void;
+  onStartThread: (project: Project) => void;
+  onOpenProject: (project: Project) => void;
+  onThreadDeleted: (id: number) => void;
+}) {
+  const [showPalette, setShowPalette] = useState(false);
+  const [pending, setPending] = useState<{ id: number; title: string; discardChanges: boolean } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useImperativeHandle(ref, () => ({
+    openPalette: () => setShowPalette(true),
+    openDelete: (id, title) => { setError(null); setPending({ id, title, discardChanges: false }); },
+  }), []);
+  useEffect(() => {
+    if (!showPalette) return;
+    let active = true;
+    void commands.rescanProjects().then((result) => {
+      if (active && result.status === "ok") onProjectsScanned(result.data);
+    });
+    return () => { active = false; };
+  }, [showPalette, onProjectsScanned]);
+  async function confirmDelete() {
+    if (!pending || deleting) return;
+    setDeleting(true); setError(null);
+    try {
+      const result = await performThreadDelete(pending.id, pending.discardChanges, commands.deleteThread);
+      if (result.status === "error") setError(result.message);
+      else if (result.status === "needs-confirmation") setPending((current) => current ? { ...current, discardChanges: true } : null);
+      else { onThreadDeleted(pending.id); setPending(null); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setDeleting(false); }
+  }
+  return <>
+    {pending && <div className="modal-backdrop">
+      <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
+        <h2 id="delete-thread-title">{pending.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pending.title}”?`}</h2>
+        <p>{pending.discardChanges ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept." : "Its conversation is removed permanently."}</p>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="modal-actions">
+          <button autoFocus onClick={() => setPending(null)} disabled={deleting}>Cancel</button>
+          <button onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "Deleting…" : "Delete Thread"}</button>
+        </div>
+      </div>
+    </div>}
+    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => setShowPalette(false)}
+      onStartThread={onStartThread} onOpenProject={onOpenProject} />}
+  </>;
 }

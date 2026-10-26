@@ -731,7 +731,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .pr-views .pr-branch { font-family: var(--mono); font-size: 11.5px; padding: 0 5px; border-radius: 4px; background: var(--bg3); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 
 /* Review */
-.pr-views .pr-nav { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2) 0 var(--pr-pad); height: 36px; border-bottom: 1px solid var(--line); flex: none; }
+.pr-views .pr-nav { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) 0 var(--pr-pad); flex: none; }
 .pr-views .pr-nav-title { color: var(--dim); font-weight: 600; }
 .pr-views .pr-back { color: var(--dim); min-height: var(--control-sm); margin-left: -6px; padding: 0 6px; border-radius: var(--radius-control); }
 .pr-views .pr-back:hover:not(:disabled) { color: var(--fg); background: var(--bg3); border: 0; }
@@ -767,7 +767,6 @@ code { font-family: var(--mono); font-size: 12px; }
 .pr-views .md li:not(.md-task)::before { content: ""; flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--faint); margin-top: 9px; }
 .pr-views .md-box { flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--control-line); border-radius: 4px; }
 .pr-views .md-box.done { background: var(--acc) center / 10px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); border-color: var(--acc); }
-.pr-views .pr-desc.clamped { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 .pr-views .pr-section > button.link { justify-self: start; min-height: 0; }
 .pr-views .pr-comment { border: 0; border-radius: 0; background: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .pr-views .pr-comment + .pr-comment { padding-top: var(--space-3); border-top: 1px solid var(--line); }
@@ -892,12 +891,13 @@ code { font-family: var(--mono); font-size: 12px; }
 .model-picker-header h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .model-picker-header .close-button { background: none; border: 0; color: var(--dim); padding: 4px; }
 .model-picker-header .close-button:hover { color: var(--fg); }
-.effort-picker-modal { width: 420px; max-width: 90vw; padding: 0; display: flex; flex-direction: column; overflow: hidden; gap: 0; }
-.effort-selector-section { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--bg); border-bottom: 1px solid var(--line); }
-.effort-label { font-size: 12px; color: var(--dim); }
-.effort-pills { display: flex; gap: 4px; flex-wrap: wrap; }
-.effort-pill { padding: 2px 12px; font-size: 12px; border-radius: 99px; background: none; }
-.effort-pill.selected { background: var(--acc); color: var(--acc-fg); border-color: var(--acc); }
+.effort-menu { position: fixed; z-index: 120; width: 208px; max-width: calc(100vw - 24px); padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg2); box-shadow: 0 8px 24px #0006; }
+.effort-label { font-size: 11px; color: var(--dim); }
+.effort-select-row { display: flex; flex-direction: column; gap: 6px; }
+.effort-options { display: flex; flex-direction: column; gap: 2px; }
+.effort-option { width: 100%; justify-content: space-between; min-height: 32px; padding: 6px 8px; border-color: transparent; background: transparent; text-align: left; }
+.effort-option:hover:not(:disabled), .effort-option[aria-selected="true"] { background: var(--bg4); border-color: transparent; }
+.effort-option[aria-selected="true"] { color: var(--acc2); }
 .model-picker-layout { display: flex; height: 380px; }
 .provider-rail { width: 150px; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 8px; gap: 2px; background: var(--bg); }
 .rail-tab { justify-content: flex-start; gap: 8px; padding: 7px 10px; border: 0; background: none; color: var(--dim); font-size: 12.5px; }

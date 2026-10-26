@@ -1,8 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
-import { applyModelShortcut, filterModels } from "./modelPicker";
+import {
+  applyModelShortcut,
+  collapseEffortVariants,
+  filterModels,
+  modelFamilyId,
+} from "./modelPicker";
 
 const PROVIDERS = [
   { id: "claude", name: "Claude" },
@@ -27,6 +32,7 @@ export interface ModelEffortPickerProps {
     effort: string | null
   ) => void;
   initialMode?: "model" | "effort";
+  anchorElement?: HTMLElement | null;
 }
 
 export function ModelEffortPicker({
@@ -39,6 +45,7 @@ export function ModelEffortPicker({
   midThreadModelSwitch,
   onSelectModelAndEffort,
   initialMode = "model",
+  anchorElement = null,
 }: ModelEffortPickerProps) {
   const [activeTab, setActiveTab] = useState<string>(currentProvider);
   const [search, setSearch] = useState("");
@@ -49,6 +56,12 @@ export function ModelEffortPicker({
   const [loading, setLoading] = useState(false);
   const [selectedEffort, setSelectedEffort] = useState<string | null>(currentEffort);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const effortMenuRef = useRef<HTMLDivElement>(null);
+  const [effortMenuPosition, setEffortMenuPosition] = useState({
+    top: 0,
+    left: 0,
+    ready: false,
+  });
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
@@ -59,6 +72,51 @@ export function ModelEffortPicker({
       searchInputRef.current?.focus();
     }
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !effortMode || !anchorElement) return;
+
+    const updatePosition = () => {
+      const menu = effortMenuRef.current;
+      if (!menu) return;
+
+      const triggerRect = anchorElement.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const left = Math.min(
+        Math.max(12, triggerRect.left),
+        Math.max(12, window.innerWidth - menuRect.width - 12)
+      );
+      const top = Math.max(12, triggerRect.top - menuRect.height - 8);
+
+      setEffortMenuPosition((current) =>
+        current.ready && current.top === top && current.left === left
+          ? current
+          : { top, left, ready: true }
+      );
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, effortMode, anchorElement]);
+
+  useEffect(() => {
+    if (!open || !effortMode) return;
+
+    const handleOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (effortMenuRef.current?.contains(target) || anchorElement?.contains(target)) return;
+      onClose();
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointer);
+    return () => document.removeEventListener("pointerdown", handleOutsidePointer);
+  }, [open, effortMode, anchorElement, onClose]);
 
   // Load favourites and refresh catalogs
   useEffect(() => {
@@ -112,9 +170,11 @@ export function ModelEffortPicker({
 
   const toggleFavourite = async (modelId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const next = favourites.includes(modelId)
-      ? favourites.filter((id) => id !== modelId)
-      : [...favourites, modelId];
+    const family = modelFamilyId(modelId);
+    const isFav = favourites.some((id) => modelFamilyId(id) === family);
+    const next = isFav
+      ? favourites.filter((id) => modelFamilyId(id) !== family)
+      : [...favourites, family];
     setFavourites(next);
     await commands.setFavouriteModels(next);
   };
@@ -123,16 +183,13 @@ export function ModelEffortPicker({
   const tabModels = useMemo(() => {
     if (activeTab === "favourites") {
       const allModels = Object.values(catalogs).flat();
-      const unique = new Map<string, ModelInfo>();
-      for (const m of allModels) {
-        if (favourites.includes(m.id) && !unique.has(m.id)) {
-          unique.set(m.id, m);
-        }
-      }
-      return Array.from(unique.values());
+      const favouriteModels = allModels.filter((model) =>
+        favourites.some((id) => modelFamilyId(id) === modelFamilyId(model.id))
+      );
+      return collapseEffortVariants(favouriteModels, selectedEffort);
     }
-    return catalogs[activeTab] || [];
-  }, [activeTab, catalogs, favourites]);
+    return collapseEffortVariants(catalogs[activeTab] || [], selectedEffort);
+  }, [activeTab, catalogs, favourites, selectedEffort]);
 
   const { current: visibleCurrent, legacy: visibleLegacy } = useMemo(
     () => filterModels(tabModels, search),
@@ -182,6 +239,7 @@ export function ModelEffortPicker({
     onSelectModelAndEffort(currentProvider, currentModel, effort);
     if (effortMode) {
       onClose();
+      anchorElement?.focus();
     }
   };
 
@@ -192,6 +250,7 @@ export function ModelEffortPicker({
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+        if (effortMode) anchorElement?.focus();
         return;
       }
 
@@ -214,6 +273,8 @@ export function ModelEffortPicker({
     flatVisible,
     activeTab,
     currentProvider,
+    anchorElement,
+    effortMode,
     modelSwitchLocked,
     handleSelectModel,
     onClose,
@@ -226,39 +287,68 @@ export function ModelEffortPicker({
 
   if (effortMode) {
     const efforts = activeModelInfo?.supportedEfforts ?? [];
+    const effortValue = efforts.includes(selectedEffort || "")
+      ? selectedEffort!
+      : activeModelInfo?.defaultEffort ?? efforts[0] ?? "";
     return (
-      <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Effort Selector">
-        <div className="modal effort-picker-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="model-picker-header">
-            <h2>Reasoning Effort</h2>
-            <button type="button" className="close-button" onClick={onClose} aria-label="Close">
-              <XIcon size={16} />
-            </button>
+      <div
+        ref={effortMenuRef}
+        className="effort-menu"
+        role="group"
+        aria-label="Reasoning effort"
+        style={{
+          top: `${effortMenuPosition.top}px`,
+          left: `${effortMenuPosition.left}px`,
+          visibility: effortMenuPosition.ready ? "visible" : "hidden",
+        }}
+      >
+        {efforts.length === 0 ? (
+          <span className="effort-label">
+            {loading ? "Loading..." : "This model has no effort levels."}
+          </span>
+        ) : (
+          <div className="effort-select-row">
+            <span className="effort-label">Reasoning effort</span>
+            <div
+              className="effort-options"
+              role="listbox"
+              aria-label="Reasoning effort"
+              onKeyDown={(event) => {
+                const options = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='option']")
+                );
+                const index = options.findIndex((option) => option === document.activeElement);
+                let next: number;
+                switch (event.key) {
+                  case "ArrowDown": next = (index + 1 + options.length) % options.length; break;
+                  case "ArrowUp": next = (index - 1 + options.length) % options.length; break;
+                  case "Home": next = 0; break;
+                  case "End": next = options.length - 1; break;
+                  default: return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                options[next]?.focus();
+              }}
+            >
+              {efforts.map((effort) => (
+                <button
+                  key={effort}
+                  type="button"
+                  role="option"
+                  aria-selected={effortValue === effort}
+                  tabIndex={effortValue === effort ? 0 : -1}
+                  autoFocus={effortValue === effort}
+                  className="effort-option"
+                  onClick={() => handleSelectEffort(effort)}
+                >
+                  <span>{effort.charAt(0).toUpperCase() + effort.slice(1)}</span>
+                  {effortValue === effort && <CheckIcon size={16} />}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="effort-selector-section">
-            {efforts.length === 0 ? (
-              <span className="effort-label">
-                {loading ? "Loading..." : "This model has no effort levels."}
-              </span>
-            ) : (
-              <div className="effort-pills" role="radiogroup" aria-label="Reasoning Effort">
-                {efforts.map((eff) => (
-                  <button
-                    key={eff}
-                    type="button"
-                    role="radio"
-                    aria-checked={selectedEffort === eff}
-                    autoFocus={selectedEffort === eff || (!selectedEffort && eff === efforts[0])}
-                    className={`effort-pill ${selectedEffort === eff ? "selected" : ""}`}
-                    onClick={() => handleSelectEffort(eff)}
-                  >
-                    {eff.charAt(0).toUpperCase() + eff.slice(1)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -346,8 +436,10 @@ export function ModelEffortPicker({
                 <div className="models-group">
                   <div className="models-group-title">Models</div>
                   {visibleCurrent.map((m, idx) => {
-                    const isSelected = m.id === currentModel;
-                    const isFav = favourites.includes(m.id);
+                    const isSelected = modelFamilyId(m.id) === modelFamilyId(currentModel ?? "");
+                    const isFav = favourites.some(
+                      (id) => modelFamilyId(id) === modelFamilyId(m.id)
+                    );
                     const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
                     const shortcutNumber = idx + 1 <= 9 ? idx + 1 : null;
 
@@ -396,8 +488,10 @@ export function ModelEffortPicker({
                 <div className="models-group legacy-group">
                   <div className="models-group-title">Legacy Models</div>
                   {visibleLegacy.map((m, idx) => {
-                    const isSelected = m.id === currentModel;
-                    const isFav = favourites.includes(m.id);
+                    const isSelected = modelFamilyId(m.id) === modelFamilyId(currentModel ?? "");
+                    const isFav = favourites.some(
+                      (id) => modelFamilyId(id) === modelFamilyId(m.id)
+                    );
                     const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
                     const overallIndex = visibleCurrent.length + idx + 1;
                     const shortcutNumber = overallIndex <= 9 ? overallIndex : null;

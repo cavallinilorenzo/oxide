@@ -110,6 +110,8 @@ export const commands = {
 	 *  asked; the Surface decides when to refresh.
 	 */
 	pullRequestState: (projectId: number) => typedError<PullRequestState_Serialize, AppError>(__TAURI_INVOKE("pull_request_state", { projectId })),
+	/**  The repository's branches on GitHub, for choosing a pull request's base. */
+	pullRequestBaseBranches: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("pull_request_base_branches", { projectId })),
 	/**  Title, body and base prefilled from the branch's commits. */
 	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
 	/**  Pushes the branch if needed, then opens a pull request for it. */

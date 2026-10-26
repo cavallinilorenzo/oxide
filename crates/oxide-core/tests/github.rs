@@ -167,6 +167,42 @@ fn input(title: &str, base: &str, draft: bool) -> PullRequestInput {
 }
 
 #[test]
+fn pr_base_branches_come_from_github_and_request_all_pages() {
+    let f = fixture();
+    f.core.create_branch(f.project.id, "local-only").unwrap();
+    let mut state = ok_state();
+    state["branches"] = serde_json::json!(["release/next", "main", "develop", "main"]);
+    install_gh(&f, state);
+    assert_eq!(
+        f.core.pull_request_base_branches(f.project.id).unwrap(),
+        vec!["develop", "main", "release/next"]
+    );
+    assert!(f.gh_calls().iter().any(|call| call
+        == &[
+            "api",
+            "repos/{owner}/{repo}/branches?per_page=100",
+            "--paginate",
+            "--jq",
+            ".[].name"
+        ]));
+}
+
+#[test]
+fn pr_base_branch_errors_are_not_reported_as_an_empty_list() {
+    let f = fixture();
+    let mut state = ok_state();
+    state["branches_error"] = serde_json::json!("HTTP 403: Resource not accessible");
+    install_gh(&f, state);
+    assert!(
+        f.core
+            .pull_request_base_branches(f.project.id)
+            .unwrap_err()
+            .to_string()
+            .contains("403")
+    );
+}
+
+#[test]
 fn missing_gh_is_reported_with_install_guidance_and_git_still_works() {
     let f = fixture(); // nothing on the PATH
     let state = f.core.pull_request_state(f.project.id).unwrap();

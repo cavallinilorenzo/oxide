@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.spyOn(commands, "pullRequestDraft").mockResolvedValue({
     status: "ok", data: { title: "Polish PR creation", body: "Changes and validation.", base: "main", head: branch },
   });
+  vi.spyOn(commands, "pullRequestBaseBranches").mockResolvedValue({ status: "ok", data: ["develop", "main", "release/next", branch] });
 });
 afterEach(async () => {
   await act(() => root.unmount());
@@ -50,6 +51,28 @@ async function edit(name: string, value: string) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+function baseSelect() {
+  return host.querySelector<HTMLButtonElement>(".pr-base-select")!;
+}
+async function chooseBase(name: string) {
+  await act(async () => baseSelect().click());
+  const option = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+    .find((option) => option.textContent === name)!;
+  await act(async () => option.click());
+}
+
+it("offers GitHub branches, selects the default and excludes the PR's own branch", async () => {
+  const create = vi.spyOn(commands, "createPullRequest").mockResolvedValue({ status: "error", error: { message: diagnostic } });
+  await render();
+  expect(baseSelect().getAttribute("aria-label")).toBe("Base branch: main");
+  expect(host.querySelector('input[aria-label="Base branch"]')).toBeNull();
+  await act(async () => baseSelect().click());
+  expect(Array.from(document.querySelectorAll('[role="option"]')).map((option) => option.textContent))
+    .toEqual(["develop", "main", "release/next"]);
+  await act(async () => document.querySelector<HTMLElement>('[role="option"]')!.click());
+  await submit();
+  expect(create).toHaveBeenCalledWith(1, "Polish PR creation", "Changes and validation.", "develop", false);
+});
 
 it("preserves the draft on failure and offers readable recovery with the original diagnostic", async () => {
   vi.spyOn(commands, "createPullRequest").mockResolvedValue({ status: "error", error: { message: diagnostic } });
@@ -64,19 +87,13 @@ it("preserves the draft on failure and offers readable recovery with the origina
   expect(host.querySelector("textarea")!.value).toBe("Changes and validation.");
   expect(host.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(false);
   expect(onChanged).not.toHaveBeenCalled();
-  await edit("base", "develop");
+  await chooseBase("develop");
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 
-it("blocks an identical base branch and empty titles, including programmatic submission", async () => {
+it("blocks empty titles, including programmatic submission", async () => {
   const create = vi.spyOn(commands, "createPullRequest");
   await render();
-  await edit("base", branch);
-  expect(input("base").getAttribute("aria-invalid")).toBe("true");
-  expect(host.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
-  await submit();
-  expect(create).not.toHaveBeenCalled();
-  await edit("base", "main");
   await edit("title", "   ");
   await submit();
   expect(create).not.toHaveBeenCalled();
@@ -93,11 +110,52 @@ it("prevents duplicate keyboard submissions while pending and restores controls 
   });
   expect(create).toHaveBeenCalledTimes(1);
   expect(host.querySelector("form")!.getAttribute("aria-busy")).toBe("true");
-  expect(input("base").disabled).toBe(true);
+  expect(baseSelect().disabled).toBe(true);
   expect(host.querySelector("textarea")!.disabled).toBe(true);
   await act(async () => reject(new Error("Failed to connect to github.com")));
   expect(host.querySelector('[role="alert"]')!.textContent).toContain("Couldn’t reach GitHub");
-  expect(input("base").disabled).toBe(false);
+  expect(baseSelect().disabled).toBe(false);
+});
+
+it("blocks creation while branch choices load", async () => {
+  let resolve!: (result: { status: "ok"; data: string[] }) => void;
+  vi.mocked(commands.pullRequestBaseBranches).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  const create = vi.spyOn(commands, "createPullRequest");
+  await render();
+  expect(baseSelect().disabled).toBe(true);
+  await submit();
+  expect(create).not.toHaveBeenCalled();
+  await act(async () => resolve({ status: "ok", data: ["main"] }));
+  expect(baseSelect().disabled).toBe(false);
+});
+
+it("preserves the form and offers retry when GitHub branches cannot be loaded", async () => {
+  vi.mocked(commands.pullRequestBaseBranches).mockResolvedValueOnce({ status: "error", error: { message: "HTTP 403" } });
+  await render();
+  expect(host.querySelector('[role="alert"]')!.textContent).toContain("Couldn’t load base branches");
+  expect(baseSelect().disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
+  await edit("title", "Keep this title");
+  await act(async () => Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Try again")!.click());
+  expect(baseSelect().getAttribute("aria-label")).toBe("Base branch: main");
+  expect(input("title").value).toBe("Keep this title");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("uses another available branch when the preferred base is missing", async () => {
+  vi.mocked(commands.pullRequestBaseBranches).mockResolvedValue({ status: "ok", data: ["release/next", branch] });
+  await render();
+  expect(baseSelect().getAttribute("aria-label")).toBe("Base branch: release/next");
+});
+
+it("blocks creation if no other branch exists on GitHub", async () => {
+  vi.mocked(commands.pullRequestBaseBranches).mockResolvedValue({ status: "ok", data: [branch] });
+  const create = vi.spyOn(commands, "createPullRequest");
+  await render();
+  expect(host.querySelector('[role="status"]')!.textContent).toContain("No other branches");
+  expect(baseSelect().disabled).toBe(true);
+  await submit();
+  expect(create).not.toHaveBeenCalled();
 });
 
 it.each(["ctrlKey", "metaKey"])("submits with %s+Enter and preserves draft choice", async (modifier) => {

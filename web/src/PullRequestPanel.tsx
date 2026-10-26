@@ -6,6 +6,7 @@ import { createPrBlockedReason } from "./gitAction";
 import { PullRequestBrowser, PullRequestReview } from "./PullRequestBrowser";
 import { PullRequestError } from "./PullRequestError";
 import { describeCreatePrError } from "./createPullRequestError";
+import { Dropdown } from "./Dropdown";
 
 interface PullRequestPanelProps {
   projectId: number;
@@ -147,6 +148,8 @@ function PullRequestBody({
           projectId={projectId}
           git={git}
           draft={draft}
+          defaultBase={pr.defaultBranch ?? "main"}
+          refreshKey={refreshKey + manual}
           onCreated={() => {
             onChanged();
             onRefresh();
@@ -165,27 +168,57 @@ interface CreateFormProps {
   git: GitStatus;
   /** Title, body and base prefilled from the branch's commits; null if they couldn't be read. */
   draft: PullRequestDraft | null;
+  defaultBase: string;
+  refreshKey: number;
   onCreated: () => void;
 }
 
-function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormProps) {
+type BaseBranches =
+  | { state: "loading" }
+  | { state: "error"; message: string }
+  | { state: "ready"; names: string[] };
+
+function CreateForm({ projectId, git, draft: prefill, defaultBase, refreshKey, onCreated }: CreateFormProps) {
   const id = useId();
   const submitting = useRef(false);
   const blocked = createPrBlockedReason(git);
   const [form, setForm] = useState<Pick<PullRequestDraft, "title" | "body" | "base">>({
     title: prefill?.title ?? "",
     body: prefill?.body ?? "",
-    base: prefill?.base ?? "main",
+    base: prefill?.base ?? defaultBase,
   });
   const [draft, setDraft] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [branches, setBranches] = useState<BaseBranches>({ state: "loading" });
+  const [branchRetry, setBranchRetry] = useState(0);
+
+  useEffect(() => {
+    if (blocked) return;
+    let active = true;
+    void commands.pullRequestBaseBranches(projectId).then((result) => {
+      if (!active) return;
+      if (result.status === "error") {
+        setBranches({ state: "error", message: result.error.message });
+        return;
+      }
+      const names = result.data.filter((name) => name !== git.branch);
+      setBranches({ state: "ready", names });
+      setError(null);
+      setForm((current) => ({
+        ...current,
+        base: names.includes(current.base) ? current.base : names.includes(defaultBase) ? defaultBase : names[0] ?? "",
+      }));
+    }).catch((cause: unknown) => {
+      if (active) setBranches({ state: "error", message: cause instanceof Error ? cause.message : String(cause) });
+    });
+    return () => { active = false; };
+  }, [projectId, git.branch, blocked, defaultBase, refreshKey, branchRetry]);
 
   if (blocked) return <p className="pr-guidance">{blocked}</p>;
 
   const pushFirst = git.unpublished || git.ahead > 0;
-  const sameBranch = form.base.trim() === git.branch;
-  const canSubmit = !!form.title.trim() && !!form.base.trim() && !sameBranch;
+  const canSubmit = !!form.title.trim() && form.base !== git.branch && branches.state === "ready" && branches.names.includes(form.base);
   const feedback = error ? describeCreatePrError(error, form.base.trim()) : null;
   async function create() {
     if (submitting.current || !canSubmit) return;
@@ -220,17 +253,16 @@ function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormPro
       </header>
       <div className="pr-create-branches" aria-label="Branch comparison">
         <div className="pr-create-base">
-          <label htmlFor={`${id}-base`}>Base branch</label>
-          <input
-            id={`${id}-base`}
-            className="mono"
-            value={form.base}
-            required
-            disabled={busy}
-            aria-invalid={sameBranch || undefined}
-            aria-describedby={sameBranch ? `${id}-base-error` : undefined}
-            onChange={(e) => {
-              setForm({ ...form, base: e.target.value });
+          <span>Base branch</span>
+          <Dropdown
+            label="Base branch"
+            triggerClassName="mono pr-base-select"
+            minMenuWidth={240}
+            value={branches.state === "loading" ? "Loading…" : branches.state === "error" ? "Unavailable" : form.base || "No branches"}
+            options={branches.state === "ready" ? branches.names.map((name) => ({ value: name, label: name })) : []}
+            disabled={busy || branches.state !== "ready"}
+            onChange={(base) => {
+              setForm({ ...form, base });
               setError(null);
             }}
           />
@@ -244,7 +276,16 @@ function CreateForm({ projectId, git, draft: prefill, onCreated }: CreateFormPro
           </span>
         </div>
       </div>
-      {sameBranch && <p id={`${id}-base-error`} className="pr-field-error" role="alert">Choose a base branch other than the current branch.</p>}
+      {branches.state === "error" && <PullRequestError
+        title="Couldn’t load base branches"
+        guidance="Try loading the branches from GitHub again. Your title and description are kept."
+        message={branches.message}
+        onRetry={() => {
+          setBranches({ state: "loading" });
+          setBranchRetry((n) => n + 1);
+        }}
+      />}
+      {branches.state === "ready" && branches.names.length === 0 && <p className="pr-create-hint" role="status">No other branches are available on GitHub.</p>}
       <div className="pr-create-field">
         <label htmlFor={`${id}-title`}>Title</label>
         <input

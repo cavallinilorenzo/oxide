@@ -74,6 +74,13 @@ if args[:2] == ["repo", "view"]:
     print(json.dumps(repo))
     sys.exit(0)
 
+if args[:2] == ["api", "repos/{owner}/{repo}/branches?per_page=100"]:
+    if state.get("branches_error"):
+        sys.stderr.write(state["branches_error"])
+        sys.exit(1)
+    print("\n".join(state.get("branches", [])))
+    sys.exit(0)
+
 if args[:2] == ["pr", "list"]:
     wanted = flag("--state") or "open"
     prs = [

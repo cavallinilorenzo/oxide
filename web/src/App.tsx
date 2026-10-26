@@ -41,6 +41,8 @@ import { getDraft, setDraft } from "./threadDrafts";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
 import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 
+const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
+
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
 type TerminalContext = { key: string; projectId: number; threadId: number | null };
@@ -477,7 +479,7 @@ export function App() {
   }
 
   return (
-    <div className="window">
+    <div className={`window ${isMac ? "macos" : "windows"}`}>
       <QuitDialog />
       {pendingDeleteThread && (
         <div className="modal-backdrop">

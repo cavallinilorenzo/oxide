@@ -8,7 +8,7 @@ mod clock;
 mod continuation;
 mod db;
 mod discovery;
-mod editor;
+pub mod editor;
 mod error;
 mod files;
 mod git;

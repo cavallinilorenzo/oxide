@@ -42,6 +42,13 @@ describe("toggleForKey", () => {
     expect(key("j", { shiftKey: true })).toBeNull();
     expect(key("x")).toBeNull();
   });
+  it("maps Ctrl shortcuts on Windows and Linux", () => {
+    expect(key("j", { metaKey: false, ctrlKey: true })).toBe("terminal");
+    expect(key("\\", { metaKey: false, ctrlKey: true })).toBe("tools");
+    expect(key("b", { metaKey: false, ctrlKey: true })).toBe("board");
+    expect(key(",", { metaKey: false, ctrlKey: true })).toBe("settings");
+    expect(key("j", { metaKey: true, ctrlKey: true })).toBeNull();
+  });
 });
 
 describe("isNewThreadShortcut", () => {

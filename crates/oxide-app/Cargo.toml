@@ -22,6 +22,14 @@ tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSProcessInfo", "NSString", "NSObject"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Power",
+    "Win32_UI_Shell",
+] }
+
+
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 

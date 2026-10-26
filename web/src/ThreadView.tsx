@@ -575,7 +575,6 @@ export function ThreadView({
     transcript.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
     currentProvider
   );
-  const currentModeConfig = PERMISSION_CONFIG[currentMode] || PERMISSION_CONFIG["auto-edit"];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

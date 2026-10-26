@@ -44,7 +44,7 @@ fn enabling_customizations_lists_skills_and_commands_and_passes_slashes_through(
     );
 
     let mut settings = core.settings().settings;
-    settings.claude_customizations = true;
+    settings.claude_customizations.skills = true;
     core.save_settings(&settings).unwrap();
 
     assert!(

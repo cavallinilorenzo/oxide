@@ -226,6 +226,16 @@ pub struct Providers {
     antigravity: ProviderSettings,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeCustomizations {
+    claude_md: bool,
+    skills: bool,
+    plugins: bool,
+    mcp_servers: bool,
+    hooks: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -233,7 +243,7 @@ pub struct Settings {
     providers: Providers,
     confirm_quit: bool,
     editor: String,
-    claude_customizations: bool,
+    claude_customizations: ClaudeCustomizations,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

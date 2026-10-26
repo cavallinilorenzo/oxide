@@ -21,6 +21,7 @@ import {
   type ApprovalDecision,
   type ContinuedThread,
   type Detection,
+  type ModelInfo,
   type PermissionMode,
   type SequencedThreadEvent,
   type SlashCommand,
@@ -39,7 +40,8 @@ import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
-import { modelFamilyId, parseSlashCommand } from "./modelPicker";
+import { parseSlashCommand, resolveDefaultModel } from "./modelPicker";
+import { readableModel } from "./headerLines";
 import { filterSlashCommands, slashQuery } from "./slashMenu";
 import {
   applyThreadEvent,
@@ -480,9 +482,23 @@ export function ThreadView({
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
-  const currentModel = threadId ? transcript.thread?.model ?? null : draftModel;
-  const displayModel = currentModel ? modelFamilyId(currentModel) : currentProvider;
-  const currentEffort = threadId ? transcript.thread?.effort ?? null : draftEffort;
+  const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void commands.getModelCatalog(currentProvider, false).then((res) => {
+      if (active && res.status === "ok") setCatalog({ provider: currentProvider, models: res.data });
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentProvider]);
+  const catalogModels = catalog?.provider === currentProvider ? catalog.models : null;
+  const { model: currentModel, effort: currentEffort } = resolveDefaultModel(
+    catalogModels,
+    threadId ? transcript.thread?.model ?? null : draftModel,
+    threadId ? transcript.thread?.effort ?? null : draftEffort
+  );
+  const displayModel = currentModel ? readableModel(currentModel, catalogModels) : currentProvider;
 
   useEffect(() => {
     let active = true;
@@ -611,8 +627,8 @@ export function ThreadView({
         const created = await commands.createThread(
           projectId,
           providerName,
-          draftModel ?? provSettings?.model ?? null,
-          draftEffort ?? provSettings?.effort ?? null,
+          currentModel ?? provSettings?.model ?? null,
+          currentEffort ?? provSettings?.effort ?? null,
           draftMode
         );
         if (created.status === "ok") {

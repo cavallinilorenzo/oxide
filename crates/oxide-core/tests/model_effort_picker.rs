@@ -30,6 +30,29 @@ fn favourites_persistence() {
 }
 
 #[test]
+fn chosen_thread_model_survives_restart() {
+    let dir = tempdir().unwrap();
+    let core = Core::open(dir.path()).unwrap();
+    let project_id = setup_project(&core, dir.path());
+    let thread = core
+        .create_thread(
+            project_id,
+            "fake",
+            Some("initial".into()),
+            Some("low".into()),
+            PermissionMode::AutoEdit,
+        )
+        .unwrap();
+    core.set_thread_model_and_effort(thread.id, Some("chosen".into()), Some("high".into()))
+        .unwrap();
+    drop(core);
+    let reopened = Core::open(dir.path()).unwrap();
+    let snapshot = reopened.get_thread_snapshot(thread.id).unwrap();
+    assert_eq!(snapshot.thread.model.as_deref(), Some("chosen"));
+    assert_eq!(snapshot.thread.effort.as_deref(), Some("high"));
+}
+
+#[test]
 fn model_catalog_caching_and_refresh() {
     let dir = tempdir().unwrap();
     let core = Core::open(dir.path()).unwrap();

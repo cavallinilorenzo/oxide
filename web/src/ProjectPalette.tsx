@@ -1,11 +1,13 @@
 import { MarkGithubIcon, RepoIcon } from "@primer/octicons-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { commands, type AppError, type GithubRepository, type Project } from "./bindings";
+import { displayPath } from "./headerLines";
 import { matchActions, matchProjects, moveHighlight, type PaletteActionId } from "./paletteSearch";
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: AppError };
 
-type FormKind = "add-folder" | "new-project" | "clone-url" | "clone-github";
+type FormKind = "new-project" | "clone-url" | "clone-github";
 type Step = { label: string; placeholder: string; initial: string };
 
 type Stage =
@@ -18,8 +20,6 @@ const GITHUB_SEARCH_DELAY_MS = 200;
 function stepsFor(form: FormKind, defaultParent: string): Step[] {
   const parent: Step = { label: "Parent folder", placeholder: "~/Developer", initial: defaultParent };
   switch (form) {
-    case "add-folder":
-      return [{ label: "Folder to add", placeholder: "~/Developer/my-project", initial: "" }];
     case "new-project":
       return [{ label: "Project name", placeholder: "my-project", initial: "" }, parent];
     case "clone-url":
@@ -37,7 +37,6 @@ function describeStage(stage: Stage): string {
   if (stage.kind === "github") return "Search your GitHub repositories";
   if (stage.form === "clone-github") return `Clone ${stage.repo}`;
   return {
-    "add-folder": "Add a local folder",
     "new-project": "Create a new Project",
     "clone-url": "Clone from a Git URL",
   }[stage.form];
@@ -153,8 +152,6 @@ export function ProjectPalette({
 
   const submit = (form: FormKind, repo: string | undefined, all: string[]) => {
     switch (form) {
-      case "add-folder":
-        return register(() => commands.addProject(all[0]));
       case "new-project":
         return register(() => commands.createProject(all[1], all[0]));
       case "clone-url":
@@ -165,7 +162,16 @@ export function ProjectPalette({
   };
 
   const chooseAction = (id: PaletteActionId) => {
-    if (id === "clone-github") goTo({ kind: "github" });
+    if (id === "add-folder") {
+      setBusy(true);
+      setError(null);
+      void open({ directory: true, multiple: false, title: "Choose a Project folder" })
+        .then((path) => {
+          if (path) return register(() => commands.addProject(path));
+        })
+        .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
+        .finally(() => setBusy(false));
+    } else if (id === "clone-github") goTo({ kind: "github" });
     else goTo({ kind: "form", form: id });
   };
 
@@ -277,7 +283,7 @@ export function ProjectPalette({
                   <RepoIcon size={14} /> {p.name}
                   {p.open && <span className="palette-open" title="In the sidebar">open</span>}
                 </span>
-                <span className="palette-detail">{p.path.replace(/^\/(Users|home)\/[^/]+/, "~")}</span>
+                <span className="palette-detail">{displayPath(p.path)}</span>
               </li>
             ))}
             {actionRows.map((a, i) => (

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyModelShortcut,
+  selectedModelInfo,
+  resolveDefaultModel,
   filterModels,
   parseSlashCommand,
-  resolveDefaultModel,
   type ModelInfo,
 } from "./modelPicker";
 
@@ -117,6 +118,18 @@ describe("applyModelShortcut", () => {
     expect(applyModelShortcut(3, sampleModels)?.id).toBe("claude-3-opus");
     expect(applyModelShortcut(5, sampleModels)).toBeNull();
     expect(applyModelShortcut(0, sampleModels)).toBeNull();
+  });
+});
+
+describe("selectedModelInfo", () => {
+  it("returns only the selected model's supported efforts", () => {
+    const models = [
+      { ...sampleModels[3]!, id: "full", supportedEfforts: ["low", "high", "max", "ultra"] },
+      { ...sampleModels[3]!, id: "limited", supportedEfforts: ["low", "high"] },
+    ];
+    expect(selectedModelInfo(models, "limited")?.supportedEfforts).toEqual(["low", "high"]);
+    expect(selectedModelInfo(models, "unknown")).toBeUndefined();
+    expect(selectedModelInfo(models, null)).toBeUndefined();
   });
 });
 

@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
@@ -7,6 +8,7 @@ import {
   collapseEffortVariants,
   filterModels,
   modelFamilyId,
+  selectedModelInfo,
 } from "./modelPicker";
 
 const PROVIDERS = [
@@ -17,6 +19,14 @@ const PROVIDERS = [
 
 /** Last known catalog per Provider, so reopening the picker is instant. */
 const catalogCache = new Map<string, ModelInfo[]>();
+const TAB_KEY = "oxide:model-picker-tab";
+
+function rememberedTab(fallback: string): string {
+  try {
+    const saved = localStorage.getItem(TAB_KEY);
+    return saved && (saved === "favourites" || PROVIDERS.some((p) => p.id === saved)) ? saved : fallback;
+  } catch { return fallback; }
+}
 
 export interface ModelEffortPickerProps {
   open: boolean;
@@ -47,7 +57,7 @@ export function ModelEffortPicker({
   initialMode = "model",
   anchorElement = null,
 }: ModelEffortPickerProps) {
-  const [activeTab, setActiveTab] = useState<string>(currentProvider);
+  const [activeTab, setActiveTab] = useState<string>(() => rememberedTab(currentProvider));
   const [search, setSearch] = useState("");
   const [favourites, setFavourites] = useState<string[]>([]);
   const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>(() =>
@@ -68,6 +78,12 @@ export function ModelEffortPicker({
   const effortMode = initialMode === "effort";
 
   useEffect(() => {
+    if (!effortMode) {
+      try { localStorage.setItem(TAB_KEY, activeTab); } catch { /* The picker still works without storage. */ }
+    }
+  }, [activeTab, effortMode]);
+
+  useEffect(() => {
     if (open) {
       searchInputRef.current?.focus();
     }
@@ -86,7 +102,9 @@ export function ModelEffortPicker({
         Math.max(12, triggerRect.left),
         Math.max(12, window.innerWidth - menuRect.width - 12)
       );
-      const top = Math.max(12, triggerRect.top - menuRect.height - 8);
+      const above = triggerRect.top - menuRect.height - 8;
+      const below = triggerRect.bottom + 8;
+      const top = Math.max(12, Math.min(above >= 12 ? above : below, window.innerHeight - menuRect.height - 12));
 
       setEffortMenuPosition((current) =>
         current.ready && current.top === top && current.left === left
@@ -96,9 +114,12 @@ export function ModelEffortPicker({
     };
 
     updatePosition();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
+    if (effortMenuRef.current) observer?.observe(effortMenuRef.current);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
@@ -203,9 +224,8 @@ export function ModelEffortPicker({
 
   // Active model info to show supported efforts
   const activeModelInfo = useMemo(() => {
-    const all = Object.values(catalogs).flat();
-    return all.find((m) => m.id === (currentModel || tabModels[0]?.id)) || tabModels[0];
-  }, [catalogs, currentModel, tabModels]);
+    return selectedModelInfo(catalogs[currentProvider] ?? [], currentModel);
+  }, [catalogs, currentProvider, currentModel]);
 
   const handleSelectModel = useCallback(
     (model: ModelInfo, isLocked: boolean) => {
@@ -304,7 +324,7 @@ export function ModelEffortPicker({
       >
         {efforts.length === 0 ? (
           <span className="effort-label">
-            {loading ? "Loading..." : "This model has no effort levels."}
+            {loading ? "Loading..." : !activeModelInfo ? "Select a model to see its effort levels." : "This model has no effort levels."}
           </span>
         ) : (
           <div className="effort-select-row">
@@ -473,8 +493,8 @@ export function ModelEffortPicker({
                         </div>
 
                         {shortcutNumber && (
-                          <span className="model-shortcut" title={`⌘${shortcutNumber}`}>
-                            ⌘{shortcutNumber}
+                          <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
+                            {shortcutLabel}{shortcutNumber}
                           </span>
                         )}
                       </div>
@@ -526,8 +546,8 @@ export function ModelEffortPicker({
                         </div>
 
                         {shortcutNumber && (
-                          <span className="model-shortcut" title={`⌘${shortcutNumber}`}>
-                            ⌘{shortcutNumber}
+                          <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
+                            {shortcutLabel}{shortcutNumber}
                           </span>
                         )}
                       </div>

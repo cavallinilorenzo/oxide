@@ -28,6 +28,7 @@ pub struct CodexModelEntry {
     pub id: String,
     pub display_name: Option<String>,
     pub supported_reasoning_efforts: Vec<String>,
+    pub default_reasoning_effort: Option<String>,
     pub is_default: bool,
 }
 
@@ -672,6 +673,7 @@ impl CodexAppServer {
                 id,
                 display_name,
                 supported_reasoning_efforts: efforts,
+                default_reasoning_effort: item.get("defaultReasoningEffort").and_then(|v| v.as_str()).map(str::to_owned),
                 is_default,
             });
         }
@@ -1290,7 +1292,7 @@ impl Provider for CodexProvider {
             .map(|e| {
                 let is_legacy = (e.id.contains("gpt-4") && !e.id.contains("gpt-4.5"))
                     || e.id.contains("gpt-3.5");
-                let default_effort = e.supported_reasoning_efforts.first().cloned();
+                let default_effort = e.default_reasoning_effort.filter(|effort| e.supported_reasoning_efforts.contains(effort));
                 ModelInfo {
                     name: e.display_name.unwrap_or_else(|| e.id.clone()),
                     id: e.id,

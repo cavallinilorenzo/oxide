@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
 import {
@@ -35,6 +36,7 @@ import { SettingsView } from "./SettingsView";
 import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
+import { readablePath } from "./headerLines";
 import { EditorMark } from "./EditorMark";
 import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
@@ -42,6 +44,10 @@ import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./thre
 import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
+
+const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+const shortcut = isMac ? "\u2318" : "Ctrl+";
+const shortcutShift = isMac ? "\u2318\u21e7" : "Ctrl+Shift+";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -97,7 +103,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
-  const [startupDelayComplete, setStartupDelayComplete] = useState(false);
+  const [startupThreadLoaded, setStartupThreadLoaded] = useState(false);
+  const onStartupThreadLoaded = useCallback(() => setStartupThreadLoaded(true), []);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
@@ -168,11 +175,6 @@ export function App() {
         setProjectsLoaded(true);
       }
     })();
-  }, []);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setStartupDelayComplete(true), 700);
-    return () => window.clearTimeout(timeout);
   }, []);
 
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
@@ -442,8 +444,9 @@ export function App() {
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
-        // The last Project reopens, but on a new Thread rather than the one it left off on.
-        const initialThreadId = wanted?.projectId === selected.id ? null : res.data[0]?.id ?? null;
+        const initialThreadId = wanted?.projectId === selected.id
+          ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
+          : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
         rememberTerminalContext(selected.id, initialThreadId);
       }
@@ -454,18 +457,18 @@ export function App() {
     };
   }, [selected, rememberTerminalContext, createThreadIn]);
 
-  const starting = !startupDelayComplete || !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
+  const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
   useEffect(() => {
-    if (!starting) document.documentElement.dataset.appReady = "true";
-  }, [starting]);
+    if (!starting && (!selected || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
+  }, [starting, selected, startupThreadLoaded]);
 
   if (starting) {
     return (
       <div className="startup-screen" aria-hidden="true">
         <div className="startup-content">
           <div className="startup-emblem" aria-hidden="true">
-            <span className="startup-orbit"><span /></span>
+            <span className="startup-orbit" />
             <img src={oxideMark} alt="" />
           </div>
           <div className="startup-copy">
@@ -512,16 +515,17 @@ export function App() {
         />
       )}
       <header className="header" data-tauri-drag-region>
+        {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); setShowBoard(false); setSelectedThreadId(null); }} />}
         {selected ? (
           <span className="title" data-tauri-drag-region>
-            <strong title={selected.path}>{selected.name}</strong>
+            <strong title={readablePath(selected.path)}>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
-        ) : (
+        ) : !isWindows ? (
           <span className="title" data-tauri-drag-region>
             <strong>Oxide</strong>
           </span>
-        )}
+        ) : null}
         {selected && !selected.missing && (
           <GitHeader
             projectId={selected.id}
@@ -535,20 +539,20 @@ export function App() {
         {openError && <span className="error header-error" role="alert">{openError}</span>}
         {selected && !selected.missing && (
           <>
-            <button className="icon-btn" title="Open in editor" aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
+            <button className="icon-btn" title={`Open in editor`} aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
               <EditorMark bundleId={editorBundleId} />
             </button>
-            <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
+            <button className="icon-btn" title={`Reveal in Finder`} aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
               <FileDirectoryIcon size={16} />
             </button>
           </>
         )}
         {selected && (
           <span role="group" aria-label="View" className="seg">
-            <button aria-pressed={!showBoard && !showSettings} title="Chat (⌘B)" onClick={() => { setShowBoard(false); setShowSettings(false); }}>
+            <button aria-pressed={!showBoard && !showSettings} title={`Chat (${shortcut}B)`} onClick={() => { setShowBoard(false); setShowSettings(false); }}>
               <CommentDiscussionIcon size={14} /> Chat
             </button>
-            <button aria-pressed={showBoard && !showSettings} title="Thread Board (⌘B)" onClick={() => { setShowBoard(true); setShowSettings(false); }}>
+            <button aria-pressed={showBoard && !showSettings} title={`Thread Board (${shortcut}B)`} onClick={() => { setShowBoard(true); setShowSettings(false); }}>
               <ProjectIcon size={14} /> Board
             </button>
           </span>
@@ -556,7 +560,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTools && !showSettings}
-          title="Tools: Files, Diff, Pull request, Issues (⌘\)"
+          title={`Tools: Files, Diff, Pull request, Issues (${shortcut}\\)`}
           aria-label="Toggle tools panel"
           onClick={() => { setShowTools(showSettings || !showTools); setShowSettings(false); }}
         >
@@ -565,7 +569,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTerminal && !showSettings}
-          title="Terminal (⌘J)"
+          title={`Terminal (${shortcut}J)`}
           aria-label="Toggle Terminal"
           onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
         >
@@ -657,6 +661,7 @@ export function App() {
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
+                  onInitialLoad={onStartupThreadLoaded}
                   threadId={selectedThreadId}
                   projectId={selected.id}
                   projectPath={selected.path}
@@ -699,7 +704,7 @@ export function App() {
                 <RepoIcon size={24} />
                 <p>Open a Project to begin.</p>
                 <button className="btn primary" onClick={() => setShowPalette(true)}>
-                  Open a Project <kbd>⌘⇧N</kbd>
+                  Open a Project <kbd>{shortcutShift}N</kbd>
                 </button>
               </div>
             </main>
@@ -739,7 +744,7 @@ export function App() {
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title="Close panel (⌘\)" aria-label="Close tools panel" onClick={() => setShowTools(false)}>
+              <button className="icon-btn sm" title={`Close panel (${shortcut}\\)`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
                 <XIcon size={14} />
               </button>
             </nav>
@@ -904,7 +909,7 @@ function Sidebar({
         className="row-action"
         onClick={() => onDeleteThread(t.id)}
         aria-label={`Delete ${threadTitle(t)}`}
-        title="Delete"
+        title={`Delete`}
       >
         <TrashIcon size={12} />
       </button>
@@ -914,10 +919,10 @@ function Sidebar({
   return (
     <nav className="sidebar" aria-label="Projects">
       <div className="sidebar-actions">
-        <button className="btn grow" onClick={onNewThread} disabled={!selected} title="New Thread in this Project (⌘N)">
-          <PlusIcon size={14} /> New Thread <kbd>⌘N</kbd>
+        <button className="btn grow" onClick={onNewThread} disabled={!selected} title={`New Thread in this Project (${shortcut}N)`}>
+          <PlusIcon size={14} /> New Thread <kbd>{shortcut}N</kbd>
         </button>
-        <button className="btn" onClick={onOpenPalette} title="Open a Project, or a new Thread in another one (⌘⇧N)" aria-label="Open a Project">
+        <button className="btn" onClick={onOpenPalette} title={`Open a Project, or a new Thread in another one (${shortcutShift}N)`} aria-label="Open a Project">
           <RepoIcon size={14} />
         </button>
       </div>
@@ -942,8 +947,8 @@ function Sidebar({
               <p className="sidebar-empty-title">No open Projects</p>
               <p className="sidebar-empty-hint">Open a project to see its Threads here.</p>
             </div>
-            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette}>
-              <RepoIcon size={14} /> Open a Project <kbd>⌘⇧N</kbd>
+            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette} title={`Open a Project (${shortcutShift}N)`}>
+              <RepoIcon size={14} /> Open a Project <kbd>{shortcutShift}N</kbd>
             </button>
           </div>
         )}
@@ -953,16 +958,16 @@ function Sidebar({
             return (
               <li key={p.id} className={`project-node${p.missing ? " missing" : ""}`}>
                 <div className="project-row">
-                  <button className="project" aria-current={isSelected} aria-expanded={isSelected} onClick={() => onSelect(p)} title={p.path}>
+                  <button className="project" aria-current={isSelected} aria-expanded={isSelected} onClick={() => onSelect(p)} title={readablePath(p.path)}>
                     {isSelected ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
                     <RepoIcon size={13} />
                     <span className="project-name">{p.name}</span>
                     {p.missing && <span className="badge">missing</span>}
                   </button>
-                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title="Thread Board">
+                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title={`Thread Board`}>
                     <ProjectIcon size={13} />
                   </button>
-                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : "Close Project (it stays in ⌘⇧N)"}>
+                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${shortcutShift}N)`}>
                     <XIcon size={13} />
                   </button>
                 </div>
@@ -979,9 +984,36 @@ function Sidebar({
           })}
         </ul>
       </div>
-      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title="Settings (⌘,)">
+      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title={`Settings (${shortcut},)`}>
         <GearIcon size={14} /> Settings
       </button>
     </nav>
   );
+}
+
+function AppMenu({ onNewThread }: { onNewThread: () => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const pointer = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(null); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(null); };
+    document.addEventListener("pointerdown", pointer); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", pointer); document.removeEventListener("keydown", key); };
+  }, [open]);
+  const win = getCurrentWindow();
+  const menus: Record<string, { label: string; action: () => void }[]> = {
+    Oxide: [{ label: "Quit Oxide", action: () => { void win.close(); } }],
+    File: [{ label: "New Thread", action: onNewThread }],
+    Edit: ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"].map((label) => ({ label, action: () => { document.execCommand(label === "Select All" ? "selectAll" : label.toLowerCase()); } })),
+    Window: [{ label: "Minimize", action: () => { void win.minimize(); } }, { label: "Maximize / Restore", action: () => { void win.toggleMaximize(); } }],
+  };
+  return <nav ref={root} className="app-menu" aria-label="Application menu">
+    {Object.entries(menus).map(([name, items]) => <div className="app-menu-item" key={name}>
+      <button type="button" aria-haspopup="menu" aria-expanded={open === name} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen(open === name ? null : name)}>{name}</button>
+      {open === name && <div className="app-menu-popup" role="menu">
+        {items.map(({ label, action }) => <button key={label} role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { action(); setOpen(null); }}>{label}</button>)}
+      </div>}
+    </div>)}
+  </nav>;
 }

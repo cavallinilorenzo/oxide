@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -40,6 +40,18 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const branchRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open && !menuOpen) return;
+    const pointer = (event: PointerEvent) => {
+      if (!branchRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!actionsRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); setMenuOpen(false); } };
+    document.addEventListener("pointerdown", pointer); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", pointer); document.removeEventListener("keydown", key); };
+  }, [open, menuOpen]);
 
   const refresh = useCallback(
     () =>
@@ -91,7 +103,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
 
   return (
     <div className="git-header">
-      <div className="branch-picker">
+      <div className="branch-picker" ref={branchRef}>
         <button
           className="hdrbtn branch-button"
           aria-haspopup="listbox"
@@ -132,7 +144,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
           <RepoPullIcon size={14} /> Pull
         </button>
       )}
-      <div className={`split-button${action.kind === "up-to-date" ? "" : " primary"}`}>
+      <div ref={actionsRef} className={`split-button${action.kind === "up-to-date" ? "" : " primary"}`}>
         <button
           className="git-primary"
           disabled={busy || push.busy || action.kind === "up-to-date" || action.blockedReason !== null}

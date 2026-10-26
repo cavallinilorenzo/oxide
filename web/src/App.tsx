@@ -442,7 +442,7 @@ export function App() {
             <img src={oxideMark} alt="" />
           </div>
           <div className="startup-copy">
-            <span className="startup-wordmark">oxide</span>
+            <span className="startup-wordmark">Oxide</span>
             <p>Preparing your workspace</p>
             <span className="startup-detail">Loading Projects and Threads</span>
           </div>

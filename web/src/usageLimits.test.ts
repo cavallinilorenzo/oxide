@@ -46,29 +46,41 @@ describe("usageView", () => {
     expect(usageView(limits(), false, NOW).kind).toBe("hidden");
   });
 
-  it("shows an empty state, not a fake 0%, before anything was reported", () => {
-    expect(usageView(null, true, NOW)).toEqual({ kind: "empty", message: "No usage reported yet" });
-    expect(usageView({ fiveHour: null, weekly: null }, true, NOW).kind).toBe("empty");
+  it("always offers the two labelled windows, empty before anything was reported", () => {
+    for (const none of [null, { fiveHour: null, weekly: null }]) {
+      const { windows } = ready(usageView(none, true, NOW));
+      expect(windows.map((w) => w.label)).toEqual(["5h", "Weekly"]);
+      for (const w of windows) {
+        expect(w).toMatchObject({ fraction: 0, severity: "normal", countdown: "—", detail: "No usage reported yet" });
+      }
+    }
   });
 
-  it("fills the ring with the 5-hour share and lists both windows", () => {
-    const view = ready(usageView(limits(), true, NOW));
-    expect(view.fraction).toBeCloseTo(0.42);
-    expect(view.severity).toBe("normal");
-    expect(view.rows).toEqual([
-      {
-        label: "5-hour limit",
-        percentLabel: "42% used",
-        resetLabel: "Resets in 2 h 13 min",
-        ariaLabel: "5-hour limit 42% used, resets in 2 hours 13 minutes",
-      },
-      {
-        label: "Weekly limit",
-        percentLabel: "10% used",
-        resetLabel: "Resets in 3 d 4 h",
-        ariaLabel: "Weekly limit 10% used, resets in 3 days 4 hours",
-      },
-    ]);
+  it("gives each window its ring, its time to reset and its exact figure", () => {
+    const { windows } = ready(usageView(limits(), true, NOW));
+    expect(windows[0]).toEqual({
+      key: "five-hour",
+      label: "5h",
+      title: "5-hour limit",
+      fraction: 0.42,
+      severity: "normal",
+      countdown: "2 h 13 min",
+      detail: "42% used · Resets in 2 h 13 min",
+      ariaLabel: "5-hour limit 42% used, resets in 2 hours 13 minutes",
+    });
+    expect(windows[1]).toMatchObject({
+      key: "weekly",
+      label: "Weekly",
+      fraction: 0.1,
+      countdown: "3 d 4 h",
+      detail: "10% used · Resets in 3 d 4 h",
+      ariaLabel: "Weekly limit 10% used, resets in 3 days 4 hours",
+    });
+  });
+
+  it("keeps a decimal figure exact", () => {
+    const { windows } = ready(usageView(limits({ fiveHour: win({ percentUsed: 42.5 }) }), true, NOW));
+    expect(windows[0].detail).toBe("42.5% used · Resets in 2 h 13 min");
   });
 
   it.each([
@@ -77,42 +89,35 @@ describe("usageView", () => {
     [94, "warning"],
     [95, "critical"],
     [100, "critical"],
-  ])("grades %i%% as %s", (percentUsed, severity) => {
-    const view = ready(usageView(limits({ fiveHour: win({ percentUsed }) }), true, NOW));
-    expect(view.severity).toBe(severity);
+  ])("grades %i%% as %s, in either window", (percentUsed, severity) => {
+    const view = ready(
+      usageView(limits({ fiveHour: win({ percentUsed }), weekly: win({ percentUsed }) }), true, NOW),
+    );
+    expect(view.windows.map((w) => w.severity)).toEqual([severity, severity]);
   });
 
   it("is critical whenever the Provider says the user is limited", () => {
-    const view = ready(
-      usageView(limits({ fiveHour: win({ percentUsed: 30, status: "limited" }) }), true, NOW),
-    );
-    expect(view.severity).toBe("critical");
+    const view = ready(usageView(limits({ fiveHour: win({ percentUsed: 30, status: "limited" }) }), true, NOW));
+    expect(view.windows[0].severity).toBe("critical");
   });
 
   it("shows a window past its reset time as reset, at 0%", () => {
     const stale = win({ percentUsed: 97, resetsAt: secs(NOW - MIN), status: "limited" });
-    const view = ready(usageView(limits({ fiveHour: stale }), true, NOW));
-    expect(view.fraction).toBe(0);
-    expect(view.severity).toBe("normal");
-    expect(view.rows[0]).toMatchObject({ percentLabel: "0% used", resetLabel: "Reset" });
+    const { windows } = ready(usageView(limits({ fiveHour: stale }), true, NOW));
+    expect(windows[0]).toMatchObject({ fraction: 0, severity: "normal", countdown: "Reset", detail: "0% used · Reset" });
   });
 
   it("keeps an unknown figure unknown", () => {
     const unknown = win({ percentUsed: null, status: "warning" });
-    const view = ready(usageView(limits({ fiveHour: unknown }), true, NOW));
-    expect(view.rows[0].percentLabel).toBe("Usage not reported");
-    expect(view.fraction).toBe(0);
+    const { windows } = ready(usageView(limits({ fiveHour: unknown }), true, NOW));
+    expect(windows[0].detail).toBe("Usage not reported · Resets in 2 h 13 min");
+    expect(windows[0].fraction).toBe(0);
   });
 
-  it("says so when a window was never reported", () => {
-    const view = ready(usageView(limits({ weekly: null }), true, NOW));
-    expect(view.rows[1]).toMatchObject({ label: "Weekly limit", percentLabel: "Not reported yet", resetLabel: "" });
-  });
-
-  it("ring is empty and normal when only the weekly window is known", () => {
-    const view = ready(usageView(limits({ fiveHour: null }), true, NOW));
-    expect(view.fraction).toBe(0);
-    expect(view.rows[0].percentLabel).toBe("Not reported yet");
+  it("leaves one window empty when only the other was reported", () => {
+    const { windows } = ready(usageView(limits({ weekly: null }), true, NOW));
+    expect(windows[1]).toMatchObject({ label: "Weekly", countdown: "—", detail: "No usage reported yet" });
+    expect(windows[0].fraction).toBeCloseTo(0.42);
   });
 
   it("marks data from before this session with how long ago it was reported", () => {
@@ -120,5 +125,6 @@ describe("usageView", () => {
     const old = limits({ fiveHour: earlier, weekly: earlier });
     expect(ready(usageView(old, true, NOW, NOW - HOUR)).updatedLabel).toBe("Updated 3 h ago");
     expect(ready(usageView(limits(), true, NOW, NOW - HOUR)).updatedLabel).toBeNull();
+    expect(ready(usageView(null, true, NOW, NOW - HOUR)).updatedLabel).toBeNull();
   });
 });

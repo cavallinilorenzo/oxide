@@ -16,12 +16,11 @@ mod git_diff;
 mod github;
 mod project_setup;
 mod settings;
-mod slash_commands;
+mod slash_catalog;
 mod storage_actor;
 mod terminal;
 pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
-pub use slash_commands::SlashCommand;
 mod thread_actor;
 mod usage;
 mod worktree;
@@ -125,6 +124,7 @@ pub struct Core {
     board: Arc<board::BoardHub>,
     usage: Arc<usage::UsageHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
+    slash_catalogs: Mutex<HashMap<String, Vec<oxide_provider::SlashCommandInfo>>>,
 }
 
 impl Core {
@@ -182,6 +182,7 @@ impl Core {
             board,
             usage,
             model_catalogs: Mutex::new(HashMap::new()),
+            slash_catalogs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -778,7 +779,6 @@ impl Core {
                 supports_reasoning: true,
                 image_attachments: false,
                 mid_thread_model_switch: true,
-                slash_command_passthrough: false,
                 reports_usage_limits: false,
             },
         }
@@ -1033,25 +1033,49 @@ impl Core {
         }
     }
 
-    /// Slash commands and skills the composer offers for `provider` in `project_id`. Only
-    /// Claude Code with customizations enabled has any.
+    /// The Slash command catalog the composer offers for `provider` in `project_id`: Oxide's own
+    /// commands merged over what the Provider reports. Cached per Provider, customizations and
+    /// Project; a Provider that could not be asked leaves only Oxide's commands, uncached.
     pub fn list_slash_commands(
         &self,
         provider: &str,
         project_id: u32,
-    ) -> Result<Vec<SlashCommand>> {
-        if provider != "claude" || !self.settings().settings.claude_customizations.skills {
-            return Ok(Vec::new());
+    ) -> Result<Vec<oxide_provider::SlashCommandInfo>> {
+        let customizations = self.settings().settings.claude_customizations;
+        let key = format!("{provider}|{customizations:?}|{project_id}");
+        if let Some(cached) = self.slash_catalogs.lock().unwrap().get(&key) {
+            return Ok(cached.clone());
         }
-        let project = self
+        let working_dir = self
             .list_projects()?
             .into_iter()
             .find(|p| p.id == project_id)
-            .map(|p| PathBuf::from(p.path));
-        Ok(slash_commands::discover(
-            &self.user_home,
-            project.as_deref(),
-        ))
+            .map(|p| PathBuf::from(p.path))
+            .unwrap_or_else(|| self.user_home.clone());
+        let reported = match provider {
+            "claude" => {
+                let mut p = oxide_provider::claude::ClaudeCodeProvider::new();
+                p.set_user_customizations(customizations);
+                ProviderTrait::slash_commands(&p, &working_dir)
+            }
+            "codex" => ProviderTrait::slash_commands(
+                &oxide_provider::codex::CodexProvider::new(),
+                &working_dir,
+            ),
+            "agy" | "antigravity" => ProviderTrait::slash_commands(
+                &oxide_provider::agy::AgyProvider::new(),
+                &working_dir,
+            ),
+            _ => Ok(Vec::new()),
+        };
+        let catalog = slash_catalog::merge(reported.as_ref().cloned().unwrap_or_default());
+        if reported.is_ok() {
+            self.slash_catalogs
+                .lock()
+                .unwrap()
+                .insert(key, catalog.clone());
+        }
+        Ok(catalog)
     }
 
     /// Capabilities of a Provider, before any Thread of it exists.

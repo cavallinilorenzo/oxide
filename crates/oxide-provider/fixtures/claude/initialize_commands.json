@@ -1,0 +1,8 @@
+[
+  {"name": "context", "description": "Show current context usage", "argumentHint": "", "builtin": true},
+  {"name": "compact", "description": "Clear history but keep a summary", "argumentHint": "<optional custom summarization instructions>", "builtin": true},
+  {"name": "clear", "description": "Start a new conversation", "argumentHint": "", "aliases": ["reset", "new"], "builtin": true},
+  {"name": "color", "description": "Set the prompt bar color", "argumentHint": "<color>", "builtin": true},
+  {"name": "heapdump", "description": "Write a heap dump", "argumentHint": "", "builtin": true},
+  {"name": "tdd", "description": "Test-driven development", "argumentHint": "", "builtin": false}
+]

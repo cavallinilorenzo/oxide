@@ -354,7 +354,6 @@ fn claude_maps_synthetic_assistant_message_to_slash_command_output() {
 
     let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
     let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
-    assert!(provider.capabilities().slash_command_passthrough);
     let context = StartContext {
         working_dir: PathBuf::from("."),
         model: None,
@@ -550,4 +549,47 @@ fn claude_model_catalog_comes_from_the_cli() {
 fn claude_model_catalog_errors_when_the_cli_is_missing() {
     let provider = ClaudeCodeProvider::with_command("nonexistent_binary_xyz_123");
     assert!(provider.models().is_err());
+}
+
+#[test]
+fn claude_slash_command_catalog_comes_from_the_cli_without_hidden_commands() {
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    provider.set_user_customizations(oxide_provider::claude::ClaudeCustomizations::ALL);
+
+    let commands = provider.slash_commands(std::path::Path::new(".")).unwrap();
+
+    let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["clear", "compact", "context", "tdd"]);
+    let context = commands.iter().find(|c| c.name == "context").unwrap();
+    assert_eq!(
+        context.description.as_deref(),
+        Some("Show current context usage")
+    );
+    assert_eq!(context.argument_hint, None);
+    assert_eq!(context.route, oxide_provider::SlashRoute::Passthrough);
+    let compact = commands.iter().find(|c| c.name == "compact").unwrap();
+    assert!(compact.argument_hint.is_some());
+    let clear = commands.iter().find(|c| c.name == "clear").unwrap();
+    assert_eq!(clear.aliases, ["reset", "new"]);
+}
+
+#[test]
+fn claude_skills_and_custom_commands_only_appear_with_the_skills_customization() {
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let names = |p: &ClaudeCodeProvider| -> Vec<String> {
+        p.slash_commands(std::path::Path::new("."))
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    };
+
+    assert!(!names(&provider).contains(&"tdd".to_string()));
+    provider.set_user_customizations(oxide_provider::claude::ClaudeCustomizations {
+        skills: true,
+        ..Default::default()
+    });
+    assert!(names(&provider).contains(&"tdd".to_string()));
 }

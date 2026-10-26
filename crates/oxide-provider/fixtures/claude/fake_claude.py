@@ -75,12 +75,16 @@ for line in sys.stdin:
         if (data.get("request") or {}).get("subtype") == "initialize":
             with open(os.path.join(fixtures_dir, "initialize_models.json"), "r") as f:
                 models = json.load(f)
+            with open(os.path.join(fixtures_dir, "initialize_commands.json"), "r") as f:
+                commands = json.load(f)
+            if "--disable-slash-commands" in sys.argv or "--safe-mode" in sys.argv:
+                commands = [c for c in commands if c.get("builtin")]
             reply = {
                 "type": "control_response",
                 "response": {
                     "subtype": "success",
                     "request_id": data.get("request_id"),
-                    "response": {"models": models},
+                    "response": {"models": models, "commands": commands},
                 },
             }
             sys.stdout.write(json.dumps(reply) + "\n")

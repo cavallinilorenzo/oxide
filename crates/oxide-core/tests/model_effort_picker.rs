@@ -241,42 +241,23 @@ fn slash_commands_model_and_effort_intercepted_and_not_sent_to_provider() {
 }
 
 #[test]
-fn slash_command_passthrough_gated() {
+fn a_slash_word_outside_the_catalog_is_an_ordinary_prompt() {
     let dir = tempdir().unwrap();
     let core = Core::open(dir.path()).unwrap();
     core.set_real_time_ticker(false);
     let project_id = setup_project(&core, dir.path());
 
-    // 1. When passthrough is FALSE
-    let mut fake1 = FakeProvider::default().reusable();
-    let mut caps1 = fake1.capabilities();
-    caps1.slash_command_passthrough = false;
-    fake1.set_capabilities(caps1);
-    let rec1 = fake1.recorder();
-
-    let t1 = core
+    let fake = FakeProvider::default().reusable();
+    let rec = fake.recorder();
+    let thread = core
         .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
         .unwrap();
-    core.register_fake_provider(t1.id, fake1);
+    core.register_fake_provider(thread.id, fake);
 
-    // Other slash command (e.g. /compact or /custom) should be rejected
-    let res = core.send_prompt(t1.id, "/compact");
-    assert!(res.is_err());
-    assert_eq!(rec1.prompts().len(), 0);
-
-    // 2. When passthrough is TRUE
-    let mut fake2 = FakeProvider::default().reusable();
-    let mut caps2 = fake2.capabilities();
-    caps2.slash_command_passthrough = true;
-    fake2.set_capabilities(caps2);
-    let rec2 = fake2.recorder();
-
-    let t2 = core
-        .create_thread(project_id, "fake", None, None, PermissionMode::AutoEdit)
+    core.send_prompt(thread.id, "/Users/me/file.txt what is this")
         .unwrap();
-    core.register_fake_provider(t2.id, fake2);
-
-    let res2 = core.send_prompt(t2.id, "/compact");
-    assert!(res2.is_ok());
-    assert_eq!(rec2.prompts().as_slice(), &["/compact"]);
+    assert_eq!(
+        rec.prompts().as_slice(),
+        &["/Users/me/file.txt what is this"]
+    );
 }

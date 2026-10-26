@@ -42,7 +42,7 @@ export async function openReview(engine = "chromium", scenario = "completed") {
     const settings = { defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {
       claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false,
     }, providers: { claude: provider, codex: provider, antigravity: provider } };
-    const caps = { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true, slashCommandPassthrough: false };
+    const caps = { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
       transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id; },

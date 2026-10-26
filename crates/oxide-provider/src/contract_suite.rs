@@ -19,7 +19,21 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
         "provider must be detected as available"
     );
 
-    // 3. Start
+    // 3. Slash command catalog: empty is fine, but every entry must be well formed.
+    let catalog = provider
+        .slash_commands(std::path::Path::new("."))
+        .expect("slash_commands must succeed");
+    let mut names = std::collections::HashSet::new();
+    for command in &catalog {
+        assert!(
+            !command.name.is_empty() && !command.name.starts_with('/'),
+            "command names are bare words: {:?}",
+            command.name
+        );
+        assert!(names.insert(&command.name), "duplicate {:?}", command.name);
+    }
+
+    // 4. Start
     let context = StartContext {
         working_dir: PathBuf::from("."),
         model: None,
@@ -28,7 +42,7 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     };
     let receiver = provider.start(&context).expect("start must succeed");
 
-    // 4. Send prompt & receive normalized events
+    // 5. Send prompt & receive normalized events
     provider
         .send_prompt("Hello test")
         .expect("send_prompt must succeed");

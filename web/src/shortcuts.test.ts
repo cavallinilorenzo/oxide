@@ -96,6 +96,8 @@ describe("isClearCommand", () => {
   it("matches /clear with optional surrounding whitespace", () => {
     expect(isClearCommand("/clear")).toBe(true);
     expect(isClearCommand("  /clear  ")).toBe(true);
+    expect(isClearCommand("/reset")).toBe(true);
+    expect(isClearCommand("/new")).toBe(true);
     expect(isClearCommand("/clear something")).toBe(false);
     expect(isClearCommand("/model")).toBe(false);
   });

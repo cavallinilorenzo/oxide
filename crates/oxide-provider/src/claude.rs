@@ -6,11 +6,13 @@ use crate::{
     ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
     UsageWindow, UsageWindowKind,
 };
+use crate::{SlashCommandInfo, SlashRoute};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -98,8 +100,6 @@ impl ClaudeCodeProvider {
                 supports_reasoning: true,
                 image_attachments: false,
                 mid_thread_model_switch: true,
-                // Built-in commands run under `--safe-mode` too.
-                slash_command_passthrough: true,
                 reports_usage_limits: true,
             })),
             child_process: Arc::new(Mutex::new(None)),
@@ -137,8 +137,37 @@ impl ClaudeCodeProvider {
         })
     }
 
+    /// Limits what the CLI loads to the customizations the user opted into.
+    fn apply_customizations(&self, cmd: &mut std::process::Command) {
+        let c = self.customizations;
+        if !c.any() && self.supports_safe_mode() {
+            cmd.arg("--safe-mode");
+        } else {
+            // `--safe-mode` is all-or-nothing, so a partial opt-in switches off the rest by hand.
+            if !c.claude_md {
+                cmd.env("CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1");
+            }
+            if !c.skills {
+                cmd.arg("--disable-slash-commands");
+            }
+            if !c.mcp_servers {
+                cmd.arg("--strict-mcp-config");
+            }
+            if !c.hooks {
+                cmd.arg("--settings").arg(r#"{"disableAllHooks":true}"#);
+            }
+            if !c.plugins {
+                // Plugins are enabled from the user's settings, which this leaves unread.
+                cmd.arg("--setting-sources").arg("project,local");
+            }
+        }
+    }
+
     /// Starts a throwaway CLI process, sends `initialize` and returns the response payload.
-    fn query_initialize(&self) -> Result<serde_json::Value, ProviderError> {
+    fn query_initialize(
+        &self,
+        working_dir: Option<&Path>,
+    ) -> Result<serde_json::Value, ProviderError> {
         let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("-p")
             .arg("--input-format")
@@ -146,8 +175,9 @@ impl ClaudeCodeProvider {
             .arg("--output-format")
             .arg("stream-json")
             .arg("--verbose");
-        if self.supports_safe_mode() {
-            cmd.arg("--safe-mode");
+        self.apply_customizations(&mut cmd);
+        if let Some(dir) = working_dir {
+            cmd.current_dir(dir);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -238,28 +268,7 @@ impl ClaudeCodeProvider {
             .arg("--verbose")
             .arg("--include-partial-messages");
 
-        let c = self.customizations;
-        if !c.any() && self.supports_safe_mode() {
-            cmd.arg("--safe-mode");
-        } else {
-            // `--safe-mode` is all-or-nothing, so a partial opt-in switches off the rest by hand.
-            if !c.claude_md {
-                cmd.env("CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1");
-            }
-            if !c.skills {
-                cmd.arg("--disable-slash-commands");
-            }
-            if !c.mcp_servers {
-                cmd.arg("--strict-mcp-config");
-            }
-            if !c.hooks {
-                cmd.arg("--settings").arg(r#"{"disableAllHooks":true}"#);
-            }
-            if !c.plugins {
-                // Plugins are enabled from the user's settings, which this leaves unread.
-                cmd.arg("--setting-sources").arg("project,local");
-            }
-        }
+        self.apply_customizations(&mut cmd);
 
         if let Some(ref model) = context.model {
             cmd.arg("--model").arg(model);
@@ -629,6 +638,65 @@ pub fn parse_rate_limit_event(val: &serde_json::Value) -> Option<ProviderEvent> 
     })
 }
 
+/// Commands that only make sense in the Claude Code terminal UI, so Oxide never offers them.
+const TERMINAL_ONLY_COMMANDS: [&str; 20] = [
+    "color",
+    "focus",
+    "heapdump",
+    "__remote-workflow",
+    "workflow-launch-exec",
+    "design",
+    "design-consent",
+    "design-revoke",
+    "team-onboarding",
+    "insights",
+    "extra-usage",
+    "usage-credits",
+    "auto-mode-setup",
+    "config",
+    "ultrareview",
+    "advisor",
+    "fast",
+    "output-style",
+    "import",
+    "list-agents",
+];
+
+fn parse_slash_commands(commands: &[serde_json::Value]) -> Vec<SlashCommandInfo> {
+    let text = |c: &serde_json::Value, key: &str| {
+        c[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
+    let mut out: Vec<SlashCommandInfo> = commands
+        .iter()
+        .filter_map(|c| {
+            let name = text(c, "name")?;
+            if TERMINAL_ONLY_COMMANDS.contains(&name.as_str()) {
+                return None;
+            }
+            Some(SlashCommandInfo {
+                name,
+                description: text(c, "description"),
+                argument_hint: text(c, "argumentHint"),
+                aliases: c["aliases"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                route: SlashRoute::Passthrough,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 /// Maps the CLI's `models` array to the catalog. The CLI reports no legacy flag, so an entry
 /// pinned to a concrete version (`value == resolvedModel`) that is not what its family's alias
 /// resolves to today counts as legacy. A `default` entry that merely repeats another entry's
@@ -829,7 +897,7 @@ impl Provider for ClaudeCodeProvider {
 
     /// The catalog is whatever the installed CLI reports for its `initialize` control request.
     fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        let response = self.query_initialize()?;
+        let response = self.query_initialize(None)?;
         let models = response
             .get("models")
             .and_then(|m| m.as_array())
@@ -837,6 +905,17 @@ impl Provider for ClaudeCodeProvider {
                 ProviderError::CommandFailed("Claude Code reported no model list".into())
             })?;
         Ok(parse_models(models))
+    }
+
+    fn slash_commands(&self, working_dir: &Path) -> Result<Vec<SlashCommandInfo>, ProviderError> {
+        let response = self.query_initialize(Some(working_dir))?;
+        let commands = response
+            .get("commands")
+            .and_then(|c| c.as_array())
+            .ok_or_else(|| {
+                ProviderError::CommandFailed("Claude Code reported no command list".into())
+            })?;
+        Ok(parse_slash_commands(commands))
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {

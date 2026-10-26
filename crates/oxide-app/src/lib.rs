@@ -1517,6 +1517,31 @@ fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, 
     Ok(core.read_attachment(std::path::Path::new(&path))?)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommand {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Skills and slash commands the `/` menu offers for a Provider in a Project.
+#[tauri::command]
+#[specta::specta]
+fn list_slash_commands(
+    core: State<'_, Arc<Core>>,
+    provider: String,
+    project_id: u32,
+) -> Result<Vec<SlashCommand>, AppError> {
+    Ok(core
+        .list_slash_commands(&provider, project_id)?
+        .into_iter()
+        .map(|c| SlashCommand {
+            name: c.name,
+            description: c.description,
+        })
+        .collect())
+}
+
 /// What a Provider supports, so the composer can offer image attachments before a Thread exists.
 #[tauri::command]
 #[specta::specta]
@@ -1762,6 +1787,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         save_attachment,
         read_attachment,
         provider_capabilities,
+        list_slash_commands,
         interrupt_thread,
         list_turns,
         subscribe_thread,

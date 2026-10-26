@@ -415,6 +415,11 @@ code { font-family: var(--mono); font-size: 12px; }
 }
 .composer:focus-within { border-color: var(--acc); box-shadow: 0 10px 30px #0009, 0 0 0 3px color-mix(in srgb, var(--acc) 25%, transparent); }
 .composer-lost { padding: 12px; align-items: flex-start; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 6px; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; border: 1px solid var(--line-strong); background: #1d2230; border-radius: 10px; box-shadow: 0 10px 30px #0009; z-index: 5; }
+.slash-menu li { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.slash-menu li.active, .slash-menu li:hover { background: #ffffff14; }
+.slash-menu .n { color: var(--fg-bright); flex: none; }
+.slash-menu .d { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-input { width: 100%; border: 0; background: none; resize: none; padding: 12px 14px 4px; min-height: 52px; font-size: 14px; color: var(--fg-bright); line-height: 1.5; }
 .composer-input:focus { border: 0; }
 .composer-input::placeholder { color: var(--faint); }

@@ -104,6 +104,8 @@ impl ClaudeCodeProvider {
     /// `true` lets the CLI load them as it would in a terminal.
     pub fn set_user_customizations(&mut self, enabled: bool) {
         self.user_customizations = enabled;
+        // Skills and slash commands only exist for the CLI when it loads the customizations.
+        self.capabilities.lock().unwrap().slash_command_passthrough = enabled;
     }
 
     /// Whether the installed CLI knows `--safe-mode`; older ones would refuse to start with it.

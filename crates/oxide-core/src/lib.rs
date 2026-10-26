@@ -16,9 +16,11 @@ mod git_diff;
 mod github;
 mod project_setup;
 mod settings;
+mod slash_commands;
 mod storage_actor;
 mod terminal;
 pub mod thread;
+pub use slash_commands::SlashCommand;
 mod thread_actor;
 mod worktree;
 
@@ -753,7 +755,11 @@ impl Core {
         provider: &str,
     ) -> oxide_provider::ProviderCapabilities {
         match provider {
-            "claude" => oxide_provider::claude::ClaudeCodeProvider::new().capabilities(),
+            "claude" => {
+                let mut claude = oxide_provider::claude::ClaudeCodeProvider::new();
+                claude.set_user_customizations(self.settings().settings.claude_customizations);
+                claude.capabilities()
+            }
             "codex" => oxide_provider::codex::CodexProvider::new().capabilities(),
             "agy" | "antigravity" => oxide_provider::agy::AgyProvider::new().capabilities(),
             _ => oxide_provider::ProviderCapabilities {
@@ -1010,6 +1016,27 @@ impl Core {
             (Ok(path), Ok(dir)) => path.starts_with(dir),
             _ => false,
         }
+    }
+
+    /// Slash commands and skills the composer offers for `provider` in `project_id`. Only
+    /// Claude Code with customizations enabled has any.
+    pub fn list_slash_commands(
+        &self,
+        provider: &str,
+        project_id: u32,
+    ) -> Result<Vec<SlashCommand>> {
+        if provider != "claude" || !self.settings().settings.claude_customizations {
+            return Ok(Vec::new());
+        }
+        let project = self
+            .list_projects()?
+            .into_iter()
+            .find(|p| p.id == project_id)
+            .map(|p| PathBuf::from(p.path));
+        Ok(slash_commands::discover(
+            &self.user_home,
+            project.as_deref(),
+        ))
     }
 
     /// Capabilities of a Provider, before any Thread of it exists.

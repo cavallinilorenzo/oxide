@@ -61,6 +61,8 @@ export const commands = {
 	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
 	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
 	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
+	/**  Skills and slash commands the `/` menu offers for a Provider in a Project. */
+	listSlashCommands: (provider: string, projectId: number) => typedError<SlashCommand_Serialize[], AppError>(__TAURI_INVOKE("list_slash_commands", { provider, projectId })),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	/**
 	 *  Up to `limit` Turns of a Thread from position `offset`, for paging in
@@ -697,6 +699,18 @@ export type Settings_Serialize = {
 	confirmQuit: boolean,
 	editor: string,
 	claudeCustomizations: boolean,
+};
+
+export type SlashCommand = SlashCommand_Serialize | SlashCommand_Deserialize;
+
+export type SlashCommand_Deserialize = {
+	name: string,
+	description?: string | null,
+};
+
+export type SlashCommand_Serialize = {
+	name: string,
+	description: string | null,
 };
 
 export type Terminal = {

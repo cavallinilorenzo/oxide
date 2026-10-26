@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  GitPullRequestDraftIcon,
-  GitPullRequestIcon,
-  LinkExternalIcon,
-  SyncIcon,
-} from "@primer/octicons-react";
+import { GitPullRequestIcon, SyncIcon } from "@primer/octicons-react";
 import { commands, type GitStatus, type PullRequestDraft, type PullRequestState } from "./bindings";
 import { createPrBlockedReason } from "./gitAction";
-import { PullRequestBrowser } from "./PullRequestBrowser";
+import { PullRequestBrowser, PullRequestReview } from "./PullRequestBrowser";
 
 interface PullRequestPanelProps {
   projectId: number;
@@ -59,7 +54,7 @@ function PullRequestViews(props: PullRequestPanelProps) {
       {view === "branch" ? (
         <PullRequestBody {...props} manual={manual} onRefresh={refresh} />
       ) : (
-        <section className="pr-panel" aria-label="Pull requests">
+        <section className="pr-panel pr-panel-flush" aria-label="Pull requests">
           <PullRequestBrowser {...props} refreshKey={props.refreshKey + manual} />
         </section>
       )}
@@ -71,6 +66,7 @@ function PullRequestBody({
   projectId,
   refreshKey,
   onChanged,
+  onReviewFiles,
   manual,
   onRefresh,
 }: PullRequestPanelProps & { manual: number; onRefresh: () => void }) {
@@ -130,26 +126,19 @@ function PullRequestBody({
 
   const existing = pr.pullRequest;
   return (
-    <section className="pr-panel" aria-label="Pull request">
+    <section className={`pr-panel${existing ? " pr-panel-flush" : ""}`} aria-label="Pull request">
       {existing ? (
-        <div className="pr-card">
-          <div className="pr-card-title">
-            {existing.draft ? <GitPullRequestDraftIcon size={16} /> : <GitPullRequestIcon size={16} className="pr-open" />}
-            <strong>{existing.title}</strong>
-            <span className="dim">#{existing.number}</span>
-          </div>
-          <div className="pr-card-meta">
-            <span className={`badge ${existing.draft ? "b-draft" : "b-open"}`}>{existing.draft ? "Draft" : "Open"}</span>
-            <span className="mono dim">
-              {existing.head} → {existing.base}
-            </span>
-          </div>
-          <div className="pr-actions">
-            <button className="btn" onClick={() => void openOnGithub()}>
-              <LinkExternalIcon size={14} /> Open on GitHub
-            </button>
-          </div>
-        </div>
+        <PullRequestReview
+          projectId={projectId}
+          number={existing.number}
+          refreshKey={refreshKey + manual}
+          onChanged={() => {
+            onChanged();
+            onRefresh();
+          }}
+          onReviewFiles={onReviewFiles}
+          onOpenOnGithub={() => void openOnGithub()}
+        />
       ) : (
         <CreateForm
           projectId={projectId}

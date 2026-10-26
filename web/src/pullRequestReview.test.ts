@@ -36,7 +36,7 @@ describe("summarizeChecks", () => {
       { name: "c", state: "pending" as const },
       { name: "d", state: "success" as const },
     ];
-    expect(summarizeChecks(checks)).toBe("1 failing, 1 pending, 2 passing");
+    expect(summarizeChecks(checks)).toBe("1 failing, 1 running, 2 passing");
   });
 
   it("omits the empty kinds", () => {

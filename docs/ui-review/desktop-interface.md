@@ -4,6 +4,31 @@ Metodo: due valutazioni indipendenti, A (design) e B (detector, contrasto e brow
 
 L’interfaccia ha un’identità appropriata: superfici scure, Octicons, gerarchia Project → Thread e azioni Git vicine al lavoro. La densità è utile, ma nella baseline i pannelli sottraevano spazio al compito principale e alcuni dettagli operativi avevano contrasto insufficiente. I fix preservano struttura, contenuti e linguaggio visivo.
 
+## Polish finale della schermata principale
+
+Il passaggio finale mantiene palette, struttura, contenuti e flussi. Le immagini della prima revisione sotto rimangono disponibili come documentazione dell’audit; queste catture mostrano il risultato aggiornato.
+
+- **Barre allineate:** Thread, Tools e Terminal condividono un’altezza di 40 px. Il nome Terminal è un’etichetta, senza semantica o sottolineatura di un tab selezionabile. Il tab Tools attivo mantiene il suo indicatore anche in hover.
+- **Sidebar stabile:** righe Thread da 32 px, gerarchia tra selezione e righe inattive, margini da 8 px. Timestamp e azione Delete condividono lo stesso spazio: il titolo non cambia larghezza in hover. Le azioni contestuali restano visibili e cliccabili quando il focus è nella riga. Settings espone lo stato corrente anche semanticamente.
+- **Composer più preciso:** raggio da 12 px, ombra alleggerita e un unico contorno di focus ad alto contrasto sul gruppo; nessun bordo aggiuntivo intorno alla textarea. Rimosso il margine negativo sul transcript. Il selettore nativo dei permessi conserva un target pieno e il focus sul contenitore anche quando mostra soltanto l’icona.
+- **Ritmo del transcript:** spaziature 8/16/24 px, bubble con padding 12×16 px, cifre temporali tabulari. Indicazione del Thread vuoto centrata nello spazio disponibile. Percorsi, nomi Thread, branch e selezioni mantengono il valore completo nei titoli nativi pertinenti.
+- **Toolbar più uniforme:** segmento Chat/Board compatto, contatori Git monospazio, stati hover/active coerenti del pulsante Commit & Push e separazione leggibile del menu associato.
+
+| Vista finale | Screenshot |
+| --- | --- |
+| Workspace 1280×800 | [Schermata principale](polish/after-workspace.png) |
+| Workspace 900×560 | [Finestra minima](polish/after-workspace-900.png) |
+| Composer con focus e invio disponibile | [Focus](polish/after-composer-focus.png) |
+| Thread vuoto | [Empty state](polish/after-empty.png) |
+| Agente al lavoro | [Working](polish/after-working.png) |
+| Richiesta di approvazione | [Approval](polish/after-approval.png) |
+| Errore del Provider | [Error](polish/after-error.png) |
+| Settings e menu | [Settings](polish/after-settings.png), [dropdown](polish/after-dropdown.png) |
+
+Verifica finale: typecheck, lint, build e 146 test frontend passati; il warning preesistente di React Compiler su `useVirtualizer` rimane invariato. Nessun codice Rust modificato in questo passaggio. Chromium e WebKit verificano 1920×1080, 1280×800, 1024×768 e 900×560, altezza delle barre, focus del composer e del selettore compatto, selezione dei permessi, stabilità della riga in hover, azioni da tastiera e ripristino pannelli. Tutti e quattro gli stati aggiuntivi sono verificati a 1280 e 900 px, inclusa l’assenza di controlli che traboccano dal composer. Zero errori JavaScript nelle fixture.
+
+Metriche: [Chromium](polish/verification-chromium.json), [WebKit](polish/verification-webkit.json). Stati: [Chromium](polish/states-chromium.json), [WebKit](polish/states-webkit.json). Per riprodurre anche le catture degli stati, aggiungere `OXIDE_REVIEW_SCENARIOS=1` ai comandi di verifica descritti sotto. Rimane una sola validazione manuale nativa finale, descritta in fondo al report.
+
 ## Criticità, evidenza e correzioni
 
 | Priorità | Criticità della baseline | Correzione implementata |

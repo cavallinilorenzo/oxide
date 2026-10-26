@@ -659,7 +659,7 @@ export function ThreadView({
         ) : (
           <div className="thread-title-display">
             {thread && <span className={`status-dot ${thread.status}`} aria-label={`Status: ${thread.status}`} />}
-            <h2 className="thread-title" onClick={handleStartRename} title="Click to rename">
+            <h2 className="thread-title" onClick={handleStartRename} title={`${threadTitle} · Click to rename`}>
               {threadTitle}
             </h2>
             {thread?.issueNumber != null && (
@@ -852,7 +852,7 @@ export function ThreadView({
               }}
               disabled={isTurnActive || sending}
               aria-label="Model"
-              title="Model (/model)"
+              title={`Model: ${currentModel || currentProvider} (/model)`}
             >
               <ProviderMark provider={currentProvider} size={14} />
               <span className="t">{currentModel || currentProvider}</span>
@@ -867,7 +867,7 @@ export function ThreadView({
               }}
               disabled={isTurnActive || sending}
               aria-label="Effort"
-              title="Effort (/effort)"
+              title={`Effort: ${currentEffort || "Default"} (/effort)`}
             >
               <LightBulbIcon size={14} />
               <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>

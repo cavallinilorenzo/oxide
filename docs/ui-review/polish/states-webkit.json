@@ -1,0 +1,18 @@
+[
+  {
+    "scenario": "empty",
+    "errors": []
+  },
+  {
+    "scenario": "working",
+    "errors": []
+  },
+  {
+    "scenario": "approval",
+    "errors": []
+  },
+  {
+    "scenario": "error",
+    "errors": []
+  }
+]

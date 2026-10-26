@@ -535,6 +535,7 @@ export function App() {
             setShowBoard(true);
           }}
           onOpenSettings={() => setShowSettings(true)}
+          settingsOpen={showSettings}
         />
         <div className="centre-column">
           {showSettings ? (
@@ -702,6 +703,7 @@ interface SidebarProps {
   onOpenPalette: () => void;
   onOpenBoard: (p: Project) => void;
   onOpenSettings: () => void;
+  settingsOpen: boolean;
 }
 
 /** Open Projects, each with its Threads. Scanned repositories stay out until opened from ⌘⇧N. */
@@ -719,6 +721,7 @@ function Sidebar({
   onOpenPalette,
   onOpenBoard,
   onOpenSettings,
+  settingsOpen,
 }: SidebarProps) {
   const [threadQuery, setThreadQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -877,7 +880,7 @@ function Sidebar({
           })}
         </ul>
       </div>
-      <button className="sidebar-footer" onClick={onOpenSettings} title="Settings (⌘,)">
+      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title="Settings (⌘,)">
         <GearIcon size={14} /> Settings
       </button>
     </nav>

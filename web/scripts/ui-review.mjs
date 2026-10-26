@@ -9,12 +9,12 @@ import { pathToFileURL } from "node:url";
 
 const { chromium, webkit } = await import(process.env.OXIDE_PLAYWRIGHT_MODULE
   ? pathToFileURL(resolve(process.env.OXIDE_PLAYWRIGHT_MODULE)).href : "playwright");
-export async function openReview(engine = "chromium") {
+export async function openReview(engine = "chromium", scenario = "completed") {
   const browser = await ({ chromium, webkit }[engine]).launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => {
+  await page.addInitScript((scenario) => {
     let callbackId = 0;
     const callbacks = new Map();
     const project = { id: 1, name: "oxide", path: "/Users/demo/Developer/projects/oxide", hidden: false, open: true, missing: false };
@@ -36,9 +36,13 @@ export async function openReview(engine = "chromium") {
         if (command === "plugin:event|listen") return ++callbackId;
         if (["plugin:event|unlisten", "remember_selection", "resize_terminal", "close_terminal", "write_terminal"].includes(command)) return null;
         if (command === "list_projects" || command === "rescan_projects") return [project];
-        if (command === "last_selection") return { projectId: 1, threadId: 1 };
-        if (command === "list_threads") return threads;
+        if (command === "last_selection") return { projectId: 1, threadId: ({ completed: 1, approval: 2, working: 3, error: 4, empty: null })[scenario] };
+        if (command === "list_threads") return scenario === "empty" ? [] : threads;
         if (command === "get_settings") return { settings, errors: [], scanRoots: [] };
+        if (command === "set_thread_permission_mode") {
+          threads.find((thread) => thread.id === args.threadId).permissionMode = args.permissionMode;
+          return null;
+        }
         if (command === "save_settings") { Object.assign(settings, args.settings); return null; }
         if (command === "get_provider_capabilities") return caps;
         if (command === "provider_capabilities") return { reasoningText: true, imageAttachments: true };
@@ -56,17 +60,24 @@ export async function openReview(engine = "chromium") {
           { name: "package.json", path: "package.json", isDir: false },
           { name: "desktop-interface-consistency-review.md", path: "docs/desktop-interface-consistency-review.md", isDir: false },
         ];
-        if (command === "subscribe_thread") return {
-          thread: threads.find((thread) => thread.id === args.threadId), capabilities: { reasoningText: true, imageAttachments: true }, turnOffset: 0, turnCount: 1, lastSeq: 0, supportedPermissionModes: caps.supportedPermissionModes,
-          turns: [{ id: 1, turnIndex: 0, prompt: "Review the desktop workspace and shared controls.", model: "claude-sonnet-4-6", effort: "medium", status: "completed", startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), approvals: [], attachments: [], unknownEvents: [], items: [{ id: 1, itemIndex: 0, kind: "agent_message", status: "completed", content: "The workspace keeps Projects, Threads and Git actions close at hand. Check contrast, keyboard focus and long labels while preserving the compact layout." }] }],
-        };
+        if (command === "subscribe_thread") {
+          const thread = threads.find((thread) => thread.id === args.threadId);
+          const running = ["working", "needs-input"].includes(thread.status);
+          return {
+            thread, capabilities: { reasoningText: true, imageAttachments: true }, turnOffset: 0, turnCount: 1, lastSeq: 0, supportedPermissionModes: caps.supportedPermissionModes,
+            turns: [{ id: 1, turnIndex: 0, prompt: "Review the desktop workspace and shared controls.", model: "claude-sonnet-4-6", effort: "medium", status: running ? "running" : thread.status === "error" ? "error" : "completed", startedAt: new Date().toISOString(), completedAt: running ? null : new Date().toISOString(),
+              error: thread.status === "error" ? { message: "Provider connection interrupted.", stderrTail: "Connection closed before the response completed." } : null,
+              approvals: thread.status === "needs-input" ? [{ id: 1, approvalId: "review-command", kind: "command", summary: "git diff --stat", options: [], decision: null, createdAt: new Date().toISOString() }] : [], attachments: [], unknownEvents: [],
+              items: [{ id: 1, itemIndex: 0, kind: "agent_message", status: "completed", content: "The workspace keeps Projects, Threads and Git actions close at hand. Check contrast, keyboard focus and long labels while preserving the compact layout." }] }],
+          };
+        }
         throw new Error(`UI review fixture missing command: ${command}`);
       },
     };
-  });
+  }, scenario);
   await page.goto(process.env.OXIDE_REVIEW_URL ?? "http://127.0.0.1:1420");
   await page.locator(".thread-title").waitFor();
-  await page.locator(".agent-message").waitFor();
+  if (scenario !== "empty") await page.locator(".agent-message").waitFor();
   await page.locator(".files-row").first().waitFor();
   await page.locator(".terminal-host .xterm").waitFor();
   return { browser, page, errors };
@@ -96,6 +107,7 @@ export async function verifyReview(page, output) {
   }
   // Real keyboard focus, including controls inside clipped/scrollable panels.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  assert.equal(await page.getByRole("button", { name: "Settings", exact: true }).getAttribute("aria-current"), "page");
   const checkbox = page.getByRole("checkbox", { name: "Confirm before quitting" });
   await page.keyboard.press("Tab");
   await checkbox.focus();
@@ -130,6 +142,30 @@ export async function verifyReview(page, output) {
   await page.locator(".composer").waitFor();
   assert.equal(await page.locator(".tools").isVisible(), true);
   assert.equal(await page.locator("section.terminal").isVisible(), true);
+  assert.equal(await page.getByRole("button", { name: "Settings", exact: true }).getAttribute("aria-current"), null);
+  // The compact native select must retain a complete pointer and keyboard target.
+  const permission = page.getByRole("combobox", { name: "Permission mode" });
+  const permissionBounds = await permission.boundingBox();
+  assert.ok(permissionBounds.width >= 24 && permissionBounds.height >= 24);
+  await permission.focus();
+  assert.equal(await permission.evaluate((el) => getComputedStyle(el.closest("label")).outlineStyle), "solid");
+  await permission.selectOption("ask");
+  await page.waitForFunction(() => document.querySelector("#permission-mode-select")?.value === "ask");
+  assert.equal(await permission.inputValue(), "ask");
+  await page.getByRole("textbox", { name: "Message to agent" }).focus();
+  assert.equal(await page.locator(".composer").evaluate((el) => getComputedStyle(el).borderColor), "rgb(88, 166, 255)");
+  const heights = await page.locator(".thread-header-bar, .tools > .tabs, .terminal-toolbar").evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect().height));
+  assert.deepEqual(heights, [40, 40, 40]);
+  const row = page.locator(".thread-row").first();
+  const title = row.locator(".thread-item-title");
+  const beforeHover = await title.boundingBox();
+  await row.hover();
+  assert.equal((await title.boundingBox()).width, beforeHover.width, "Hover must not reflow the Thread title");
+  const rowAction = row.getByRole("button", { name: /^Delete / });
+  await rowAction.focus();
+  await page.mouse.move(0, 0);
+  assert.equal(await rowAction.evaluate((el) => getComputedStyle(el).pointerEvents), "auto");
+  assert.equal(await rowAction.evaluate((el) => getComputedStyle(el).opacity), "1");
   // Stress long repository and branch labels without invoking a real backend.
   await page.locator(".header .title strong").evaluate((el) => { el.textContent = "a-very-long-project-name-that-must-not-cover-actions"; });
   await page.locator(".header .branch-name").evaluate((el) => { el.textContent = "fix/a-very-long-branch-name/with-many-segments-and-an-unbroken-suffix"; });
@@ -150,6 +186,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const { browser, page, errors } = await openReview(process.env.OXIDE_REVIEW_ENGINE ?? "chromium");
   try {
     await page.screenshot({ animations: "disabled", path: `${output}/${prefix}-workspace.png` });
+    if (process.env.OXIDE_REVIEW_SCENARIOS) {
+      await page.getByRole("textbox", { name: "Message to agent" }).fill("Check spacing and keyboard focus across the workspace.");
+      await page.screenshot({ animations: "disabled", path: `${output}/${prefix}-composer-focus.png` });
+    }
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.locator(".settings-card").first().waitFor();
     await page.screenshot({ animations: "disabled", path: `${output}/${prefix}-settings.png` });
@@ -164,4 +204,35 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     }
     if (errors.length) throw new Error(errors.join("\n"));
   } finally { await browser.close(); }
+  if (process.env.OXIDE_REVIEW_SCENARIOS) {
+    const states = [];
+    for (const scenario of ["empty", "working", "approval", "error"]) {
+      const { browser, page, errors } = await openReview(process.env.OXIDE_REVIEW_ENGINE ?? "chromium", scenario);
+      try {
+        if (scenario === "working" || scenario === "approval") {
+          assert.equal(await page.getByRole("button", { name: "Stop", exact: true }).isVisible(), true);
+          assert.equal(await page.getByRole("button", { name: "Model", exact: true }).isDisabled(), true);
+        }
+        if (scenario === "empty") assert.equal(await page.locator(".empty-thread").isVisible(), true);
+        if (scenario === "approval") assert.equal(await page.getByRole("button", { name: "Allow", exact: true }).isEnabled(), true);
+        if (scenario === "error") assert.equal(await page.getByRole("alert").isVisible(), true);
+        for (const [width, height] of [[1280, 800], [900, 560]]) {
+          await page.setViewportSize({ width, height });
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow in ${scenario}`);
+          const controlsFit = await page.locator(".composer").evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            return [...el.querySelectorAll(".composer-bar button, .composer-bar label")].every((control) => {
+              const c = control.getBoundingClientRect();
+              return c.left >= r.left && c.right <= r.right;
+            });
+          });
+          assert.equal(controlsFit, true, `Composer controls overflow in ${scenario} at ${width}`);
+          if (width === 1280) await page.screenshot({ path: `${output}/${prefix}-${scenario}.png`, animations: "disabled" });
+        }
+        assert.deepEqual(errors, []);
+        states.push({ scenario, errors });
+      } finally { await browser.close(); }
+    }
+    await writeFile(`${output}/states-${process.env.OXIDE_REVIEW_ENGINE ?? "chromium"}.json`, JSON.stringify(states, null, 2));
+  }
 }

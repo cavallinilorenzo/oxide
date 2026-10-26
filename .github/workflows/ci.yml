@@ -17,8 +17,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  rust:
-    runs-on: macos-latest # Apple Silicon
+  rust-platform:
+    name: rust (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,6 +45,16 @@ jobs:
       - run: cargo test --workspace
       - name: Generated bindings are committed
         run: git diff --exit-code web/src/bindings.ts
+
+  rust:
+    if: always()
+    needs: rust-platform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all Rust platform checks to pass
+        env:
+          MATRIX_RESULT: ${{ needs.rust-platform.result }}
+        run: test "$MATRIX_RESULT" = success
 
   web:
     runs-on: macos-latest

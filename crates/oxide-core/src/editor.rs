@@ -478,12 +478,4 @@ mod tests {
             find_windows_editor_with("com.unknown.editor", Some(tmp.path().as_os_str())).is_none()
         );
     }
-
-    #[cfg(windows)]
-    #[test]
-    fn detects_installed_zed_on_current_machine() {
-        // Zed is installed on this dev machine
-        let found = find_windows_editor("dev.zed.Zed");
-        assert!(found.is_some(), "Zed should be detected on this machine");
-    }
 }

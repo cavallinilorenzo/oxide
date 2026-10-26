@@ -99,8 +99,16 @@ fn threads_of_one_provider_share_merged_usage_limits_that_survive_a_restart() {
         assert_eq!(merged.weekly.as_ref().unwrap().percent_used, Some(10.0));
         assert!(merged.weekly.as_ref().unwrap().reported_at > 0);
 
+        // A report updates the snapshot before it sends to subscribers, so wait for both events
+        // instead of racing the second send with `try_iter`.
+        let received: Vec<UsageLimits> = (0..2)
+            .map(|_| {
+                updates
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("usage update should reach subscribers")
+            })
+            .collect();
         // The subscriber saw each report, the last one being the merged snapshot.
-        let received: Vec<UsageLimits> = updates.try_iter().collect();
         assert_eq!(received.len(), 2);
         assert_eq!(received.last(), Some(&merged));
 

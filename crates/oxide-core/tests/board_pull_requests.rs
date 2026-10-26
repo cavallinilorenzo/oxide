@@ -92,7 +92,7 @@ fn pr(
 
 /// Long enough for the off-thread lookup (two fake `gh` runs, each starting Python) on a slow
 /// CI runner. Waiting for an event that does arrive returns as soon as it does.
-const ARRIVES_WITHIN: Duration = Duration::from_secs(20);
+const ARRIVES_WITHIN: Duration = Duration::from_secs(60);
 /// How long to watch before concluding no pull request event is coming.
 const QUIET_FOR: Duration = Duration::from_secs(3);
 

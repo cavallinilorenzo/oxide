@@ -347,6 +347,47 @@ fn claude_provider_resume_passes_session_id() {
     );
 }
 
+#[test]
+fn claude_maps_synthetic_assistant_message_to_slash_command_output() {
+    use oxide_provider::{ItemKind, PermissionMode, ProviderEvent, StartContext, TurnStatus};
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    assert!(provider.capabilities().slash_command_passthrough);
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: None,
+        effort: None,
+        permission_mode: PermissionMode::AutoEdit,
+    };
+    let rx = provider.start(&context).unwrap();
+    provider.send_prompt("/context").unwrap();
+
+    let mut started = 0;
+    let mut output = None;
+    while let Ok(evt) = rx.recv_timeout(Duration::from_secs(5)) {
+        match evt {
+            ProviderEvent::ItemStarted { kind, .. } => {
+                assert_eq!(kind, ItemKind::SlashCommandOutput);
+                started += 1;
+            }
+            ProviderEvent::ItemCompleted { kind, content, .. } => {
+                assert_eq!(kind, ItemKind::SlashCommandOutput);
+                output = Some(content);
+            }
+            ProviderEvent::TurnCompleted { status, .. } => {
+                assert_eq!(status, TurnStatus::Completed);
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(started, 1);
+    assert!(output.unwrap().contains("| Messages | 12 |"));
+    provider.shutdown().unwrap();
+}
+
 fn start_and_read_argv(configure: impl FnOnce(&mut ClaudeCodeProvider)) -> String {
     use oxide_provider::{PermissionMode, ProviderEvent, StartContext};
 

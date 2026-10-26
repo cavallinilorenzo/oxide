@@ -98,7 +98,8 @@ impl ClaudeCodeProvider {
                 supports_reasoning: true,
                 image_attachments: false,
                 mid_thread_model_switch: true,
-                slash_command_passthrough: false,
+                // Built-in commands run under `--safe-mode` too.
+                slash_command_passthrough: true,
                 reports_usage_limits: true,
             })),
             child_process: Arc::new(Mutex::new(None)),
@@ -123,8 +124,6 @@ impl ClaudeCodeProvider {
     /// enabled category lets the CLI load it as it would in a terminal.
     pub fn set_user_customizations(&mut self, customizations: ClaudeCustomizations) {
         self.customizations = customizations;
-        // Skills and slash commands only exist for the CLI when it loads them.
-        self.capabilities.lock().unwrap().slash_command_passthrough = customizations.skills;
     }
 
     /// Whether the installed CLI knows `--safe-mode`; older ones would refuse to start with it.
@@ -320,6 +319,7 @@ impl ClaudeCodeProvider {
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             let mut accumulated_items: HashMap<u32, (ItemKind, String)> = HashMap::new();
+            let mut slash_outputs: u32 = 0;
 
             for line_res in reader.lines() {
                 let line = match line_res {
@@ -457,6 +457,42 @@ impl ClaudeCodeProvider {
                                     let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
                                 }
                             }
+                            "assistant" => {
+                                // Regular assistant messages already arrived as `stream_event`
+                                // deltas; only synthetic ones (Slash command output) are new.
+                                let message = val.get("message");
+                                let synthetic = message
+                                    .and_then(|m| m.get("model"))
+                                    .and_then(|v| v.as_str())
+                                    == Some("<synthetic>");
+                                if !synthetic {
+                                    continue;
+                                }
+                                let content = message
+                                    .and_then(|m| m.get("content"))
+                                    .and_then(|c| c.as_array())
+                                    .map(|blocks| {
+                                        blocks
+                                            .iter()
+                                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    })
+                                    .unwrap_or_default();
+                                let item_index = SLASH_OUTPUT_INDEX_BASE + slash_outputs;
+                                slash_outputs += 1;
+                                let _ = tx.send(ProviderEvent::ItemStarted {
+                                    item_index,
+                                    kind: ItemKind::SlashCommandOutput,
+                                    parent_item_index: None,
+                                });
+                                let _ = tx.send(ProviderEvent::ItemCompleted {
+                                    item_index,
+                                    kind: ItemKind::SlashCommandOutput,
+                                    content,
+                                    parent_item_index: None,
+                                });
+                            }
                             "rate_limit_event" => {
                                 // Per-Model and overage windows are not shown.
                                 if let Some(event) = parse_rate_limit_event(&val) {
@@ -559,6 +595,9 @@ impl ClaudeCodeProvider {
         }
     }
 }
+
+/// Synthetic messages carry no content-block index, so they get indices above any real one.
+const SLASH_OUTPUT_INDEX_BASE: u32 = 10_000;
 
 /// Maps a stream-json `rate_limit_event` to a `UsageLimits` event. Only the 5-hour and the
 /// all-Models weekly windows are kept; `utilization` is a fraction and may be absent.

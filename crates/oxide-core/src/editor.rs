@@ -53,6 +53,7 @@ pub fn choose<'a>(detected: &'a [Editor], configured: &str) -> Option<&'a Editor
 }
 
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 struct WindowsEditorSpec {
     bundle_id: &'static str,
     commands: &'static [&'static str],
@@ -61,6 +62,7 @@ struct WindowsEditorSpec {
     env_fallbacks: &'static [(&'static str, &'static str)],
 }
 
+#[allow(dead_code)]
 const WINDOWS_SPECS: &[WindowsEditorSpec] = &[
     WindowsEditorSpec {
         bundle_id: "com.microsoft.VSCode",
@@ -154,21 +156,25 @@ const WINDOWS_SPECS: &[WindowsEditorSpec] = &[
     },
 ];
 
+#[allow(dead_code)]
 fn spec_for_bundle(bundle_id: &str) -> Option<&'static WindowsEditorSpec> {
     WINDOWS_SPECS.iter().find(|s| s.bundle_id == bundle_id)
 }
 
 /// Checks whether an editor is installed on Windows, looking at PATH and Registry.
+#[allow(dead_code)]
 pub fn is_installed_windows(bundle_id: &str) -> bool {
     find_windows_editor(bundle_id).is_some()
 }
 
 /// Finds the executable for an editor on Windows by checking PATH and Registry.
+#[allow(dead_code)]
 pub fn find_windows_editor(bundle_id: &str) -> Option<PathBuf> {
     find_windows_editor_with(bundle_id, std::env::var_os("PATH").as_deref())
 }
 
 /// Finds the executable for an editor using an explicit PATH environment (useful for tests).
+#[allow(dead_code)]
 pub fn find_windows_editor_with(
     bundle_id: &str,
     path_env: Option<&std::ffi::OsStr>,
@@ -218,6 +224,7 @@ pub fn find_windows_editor_with(
 }
 
 /// Opens a path in the specified editor on Windows.
+#[allow(dead_code)]
 pub fn open_windows(bundle_id: &str, path: &Path) -> bool {
     if let Some(exe) = find_windows_editor(bundle_id) {
         std::process::Command::new(exe).arg(path).spawn().is_ok()
@@ -227,6 +234,7 @@ pub fn open_windows(bundle_id: &str, path: &Path) -> bool {
 }
 
 /// Detects all installed editors on Windows without needing a custom callback.
+#[allow(dead_code)]
 pub fn detect_windows() -> Vec<Editor> {
     detect(is_installed_windows)
 }

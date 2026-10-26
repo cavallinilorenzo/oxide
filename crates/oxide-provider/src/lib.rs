@@ -10,7 +10,7 @@ pub mod process;
 
 use crossbeam_channel::Receiver;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -234,6 +234,33 @@ pub struct ModelInfo {
     pub is_legacy: bool,
 }
 
+/// How a Slash command is run (ADR-0006).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlashRoute {
+    /// Intercepted and run by Oxide.
+    Oxide,
+    /// Sent to the Provider as the prompt text.
+    Passthrough,
+    /// Translated by Oxide into the Provider's own API.
+    Native,
+}
+
+/// One entry of a Provider's Slash command catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandInfo {
+    /// Without the leading `/`.
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub argument_hint: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub route: SlashRoute,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilities {
@@ -245,8 +272,6 @@ pub struct ProviderCapabilities {
     pub image_attachments: bool,
     #[serde(default)]
     pub mid_thread_model_switch: bool,
-    #[serde(default)]
-    pub slash_command_passthrough: bool,
     /// The Provider reports Usage limits (5-hour and weekly) through `UsageLimits` events.
     #[serde(default)]
     pub reports_usage_limits: bool,
@@ -399,6 +424,10 @@ pub trait Provider: Send + 'static {
         Ok(())
     }
     fn models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        Ok(Vec::new())
+    }
+    /// The Slash commands this Provider offers in `working_dir`. Empty when it has none.
+    fn slash_commands(&self, _working_dir: &Path) -> Result<Vec<SlashCommandInfo>, ProviderError> {
         Ok(Vec::new())
     }
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError>;
@@ -559,7 +588,6 @@ impl Default for FakeProvider {
                 supports_reasoning: true,
                 image_attachments: true,
                 mid_thread_model_switch: true,
-                slash_command_passthrough: false,
                 reports_usage_limits: false,
             },
             detection: Detection {

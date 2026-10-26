@@ -510,3 +510,25 @@ fn claude_model_catalog_errors_when_the_cli_is_missing() {
     let provider = ClaudeCodeProvider::with_command("nonexistent_binary_xyz_123");
     assert!(provider.models().is_err());
 }
+
+#[test]
+fn claude_slash_command_catalog_comes_from_the_cli_without_hidden_commands() {
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+
+    let commands = provider.slash_commands(std::path::Path::new(".")).unwrap();
+
+    let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["clear", "compact", "context", "tdd"]);
+    let context = commands.iter().find(|c| c.name == "context").unwrap();
+    assert_eq!(
+        context.description.as_deref(),
+        Some("Show current context usage")
+    );
+    assert_eq!(context.argument_hint, None);
+    assert_eq!(context.route, oxide_provider::SlashRoute::Passthrough);
+    let compact = commands.iter().find(|c| c.name == "compact").unwrap();
+    assert!(compact.argument_hint.is_some());
+    let clear = commands.iter().find(|c| c.name == "clear").unwrap();
+    assert_eq!(clear.aliases, ["reset", "new"]);
+}

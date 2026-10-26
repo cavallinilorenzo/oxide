@@ -43,7 +43,7 @@ import { ModelEffortPicker } from "./ModelEffortPicker";
 import { loadDraftModel, saveDraftModel } from "./draftModel";
 import { parseSlashCommand, resolveDefaultModel } from "./modelPicker";
 import { readableModel } from "./headerLines";
-import { filterSlashCommands, slashQuery } from "./slashMenu";
+import { filterSlashCommands, pickSlashCommand, slashQuery } from "./slashMenu";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -863,6 +863,7 @@ export function ThreadView({
                 }}
               >
                 <span className="n">/{c.name}</span>
+                {c.argumentHint && <span className="h">{c.argumentHint}</span>}
                 {c.description && <span className="d">{c.description}</span>}
               </li>
             ))}
@@ -893,7 +894,13 @@ export function ThreadView({
               if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
                 e.preventDefault();
                 const pick = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
-                handleInputChange(`/${pick.name} `);
+                const action = pickSlashCommand(pick, e.key === "Tab" ? "Tab" : "Enter", input);
+                if ("insert" in action) {
+                  e.preventDefault();
+                  handleInputChange(action.insert);
+                  return;
+                }
+                e.currentTarget.form?.requestSubmit();
                 return;
               }
             }

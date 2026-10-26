@@ -332,7 +332,6 @@ pub struct ProviderCapabilities {
     pub supports_reasoning: bool,
     pub image_attachments: bool,
     pub mid_thread_model_switch: bool,
-    pub slash_command_passthrough: bool,
     pub reports_usage_limits: bool,
 }
 
@@ -1554,29 +1553,37 @@ fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, 
     Ok(core.read_attachment(std::path::Path::new(&path))?)
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SlashRoute {
+    Oxide,
+    Passthrough,
+    Native,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SlashCommand {
     pub name: String,
     pub description: Option<String>,
+    pub argument_hint: Option<String>,
+    pub aliases: Vec<String>,
+    pub route: SlashRoute,
 }
 
-/// Skills and slash commands the `/` menu offers for a Provider in a Project.
+/// The Slash command catalog the `/` menu offers for a Provider in a Project.
 #[tauri::command]
 #[specta::specta]
-fn list_slash_commands(
+async fn list_slash_commands(
     core: State<'_, Arc<Core>>,
     provider: String,
     project_id: u32,
 ) -> Result<Vec<SlashCommand>, AppError> {
-    Ok(core
-        .list_slash_commands(&provider, project_id)?
-        .into_iter()
-        .map(|c| SlashCommand {
-            name: c.name,
-            description: c.description,
-        })
-        .collect())
+    git_blocking(&core, move |core| {
+        core.list_slash_commands(&provider, project_id)
+    })
+    .await
+    .map(|commands| commands.iter().map(convert).collect())
 }
 
 /// What a Provider supports, so the composer can offer image attachments before a Thread exists.

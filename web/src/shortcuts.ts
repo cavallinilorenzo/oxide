@@ -45,7 +45,7 @@ export function isNewThreadShortcut(e: KeyPress): boolean {
 
 /** /clear starts a new Thread and keeps the previous one in history. */
 export function isClearCommand(input: string): boolean {
-  return input.trim() === "/clear";
+  return ["/clear", "/reset", "/new"].includes(input.trim());
 }
 
 /** ⌘1..9 / Ctrl 1..9 picks visible model in picker. */

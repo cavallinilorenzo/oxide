@@ -726,13 +726,6 @@ fn run_thread_actor(
                             continue;
                         }
 
-                        if trimmed.starts_with('/') && !state.capabilities.slash_command_passthrough {
-                            let _ = reply.send(Err(Error::Provider(
-                                format!("Slash command '{}' is not supported by this provider", trimmed),
-                            )));
-                            continue;
-                        }
-
                         if !attachments.is_empty() && !state.capabilities.image_attachments {
                             let _ = reply.send(Err(Error::Io {
                                 path: PathBuf::from("attachments"),

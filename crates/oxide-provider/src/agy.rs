@@ -507,7 +507,6 @@ impl Provider for AgyProvider {
             supports_reasoning: false,
             image_attachments: false,
             mid_thread_model_switch: true,
-            slash_command_passthrough: false,
             reports_usage_limits: false,
         }
     }

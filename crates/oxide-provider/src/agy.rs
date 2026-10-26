@@ -341,30 +341,6 @@ impl Provider for AgyProvider {
                 "Failed to contain Antigravity CLI process: {error}"
             )));
         }
-        #[cfg(windows)]
-        {
-            use std::io::Write;
-            let sent = {
-                let mut stdin = child.stdin.take().expect("stdin must be piped");
-                writeln!(
-                    stdin,
-                    "{}",
-                    serde_json::json!({
-                        "event": "user", "message": { "content": prompt }
-                    })
-                )
-            };
-            if let Err(error) = sent {
-                process::terminate_group(pgid, SHUTDOWN_GRACE, || {
-                    let _ = child.try_wait();
-                });
-                let _ = child.wait();
-                self.turn_running.store(false, Ordering::SeqCst);
-                return Err(ProviderError::CommandFailed(format!(
-                    "Failed to send Antigravity CLI prompt: {error}"
-                )));
-            }
-        }
         if let Some(registry) = &self.registry {
             registry.register(pgid, &self.command);
         }
@@ -393,7 +369,13 @@ impl Provider for AgyProvider {
             closed: Arc::clone(&self.closed),
             registry: self.registry.clone(),
         };
-        std::thread::spawn(move || turn.run(child, pgid, stdout, stderr));
+        let prompt_input = cfg!(windows).then(|| {
+            serde_json::json!({
+                "event": "user", "message": { "content": prompt }
+            })
+            .to_string()
+        });
+        std::thread::spawn(move || turn.run(child, pgid, stdout, stderr, prompt_input));
         Ok(())
     }
 
@@ -557,7 +539,22 @@ impl TurnRun {
         pgid: i32,
         stdout: std::process::ChildStdout,
         stderr: std::process::ChildStderr,
+        prompt_input: Option<String>,
     ) {
+        // Drain startup output while feeding stdin: neither pipe may block the other, and
+        // send_prompt must return so the user can interrupt even a CLI that stops reading.
+        let prompt_writer = prompt_input.map(|prompt| {
+            use std::io::Write;
+            let mut stdin = child.stdin.take().expect("stdin must be piped");
+            std::thread::spawn(move || {
+                let sent = writeln!(stdin, "{prompt}");
+                if sent.is_err() {
+                    // Closing the Windows job terminates the CLI without racing a reused pid.
+                    process::release_job(pgid);
+                }
+                sent
+            })
+        });
         let stderr_reader = std::thread::spawn(move || {
             let mut tail = VecDeque::new();
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -608,6 +605,17 @@ impl TurnRun {
         }
 
         let code = child.wait().ok().and_then(|s| s.code());
+        if let Some(writer) = prompt_writer
+            && let Ok(Err(error)) = writer.join()
+            && !self.closed.load(Ordering::SeqCst)
+            && !self.interrupted.load(Ordering::SeqCst)
+        {
+            let _ = self.tx.send(ProviderEvent::Error {
+                message: format!("Failed to send Antigravity CLI prompt: {error}"),
+                code: None,
+                retrying: false,
+            });
+        }
         let stderr_tail = stderr_reader.join().ok().filter(|t| !t.is_empty());
         if let Some(registry) = &self.registry {
             registry.unregister(pgid);

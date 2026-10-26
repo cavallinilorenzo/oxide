@@ -47,6 +47,8 @@ if args[:1] == ["models"]:
         sys.stdout.write(f.read())
     sys.exit(0)
 
+sys.stderr.write("s" * int(os.environ.get("OXIDE_FAKE_STARTUP_LOG_BYTES", "0")))
+sys.stderr.flush()
 prompt = option("-p") or option("--print") or ""
 if option("--input-format") == "stream-json":
     message = json.loads(sys.stdin.readline())

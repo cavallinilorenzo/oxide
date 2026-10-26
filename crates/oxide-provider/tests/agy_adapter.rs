@@ -254,6 +254,26 @@ fn prompts_preserve_newlines_quotes_and_shell_characters() {
     provider.shutdown().unwrap();
 }
 
+#[cfg(windows)]
+#[test]
+fn large_prompts_and_startup_logs_do_not_block_each_other() {
+    let (done, rx) = crossbeam_channel::bounded(1);
+    std::thread::spawn(move || {
+        let (mut provider, log, _fake) = provider_with_log();
+        provider.set_env("OXIDE_FAKE_STARTUP_LOG_BYTES", "220000");
+        let events = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
+        let prompt = "long prompt\n".repeat(12000);
+        provider.send_prompt(&prompt).unwrap();
+        collect_turn(&events);
+        provider.shutdown().unwrap();
+        done.send((wire_prompts(log.path()), prompt)).unwrap();
+    });
+    let (received, prompt) = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("CLI pipes must keep draining");
+    assert_eq!(received, [prompt]);
+}
+
 #[test]
 fn error_result_emits_error_then_failed_turn() {
     let fake = fake_agy();

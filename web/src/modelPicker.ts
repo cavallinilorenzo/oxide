@@ -61,6 +61,55 @@ export function filterModels(
 }
 
 /**
+ * Antigravity lists each selectable effort as a separate catalog entry. Treat
+ * those entries as one model in the picker; the effort selector still owns
+ * which variant is sent to the provider.
+ */
+export function modelFamilyId(modelId: string): string {
+  return modelId.replace(/-(low|medium|high)$/i, "");
+}
+
+export function collapseEffortVariants(
+  models: ModelInfo[],
+  effort: string | null
+): ModelInfo[] {
+  const families = new Map<string, ModelInfo[]>();
+  for (const model of models) {
+    const family = modelFamilyId(model.id);
+    const variants = families.get(family) ?? [];
+    variants.push(model);
+    families.set(family, variants);
+  }
+
+  return Array.from(families.values()).map((variants) => {
+    if (variants.length === 1) {
+      const onlyVariant = variants[0];
+      return {
+        ...onlyVariant,
+        name:
+          modelFamilyId(onlyVariant.id) === onlyVariant.id
+            ? onlyVariant.name
+            : onlyVariant.name.replace(/\s*\((low|medium|high)\)$/i, ""),
+      };
+    }
+
+    const selected =
+      variants.find((model) => model.id.toLowerCase().endsWith(`-${effort?.toLowerCase()}`)) ??
+      variants.find((model) => model.id.toLowerCase().endsWith(`-${model.defaultEffort?.toLowerCase()}`)) ??
+      variants[0]!;
+    const supportedEfforts = Array.from(
+      new Set(variants.flatMap((model) => model.supportedEfforts))
+    );
+
+    return {
+      ...selected,
+      name: selected.name.replace(/\s*\((low|medium|high)\)$/i, ""),
+      supportedEfforts,
+    };
+  });
+}
+
+/**
  * Maps a 1-based shortcut index (1-9) to the corresponding model from visible models.
  */
 export function applyModelShortcut(

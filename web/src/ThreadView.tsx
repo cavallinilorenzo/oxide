@@ -26,6 +26,7 @@ import {
   type Detection,
   type PermissionMode,
   type SequencedThreadEvent,
+  type SlashCommand,
   type Thread,
   type ThreadCapabilities,
   type ThreadStatus,
@@ -40,6 +41,7 @@ import { isClearCommand, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { parseSlashCommand } from "./modelPicker";
+import { filterSlashCommands, slashQuery } from "./slashMenu";
 import {
   applyThreadEvent,
   initialTranscriptState,
@@ -166,7 +168,26 @@ export function ThreadView({
     }
   }, [draft, threadId]);
 
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const slashOpen = slashQuery(input) !== null;
+  const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
+  const slashProvider = transcript.thread?.provider || draftProvider;
+
+  // Re-read when the menu opens, so changes to the customizations show up without a restart.
+  useEffect(() => {
+    if (!slashOpen) return;
+    let active = true;
+    void commands.listSlashCommands(slashProvider, projectId).then((res) => {
+      if (active && res.status === "ok") setSlashCommands(res.data);
+    });
+    return () => {
+      active = false;
+    };
+  }, [slashOpen, slashProvider, projectId]);
+
   const handleInputChange = (val: string) => {
+    setSlashIndex(0);
     setInput(val);
     onDraftChange?.(val);
   };
@@ -816,6 +837,25 @@ export function ThreadView({
             ))}
           </div>
         )}
+        {slashMatches.length > 0 && (
+          <ul className="slash-menu" role="listbox" aria-label="Slash commands">
+            {slashMatches.map((c, i) => (
+              <li
+                key={c.name}
+                role="option"
+                aria-selected={i === slashIndex}
+                className={i === slashIndex ? "active" : undefined}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleInputChange(`/${c.name} `);
+                }}
+              >
+                <span className="n">/{c.name}</span>
+                {c.description && <span className="d">{c.description}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
           className="composer-input"
           rows={Math.max(2, Math.min(10, input.split("\n").length))}
@@ -830,6 +870,20 @@ export function ThreadView({
           onChange={(e) => handleInputChange(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={(e) => {
+            if (slashMatches.length > 0 && !e.nativeEvent.isComposing) {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const step = e.key === "ArrowDown" ? 1 : slashMatches.length - 1;
+                setSlashIndex((slashIndex + step) % slashMatches.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                const pick = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
+                handleInputChange(`/${pick.name} `);
+                return;
+              }
+            }
             if (stopsTurn(e, transcript.status)) {
               e.preventDefault();
               stop();

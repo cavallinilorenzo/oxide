@@ -23,6 +23,14 @@ const PROVIDERS: { id: Provider; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "antigravity", label: "Antigravity CLI" },
 ];
+const CUSTOMIZATIONS: { key: keyof Settings["claudeCustomizations"]; label: string }[] = [
+  { key: "claudeMd", label: "CLAUDE.md and memory files" },
+  { key: "skills", label: "Skills and slash commands" },
+  { key: "plugins", label: "Plugins" },
+  { key: "mcpServers", label: "MCP servers" },
+  { key: "hooks", label: "Hooks" },
+];
+
 const MODES: { id: PermissionMode; label: string; description: string }[] = [
   { id: "ask", label: "Ask", description: "Asks before file edits and commands." },
   { id: "auto-edit", label: "Auto-edit", description: "Edits files in the Thread’s folder; asks before other actions." },
@@ -272,25 +280,32 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
                 </div>
               )}
               {p.id === "claude" && (
-                <div className="settings-customizations">
-                  <label className="inline">
-                    <input
-                      type="checkbox"
-                      aria-describedby="settings-customizations-hint"
-                      checked={draft.claudeCustomizations}
-                      onChange={(e) =>
-                        set({ claudeCustomizations: e.target.checked })
-                      }
-                    />
-                    Load Claude Code’s own CLAUDE.md, skills, plugins, hooks and
-                    MCP servers
-                    {fieldErrors("claudeCustomizations")}
-                  </label>
+                <fieldset className="settings-customizations">
+                  <legend>Claude Code customizations</legend>
+                  {CUSTOMIZATIONS.map(({ key, label }) => (
+                    <label className="inline" key={key}>
+                      <input
+                        type="checkbox"
+                        aria-describedby="settings-customizations-hint"
+                        checked={draft.claudeCustomizations[key]}
+                        onChange={(e) =>
+                          set({
+                            claudeCustomizations: {
+                              ...draft.claudeCustomizations,
+                              [key]: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                  {fieldErrors("claudeCustomizations")}
                   <p className="hint" id="settings-customizations-hint">
-                    Off keeps a new Thread’s context window clean. Applies to
-                    Threads started after saving.
+                    Everything off keeps a new Thread’s context window clean.
+                    Applies to Threads started after saving.
                   </p>
-                </div>
+                </fieldset>
               )}
             </section>
           );

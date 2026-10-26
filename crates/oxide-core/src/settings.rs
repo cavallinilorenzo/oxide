@@ -13,6 +13,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use oxide_provider::claude::ClaudeCustomizations;
+
 use crate::{Error, Result};
 
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -77,9 +79,9 @@ pub struct Settings {
     /// Bundle identifier of the editor "Open in editor" uses; empty or not detected means
     /// the first detected editor.
     pub editor: String,
-    /// Let Claude Code load the user's own `CLAUDE.md`, skills, plugins, hooks and MCP servers.
-    /// Off by default so a new Thread starts with a clean context window.
-    pub claude_customizations: bool,
+    /// Which of the user's own `CLAUDE.md`, skills, plugins, hooks and MCP servers Claude Code
+    /// may load. All off by default so a new Thread starts with a clean context window.
+    pub claude_customizations: ClaudeCustomizations,
 }
 
 impl Default for Settings {
@@ -89,7 +91,7 @@ impl Default for Settings {
             providers: Providers::default(),
             confirm_quit: true,
             editor: String::new(),
-            claude_customizations: false,
+            claude_customizations: ClaudeCustomizations::default(),
         }
     }
 }
@@ -284,13 +286,28 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             &mut errors,
         ),
         editor: field(&mut root, "", "editor", defaults.editor, &mut errors),
-        claude_customizations: field(
-            &mut root,
-            "",
-            "claudeCustomizations",
-            defaults.claude_customizations,
-            &mut errors,
-        ),
+        claude_customizations: {
+            // Older files held one on/off switch for every category.
+            if let Some(Value::Bool(all)) = root.get("claudeCustomizations") {
+                let all = *all;
+                root.insert(
+                    "claudeCustomizations".into(),
+                    serde_json::to_value(if all {
+                        ClaudeCustomizations::ALL
+                    } else {
+                        ClaudeCustomizations::default()
+                    })
+                    .expect("serialize"),
+                );
+            }
+            field(
+                &mut root,
+                "",
+                "claudeCustomizations",
+                defaults.claude_customizations,
+                &mut errors,
+            )
+        },
     };
     unknown_keys(&root, "", &mut errors);
     if errors.is_empty() {

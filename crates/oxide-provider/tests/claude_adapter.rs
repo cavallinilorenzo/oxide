@@ -1,5 +1,5 @@
 use oxide_provider::Provider;
-use oxide_provider::claude::ClaudeCodeProvider;
+use oxide_provider::claude::{ClaudeCodeProvider, ClaudeCustomizations};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -377,8 +377,23 @@ fn claude_session_starts_in_safe_mode_by_default() {
 
 #[test]
 fn claude_session_keeps_user_customizations_when_enabled() {
-    let argv = start_and_read_argv(|p| p.set_user_customizations(true));
+    let argv = start_and_read_argv(|p| p.set_user_customizations(ClaudeCustomizations::ALL));
     assert!(!argv.contains("--safe-mode"), "{argv}");
+}
+
+#[test]
+fn claude_session_switches_off_only_the_categories_left_disabled() {
+    let argv = start_and_read_argv(|p| {
+        p.set_user_customizations(ClaudeCustomizations {
+            skills: true,
+            ..ClaudeCustomizations::default()
+        })
+    });
+    assert!(!argv.contains("--safe-mode"), "{argv}");
+    assert!(!argv.contains("--disable-slash-commands"), "{argv}");
+    for off in ["--strict-mcp-config", "disableAllHooks", "project,local"] {
+        assert!(argv.contains(off), "{off} missing from {argv}");
+    }
 }
 
 #[test]

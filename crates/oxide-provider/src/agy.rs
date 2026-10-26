@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -148,9 +148,8 @@ impl AgyProvider {
     }
 
     fn run_probe(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.args(args)
-            .envs(&self.extra_env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -295,7 +294,7 @@ impl Provider for AgyProvider {
             ));
         }
 
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("-p")
             .arg(prompt)
             .arg("--output-format")
@@ -313,7 +312,6 @@ impl Provider for AgyProvider {
             cmd.arg("--dangerously-skip-permissions");
         }
         cmd.current_dir(&context.working_dir)
-            .envs(&self.extra_env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -369,12 +367,17 @@ impl Provider for AgyProvider {
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
-        if let Some(_pgid) = *self.group.lock().unwrap() {
+        let pgid = *self.group.lock().unwrap();
+        if let Some(_pgid) = pgid {
             self.interrupted.store(true, Ordering::SeqCst);
             #[cfg(unix)]
             unsafe {
                 libc::kill(-_pgid, libc::SIGINT)
             };
+            // Print mode has no input/control channel. End the whole contained process tree;
+            // the reader reports the interrupted Turn and preserves its conversation id.
+            #[cfg(windows)]
+            process::terminate_group(_pgid, Duration::ZERO, || {});
         }
         Ok(())
     }
@@ -578,6 +581,7 @@ impl TurnRun {
         if let Some(registry) = &self.registry {
             registry.unregister(pgid);
         }
+        process::release_job(pgid);
         {
             let mut group = self.group.lock().unwrap();
             if *group == Some(pgid) {

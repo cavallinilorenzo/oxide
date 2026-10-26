@@ -11,7 +11,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -53,7 +53,12 @@ type PendingRequestsMap = Arc<Mutex<HashMap<u64, Sender<Result<serde_json::Value
 type ThreadItemsMap = Arc<Mutex<HashMap<String, ThreadItemState>>>;
 type ServerRequestsMap = Arc<Mutex<HashMap<String, (serde_json::Value, String)>>>;
 type ThreadsMap = Arc<Mutex<HashMap<String, Sender<ProviderEvent>>>>;
-type ActiveTurnsMap = Arc<Mutex<HashMap<String, u32>>>;
+struct ActiveTurn {
+    index: u32,
+    id: Option<String>,
+}
+
+type ActiveTurnsMap = Arc<Mutex<HashMap<String, ActiveTurn>>>;
 
 fn dispatch_to_thread(threads: &ThreadsMap, thread_id: Option<&str>, event: ProviderEvent) {
     let threads_guard = threads.lock().unwrap();
@@ -131,11 +136,8 @@ impl CodexAppServer {
             return Ok(());
         }
 
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.arg("app-server").arg("--listen").arg("stdio://");
-        for (k, v) in &self.extra_env {
-            cmd.env(k, v);
-        }
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -276,6 +278,12 @@ impl CodexAppServer {
                     match method {
                         "turn/started" => {
                             // TurnStarted event already emitted immediately on send_prompt
+                            if let Some(tid) = &thread_id {
+                                let mut turns = active_turns_clone.lock().unwrap();
+                                if let Some(turn) = turns.get_mut(tid) {
+                                    turn.id = params["turn"]["id"].as_str().map(str::to_owned);
+                                }
+                            }
                         }
                         "thread/started"
                         | "thread/status/changed"
@@ -419,7 +427,12 @@ impl CodexAppServer {
                             };
 
                             let turn_idx = if let Some(ref tid) = thread_id {
-                                active_turns_clone.lock().unwrap().remove(tid).unwrap_or(0)
+                                active_turns_clone
+                                    .lock()
+                                    .unwrap()
+                                    .remove(tid)
+                                    .map(|turn| turn.index)
+                                    .unwrap_or(0)
                             } else {
                                 0
                             };
@@ -716,12 +729,51 @@ impl CodexAppServer {
     fn record_active_turn(&self, thread_id: String, turn_index: u32) {
         let guard = self.inner.lock().unwrap();
         if let Some(ref inner) = *guard {
-            inner
-                .active_turns
-                .lock()
-                .unwrap()
-                .insert(thread_id, turn_index);
+            inner.active_turns.lock().unwrap().insert(
+                thread_id,
+                ActiveTurn {
+                    index: turn_index,
+                    id: None,
+                },
+            );
         }
+    }
+
+    fn start_turn(&self, thread_id: &str, params: serde_json::Value) -> Result<(), ProviderError> {
+        let response = self.send_request("turn/start", params)?;
+        // A caller may interrupt immediately after send_prompt returns, before turn/started.
+        let guard = self.inner.lock().unwrap();
+        if let Some(inner) = guard.as_ref() {
+            let mut turns = inner.active_turns.lock().unwrap();
+            if let Some(turn) = turns.get_mut(thread_id) {
+                turn.id = response["turn"]["id"].as_str().map(str::to_owned);
+            }
+        }
+        Ok(())
+    }
+
+    fn interrupt_turn(&self, thread_id: &str) -> Result<(), ProviderError> {
+        let turn_id = {
+            let guard = self.inner.lock().unwrap();
+            guard.as_ref().and_then(|inner| {
+                inner
+                    .active_turns
+                    .lock()
+                    .unwrap()
+                    .get(thread_id)
+                    .and_then(|turn| turn.id.clone())
+            })
+        };
+        if let Some(turn_id) = turn_id {
+            self.send_request(
+                "turn/interrupt",
+                json!({
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                }),
+            )?;
+        }
+        Ok(())
     }
 
     pub fn shutdown(&self) -> Result<(), ProviderError> {
@@ -842,11 +894,9 @@ impl CodexProvider {
 
 impl Provider for CodexProvider {
     fn detect(&self) -> Result<Detection, ProviderError> {
-        let mut cmd = Command::new(&self.app_server.command);
+        let mut cmd =
+            crate::command::provider_command(&self.app_server.command, &self.app_server.extra_env);
         cmd.arg("--version");
-        for (k, v) in &self.app_server.extra_env {
-            cmd.env(k, v);
-        }
 
         let version_output = match process::output_in_own_group(&mut cmd) {
             Ok(out) if out.status.success() => out,
@@ -885,11 +935,9 @@ impl Provider for CodexProvider {
             None
         };
 
-        let mut auth_cmd = Command::new(&self.app_server.command);
+        let mut auth_cmd =
+            crate::command::provider_command(&self.app_server.command, &self.app_server.extra_env);
         auth_cmd.args(["login", "status"]);
-        for (k, v) in &self.app_server.extra_env {
-            auth_cmd.env(k, v);
-        }
 
         let auth_output = process::output_in_own_group(&mut auth_cmd);
         let authenticated = match auth_output {
@@ -1037,7 +1085,7 @@ impl Provider for CodexProvider {
             params["effort"] = json!(eff);
         }
 
-        let _ = self.app_server.send_request("turn/start", params)?;
+        self.app_server.start_turn(&tid, params)?;
         Ok(())
     }
 
@@ -1092,7 +1140,7 @@ impl Provider for CodexProvider {
             params["effort"] = json!(eff);
         }
 
-        let _ = self.app_server.send_request("turn/start", params)?;
+        self.app_server.start_turn(&tid, params)?;
         Ok(())
     }
 
@@ -1104,12 +1152,7 @@ impl Provider for CodexProvider {
             .clone()
             .ok_or_else(|| ProviderError::CommandFailed("Thread not started".into()))?;
 
-        let params = json!({
-            "threadId": tid
-        });
-
-        let _ = self.app_server.send_request("turn/interrupt", params)?;
-        Ok(())
+        self.app_server.interrupt_turn(&tid)
     }
 
     fn respond_to_approval(

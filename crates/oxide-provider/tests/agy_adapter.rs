@@ -5,8 +5,10 @@ use oxide_provider::{ItemKind, PermissionMode, Provider, ProviderEvent, StartCon
 use std::path::PathBuf;
 use std::time::Duration;
 
-fn fake_agy() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/agy/fake_agy.py")
+mod support;
+
+fn fake_agy() -> support::FakeCli {
+    support::fake_cli("agy")
 }
 
 fn context(mode: PermissionMode) -> StartContext {
@@ -51,16 +53,18 @@ fn wire_argv(log: &std::path::Path) -> Vec<(u64, Vec<String>)> {
         .collect()
 }
 
-fn provider_with_log() -> (AgyProvider, tempfile::NamedTempFile) {
+fn provider_with_log() -> (AgyProvider, tempfile::NamedTempFile, support::FakeCli) {
     let log = tempfile::NamedTempFile::new().unwrap();
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     provider.set_env("OXIDE_WIRE_LOG", log.path().to_str().unwrap());
-    (provider, log)
+    (provider, log, fake)
 }
 
 #[test]
 fn agy_provider_passes_shared_contract_suite() {
-    verify_provider_contract(|| AgyProvider::with_command(fake_agy().to_str().unwrap()));
+    let fake = fake_agy();
+    verify_provider_contract(|| AgyProvider::with_command(fake.command()));
 }
 
 #[test]
@@ -76,7 +80,8 @@ fn agy_offers_only_the_modes_it_can_honour_and_no_attachments() {
 
 #[test]
 fn agy_refuses_ask_mode() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     assert!(provider.start(&context(PermissionMode::Ask)).is_err());
     provider.start(&context(PermissionMode::AutoEdit)).unwrap();
     assert!(provider.set_permission_mode(PermissionMode::Ask).is_err());
@@ -85,7 +90,7 @@ fn agy_refuses_ask_mode() {
 
 #[test]
 fn second_turn_spawns_a_new_process_resuming_the_same_conversation() {
-    let (mut provider, log) = provider_with_log();
+    let (mut provider, log, _fake) = provider_with_log();
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
 
     provider.send_prompt("first").unwrap();
@@ -117,7 +122,7 @@ fn second_turn_spawns_a_new_process_resuming_the_same_conversation() {
 
 #[test]
 fn resume_continues_the_given_conversation_from_the_first_turn() {
-    let (mut provider, log) = provider_with_log();
+    let (mut provider, log, _fake) = provider_with_log();
     let rx = provider
         .resume("conv-42", &context(PermissionMode::AutoEdit))
         .unwrap();
@@ -135,7 +140,7 @@ fn resume_continues_the_given_conversation_from_the_first_turn() {
 
 #[test]
 fn permission_mode_model_and_effort_map_to_flags_on_every_turn() {
-    let (mut provider, log) = provider_with_log();
+    let (mut provider, log, _fake) = provider_with_log();
     let mut ctx = context(PermissionMode::AutoEdit);
     ctx.model = Some("gemini-3.8-flash-high".into());
     ctx.effort = Some("low".into());
@@ -177,7 +182,8 @@ fn permission_mode_model_and_effort_map_to_flags_on_every_turn() {
 
 #[test]
 fn steps_map_to_items() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
     provider.send_prompt("tools_test").unwrap();
     let events = collect_turn(&rx);
@@ -228,8 +234,21 @@ fn steps_map_to_items() {
 }
 
 #[test]
+fn prompt_arguments_preserve_quotes_and_shell_characters() {
+    let (mut provider, log, _fake) = provider_with_log();
+    let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
+    let prompt = "Explain \"a & b\" | <input> ^ !literal! %PATH%";
+    provider.send_prompt(prompt).unwrap();
+    collect_turn(&rx);
+    let runs = wire_argv(log.path());
+    assert!(runs[0].1.windows(2).any(|args| args == ["-p", prompt]));
+    provider.shutdown().unwrap();
+}
+
+#[test]
 fn error_result_emits_error_then_failed_turn() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
     provider.send_prompt("error_test").unwrap();
     let events = collect_turn(&rx);
@@ -249,7 +268,8 @@ fn error_result_emits_error_then_failed_turn() {
 
 #[test]
 fn interrupt_ends_the_turn_as_interrupted() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
     provider.send_prompt("interrupt_test").unwrap();
     // Let the fake install its SIGINT handler and emit init.
@@ -275,7 +295,8 @@ fn interrupt_ends_the_turn_as_interrupted() {
 
 #[test]
 fn process_dying_without_a_result_reports_exit_with_stderr() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
     provider.send_prompt("crash_test").unwrap();
     let exited = loop {
@@ -291,7 +312,8 @@ fn process_dying_without_a_result_reports_exit_with_stderr() {
 
 #[test]
 fn model_catalog_comes_from_agy_models() {
-    let provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let provider = AgyProvider::with_command(fake.command());
     let models = provider.list_models().unwrap();
     let slugs: Vec<&str> = models.iter().map(|m| m.slug.as_str()).collect();
     assert_eq!(
@@ -316,7 +338,8 @@ fn detect_reports_missing_cli() {
 
 #[test]
 fn detect_reports_version_and_auth() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     let detection = provider.detect().unwrap();
     assert!(detection.installed && detection.authenticated && detection.available);
     assert_eq!(detection.version.as_deref(), Some("1.4.5"));
@@ -329,7 +352,8 @@ fn detect_reports_version_and_auth() {
 
 #[test]
 fn detect_warns_but_does_not_block_outside_the_pinned_range() {
-    let mut provider = AgyProvider::with_command(fake_agy().to_str().unwrap());
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
     provider.set_env("OXIDE_FAKE_VERSION", "2.0.1");
     let detection = provider.detect().unwrap();
     assert!(detection.available);

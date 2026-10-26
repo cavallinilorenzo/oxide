@@ -85,6 +85,9 @@ for line in sys.stdin:
             }
             sys.stdout.write(json.dumps(reply) + "\n")
             sys.stdout.flush()
+        elif (data.get("request") or {}).get("subtype") == "interrupt":
+            # The CLI may use a normal result subtype after a control interrupt.
+            print(json.dumps({"type": "result", "subtype": "success", "is_error": False}), flush=True)
         continue
 
     # Check for prompt
@@ -107,8 +110,8 @@ for line in sys.stdin:
             sys.stdout.write(json.dumps(appr) + "\n")
             sys.stdout.flush()
         elif "interrupt_test" in prompt_text:
-            # Wait for SIGINT
-            time.sleep(10)
+            # Keep reading stdin so protocol interrupts can be handled on every platform.
+            print(json.dumps({"type": "interrupt_ready"}), flush=True)
         else:
             # Emit turn response fixture
             resp_file = os.path.join(fixtures_dir, "turn_response.jsonl")
@@ -139,7 +142,5 @@ for line in sys.stdin:
             log_wire({"type": "effort_changed", "effort": data.get("effort")})
         elif cmd == "set_permission_mode":
             log_wire({"type": "permission_mode_changed", "mode": data.get("mode")})
-        elif cmd == "interrupt":
-            sigint_handler(signal.SIGINT, None)
 
 sys.exit(0)

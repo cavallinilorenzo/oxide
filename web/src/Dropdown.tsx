@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon } from "@primer/octicons-react";
 
 export interface DropdownOption<T extends string> {
@@ -17,9 +18,11 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<CSSProperties>({});
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const anchorBounds = useRef<DOMRect | null>(null);
   const selected = options.find((option) => option.value === value);
 
   useEffect(() => {
@@ -29,11 +32,46 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
       items?.[Math.max(0, options.findIndex((option) => option.value === value))]?.focus();
     }
     const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false);
+      if (event.target instanceof Node && !container.current?.contains(event.target) && !list.current?.contains(event.target)) setOpen(false);
     };
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
   }, [open, options, value]);
+
+  const placeMenu = () => {
+    const rect = trigger.current?.getBoundingClientRect();
+    if (!rect) return;
+    anchorBounds.current = rect;
+    const below = window.innerHeight - rect.bottom - 8;
+    const above = rect.top - 8;
+    const upward = below < 240 && above > below;
+    setPlacement({
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8)),
+      width: Math.min(rect.width, window.innerWidth - 16),
+      maxHeight: Math.max(0, Math.min(240, upward ? above : below)),
+      ...(upward ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+    });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    // Close when the anchor moves; scrolling within the menu stays available.
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && list.current?.contains(event.target)) return;
+      const rect = trigger.current?.getBoundingClientRect();
+      const anchor = anchorBounds.current;
+      // Focus may queue a scroll event before opening. Ignore it when the
+      // trigger is still at the position used to place this menu.
+      if (event.type === "scroll" && rect && anchor && rect.top === anchor.top && rect.left === anchor.left) return;
+      setOpen(false);
+    };
+    window.addEventListener("resize", dismiss);
+    document.addEventListener("scroll", dismiss, true);
+    return () => {
+      window.removeEventListener("resize", dismiss);
+      document.removeEventListener("scroll", dismiss, true);
+    };
+  }, [open]);
 
   const close = () => {
     setOpen(false);
@@ -46,20 +84,22 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
 
   return (
     <div className="dropdown" ref={container} onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      if (!event.currentTarget.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false);
     }}>
       <button ref={trigger} type="button" className="dropdown-trigger"
         aria-label={`${label}: ${selected?.label ?? value}`} aria-haspopup="listbox" aria-expanded={open}
         aria-controls={open ? id : undefined} disabled={options.length === 0}
-        onClick={() => setOpen(!open)} onKeyDown={(event) => {
+        title={selected?.label ?? value}
+        onClick={() => { placeMenu(); setOpen(!open); }} onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
+            placeMenu();
             setOpen(true);
           }
         }}>
         {selected?.icon}<span>{selected?.label ?? value}</span><ChevronDownIcon size={16} />
       </button>
-      {open && <div id={id} ref={list} className="dropdown-menu" role="listbox" aria-label={label}
+      {open && createPortal(<div id={id} ref={list} style={placement} className="dropdown-menu" role="listbox" aria-label={label}
         onKeyDown={(event) => {
           event.stopPropagation();
           const items = Array.from(list.current?.querySelectorAll<HTMLElement>("[role=option]") ?? []);
@@ -87,7 +127,7 @@ export function Dropdown<T extends string>({ label, value, options, onChange }: 
           {option.icon}<span>{option.label}{option.description && <small className="dropdown-description">{option.description}</small>}</span>
           {option.value === value && <CheckIcon size={16} />}
         </div>)}
-      </div>}
+      </div>, document.body)}
     </div>
   );
 }

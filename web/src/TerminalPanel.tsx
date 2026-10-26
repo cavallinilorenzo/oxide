@@ -119,7 +119,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
   return (
     <section className={`terminal${visible ? "" : " terminal-hidden"}`} aria-label="Terminal" aria-hidden={!visible}>
       <div className="tabs terminal-toolbar">
-        <span className="tab" aria-selected>
+        <span className="terminal-label">
           <TerminalIcon size={14} /> Terminal
         </span>
         {error && <span className="terminal-error">{error}</span>}

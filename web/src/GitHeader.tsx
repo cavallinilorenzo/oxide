@@ -97,7 +97,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={disabledReason !== null}
-          title={disabledReason ?? "Switch branch"}
+          title={disabledReason ?? `Switch branch: ${status.branch ?? "detached HEAD"}`}
           onClick={() => setOpen((v) => !v)}
         >
           <GitBranchIcon size={14} />

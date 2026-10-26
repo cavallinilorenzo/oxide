@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -10,6 +10,9 @@ import {
 import { commands, type FileContent, type FileEntry } from "./bindings";
 import { languageForPath, shouldHighlight } from "./fileLang";
 import { highlighter } from "./highlighter";
+import { fileTreeLayout } from "./panelLayout";
+import { ResizeHandle } from "./ResizeHandle";
+import { useElementSize, usePanelSize } from "./usePanelSize";
 
 interface FilesPanelProps {
   projectId: number;
@@ -25,6 +28,13 @@ export function FilesPanel(props: FilesPanelProps) {
 }
 
 function FilesTree({ projectId, threadId }: FilesPanelProps) {
+  const region = useRef<HTMLElement>(null);
+  const treeId = useId();
+  const size = useElementSize(region, { width: 0, height: 0 });
+  const treeWidth = usePanelSize("files-width");
+  const treeHeight = usePanelSize("files-height");
+  const split = fileTreeLayout(size.width, size.height, { width: treeWidth.preferred, height: treeHeight.preferred });
+  const preference = split.axis === "x" ? treeWidth : treeHeight;
   const [listings, setListings] = useState<Record<string, Listing>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -53,7 +63,7 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   }
 
   function renderDir(path: string, depth: number) {
-    const indent = { paddingLeft: 8 + depth * 14 };
+    const indent = { paddingLeft: 8 + depth * 16 };
     const listing = listings[path];
     if (listing === undefined) return <div className="files-note" style={indent}>Loading…</div>;
     if ("error" in listing) return <div className="files-note error" style={indent}>{listing.error}</div>;
@@ -84,10 +94,16 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   }
 
   return (
-    <section className="files" aria-label="Files">
-      <div className="files-tree" role="tree">
+    <section className="files" aria-label="Files" ref={region} data-split-axis={split.axis} style={split.axis === "x"
+      ? { gridTemplateColumns: `${split.value}px minmax(0, 1fr)` }
+      : { gridTemplateRows: `${split.value}px minmax(0, 1fr)` }}>
+      <div className="files-tree" role="tree" id={treeId}>
         {renderDir("", 0)}
       </div>
+      <ResizeHandle key={split.axis} label="Resize file tree" controls={treeId} axis={split.axis} edge="end"
+        value={split.value} min={split.min} max={split.max}
+        style={split.axis === "x" ? { left: split.value - 4, right: "auto" } : { top: split.value - 4, bottom: "auto" }}
+        onResize={preference.resize} onCommit={preference.commit} onReset={preference.reset} onCancel={preference.cancel} />
       {selected ? (
         <FileViewer key={selected} projectId={projectId} threadId={threadId} path={selected} />
       ) : (

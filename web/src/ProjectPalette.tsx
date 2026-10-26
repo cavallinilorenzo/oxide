@@ -1,5 +1,5 @@
 import { MarkGithubIcon, RepoIcon } from "@primer/octicons-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { commands, type AppError, type GithubRepository, type Project } from "./bindings";
 import { matchActions, matchProjects, moveHighlight, type PaletteActionId } from "./paletteSearch";
 
@@ -46,7 +46,7 @@ function describeStage(stage: Stage): string {
 /**
  * ⌘⇧N: find a Project and start a Thread in it, or register one more (an existing folder,
  * a new `git init` folder, a clone from a URL or from the user's GitHub repositories).
- * Keyboard-only: ↑/↓ pick, Enter confirms, Esc steps back.
+ * Click a row, or use ↑/↓ to pick, Enter to confirm and Esc to step back.
  */
 export function ProjectPalette({
   projects,
@@ -73,6 +73,8 @@ export function ProjectPalette({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const listId = useId();
 
   const steps = useMemo(
     () => (stage.kind === "form" ? stepsFor(stage.form, defaultParent) : []),
@@ -86,6 +88,11 @@ export function ProjectPalette({
   const actionRows = useMemo(() => (stage.kind === "search" ? matchActions(query) : []), [stage, query]);
   const rowCount =
     stage.kind === "search" ? projectRows.length + actionRows.length : stage.kind === "github" ? repositories.length : 0;
+  const activeIndex = Math.min(highlight, Math.max(0, rowCount - 1));
+
+  useEffect(() => {
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, rowCount, stage, query]);
 
   useEffect(() => {
     input.current?.focus();
@@ -162,20 +169,27 @@ export function ProjectPalette({
     else goTo({ kind: "form", form: id });
   };
 
+  const chooseProject = (project: Project) => {
+    onStartThread(project);
+    onClose();
+  };
+
+  const chooseRepository = (repo: GithubRepository) =>
+    goTo({ kind: "form", form: "clone-github", repo: repo.nameWithOwner });
+
   const enter = () => {
     if (busy) return;
     if (stage.kind === "search") {
-      const project = projectRows[highlight];
+      const project = projectRows[activeIndex];
       if (project) {
-        onStartThread(project);
-        onClose();
+        chooseProject(project);
         return;
       }
-      const action = actionRows[highlight - projectRows.length];
+      const action = actionRows[activeIndex - projectRows.length];
       if (action) chooseAction(action.id);
     } else if (stage.kind === "github") {
-      const repo = repositories[highlight];
-      if (repo) goTo({ kind: "form", form: "clone-github", repo: repo.nameWithOwner });
+      const repo = repositories[activeIndex];
+      if (repo) chooseRepository(repo);
     } else {
       const typed = (values[step] ?? steps[step].initial).trim();
       if (typed === "") return;
@@ -198,7 +212,7 @@ export function ProjectPalette({
       enter();
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlight(moveHighlight(highlight, rowCount, e.key === "ArrowDown" ? 1 : -1));
+      setHighlight(moveHighlight(activeIndex, rowCount, e.key === "ArrowDown" ? 1 : -1));
     }
   };
 
@@ -227,6 +241,11 @@ export function ProjectPalette({
           ref={input}
           className="palette-input"
           aria-label={field?.label ?? "Search"}
+          role={inForm ? undefined : "combobox"}
+          aria-expanded={inForm ? undefined : true}
+          aria-autocomplete={inForm ? undefined : "list"}
+          aria-controls={inForm ? undefined : listId}
+          aria-activedescendant={!inForm && rowCount > 0 ? `${listId}-${activeIndex}` : undefined}
           placeholder={field?.placeholder ?? (stage.kind === "github" ? "owner/repository" : "Project name")}
           value={value}
           disabled={busy}
@@ -249,9 +268,11 @@ export function ProjectPalette({
         {busy && <p className="palette-hint">Working…</p>}
         {error && <p className="error palette-error">{error}</p>}
         {stage.kind === "search" && (
-          <ul className="palette-list" role="listbox" aria-label="Results">
+          <ul ref={list} id={listId} className="palette-list" role="listbox" aria-label="Results">
             {projectRows.map((p, i) => (
-              <li key={p.id} role="option" aria-selected={i === highlight}>
+              <li key={p.id} id={`${listId}-${i}`} role="option" aria-selected={i === activeIndex}
+                onPointerMove={() => setHighlight(i)} onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseProject(p)}>
                 <span className="palette-name">
                   <RepoIcon size={14} /> {p.name}
                   {p.open && <span className="palette-open" title="In the sidebar">open</span>}
@@ -263,8 +284,11 @@ export function ProjectPalette({
               <li
                 key={a.id}
                 role="option"
+                id={`${listId}-${projectRows.length + i}`}
                 className="palette-action"
-                aria-selected={projectRows.length + i === highlight}
+                aria-selected={projectRows.length + i === activeIndex}
+                onPointerMove={() => setHighlight(projectRows.length + i)} onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseAction(a.id)}
               >
                 {a.label}
               </li>
@@ -273,9 +297,11 @@ export function ProjectPalette({
           </ul>
         )}
         {stage.kind === "github" && (
-          <ul className="palette-list" role="listbox" aria-label="GitHub repositories">
+          <ul ref={list} id={listId} className="palette-list" role="listbox" aria-label="GitHub repositories">
             {repositories.map((r, i) => (
-              <li key={r.nameWithOwner} role="option" aria-selected={i === highlight}>
+              <li key={r.nameWithOwner} id={`${listId}-${i}`} role="option" aria-selected={i === activeIndex}
+                onPointerMove={() => setHighlight(i)} onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseRepository(r)}>
                 <span className="palette-name">
                   <MarkGithubIcon size={14} /> {r.nameWithOwner}
                 </span>

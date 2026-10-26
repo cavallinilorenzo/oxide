@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { EditorMark } from "./EditorMark";
 import { ProviderMark } from "./ProviderMark";
@@ -48,6 +48,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const editVersion = useRef(0);
   const [claudeDetection, setClaudeDetection] = useState<Detection | null>(
     null,
   );
@@ -91,11 +93,17 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const errorsFor = (path: string) =>
     state.errors.filter((e) => e.path === path);
   const fileErrors = state.errors;
-  const set = (patch: Partial<Settings>) => setDraft({ ...draft, ...patch });
+  const set = (patch: Partial<Settings>) => {
+    editVersion.current++;
+    setSaveStatus((status) => status === "saving" ? status : "idle");
+    setDraft({ ...draft, ...patch });
+  };
   const setProvider = (
     p: Provider,
     patch: Partial<Settings["providers"][Provider]>,
-  ) =>
+  ) => {
+    editVersion.current++;
+    setSaveStatus((status) => status === "saving" ? status : "idle");
     setDraft({
       ...draft,
       providers: {
@@ -103,10 +111,20 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         [p]: { ...draft.providers[p], ...patch },
       },
     });
+  };
 
   const save = async () => {
-    const r = await commands.saveSettings(draft);
-    setSaveError(r.status === "error" ? r.error.message : null);
+    const savingVersion = editVersion.current;
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      const r = await commands.saveSettings(draft);
+      setSaveError(r.status === "error" ? r.error.message : null);
+      setSaveStatus(r.status === "ok" && editVersion.current === savingVersion ? "saved" : "idle");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+      setSaveStatus("idle");
+    }
   };
 
   const fieldErrors = (path: string) =>
@@ -295,12 +313,15 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         })}
       </section>
 
-      {saveError && <p className="error">{saveError}</p>}
+      {saveError && <p className="error" role="alert">{saveError}</p>}
       <div className="actions">
-        <button className="primary" onClick={save}>
-          Save
+        <button className="primary" onClick={save} disabled={saveStatus === "saving"}>
+          {saveStatus === "saving" ? "Saving…" : "Save"}
         </button>
         <button onClick={onClose}>Close</button>
+        <span className="settings-save-status" role="status">
+          {saveStatus === "saved" ? "Settings saved." : ""}
+        </span>
       </div>
     </main>
   );

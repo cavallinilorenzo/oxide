@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/src/styles.css"
+        ],
+        "createdAt": "2026-10-26T11:43:41.995Z",
+        "reason": "Agent review: the existing .rail uses a neutral 2px var(--line) border to group nested tool calls in the transcript; it is not a colored card accent. Confirmed independently in the desktop UI review."
+      }
+    ]
+  }
+}

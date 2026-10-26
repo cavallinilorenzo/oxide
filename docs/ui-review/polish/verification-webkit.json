@@ -1,0 +1,37 @@
+{
+  "metrics": [
+    {
+      "width": 1920,
+      "centre": 1080,
+      "composer": 760,
+      "obscured": [],
+      "documentOverflow": false,
+      "footerOverflow": false
+    },
+    {
+      "width": 1280,
+      "centre": 630.40625,
+      "composer": 582.40625,
+      "obscured": [],
+      "documentOverflow": false,
+      "footerOverflow": false
+    },
+    {
+      "width": 1024,
+      "centre": 488.328125,
+      "composer": 440.328125,
+      "obscured": [],
+      "documentOverflow": false,
+      "footerOverflow": false
+    },
+    {
+      "width": 900,
+      "centre": 404,
+      "composer": 356,
+      "obscured": [],
+      "documentOverflow": false,
+      "footerOverflow": false
+    }
+  ],
+  "errors": []
+}

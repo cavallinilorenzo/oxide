@@ -39,12 +39,12 @@ it("cancels with Escape and closes when focus leaves without changing the value"
   expect(document.activeElement?.textContent).toBe("High");
   act(() => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(document.activeElement).toBe(trigger);
-  expect(container.querySelector("[role=listbox]")).toBeNull();
+  expect(document.querySelector("[role=listbox]")).toBeNull();
   act(() => trigger.click());
   const outside = document.createElement("button");
   document.body.append(outside);
   act(() => outside.focus());
-  expect(container.querySelector("[role=listbox]")).toBeNull();
+  expect(document.querySelector("[role=listbox]")).toBeNull();
   expect(onChange).not.toHaveBeenCalled();
   outside.remove();
 });
@@ -56,12 +56,12 @@ it("exposes the selected option and allows pointer selection and dismissal", () 
   ]} onChange={onChange} />));
   const trigger = container.querySelector("button")!;
   act(() => trigger.click());
-  expect(container.querySelector('[aria-selected="true"]')?.textContent).toBe("Saved model");
-  act(() => container.querySelector<HTMLElement>('[role="option"]')!.click());
+  expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe("Saved model");
+  act(() => document.querySelector<HTMLElement>('[role="option"]')!.click());
   expect(onChange).toHaveBeenCalledWith("");
   act(() => trigger.click());
   act(() => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
-  expect(container.querySelector("[role=listbox]")).toBeNull();
+  expect(document.querySelector("[role=listbox]")).toBeNull();
 });
 
 it("keeps the keyboard choice focused when options are refreshed", () => {
@@ -73,4 +73,27 @@ it("keeps the keyboard choice focused when options are refreshed", () => {
   act(() => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
   act(render);
   expect(document.activeElement?.textContent).toBe("Codex");
+});
+
+it("keeps portaled options open for pointer selection and dismisses on window resize", () => {
+  const onChange = vi.fn();
+  act(() => root.render(<Dropdown label="Provider" value="claude" options={[
+    { value: "claude", label: "Claude" }, { value: "codex", label: "Codex" },
+  ]} onChange={onChange} />));
+  const trigger = container.querySelector("button")!;
+  act(() => trigger.click());
+  const menu = document.querySelector<HTMLElement>("[role=listbox]")!;
+  expect(menu.parentElement).toBe(document.body);
+  act(() => menu.dispatchEvent(new Event("scroll")));
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  const codex = menu.querySelectorAll<HTMLElement>("[role=option]")[1];
+  act(() => codex.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  act(() => codex.click());
+  expect(onChange).toHaveBeenCalledWith("codex");
+  expect(document.activeElement).toBe(trigger);
+  act(() => trigger.click());
+  act(() => window.dispatchEvent(new Event("resize")));
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  expect(onChange).toHaveBeenCalledTimes(1);
 });

@@ -10,5 +10,8 @@ fn a_provider_with_no_commands_still_lists_oxides_once_each() {
 
     let list = core.list_slash_commands("fake", project_id, None).unwrap();
     let names: Vec<_> = list.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["clear", "effort", "model"]);
+    assert_eq!(
+        names,
+        ["clear", "diff", "effort", "model", "permissions", "rename"]
+    );
 }

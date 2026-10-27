@@ -15,8 +15,16 @@ fn oxide_commands() -> Vec<SlashCommandInfo> {
         };
     vec![
         own("clear", "Start a new conversation", None, &["reset", "new"]),
+        own("diff", "Open the Diff Surface", None, &[]),
         own("effort", "Set the Effort", Some("<level>"), &[]),
         own("model", "Set the Model", Some("<model>"), &[]),
+        own(
+            "permissions",
+            "Set the Permission mode",
+            Some("<ask|auto-edit|full>"),
+            &[],
+        ),
+        own("rename", "Rename the Thread", Some("<name>"), &[]),
     ]
 }
 
@@ -74,8 +82,11 @@ mod tests {
                     vec!["reset".to_string(), "new".to_string()]
                 ),
                 ("context", SlashRoute::Passthrough, vec!["ctx".to_string()]),
+                ("diff", SlashRoute::Oxide, vec![]),
                 ("effort", SlashRoute::Oxide, vec![]),
                 ("model", SlashRoute::Oxide, vec![]),
+                ("permissions", SlashRoute::Oxide, vec![]),
+                ("rename", SlashRoute::Oxide, vec![]),
             ]
         );
     }
@@ -83,6 +94,9 @@ mod tests {
     #[test]
     fn a_provider_without_commands_still_gets_oxides() {
         let names: Vec<_> = merge(Vec::new()).into_iter().map(|c| c.name).collect();
-        assert_eq!(names, ["clear", "effort", "model"]);
+        assert_eq!(
+            names,
+            ["clear", "diff", "effort", "model", "permissions", "rename"]
+        );
     }
 }

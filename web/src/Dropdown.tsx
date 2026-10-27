@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, ChevronDownIcon } from "@primer/octicons-react";
 
@@ -10,11 +10,12 @@ export interface DropdownOption<T extends string> {
 }
 
 /** A single-select listbox. Selection is committed only by click, Enter or Space. */
-export function Dropdown<T extends string>({ label, value, options, onChange, triggerClassName, minMenuWidth, disabled }: {
+export function Dropdown<T extends string>({ label, value, options, onChange, triggerClassName, minMenuWidth, disabled, triggerRef }: {
   label: string;
   triggerClassName?: string;
   minMenuWidth?: number;
   disabled?: boolean;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
   value: T;
   options: DropdownOption<T>[];
   onChange: (value: T) => void;
@@ -89,7 +90,7 @@ export function Dropdown<T extends string>({ label, value, options, onChange, tr
     <div className="dropdown" ref={container} onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget) && !list.current?.contains(event.relatedTarget)) setOpen(false);
     }}>
-      <button ref={trigger} type="button" className={`dropdown-trigger${triggerClassName ? ` ${triggerClassName}` : ""}`}
+      <button ref={(element) => { trigger.current = element; if (triggerRef) triggerRef.current = element; }} type="button" className={`dropdown-trigger${triggerClassName ? ` ${triggerClassName}` : ""}`}
         aria-label={`${label}: ${selected?.label ?? value}`} aria-haspopup="listbox" aria-expanded={open}
         aria-controls={open ? id : undefined} disabled={disabled || options.length === 0}
         title={selected?.label ?? value}

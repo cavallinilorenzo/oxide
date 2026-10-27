@@ -72,8 +72,7 @@ The probe does not establish whether separate legacy custom commands are include
 
 The two JSON probes have been verified with 1.4.8, not every version in the
 pinned 1.4.x range. If the CLI does not return the expected command payload,
-Oxide falls back to its own commands. The existing catalog API probes the project
-root rather than a dispatched Thread's worktree, so differing worktree skills
-are not yet represented accurately. The CLI setting `disableSlashCommands` may
+Oxide falls back to its own commands. The catalog API probes the Thread worktree when present and the project root
+for a draft or a Thread without a worktree. The CLI setting `disableSlashCommands` may
 prevent the probes from executing as commands; its effect on these probes has
 not been verified.

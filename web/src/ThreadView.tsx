@@ -193,17 +193,22 @@ export function ThreadView({
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
   const slashProvider = transcript.thread?.provider || draftProvider;
 
-  // Re-read when the menu opens, so changes to the customizations show up without a restart.
+  // Show the cached catalog first, then refresh for the active Thread's directory.
   useEffect(() => {
-    if (!slashOpen) return;
+    if (threadId && transcript.thread?.id !== threadId) return;
     let active = true;
-    void commands.listSlashCommands(slashProvider, projectId).then((res) => {
-      if (active && res.status === "ok") setSlashCommands(res.data);
-    });
-    return () => {
-      active = false;
-    };
-  }, [slashOpen, slashProvider, projectId]);
+    setSlashCommands([]);
+    void (async () => {
+      const cached = await commands.listSlashCommands(slashProvider, projectId, threadId, false);
+      if (!active) return;
+      if (cached.status === "ok") setSlashCommands(cached.data);
+      const refreshed = await commands.listSlashCommands(slashProvider, projectId, threadId, true);
+      if (!active) return;
+      if (refreshed.status === "ok") setSlashCommands(refreshed.data);
+      else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
+    })();
+    return () => { active = false; };
+  }, [threadId, transcript.thread?.id, slashProvider, projectId]);
 
   const handleInputChange = (val: string) => {
     setSlashIndex(0);
@@ -643,6 +648,13 @@ export function ThreadView({
     }
 
     const slash = parseSlashCommand(input);
+    if (slash.type === "reload-cache") {
+      handleInputChange("");
+      const result = await commands.listSlashCommands(slashProvider, projectId, threadId, true);
+      if (result.status === "ok") setSlashCommands(result.data);
+      else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
+      return;
+    }
     if (slash.type === "rename") {
       if (!threadId) setCommandError("Create a Thread before renaming it.");
       else if (slash.arg) void saveRename(slash.arg);

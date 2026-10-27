@@ -1592,9 +1592,11 @@ async fn list_slash_commands(
     core: State<'_, Arc<Core>>,
     provider: String,
     project_id: u32,
+    thread_id: Option<u32>,
+    refresh: bool,
 ) -> Result<Vec<SlashCommand>, AppError> {
     git_blocking(&core, move |core| {
-        core.list_slash_commands(&provider, project_id)
+        core.thread_slash_commands(&provider, project_id, thread_id, refresh)
     })
     .await
     .map(|commands| commands.iter().map(convert).collect())

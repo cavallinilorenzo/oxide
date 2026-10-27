@@ -89,8 +89,8 @@ fn skill_catalog_comes_from_agy_in_the_project_directory() {
         .find(|entry| entry["type"] == "skills_probe")
         .unwrap();
     assert_eq!(
-        std::path::Path::new(probe["cwd"].as_str().unwrap()),
-        dir.path()
+        std::fs::canonicalize(probe["cwd"].as_str().unwrap()).unwrap(),
+        std::fs::canonicalize(dir.path()).unwrap()
     );
 }
 

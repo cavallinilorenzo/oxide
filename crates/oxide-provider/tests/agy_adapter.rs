@@ -191,6 +191,22 @@ fn permission_mode_model_and_effort_map_to_flags_on_every_turn() {
 }
 
 #[test]
+fn skill_invocation_yields_an_agent_response_and_allows_another_turn() {
+    let (mut provider, log, _fake) = provider_with_log();
+    let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
+    provider.send_prompt("/oxide-probe").unwrap();
+    let events = collect_turn(&rx);
+    assert!(events.iter().any(|event| matches!(event,
+        ProviderEvent::ItemCompleted { kind: ItemKind::AgentMessage, content, .. }
+        if content == "OXIDE_SKILL_EXPANDED_93\n"
+    )));
+    provider.send_prompt("second").unwrap();
+    collect_turn(&rx);
+    assert_eq!(wire_prompts(log.path()), ["/oxide-probe", "second"]);
+    provider.shutdown().unwrap();
+}
+
+#[test]
 fn steps_map_to_items() {
     let fake = fake_agy();
     let mut provider = AgyProvider::with_command(fake.command());

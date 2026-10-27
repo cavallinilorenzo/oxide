@@ -79,6 +79,8 @@ if "interrupt_test" in prompt:
 elif "crash_test" in prompt:
     sys.stderr.write("panic: something broke\n")
     sys.exit(7)
+elif prompt == "/oxide-probe":
+    replay("turn_skill.jsonl")
 elif "tools_test" in prompt:
     replay("turn_tools.jsonl")
 elif "error_test" in prompt:

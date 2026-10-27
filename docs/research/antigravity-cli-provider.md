@@ -14,7 +14,7 @@
 | Models and effort | Run `agy models` to enumerate model slugs and their supported effort variants; pass a listed slug with `--model`. The CLI supports `--effort low|medium|high|xhigh|max` in the installed 1.4.4 help (model availability may constrain this; prefer the concrete slugs returned by `agy models`). Run `agy agents` for agent names and pass `--agent`. These are separate subprocess calls, not stream RPCs. Locally, `agy models` returned Gemini 3.8 Flash low/medium/high, Claude Sonnet 4.6, Claude Opus 4.6 Thinking, and GPT-OSS 120B medium. This is an account/environment snapshot, not a stable catalog. [Headless model selection](https://antigravity.google/docs/cli/headless) |
 | Installed / authenticated | Resolve `agy` on `PATH` (or check the documented macOS/Linux `~/.local/bin/agy`) and run `agy --version`. There is no documented dedicated auth-status command. Headless mode uses cached credentials; if absent it exits with an `authentication required` error instead of hanging. A lightweight `agy -p ... --output-format json` health probe can confirm usable authentication, but it makes a model request; alternatively parse failures from `agy models`/a real request. The locally installed binary returned version 1.4.4 and `agy models` succeeded. Credentials are stored through the system keyring per the official CLI repository README. [Install/auth docs](https://antigravity.google/docs/cli/install/) |
 | Resume | `--continue` resumes the latest conversation; `--conversation <id>` resumes a known conversation ID from the result. These start a new process. The multi-turn stdin stream itself keeps one conversation alive until stdin closes. Persist conversation IDs per Oxide Thread. [Resume docs](https://antigravity.google/docs/cli/headless) |
-| Slash commands / skills | A stream input is a `user` message whose content is text. CLI-handled commands such as `/model` and `/usage` are explicitly unsupported inside stream mode and terminate the run; invoke supported CLI commands separately as `agy -p /command`. Slash commands that are interpreted by the agent may behave as ordinary prompt text, but the docs do not guarantee `/compact`, skill invocation, or custom-command expansion over the stream. `--disable-slash-commands` exists in installed help for print mode. Treat these features as unsupported/unknown in the Provider contract unless verified against specific CLI versions. Skills/customizations may still be loaded by the underlying agent as workspace context, but sending their slash invocations is not established. [Input and slash-command behavior](https://antigravity.google/docs/cli/headless) |
+| Slash commands / skills | `agy` 1.4.7 expanded a workspace skill sent as `/oxide-probe` in stream-json, and accepted a second turn on the same stream. Its response arrived as ordinary `agent_response` deltas, not a distinct command-output event. CLI-handled commands such as `/model` and `/usage` remain unsupported inside stream mode and terminate the run; do not offer them as passthrough commands. `--disable-slash-commands` disables expansion in print mode. See the 1.4.7 investigation below. [Input and slash-command behavior](https://antigravity.google/docs/cli/headless) |
 | Subagents | Tool steps may expose `subagent_info.subagents` entries with type, role, conversation ID, log URI, and workspace URIs. This supports reporting subagent-spawn metadata, not necessarily a full lifecycle/event stream. Docs confirm Antigravity CLI has subagent functionality, but Oxide should treat further progress as unavailable unless separately observed. [Stream schema](https://antigravity.google/docs/cli/headless), [subagents](https://antigravity.google/docs/subagents/) |
 | Attachments | Stream input accepts text or a list of text blocks only; any other block type errors and ends the session. There is no documented image/file attachment block. A practical fallback is put files in the project workspace and reference their paths in text, subject to the agent's filesystem access; this does not provide uploaded/pasted attachment semantics. [Input format](https://antigravity.google/docs/cli/headless) |
 | ACP / SDK | No official documentation found for launching `agy` in ACP mode; the public CLI flags/subcommands inspected locally also contain no ACP option. ACP itself is a JSON-RPC protocol with initialize/session/prompt/update/cancel and optional permissions, so a compliant ACP adapter would be a distinct transport, not something to assume from CLI stream-json. The official Antigravity SDK is a Python SDK for building agents, configured with Gemini API credentials; it does not document controlling the installed `agy` process or reusing its login. [ACP overview](https://agentclientprotocol.com/protocol/v1/overview), [Antigravity SDK](https://antigravity.google/docs/sdk/overview/) |
@@ -27,3 +27,37 @@ Use a supervised long-lived child process, with the Rust Provider owning pipes a
 ## Evidence and limits
 
 Primary sources used: [official headless CLI docs](https://antigravity.google/docs/cli/headless), [official install/auth docs](https://antigravity.google/docs/cli/install/), [official CLI repository](https://github.com/google-antigravity/antigravity-cli), [official subagent docs](https://antigravity.google/docs/subagents/), [official Antigravity SDK docs](https://antigravity.google/docs/sdk/overview/), and the [ACP v1 protocol specification](https://agentclientprotocol.com/protocol/v1/overview). The CLI is distributed as a binary, and its full implementation is not in this Oxide checkout; conclusions about behavior follow official CLI docs plus local `agy --help`, `agy --version`, and `agy models`. Absence of ACP support means “not documented/advertised,” not proof that no hidden or future mode exists. No model prompt was sent during this research.
+
+## Skills and commands: `agy` 1.4.7 (2026-10-27, Windows)
+
+A temporary workspace contained `.agents/skills/oxide-probe/SKILL.md`, with a `name`,
+`description`, and instruction to reply `OXIDE_SKILL_EXPANDED_93`. Sending
+`{"event":"user","message":{"content":"/oxide-probe"}}` to `agy --input-format
+stream-json --output-format stream-json` produced a `user_input` step, then
+`agent_response` deltas containing the marker, then a `SUCCESS` result. A second
+ordinary prompt sent to the same still-running process returned its own successful
+result. This verifies that this skill expanded and the stream survived; it does
+not establish that every command or skill does. The init event did not list skills.
+The observed response contained no separately identifiable command-output event.
+
+The [CLI skills documentation](https://www.antigravity.google/docs/skills?tab=ide)
+identifies workspace `.agents/skills/<name>/`, global
+`~/.gemini/antigravity-cli/skills/<name>/`, and plugin skills under
+`~/.gemini/antigravity-cli/plugins/<name>/skills/`. `agy plugin list --json`
+reports installed plugins and their bundled skills, but is not a complete skill
+inventory; this installation returned `[]`. Its `skills.json` also explicitly
+registers `~/.agents/skills`, so that path is configuration-dependent, not proof
+of a universal default. The CLI's bundled customization documentation describes
+workspace aliases and `skills.json` registrations. It also describes global
+`~/.gemini/config/`, while the public CLI documentation names the CLI-specific
+global directory above; the exact effective precedence and all configured sources
+have not been independently verified.
+
+`agy --help` advertises no general skills or custom commands listing subcommand;
+`agy help skills` and `agy help commands` reported unknown subcommands. Custom
+command locations and whether they expand independently of skills remain
+unverified. [Legacy workflows](https://www.antigravity.google/docs/ide/workflows/)
+are documented as discontinued on October 19, 2026, and should not be assumed
+to be the CLI's current custom-command source. A complete provider-reported
+catalog has not been found. ADR-0006 rejects filesystem discovery, so exposing a
+partial scanned catalog would require a deliberate change to that decision.

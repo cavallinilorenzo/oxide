@@ -3,8 +3,8 @@
 use crate::process;
 use crate::{
     ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
-    UsageWindow, UsageWindowKind,
+    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
+    TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,36 @@ fn dispatch_to_thread(threads: &ThreadsMap, thread_id: Option<&str>, event: Prov
     }
 }
 
+fn emit_compaction(threads: &ThreadsMap, items: &ThreadItemsMap, thread_id: Option<&str>) {
+    let mut items = items.lock().unwrap();
+    let state = items
+        .entry(thread_id.unwrap_or_default().to_owned())
+        .or_default();
+    if state.item_ids.contains_key("oxide-compact-output") {
+        return;
+    }
+    let idx = state.resolve_index("oxide-compact-output");
+    dispatch_to_thread(
+        threads,
+        thread_id,
+        ProviderEvent::ItemStarted {
+            item_index: idx,
+            kind: ItemKind::SlashCommandOutput,
+            parent_item_index: None,
+        },
+    );
+    dispatch_to_thread(
+        threads,
+        thread_id,
+        ProviderEvent::ItemCompleted {
+            item_index: idx,
+            kind: ItemKind::SlashCommandOutput,
+            content: "Conversation compacted.".into(),
+            parent_item_index: None,
+        },
+    );
+}
+
 /// Maps Codex rate limits (the `account/rateLimits/updated` params or the
 /// `account/rateLimits/read` result) to a `UsageLimits` event. Windows are classified by
 /// duration, not by whether Codex calls them primary or secondary.
@@ -122,6 +152,7 @@ struct AppServerInner {
     process: AppServerProcess,
     handshake_warning: Option<String>,
     models: Vec<CodexModelEntry>,
+    skills_cache: HashMap<PathBuf, Vec<serde_json::Value>>,
     next_request_id: AtomicU64,
     pending_requests: PendingRequestsMap,
     pending_server_requests: ServerRequestsMap,
@@ -316,6 +347,13 @@ impl CodexAppServer {
                         .map(|s| s.to_string());
 
                     match method {
+                        "thread/compacted" => {
+                            emit_compaction(
+                                &threads_clone,
+                                &thread_items_clone,
+                                thread_id.as_deref(),
+                            );
+                        }
                         "turn/started" => {
                             // TurnStarted event already emitted immediately on send_prompt
                             if let Some(tid) = &thread_id {
@@ -325,6 +363,11 @@ impl CodexAppServer {
                                 }
                             }
                         }
+                        "skills/changed" => dispatch_to_thread(
+                            &threads_clone,
+                            None,
+                            ProviderEvent::SlashCommandsChanged,
+                        ),
                         "thread/started"
                         | "thread/status/changed"
                         | "account/updated"
@@ -349,6 +392,9 @@ impl CodexAppServer {
                                 .get("type")
                                 .and_then(|s| s.as_str())
                                 .unwrap_or("agentMessage");
+                            if itype == "contextCompaction" {
+                                continue;
+                            }
 
                             let kind = match itype {
                                 "agentMessage" => ItemKind::AgentMessage,
@@ -356,7 +402,17 @@ impl CodexAppServer {
                                 "commandExecution" => ItemKind::ToolCall,
                                 "fileChange" => ItemKind::FileChange,
                                 "subAgentActivity" | "collabAgentToolCall" => ItemKind::Subagent,
-                                _ => ItemKind::ToolCall,
+                                "enteredReviewMode" | "exitedReviewMode" => {
+                                    ItemKind::SlashCommandOutput
+                                }
+                                _ => {
+                                    dispatch_to_thread(
+                                        &threads_clone,
+                                        thread_id.as_deref(),
+                                        ProviderEvent::Unknown { raw: line.clone() },
+                                    );
+                                    continue;
+                                }
                             };
 
                             let t_key = thread_id.clone().unwrap_or_default();
@@ -407,6 +463,14 @@ impl CodexAppServer {
                                 .get("type")
                                 .and_then(|s| s.as_str())
                                 .unwrap_or("agentMessage");
+                            if itype == "contextCompaction" {
+                                emit_compaction(
+                                    &threads_clone,
+                                    &thread_items_clone,
+                                    thread_id.as_deref(),
+                                );
+                                continue;
+                            }
 
                             let kind = match itype {
                                 "agentMessage" => ItemKind::AgentMessage,
@@ -414,10 +478,25 @@ impl CodexAppServer {
                                 "commandExecution" => ItemKind::ToolCall,
                                 "fileChange" => ItemKind::FileChange,
                                 "subAgentActivity" | "collabAgentToolCall" => ItemKind::Subagent,
-                                _ => ItemKind::ToolCall,
+                                "enteredReviewMode" | "exitedReviewMode" => {
+                                    ItemKind::SlashCommandOutput
+                                }
+                                _ => {
+                                    dispatch_to_thread(
+                                        &threads_clone,
+                                        thread_id.as_deref(),
+                                        ProviderEvent::Unknown { raw: line.clone() },
+                                    );
+                                    continue;
+                                }
                             };
 
                             let content = match itype {
+                                "enteredReviewMode" | "exitedReviewMode" => item
+                                    .get("review")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
                                 "agentMessage" => item
                                     .get("text")
                                     .and_then(|s| s.as_str())
@@ -529,6 +608,7 @@ impl CodexAppServer {
             process: AppServerProcess { child, stdin },
             handshake_warning: None,
             models: Vec::new(),
+            skills_cache: HashMap::new(),
             next_request_id: AtomicU64::new(1),
             pending_requests,
             pending_server_requests,
@@ -789,8 +869,13 @@ impl CodexAppServer {
         }
     }
 
-    fn start_turn(&self, thread_id: &str, params: serde_json::Value) -> Result<(), ProviderError> {
-        let response = self.send_request("turn/start", params)?;
+    fn start_turn(
+        &self,
+        thread_id: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(), ProviderError> {
+        let response = self.send_request(method, params)?;
         // A caller may interrupt immediately after send_prompt returns, before turn/started.
         let interrupt_requested = {
             let guard = self.inner.lock().unwrap();
@@ -868,6 +953,7 @@ pub struct CodexProvider {
     active_model: Arc<Mutex<Option<String>>>,
     active_effort: Arc<Mutex<Option<String>>>,
     active_permission_mode: Arc<Mutex<PermissionMode>>,
+    working_dir: Arc<Mutex<PathBuf>>,
     capabilities: Arc<Mutex<ProviderCapabilities>>,
 }
 
@@ -904,6 +990,7 @@ impl CodexProvider {
             active_model: Arc::new(Mutex::new(None)),
             active_effort: Arc::new(Mutex::new(None)),
             active_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
+            working_dir: Arc::new(Mutex::new(PathBuf::new())),
             capabilities: Arc::new(Mutex::new(ProviderCapabilities {
                 supported_permission_modes: vec![
                     PermissionMode::Ask,
@@ -961,6 +1048,57 @@ impl CodexProvider {
         }
     }
 
+    fn skills(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Result<Vec<serde_json::Value>, ProviderError> {
+        let result = self.app_server.send_request(
+            "skills/list",
+            json!({"cwds": [working_dir.to_string_lossy()]}),
+        )?;
+        let skills: Vec<_> = result["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+            .filter(|skill| skill["enabled"].as_bool() == Some(true))
+            .cloned()
+            .collect();
+        if let Some(inner) = self.app_server.inner.lock().unwrap().as_mut() {
+            inner
+                .skills_cache
+                .insert(working_dir.to_owned(), skills.clone());
+        }
+        Ok(skills)
+    }
+
+    fn finish_native_request(
+        &self,
+        thread_id: &str,
+        turn_index: u32,
+        result: Result<(), ProviderError>,
+    ) -> Result<(), ProviderError> {
+        if let Err(ref error) = result {
+            let guard = self.app_server.inner.lock().unwrap();
+            if let Some(inner) = guard.as_ref() {
+                inner.active_turns.lock().unwrap().remove(thread_id);
+            }
+            drop(guard);
+            if let Some(sender) = self.event_sender.lock().unwrap().as_ref() {
+                let _ = sender.send(ProviderEvent::Error {
+                    message: error.to_string(),
+                    code: None,
+                    retrying: false,
+                });
+                let _ = sender.send(ProviderEvent::TurnCompleted {
+                    turn_index,
+                    status: TurnStatus::Error,
+                });
+            }
+        }
+        result
+    }
+
     fn map_permission_mode_to_turn_start(
         mode: PermissionMode,
     ) -> (serde_json::Value, &'static str) {
@@ -973,6 +1111,39 @@ impl CodexProvider {
 }
 
 impl Provider for CodexProvider {
+    fn slash_commands(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Result<Vec<SlashCommandInfo>, ProviderError> {
+        let mut commands = vec![
+            SlashCommandInfo {
+                name: "compact".into(),
+                description: Some("Compact the conversation".into()),
+                argument_hint: None,
+                aliases: vec![],
+                route: SlashRoute::Native,
+            },
+            SlashCommandInfo {
+                name: "review".into(),
+                description: Some("Review changes".into()),
+                argument_hint: Some("[instructions]".into()),
+                aliases: vec![],
+                route: SlashRoute::Native,
+            },
+        ];
+        for skill in self.skills(working_dir)? {
+            if let Some(name) = skill["name"].as_str() {
+                commands.push(SlashCommandInfo {
+                    name: name.into(),
+                    description: skill["description"].as_str().map(str::to_owned),
+                    argument_hint: Some("[text]".into()),
+                    aliases: vec![],
+                    route: SlashRoute::Native,
+                });
+            }
+        }
+        Ok(commands)
+    }
     fn detect(&self) -> Result<Detection, ProviderError> {
         let mut cmd =
             crate::command::provider_command(&self.app_server.command, &self.app_server.extra_env);
@@ -1062,6 +1233,7 @@ impl Provider for CodexProvider {
         *self.active_permission_mode.lock().unwrap() = context.permission_mode;
         *self.active_model.lock().unwrap() = context.model.clone();
         *self.active_effort.lock().unwrap() = context.effort.clone();
+        *self.working_dir.lock().unwrap() = context.working_dir.clone();
 
         let res = self.app_server.send_request("thread/start", params)?;
         let tid = res
@@ -1108,6 +1280,7 @@ impl Provider for CodexProvider {
         *self.active_permission_mode.lock().unwrap() = context.permission_mode;
         *self.active_model.lock().unwrap() = context.model.clone();
         *self.active_effort.lock().unwrap() = context.effort.clone();
+        *self.working_dir.lock().unwrap() = context.working_dir.clone();
 
         let _res = self.app_server.send_request("thread/resume", params)?;
 
@@ -1145,17 +1318,60 @@ impl Provider for CodexProvider {
             });
         }
 
+        if prompt.trim() == "/compact" {
+            let result = self
+                .app_server
+                .send_request("thread/compact/start", json!({"threadId": tid}))
+                .map(|_| ());
+            return self.finish_native_request(&tid, turn_index, result);
+        }
+        if let Some(rest) = prompt.trim().strip_prefix("/review")
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            let instructions = rest.trim();
+            let target = if instructions.is_empty() {
+                json!({"type": "uncommittedChanges"})
+            } else {
+                json!({"type": "custom", "instructions": instructions})
+            };
+            let result = self.app_server.start_turn(
+                &tid,
+                "review/start",
+                json!({"threadId": tid, "target": target, "delivery": "inline"}),
+            );
+            return self.finish_native_request(&tid, turn_index, result);
+        }
+
+        let mut input = vec![json!({"type": "text", "text": prompt})];
+        if let Some(command) = prompt.trim_start().strip_prefix('/') {
+            let split = command.find(char::is_whitespace).unwrap_or(command.len());
+            let name = &command[..split];
+            let cwd = self.working_dir.lock().unwrap().clone();
+            let skills = self.skills(&cwd).or_else(|error| {
+                let guard = self.app_server.inner.lock().unwrap();
+                guard
+                    .as_ref()
+                    .and_then(|inner| inner.skills_cache.get(&cwd).cloned())
+                    .ok_or(error)
+            });
+            if let Ok(skills) = skills
+                && let Some(skill) = skills
+                    .into_iter()
+                    .find(|skill| skill["name"].as_str() == Some(name) && skill["path"].is_string())
+            {
+                input = vec![
+                    json!({"type": "skill", "name": name, "path": skill["path"]}),
+                    json!({"type": "text", "text": command[split..].trim_start()}),
+                ];
+            }
+        }
+
         let mode = *self.active_permission_mode.lock().unwrap();
         let (sandbox_policy, approval_policy) = Self::map_permission_mode_to_turn_start(mode);
 
         let mut params = json!({
             "threadId": tid,
-            "input": [
-                {
-                    "type": "text",
-                    "text": prompt
-                }
-            ],
+            "input": input,
             "sandboxPolicy": sandbox_policy,
             "approvalPolicy": approval_policy,
         });
@@ -1167,7 +1383,7 @@ impl Provider for CodexProvider {
             params["effort"] = json!(eff);
         }
 
-        self.app_server.start_turn(&tid, params)?;
+        self.app_server.start_turn(&tid, "turn/start", params)?;
         Ok(())
     }
 
@@ -1222,7 +1438,7 @@ impl Provider for CodexProvider {
             params["effort"] = json!(eff);
         }
 
-        self.app_server.start_turn(&tid, params)?;
+        self.app_server.start_turn(&tid, "turn/start", params)?;
         Ok(())
     }
 

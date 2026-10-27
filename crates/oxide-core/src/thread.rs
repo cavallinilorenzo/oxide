@@ -212,6 +212,7 @@ pub enum ThreadEvent {
     ProviderRetrying {
         message: String,
     },
+    SlashCommandsChanged,
     Error {
         message: String,
     },

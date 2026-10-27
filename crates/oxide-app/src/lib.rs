@@ -611,6 +611,7 @@ pub enum ThreadEvent {
     ProviderRetrying {
         message: String,
     },
+    SlashCommandsChanged,
     Error {
         message: String,
     },
@@ -1593,6 +1594,7 @@ async fn list_slash_commands(
     provider: String,
     project_id: u32,
     thread_id: Option<u32>,
+
     refresh: bool,
 ) -> Result<Vec<SlashCommand>, AppError> {
     git_blocking(&core, move |core| {

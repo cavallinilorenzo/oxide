@@ -1043,8 +1043,9 @@ impl Core {
         &self,
         provider: &str,
         project_id: u32,
+        thread_id: Option<u32>,
     ) -> Result<Vec<oxide_provider::SlashCommandInfo>> {
-        self.thread_slash_commands(provider, project_id, None, true)
+        self.thread_slash_commands(provider, project_id, thread_id, true)
     }
 
     /// Ask the Provider in the same directory used for the Thread's Turns.
@@ -1070,6 +1071,7 @@ impl Core {
                 .ok_or_else(|| Error::Provider("Project not found".into()))?
         };
         let customizations = self.settings().settings.claude_customizations;
+
         let key = serde_json::to_string(&(provider, format!("{customizations:?}"), &working_dir))
             .map_err(|e| Error::Provider(e.to_string()))?;
         let cached = self.slash_catalogs.lock().unwrap().get(&key).cloned();
@@ -1085,6 +1087,7 @@ impl Core {
                 })
                 .unwrap_or_else(|| slash_catalog::merge(Vec::new())));
         }
+
         let reported = match provider {
             "claude" => {
                 let mut p = oxide_provider::claude::ClaudeCodeProvider::new();
@@ -1101,6 +1104,7 @@ impl Core {
             ),
             _ => Ok(Vec::new()),
         };
+
         match reported {
             Ok(commands) => {
                 let catalog = slash_catalog::merge(commands);

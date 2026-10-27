@@ -162,7 +162,10 @@ export function ThreadView({
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
-  const permissionControlRef = useRef<HTMLDivElement>(null);
+
+  const permissionControlRef = useRef<HTMLButtonElement>(null);
+  const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
+
   const [commandError, setCommandError] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
@@ -188,7 +191,11 @@ export function ThreadView({
   }, [draft, threadId]);
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+
   const slashGeneration = useRef({ active: true });
+
+  const [slashRevision, setSlashRevision] = useState(0);
+
   const [slashIndex, setSlashIndex] = useState(0);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
@@ -198,6 +205,7 @@ export function ThreadView({
   useEffect(() => {
     if (threadId && transcript.thread?.id !== threadId) return;
     let active = true;
+
     const generation = { active: true };
     slashGeneration.current = generation;
     setSlashCommands([]);
@@ -210,11 +218,28 @@ export function ThreadView({
       if (refreshed.status === "ok") setSlashCommands(refreshed.data);
       else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
     })();
+
     return () => {
       active = false;
       generation.active = false;
     };
+
   }, [threadId, transcript.thread?.id, slashProvider, projectId]);
+
+
+  // Codex can change its available skills while the menu is open.
+  useEffect(() => {
+    if (!slashOpen || slashProvider !== "codex") return;
+    let active = true;
+    const update = () => {
+      void commands.listSlashCommands(slashProvider, projectId, threadId, true).then((res) => {
+        if (active && res.status === "ok") setSlashCommands(res.data);
+      });
+    };
+    update();
+    const timer = window.setInterval(update, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [slashOpen, slashProvider, projectId, threadId, slashRevision]);
 
   const handleInputChange = (val: string) => {
     setSlashIndex(0);
@@ -305,6 +330,7 @@ export function ThreadView({
     const early: SequencedThreadEvent[] = [];
     const channel = new Channel<SequencedThreadEvent>();
     channel.onmessage = (event) => {
+      if (event.event.type === "SlashCommandsChanged") setSlashRevision((n) => n + 1);
       if (snapshotApplied) batcher.push(event);
       else early.push(event);
     };
@@ -542,6 +568,14 @@ export function ThreadView({
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
   const providerCaps = providerCapsEntry?.provider === currentProvider ? providerCapsEntry.caps : null;
+
+  useEffect(() => {
+    if (openPermissionsWhenReady && providerCaps) {
+      permissionControlRef.current?.click();
+      setOpenPermissionsWhenReady(false);
+    }
+  }, [openPermissionsWhenReady, providerCaps]);
+
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
     let active = true;
@@ -654,6 +688,7 @@ export function ThreadView({
     }
 
     const slash = parseSlashCommand(input);
+
     if (slash.type === "reload-cache") {
       handleInputChange("");
       const generation = slashGeneration.current;
@@ -663,6 +698,7 @@ export function ThreadView({
       else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
       return;
     }
+
     if (slash.type === "rename") {
       if (!threadId) setCommandError("Create a Thread before renaming it.");
       else if (slash.arg) void saveRename(slash.arg);
@@ -677,14 +713,29 @@ export function ThreadView({
     }
     if (slash.type === "permissions") {
       if (!slash.arg) {
-        permissionControlRef.current?.querySelector("button")?.click();
+
+        if (providerCaps) permissionControlRef.current?.click();
+        else {
+          const result = await commands.getProviderCapabilities(currentProvider);
+          if (result.status === "ok") {
+            setProviderCaps({ provider: currentProvider, caps: result.data });
+            setOpenPermissionsWhenReady(true);
+          } else setCommandError("Could not load permission modes for this Provider.");
+        }
+
       } else {
         const modes: Record<string, PermissionMode> = { ask: "ask", "auto-edit": "auto-edit", full: "full-access" };
         const mode = modes[slash.arg];
         if (!mode) setCommandError("Choose ask, auto-edit, or full.");
-        else if (!offeredModes.some((item) => item.mode === mode)) {
-          setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
-        } else void handlePermissionChange(mode);
+
+        else {
+          const result = providerCaps ? null : await commands.getProviderCapabilities(currentProvider);
+          const supported = providerCaps?.supportedPermissionModes ?? (result?.status === "ok" ? result.data.supportedPermissionModes : null);
+          if (!supported) setCommandError("Could not load permission modes for this Provider.");
+          else if (!supported.includes(mode)) setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
+          else void handlePermissionChange(mode);
+        }
+
       }
       handleInputChange("");
       return;
@@ -1014,7 +1065,10 @@ export function ThreadView({
               <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
               <ChevronDownIcon size={12} className="cv" />
             </button>
-            <div ref={permissionControlRef}><Dropdown
+
+            <Dropdown
+              triggerRef={permissionControlRef}
+
               label="Permission mode"
               triggerClassName="cbtn compact"
               minMenuWidth={200}
@@ -1025,7 +1079,7 @@ export function ThreadView({
                 return { value: item.mode, label: item.label, icon: <PermIcon size={14} /> };
               })}
               onChange={(mode) => void handlePermissionChange(mode)}
-            /></div>
+            />
           </div>
           {imagesOffered && (
             <>

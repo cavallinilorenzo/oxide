@@ -32,6 +32,29 @@ it("intercepts an unavailable permission mode before a Thread exists", async () 
   expect(container.querySelector('[aria-label^="Permission mode:"]')?.getAttribute("aria-label")).toContain("Auto-edit");
 });
 
+
+it("loads capabilities before applying a permission command in a new Thread", async () => {
+  let requests = 0;
+  mockIPC((command) => {
+    if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {} }, errors: [] };
+    if (command === "get_provider_capabilities") {
+      requests++;
+      return requests < 3 ? new Promise(() => {}) : { supportedPermissionModes: ["ask", "auto-edit", "full-access"] };
+    }
+    if (command === "provider_capabilities") return { imageAttachments: false };
+    if (command === "git_status") return { branch: "main" };
+    if (command === "get_model_catalog" || command === "list_slash_commands") return [];
+    return null;
+  });
+  await act(async () => root.render(<ThreadView threadId={null} projectId={1} projectPath="/test" draft="/permissions full"
+    onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
+    onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
+  await act(async () => container.querySelector("form")!.requestSubmit());
+  expect(container.querySelector('[aria-label^="Permission mode:"]')?.getAttribute("aria-label")).toContain("Full access");
+  expect(container.textContent).not.toContain("not offered");
+});
+
+
 it.each(["claude", "codex", "agy"])("intercepts commands in a %s Thread without sending a Turn", async (provider) => {
   const calls: { command: string; args: unknown }[] = [];
   const openDiff = vi.fn();
@@ -58,15 +81,18 @@ it.each(["claude", "codex", "agy"])("intercepts commands in a %s Thread without 
   await act(async () => root.render(render("/diff")));
   await act(async () => container.querySelector("form")!.requestSubmit());
   expect(openDiff).toHaveBeenCalledOnce();
+
   await act(async () => root.render(render("/reload-cache")));
   await act(async () => container.querySelector("form")!.requestSubmit());
   expect(calls.some((c) => c.command === "list_slash_commands" && (c.args as { refresh: boolean; threadId: number }).refresh && (c.args as { threadId: number }).threadId === 7)).toBe(true);
+
 
   await act(async () => root.render(render("/permissions full")));
   await act(async () => container.querySelector("form")!.requestSubmit());
   expect(calls.some((c) => c.command === "set_thread_permission_mode" && (c.args as { permissionMode: string }).permissionMode === "full-access")).toBe(true);
   expect(calls.some((c) => c.command === "send_prompt")).toBe(false);
 });
+
 
 it("reports a failed cache reload without sending the command to the provider", async () => {
   const calls: string[] = [];

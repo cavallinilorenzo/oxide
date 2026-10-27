@@ -395,6 +395,8 @@ pub enum ProviderEvent {
     UsageLimits {
         windows: Vec<UsageWindow>,
     },
+    /// The Provider's Slash command catalog should be re-read.
+    SlashCommandsChanged,
     Unknown {
         raw: String,
     },

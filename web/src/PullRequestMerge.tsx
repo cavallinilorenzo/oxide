@@ -68,11 +68,15 @@ interface MergeFooterProps {
   deleteBranch: boolean;
   busy: boolean;
   canMerge: boolean;
+  /** Offer to merge by itself once the checks pass: the merge is blocked only by a wait. */
+  canAutoMerge: boolean;
+  autoMerge: boolean;
   tone: Tone;
   status: string;
   onMethod: (method: MergeMethod) => void;
   onDeleteBranch: (on: boolean) => void;
   onMerge: () => void;
+  onAutoMerge: () => void;
   onReady: () => void;
 }
 
@@ -126,6 +130,11 @@ export function MergeFooter(p: MergeFooterProps) {
         >
           <GitMergeIcon size={14} /> {mergeLabel(p.method)}
         </button>
+        {p.canAutoMerge && (
+          <button disabled={p.busy || p.autoMerge} onClick={p.onAutoMerge} title="Merge by itself once the required checks pass">
+            {p.autoMerge ? "Auto-merge on" : "Merge when ready"}
+          </button>
+        )}
         <button
           ref={trigger}
           className="icon-btn"
@@ -138,7 +147,8 @@ export function MergeFooter(p: MergeFooterProps) {
           <GearIcon size={16} />
         </button>
       </div>
-      {p.deleteBranch && (
+      {p.autoMerge && <p className="pr-merge-note">GitHub will merge it once the checks pass.</p>}
+      {p.deleteBranch && !p.autoMerge && (
         <p className="pr-merge-note">
           <code>{p.head}</code> will be deleted after merging.
         </p>

@@ -1521,22 +1521,24 @@ impl Core {
     }
 
     /// Merges a pull request with one of the methods its repository allows,
-    /// optionally deleting the branch.
+    /// optionally deleting the branch. With `auto`, GitHub merges it later,
+    /// once the checks pass.
     pub fn merge_pull_request(
         &self,
         project_id: u32,
         number: u32,
         method: MergeMethod,
         delete_branch: bool,
+        auto: bool,
     ) -> Result<()> {
         let cwd = self.main_checkout(project_id)?;
         self.git.mutate(&cwd, || {
             // Deleting the branch may move the checkout off it, which a
             // working Thread must not see.
-            if delete_branch && let Some(reason) = self.checkout_blocked_reason(project_id)? {
+            if delete_branch && !auto && let Some(reason) = self.checkout_blocked_reason(project_id)? {
                 return Err(Error::Git(reason));
             }
-            github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch)
+            github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch, auto)
         })
     }
 

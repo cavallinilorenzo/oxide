@@ -117,12 +117,30 @@ it("offers no merge while GitHub's branch policy blocks it, e.g. required checks
   expect(button(/Squash and merge/).disabled).toBe(true);
 });
 
+it("turns on auto-merge while the checks run, and only then offers it", async () => {
+  const merge = vi.spyOn(commands, "mergePullRequest").mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({
+    status: "ok",
+    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null }] }),
+  });
+  await render();
+  await click(button(/Merge when ready/));
+  expect(merge).toHaveBeenCalledWith(1, 174, "squash", false, true);
+  expect(button(/Auto-merge on/).disabled).toBe(true);
+  expect(onChanged).not.toHaveBeenCalled();
+});
+
+it("does not offer auto-merge when nothing is waiting", async () => {
+  await render();
+  expect([...host.querySelectorAll("button")].some((b) => /Merge when ready/.test(b.textContent ?? ""))).toBe(false);
+});
+
 it("preselects the merge method GitHub's own merge box would, not the first allowed", async () => {
   const merge = vi.spyOn(commands, "mergePullRequest").mockResolvedValue({ status: "ok", data: null });
   await render();
   expect(button(/and merge|merge commit/).textContent).toContain("Squash and merge");
   await click(button(/Squash and merge/));
-  expect(merge).toHaveBeenCalledWith(1, 174, "squash", false);
+  expect(merge).toHaveBeenCalledWith(1, 174, "squash", false, false);
   expect(onChanged).toHaveBeenCalledTimes(1);
 });
 
@@ -136,7 +154,7 @@ it("keeps 'delete branch' in the merge options and sends the choice with the mer
   await click(toggle);
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   await click(button(/Squash and merge/));
-  expect(merge).toHaveBeenCalledWith(1, 174, "squash", true);
+  expect(merge).toHaveBeenCalledWith(1, 174, "squash", true, false);
 });
 
 it("takes a draft out of draft with one button", async () => {

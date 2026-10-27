@@ -1088,14 +1088,17 @@ fn merge_settings(gh: &Gh, cwd: &Path) -> Result<(Vec<MergeMethod>, bool)> {
     Ok((methods, allowed("deleteBranchOnMerge")))
 }
 
-/// Merges with a method the repository allows. The caller holds the
-/// checkout's Git lock: deleting the branch may move the checkout off it.
+/// Merges with a method the repository allows, or with `auto` turns on
+/// auto-merge: GitHub merges once the required checks pass, and deletes the
+/// branch itself if the repository is set to. The caller holds the checkout's
+/// Git lock: deleting the branch may move the checkout off it.
 pub fn merge_pull_request(
     gh: &Gh,
     cwd: &Path,
     number: u32,
     method: MergeMethod,
     delete_branch: bool,
+    auto: bool,
 ) -> Result<()> {
     gh.require_ready(cwd)?;
     if !merge_settings(gh, cwd)?.0.contains(&method) {
@@ -1106,7 +1109,9 @@ pub fn merge_pull_request(
     }
     let n = number.to_string();
     let mut args = vec!["pr", "merge", &n, method.flag()];
-    if delete_branch {
+    if auto {
+        args.push("--auto");
+    } else if delete_branch {
         args.push("--delete-branch");
     }
     gh.run(cwd, &args)?;

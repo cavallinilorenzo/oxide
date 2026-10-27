@@ -10,6 +10,8 @@ Oxide is a desktop app for agentic engineering. You open a Project and drive cod
 
 ## Supported Providers
 
+TEST
+
 Oxide doesn't ship an agent of its own. It drives the agent CLIs you already use, called Providers:
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`)

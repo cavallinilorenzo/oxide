@@ -160,7 +160,7 @@ impl Core {
         let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
         let usage = Arc::new(usage::UsageHub::new(home.join(DB_FILE)));
         Ok(Self {
-            home,
+            home: home.clone(),
             user_home: std::env::var_os("HOME")
                 .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(PathBuf::from)
@@ -182,7 +182,12 @@ impl Core {
             board,
             usage,
             model_catalogs: Mutex::new(HashMap::new()),
-            slash_catalogs: Mutex::new(HashMap::new()),
+            slash_catalogs: Mutex::new(
+                fs::read(home.join("cache/slash-commands/catalogs.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default(),
+            ),
         })
     }
 
@@ -1033,31 +1038,56 @@ impl Core {
         }
     }
 
-    /// The Slash command catalog the composer offers for `provider` in `project_id`: Oxide's own
-    /// commands merged over what the Provider reports. Cached per Provider, customizations and
-    /// Project; a Provider that could not be asked leaves only Oxide's commands, uncached.
+    /// The catalog for a Project before a Thread exists.
     pub fn list_slash_commands(
         &self,
         provider: &str,
         project_id: u32,
         thread_id: Option<u32>,
     ) -> Result<Vec<oxide_provider::SlashCommandInfo>> {
-        let customizations = self.settings().settings.claude_customizations;
-        let key = format!("{provider}|{customizations:?}|{project_id}|{thread_id:?}");
-        if provider != "codex"
-            && let Some(cached) = self.slash_catalogs.lock().unwrap().get(&key)
-        {
-            return Ok(cached.clone());
-        }
-        let working_dir = if thread_id.is_some() {
-            PathBuf::from(self.checkout_path(project_id, thread_id)?)
+        self.thread_slash_commands(provider, project_id, thread_id, true)
+    }
+
+    /// Ask the Provider in the same directory used for the Thread's Turns.
+    pub fn thread_slash_commands(
+        &self,
+        provider: &str,
+        project_id: u32,
+        thread_id: Option<u32>,
+        refresh: bool,
+    ) -> Result<Vec<oxide_provider::SlashCommandInfo>> {
+        let working_dir = if let Some(thread_id) = thread_id {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let path: String = db.query_row(
+                "SELECT COALESCE(t.worktree_path, p.path) FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1 AND p.id = ?2",
+                rusqlite::params![thread_id, project_id], |row| row.get(0),
+            )?;
+            PathBuf::from(path)
         } else {
             self.list_projects()?
                 .into_iter()
                 .find(|p| p.id == project_id)
                 .map(|p| PathBuf::from(p.path))
-                .unwrap_or_else(|| self.user_home.clone())
+                .ok_or_else(|| Error::Provider("Project not found".into()))?
         };
+        let customizations = self.settings().settings.claude_customizations;
+
+        let key = serde_json::to_string(&(provider, format!("{customizations:?}"), &working_dir))
+            .map_err(|e| Error::Provider(e.to_string()))?;
+        let cached = self.slash_catalogs.lock().unwrap().get(&key).cloned();
+        if !refresh {
+            return Ok(cached
+                .map(|catalog| {
+                    slash_catalog::merge(
+                        catalog
+                            .into_iter()
+                            .filter(|c| c.route != oxide_provider::SlashRoute::Oxide)
+                            .collect(),
+                    )
+                })
+                .unwrap_or_else(|| slash_catalog::merge(Vec::new())));
+        }
+
         let reported = match provider {
             "claude" => {
                 let mut p = oxide_provider::claude::ClaudeCodeProvider::new();
@@ -1074,14 +1104,29 @@ impl Core {
             ),
             _ => Ok(Vec::new()),
         };
-        let catalog = slash_catalog::merge(reported.as_ref().cloned().unwrap_or_default());
-        if provider != "codex" && reported.is_ok() {
-            self.slash_catalogs
-                .lock()
-                .unwrap()
-                .insert(key, catalog.clone());
+
+        match reported {
+            Ok(commands) => {
+                let catalog = slash_catalog::merge(commands);
+                let mut catalogs = self.slash_catalogs.lock().unwrap();
+                let mut updated = catalogs.clone();
+                updated.insert(key, catalog.clone());
+                let folder = self.home.join("cache/slash-commands");
+                fs::create_dir_all(&folder).map_err(|source| Error::Io {
+                    path: folder.clone(),
+                    source,
+                })?;
+                let path = folder.join("catalogs.json");
+                let bytes =
+                    serde_json::to_vec(&updated).map_err(|e| Error::Provider(e.to_string()))?;
+                fs::write(&path, bytes).map_err(|source| Error::Io { path, source })?;
+                *catalogs = updated;
+                Ok(catalog)
+            }
+            Err(error) => Err(Error::Provider(format!(
+                "Could not refresh Slash commands: {error}"
+            ))),
         }
-        Ok(catalog)
     }
 
     /// Capabilities of a Provider, before any Thread of it exists.

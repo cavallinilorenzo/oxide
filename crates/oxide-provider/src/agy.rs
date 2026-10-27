@@ -8,7 +8,8 @@
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
     ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus,
+    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
+    TurnStatus,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
@@ -25,6 +26,66 @@ pub const DEFAULT_AGY_COMMAND: &str = "agy";
 /// Range: >= 1.4.0, < 1.5.0
 pub const PINNED_VERSION_MIN: (u64, u64, u64) = (1, 4, 0);
 pub const PINNED_VERSION_MAX: (u64, u64, u64) = (1, 5, 0);
+
+// CLI-owned names take precedence over skills with the same name and can end a stream.
+const AGY_CLI_COMMANDS: &[&str] = &[
+    "add-dir",
+    "agents",
+    "artifact",
+    "boost",
+    "branch",
+    "browser",
+    "btw",
+    "changelog",
+    "clear",
+    "codesearch",
+    "config",
+    "context",
+    "conversation",
+    "copy",
+    "credits",
+    "cs",
+    "diff",
+    "effort",
+    "exit",
+    "feedback",
+    "fork",
+    "goal",
+    "grill-me",
+    "help",
+    "hooks",
+    "keybindings",
+    "learn",
+    "logout",
+    "mcp",
+    "model",
+    "new",
+    "open",
+    "permissions",
+    "plan",
+    "plugin",
+    "plugins",
+    "quit",
+    "quota",
+    "record",
+    "remote-control",
+    "rename",
+    "resume",
+    "rewind",
+    "schedule",
+    "search",
+    "settings",
+    "skills",
+    "statusline",
+    "switch",
+    "tasks",
+    "teamwork",
+    "teamwork-preview",
+    "title",
+    "undo",
+    "usage",
+    "voice",
+];
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const STDERR_TAIL_LINES: usize = 20;
@@ -148,11 +209,22 @@ impl AgyProvider {
     }
 
     fn run_probe(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        self.run_probe_in(args, None)
+    }
+
+    fn run_probe_in(
+        &self,
+        args: &[&str],
+        working_dir: Option<&std::path::Path>,
+    ) -> std::io::Result<std::process::Output> {
         let mut cmd = crate::command::provider_command(&self.command, &self.extra_env);
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(dir) = working_dir {
+            cmd.current_dir(dir);
+        }
         process::spawn_in_own_group(&mut cmd);
         let mut child = cmd.spawn()?;
         let pgid = child.id() as i32;
@@ -174,6 +246,35 @@ impl AgyProvider {
                 ))
             }
         }
+    }
+
+    fn command_probe(
+        &self,
+        name: &str,
+        working_dir: &std::path::Path,
+    ) -> Result<Value, ProviderError> {
+        let prompt = format!("/{name}");
+        let output = self
+            .run_probe_in(
+                &["-p", &prompt, "--output-format", "json"],
+                Some(working_dir),
+            )
+            .map_err(|e| ProviderError::CommandFailed(format!("`agy {prompt}` failed: {e}")))?;
+        if !output.status.success() {
+            return Err(ProviderError::CommandFailed(format!(
+                "`agy {prompt}` exited with {}",
+                output.status
+            )));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+            ProviderError::CommandFailed(format!("invalid `agy {prompt}` response: {e}"))
+        })?;
+        if value["status"] != "SUCCESS" || value["command"]["name"] != name {
+            return Err(ProviderError::CommandFailed(format!(
+                "unexpected `agy {prompt}` response"
+            )));
+        }
+        Ok(value)
     }
 
     fn open_channel(&self) -> Receiver<ProviderEvent> {
@@ -476,6 +577,53 @@ impl Provider for AgyProvider {
                 },
             ]),
         }
+    }
+
+    fn slash_commands(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Result<Vec<SlashCommandInfo>, ProviderError> {
+        let help = self.command_probe("help", working_dir)?;
+        let cli_commands = help["command"]["data"]["commands"]
+            .as_array()
+            .ok_or_else(|| {
+                ProviderError::CommandFailed("missing commands in `agy /help` response".into())
+            })?;
+        let mut reserved: std::collections::HashSet<&str> =
+            AGY_CLI_COMMANDS.iter().copied().collect();
+        for command in cli_commands {
+            if let Some(name) = command["name"].as_str() {
+                reserved.insert(name);
+            }
+            if let Some(aliases) = command["aliases"].as_array() {
+                reserved.extend(aliases.iter().filter_map(Value::as_str));
+            }
+        }
+        let value = self.command_probe("skills", working_dir)?;
+        let skills = value["command"]["data"]["skills"]
+            .as_array()
+            .ok_or_else(|| {
+                ProviderError::CommandFailed("missing skills in `agy /skills` response".into())
+            })?;
+        let mut commands: Vec<_> = skills
+            .iter()
+            .filter_map(|skill| {
+                let name = skill["name"].as_str()?;
+                if name.is_empty() || reserved.contains(name) {
+                    return None;
+                }
+                Some(SlashCommandInfo {
+                    name: name.to_owned(),
+                    description: skill["description"].as_str().map(str::to_owned),
+                    argument_hint: None,
+                    aliases: vec![],
+                    route: SlashRoute::Passthrough,
+                })
+            })
+            .collect();
+        commands.sort_by(|a, b| a.name.cmp(&b.name));
+        commands.dedup_by(|a, b| a.name == b.name);
+        Ok(commands)
     }
 
     fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), ProviderError> {

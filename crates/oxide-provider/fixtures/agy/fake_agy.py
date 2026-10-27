@@ -38,6 +38,26 @@ if "--version" in args:
     print(os.environ.get("OXIDE_FAKE_VERSION", "1.4.5"))
     sys.exit(0)
 
+if option("-p") == "/help" and option("--output-format") == "json":
+    print(json.dumps({"status": "SUCCESS", "command": {"name": "help", "data": {
+        "commands": [{"name": "future-cli", "aliases": ["future-alias"]}]
+    }}}))
+    sys.exit(0)
+
+if option("-p") == "/skills" and option("--output-format") == "json":
+    log_wire({"type": "skills_probe", "cwd": os.getcwd()})
+    if os.environ.get("OXIDE_FAKE_SKILLS_FAIL"):
+        sys.exit(1)
+    print(json.dumps({"status": "SUCCESS", "command": {"name": "skills", "data": {"skills": [
+        {"name": "project-skill", "description": "A project skill"},
+        {"name": "usage", "description": "Collides with a CLI command"},
+        {"name": "skills", "description": "Collides with a CLI command"},
+        {"name": "changelog", "description": "Another CLI command"},
+        {"name": "future-cli", "description": "A discovered CLI command"},
+        {"name": "future-alias", "description": "A discovered CLI alias"}
+    ]}}}))
+    sys.exit(0)
+
 if args[:1] == ["models"]:
     if os.environ.get("OXIDE_FAKE_LOGGED_IN", "1") != "1":
         sys.stderr.write("authentication required\n")
@@ -79,6 +99,8 @@ if "interrupt_test" in prompt:
 elif "crash_test" in prompt:
     sys.stderr.write("panic: something broke\n")
     sys.exit(7)
+elif prompt == "/oxide-probe":
+    replay("turn_skill.jsonl")
 elif "tools_test" in prompt:
     replay("turn_tools.jsonl")
 elif "error_test" in prompt:

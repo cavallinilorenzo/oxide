@@ -5,3 +5,6 @@ Replayed by `fake_agy.py`. `init.json` and `turn_error.jsonl` were recorded from
 error turn). `turn_response.jsonl` and `turn_tools.jsonl` follow the documented stream schema
 (https://antigravity.google/docs/cli/headless) because no successful turn could be recorded;
 re-record it once quota allows.
+
+`turn_skill.jsonl` reproduces the event shapes and response of a successful workspace skill
+invocation observed with `agy` 1.4.7; IDs and token counts are fixture values.

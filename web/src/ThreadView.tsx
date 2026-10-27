@@ -189,30 +189,48 @@ export function ThreadView({
   }, [draft, threadId]);
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const slashGeneration = useRef({ active: true });
   const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
   const slashProvider = transcript.thread?.provider || draftProvider;
 
-  // Re-read when the menu opens, so changes to the customizations show up without a restart.
+  // Show the cached catalog first, then refresh for the active Thread's directory.
   useEffect(() => {
-    if (!slashOpen) return;
+    if (threadId && transcript.thread?.id !== threadId) return;
     let active = true;
-    void commands.listSlashCommands(slashProvider, projectId, threadId).then((res) => {
-      if (active && res.status === "ok") setSlashCommands(res.data);
-    });
+    const generation = { active: true };
+    slashGeneration.current = generation;
+    setSlashCommands([]);
+    void (async () => {
+      const cached = await commands.listSlashCommands(slashProvider, projectId, threadId, false);
+      if (!active) return;
+      if (cached.status === "ok") setSlashCommands(cached.data);
+      const refreshed = await commands.listSlashCommands(slashProvider, projectId, threadId, true);
+      if (!active) return;
+      if (refreshed.status === "ok") setSlashCommands(refreshed.data);
+      else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
+    })();
     return () => {
       active = false;
+      generation.active = false;
     };
-  }, [slashOpen, slashProvider, projectId, threadId, slashRevision]);
+  }, [threadId, transcript.thread?.id, slashProvider, projectId]);
 
-  // A draft or idle Thread may not have registered a Provider event stream yet.
+  // Codex can change its available skills while the menu is open.
   useEffect(() => {
     if (!slashOpen || slashProvider !== "codex") return;
-    const timer = window.setInterval(() => setSlashRevision((n) => n + 1), 5000);
-    return () => window.clearInterval(timer);
-  }, [slashOpen, slashProvider]);
+    let active = true;
+    const update = () => {
+      void commands.listSlashCommands(slashProvider, projectId, threadId, true).then((res) => {
+        if (active && res.status === "ok") setSlashCommands(res.data);
+      });
+    };
+    update();
+    const timer = window.setInterval(update, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [slashOpen, slashProvider, projectId, threadId, slashRevision]);
 
   const handleInputChange = (val: string) => {
     setSlashIndex(0);
@@ -659,6 +677,15 @@ export function ThreadView({
     }
 
     const slash = parseSlashCommand(input);
+    if (slash.type === "reload-cache") {
+      handleInputChange("");
+      const generation = slashGeneration.current;
+      const result = await commands.listSlashCommands(slashProvider, projectId, threadId, true);
+      if (!generation.active) return;
+      if (result.status === "ok") setSlashCommands(result.data);
+      else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
+      return;
+    }
     if (slash.type === "rename") {
       if (!threadId) setCommandError("Create a Thread before renaming it.");
       else if (slash.arg) void saveRename(slash.arg);

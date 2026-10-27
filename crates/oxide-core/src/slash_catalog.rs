@@ -24,6 +24,12 @@ fn oxide_commands() -> Vec<SlashCommandInfo> {
             Some("<ask|auto-edit|full>"),
             &[],
         ),
+        own(
+            "reload-cache",
+            "Refresh the Slash command catalog",
+            None,
+            &[],
+        ),
         own("rename", "Rename the Thread", Some("<name>"), &[]),
     ]
 }
@@ -86,6 +92,7 @@ mod tests {
                 ("effort", SlashRoute::Oxide, vec![]),
                 ("model", SlashRoute::Oxide, vec![]),
                 ("permissions", SlashRoute::Oxide, vec![]),
+                ("reload-cache", SlashRoute::Oxide, vec![]),
                 ("rename", SlashRoute::Oxide, vec![]),
             ]
         );
@@ -96,7 +103,15 @@ mod tests {
         let names: Vec<_> = merge(Vec::new()).into_iter().map(|c| c.name).collect();
         assert_eq!(
             names,
-            ["clear", "diff", "effort", "model", "permissions", "rename"]
+            [
+                "clear",
+                "diff",
+                "effort",
+                "model",
+                "permissions",
+                "reload-cache",
+                "rename"
+            ]
         );
     }
 }

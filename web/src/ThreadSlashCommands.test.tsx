@@ -32,6 +32,7 @@ it("intercepts an unavailable permission mode before a Thread exists", async () 
   expect(container.querySelector('[aria-label^="Permission mode:"]')?.getAttribute("aria-label")).toContain("Auto-edit");
 });
 
+
 it("loads capabilities before applying a permission command in a new Thread", async () => {
   let requests = 0;
   mockIPC((command) => {
@@ -52,6 +53,7 @@ it("loads capabilities before applying a permission command in a new Thread", as
   expect(container.querySelector('[aria-label^="Permission mode:"]')?.getAttribute("aria-label")).toContain("Full access");
   expect(container.textContent).not.toContain("not offered");
 });
+
 
 it.each(["claude", "codex", "agy"])("intercepts commands in a %s Thread without sending a Turn", async (provider) => {
   const calls: { command: string; args: unknown }[] = [];
@@ -79,8 +81,36 @@ it.each(["claude", "codex", "agy"])("intercepts commands in a %s Thread without 
   await act(async () => root.render(render("/diff")));
   await act(async () => container.querySelector("form")!.requestSubmit());
   expect(openDiff).toHaveBeenCalledOnce();
+
+  await act(async () => root.render(render("/reload-cache")));
+  await act(async () => container.querySelector("form")!.requestSubmit());
+  expect(calls.some((c) => c.command === "list_slash_commands" && (c.args as { refresh: boolean; threadId: number }).refresh && (c.args as { threadId: number }).threadId === 7)).toBe(true);
+
+
   await act(async () => root.render(render("/permissions full")));
   await act(async () => container.querySelector("form")!.requestSubmit());
   expect(calls.some((c) => c.command === "set_thread_permission_mode" && (c.args as { permissionMode: string }).permissionMode === "full-access")).toBe(true);
   expect(calls.some((c) => c.command === "send_prompt")).toBe(false);
+});
+
+
+it("reports a failed cache reload without sending the command to the provider", async () => {
+  const calls: string[] = [];
+  mockIPC((command) => {
+    calls.push(command);
+    if (command === "get_settings") return { settings: { defaultProvider: "agy", providers: {} }, errors: [] };
+    if (command === "get_provider_capabilities") return { supportedPermissionModes: ["auto-edit"] };
+    if (command === "provider_capabilities") return { imageAttachments: false };
+    if (command === "git_status") return { branch: "main" };
+    if (command === "get_model_catalog") return [];
+    if (command === "list_slash_commands") throw "provider unavailable";
+    return null;
+  });
+  await act(async () => root.render(<ThreadView threadId={null} projectId={1} projectPath="/test" draft="/reload-cache"
+    onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
+    onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
+  await act(async () => container.querySelector("form")!.requestSubmit());
+  expect(container.textContent).toContain("Could not refresh the Slash command catalog");
+  expect(calls).not.toContain("send_prompt");
+  expect(calls).not.toContain("create_thread");
 });

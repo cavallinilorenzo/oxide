@@ -59,6 +59,7 @@ const STICK_TO_BOTTOM = 48;
 const PAGE_LOAD_DELAY = 80;
 
 interface ThreadViewProps {
+  onOpenDefaultDiff?: () => void;
   onInitialLoad?: () => void;
   threadId: number | null;
   projectId: number;
@@ -134,6 +135,7 @@ export function getOfferedPermissionModes(
 }
 
 export function ThreadView({
+  onOpenDefaultDiff,
   onInitialLoad,
   threadId,
   projectId,
@@ -160,13 +162,16 @@ export function ThreadView({
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const permissionControlRef = useRef<HTMLButtonElement>(null);
+  const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelPickerMode, setModelPickerMode] = useState<"model" | "effort">("model");
-  const [providerCaps, setProviderCaps] = useState<ProviderCapabilities | null>(null);
+  const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -453,7 +458,11 @@ export function ThreadView({
 
   const handlePermissionChange = async (newMode: PermissionMode) => {
     if (threadId) {
-      await commands.setThreadPermissionMode(threadId, newMode);
+      const result = await commands.setThreadPermissionMode(threadId, newMode);
+      if (result.status !== "ok") {
+        setCommandError("Could not change the Permission mode.");
+        return;
+      }
       setTranscript((prev) =>
         prev.thread
           ? { ...prev, thread: { ...prev.thread, permissionMode: newMode } }
@@ -504,19 +513,31 @@ export function ThreadView({
     setIsEditingTitle(true);
   };
 
-  const handleSaveRename = async () => {
+  const saveRename = async (title: string) => {
     setIsEditingTitle(false);
-    const trimmed = editTitle.trim();
+    const trimmed = title.trim();
     if (!trimmed || !threadId) return;
-    await commands.renameThread(threadId, trimmed);
+    const result = await commands.renameThread(threadId, trimmed);
+    if (result.status !== "ok") {
+      setCommandError("Could not rename the Thread.");
+      return;
+    }
     setTranscript((prev) =>
       prev.thread ? { ...prev, thread: { ...prev.thread, title: trimmed } } : prev
     );
     onThreadTitleChange?.(threadId, trimmed);
   };
+  const handleSaveRename = () => saveRename(editTitle);
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
+  const providerCaps = providerCapsEntry?.provider === currentProvider ? providerCapsEntry.caps : null;
+  useEffect(() => {
+    if (openPermissionsWhenReady && providerCaps) {
+      permissionControlRef.current?.click();
+      setOpenPermissionsWhenReady(false);
+    }
+  }, [openPermissionsWhenReady, providerCaps]);
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
     let active = true;
@@ -539,7 +560,7 @@ export function ThreadView({
     let active = true;
     void commands.getProviderCapabilities(currentProvider).then((res) => {
       if (active && res.status === "ok") {
-        setProviderCaps(res.data);
+        setProviderCaps({ provider: currentProvider, caps: res.data });
       }
     });
     return () => {
@@ -612,7 +633,7 @@ export function ThreadView({
   const providerHint = currentProvider === "claude" ? getClaudeCodeHint(providerDetection) : null;
 
   const offeredModes = getOfferedPermissionModes(
-    transcript.supportedPermissionModes || ["ask", "auto-edit", "full-access"],
+    providerCaps?.supportedPermissionModes ?? (threadId && transcript.thread ? transcript.supportedPermissionModes : []),
     currentProvider
   );
 
@@ -620,6 +641,7 @@ export function ThreadView({
     e.preventDefault();
     const prompt = input.trim();
     if (!prompt || sending || turnIsRunning(transcript.status)) return;
+    setCommandError(null);
 
     if (isClearCommand(input)) {
       handleInputChange("");
@@ -628,6 +650,43 @@ export function ThreadView({
     }
 
     const slash = parseSlashCommand(input);
+    if (slash.type === "rename") {
+      if (!threadId) setCommandError("Create a Thread before renaming it.");
+      else if (slash.arg) void saveRename(slash.arg);
+      else handleStartRename();
+      handleInputChange("");
+      return;
+    }
+    if (slash.type === "diff") {
+      onOpenDefaultDiff?.();
+      handleInputChange("");
+      return;
+    }
+    if (slash.type === "permissions") {
+      if (!slash.arg) {
+        if (providerCaps) permissionControlRef.current?.click();
+        else {
+          const result = await commands.getProviderCapabilities(currentProvider);
+          if (result.status === "ok") {
+            setProviderCaps({ provider: currentProvider, caps: result.data });
+            setOpenPermissionsWhenReady(true);
+          } else setCommandError("Could not load permission modes for this Provider.");
+        }
+      } else {
+        const modes: Record<string, PermissionMode> = { ask: "ask", "auto-edit": "auto-edit", full: "full-access" };
+        const mode = modes[slash.arg];
+        if (!mode) setCommandError("Choose ask, auto-edit, or full.");
+        else {
+          const result = providerCaps ? null : await commands.getProviderCapabilities(currentProvider);
+          const supported = providerCaps?.supportedPermissionModes ?? (result?.status === "ok" ? result.data.supportedPermissionModes : null);
+          if (!supported) setCommandError("Could not load permission modes for this Provider.");
+          else if (!supported.includes(mode)) setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
+          else void handlePermissionChange(mode);
+        }
+      }
+      handleInputChange("");
+      return;
+    }
     if (slash.type === "model") {
       if (slash.arg) {
         void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
@@ -820,6 +879,7 @@ export function ThreadView({
       )}
 
       <div className="composer-wrap">
+      {commandError && <div className="provider-hint missing" role="alert">{commandError}</div>}
       {thread?.sessionLost ? (
         <div className="composer composer-lost">
           <button
@@ -953,6 +1013,7 @@ export function ThreadView({
               <ChevronDownIcon size={12} className="cv" />
             </button>
             <Dropdown
+              triggerRef={permissionControlRef}
               label="Permission mode"
               triggerClassName="cbtn compact"
               minMenuWidth={200}

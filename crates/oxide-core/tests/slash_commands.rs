@@ -11,6 +11,10 @@ fn a_provider_with_no_commands_still_lists_oxides_once_each() {
     for provider in ["fake", "codex"] {
         let list = core.list_slash_commands(provider, project_id).unwrap();
         let names: Vec<_> = list.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["clear", "effort", "model"], "{provider}");
+        assert_eq!(
+            names,
+            ["clear", "diff", "effort", "model", "permissions", "rename"],
+            "{provider}"
+        );
     }
 }

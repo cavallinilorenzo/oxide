@@ -44,6 +44,11 @@ const sampleModels: ModelInfo[] = [
 ];
 
 describe("parseSlashCommand", () => {
+  it("recognizes Oxide's remaining commands and preserves multiword names", () => {
+    expect(parseSlashCommand("/rename  A new title ")).toEqual({ type: "rename", command: "/rename", arg: "A new title" });
+    expect(parseSlashCommand("/diff")).toEqual({ type: "diff", command: "/diff", arg: undefined });
+    expect(parseSlashCommand("/permissions ask")).toEqual({ type: "permissions", command: "/permissions", arg: "ask" });
+  });
   it("detects /model command with and without argument", () => {
     expect(parseSlashCommand("/model")).toEqual({
       type: "model",

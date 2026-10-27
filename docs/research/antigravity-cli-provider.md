@@ -58,6 +58,13 @@ have not been independently verified.
 command locations and whether they expand independently of skills remain
 unverified. [Legacy workflows](https://www.antigravity.google/docs/ide/workflows/)
 are documented as discontinued on October 19, 2026, and should not be assumed
-to be the CLI's current custom-command source. A complete provider-reported
-catalog has not been found. ADR-0006 rejects filesystem discovery, so exposing a
-partial scanned catalog would require a deliberate change to that decision.
+to be the CLI's current custom-command source. On 1.4.8, the documented CLI command `agy -p /skills --output-format json`
+returned `status: SUCCESS` and a structured `command.data.skills` array with
+name, description, path and metadata. With a temporary workspace skill, the
+array included that skill when the command ran in the workspace. This is a
+provider-reported skill inventory, not a disk scan by Oxide. `/skills` itself is
+a CLI command and must run as a separate probe, never inside the Turn stream.
+The [CLI reference](https://www.antigravity.google/docs/cli/reference/) lists
+CLI-owned names and aliases; names colliding with those are excluded from the
+passthrough catalog. This list must be reviewed when supporting newer versions.
+The probe does not establish whether separate legacy custom commands are included.

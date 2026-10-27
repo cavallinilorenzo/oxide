@@ -72,6 +72,37 @@ fn provider_with_log() -> (AgyProvider, tempfile::NamedTempFile, support::FakeCl
 }
 
 #[test]
+fn skill_catalog_comes_from_agy_in_the_project_directory() {
+    let (provider, log, _fake) = provider_with_log();
+    let dir = tempfile::tempdir().unwrap();
+    let commands = provider.slash_commands(dir.path()).unwrap();
+    assert_eq!(
+        commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["project-skill"]
+    );
+    assert_eq!(commands[0].description.as_deref(), Some("A project skill"));
+    assert_eq!(commands[0].route, oxide_provider::SlashRoute::Passthrough);
+    let entries = std::fs::read_to_string(log.path()).unwrap();
+    let probe = entries
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|entry| entry["type"] == "skills_probe")
+        .unwrap();
+    assert_eq!(
+        std::path::Path::new(probe["cwd"].as_str().unwrap()),
+        dir.path()
+    );
+}
+
+#[test]
+fn skill_catalog_reports_probe_failure_so_it_can_be_retried() {
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
+    provider.set_env("OXIDE_FAKE_SKILLS_FAIL", "1");
+    assert!(provider.slash_commands(std::path::Path::new(".")).is_err());
+}
+
+#[test]
 fn agy_provider_passes_shared_contract_suite() {
     let fake = fake_agy();
     verify_provider_contract(|| AgyProvider::with_command(fake.command()));

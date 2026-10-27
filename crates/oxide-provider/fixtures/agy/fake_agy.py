@@ -38,6 +38,18 @@ if "--version" in args:
     print(os.environ.get("OXIDE_FAKE_VERSION", "1.4.5"))
     sys.exit(0)
 
+if option("-p") == "/skills" and option("--output-format") == "json":
+    log_wire({"type": "skills_probe", "cwd": os.getcwd()})
+    if os.environ.get("OXIDE_FAKE_SKILLS_FAIL"):
+        sys.exit(1)
+    print(json.dumps({"status": "SUCCESS", "command": {"name": "skills", "data": {"skills": [
+        {"name": "project-skill", "description": "A project skill"},
+        {"name": "usage", "description": "Collides with a CLI command"},
+        {"name": "skills", "description": "Collides with a CLI command"},
+        {"name": "changelog", "description": "Another CLI command"}
+    ]}}}))
+    sys.exit(0)
+
 if args[:1] == ["models"]:
     if os.environ.get("OXIDE_FAKE_LOGGED_IN", "1") != "1":
         sys.stderr.write("authentication required\n")

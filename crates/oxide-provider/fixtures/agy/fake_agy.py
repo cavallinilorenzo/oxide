@@ -38,6 +38,12 @@ if "--version" in args:
     print(os.environ.get("OXIDE_FAKE_VERSION", "1.4.5"))
     sys.exit(0)
 
+if option("-p") == "/help" and option("--output-format") == "json":
+    print(json.dumps({"status": "SUCCESS", "command": {"name": "help", "data": {
+        "commands": [{"name": "future-cli", "aliases": ["future-alias"]}]
+    }}}))
+    sys.exit(0)
+
 if option("-p") == "/skills" and option("--output-format") == "json":
     log_wire({"type": "skills_probe", "cwd": os.getcwd()})
     if os.environ.get("OXIDE_FAKE_SKILLS_FAIL"):
@@ -46,7 +52,9 @@ if option("-p") == "/skills" and option("--output-format") == "json":
         {"name": "project-skill", "description": "A project skill"},
         {"name": "usage", "description": "Collides with a CLI command"},
         {"name": "skills", "description": "Collides with a CLI command"},
-        {"name": "changelog", "description": "Another CLI command"}
+        {"name": "changelog", "description": "Another CLI command"},
+        {"name": "future-cli", "description": "A discovered CLI command"},
+        {"name": "future-alias", "description": "A discovered CLI alias"}
     ]}}}))
     sys.exit(0)
 

@@ -65,6 +65,7 @@ array included that skill when the command ran in the workspace. This is a
 provider-reported skill inventory, not a disk scan by Oxide. `/skills` itself is
 a CLI command and must run as a separate probe, never inside the Turn stream.
 The [CLI reference](https://www.antigravity.google/docs/cli/reference/) lists
-CLI-owned names and aliases; names colliding with those are excluded from the
-passthrough catalog. This list must be reviewed when supporting newer versions.
+CLI-owned names and aliases. `agy -p /help --output-format json` also returns a
+structured `command.data.commands` list with names and aliases. Both sources
+are used to exclude collisions from the passthrough catalog. This list must be reviewed when supporting newer versions.
 The probe does not establish whether separate legacy custom commands are included.

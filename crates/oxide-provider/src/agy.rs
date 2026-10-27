@@ -248,6 +248,35 @@ impl AgyProvider {
         }
     }
 
+    fn command_probe(
+        &self,
+        name: &str,
+        working_dir: &std::path::Path,
+    ) -> Result<Value, ProviderError> {
+        let prompt = format!("/{name}");
+        let output = self
+            .run_probe_in(
+                &["-p", &prompt, "--output-format", "json"],
+                Some(working_dir),
+            )
+            .map_err(|e| ProviderError::CommandFailed(format!("`agy {prompt}` failed: {e}")))?;
+        if !output.status.success() {
+            return Err(ProviderError::CommandFailed(format!(
+                "`agy {prompt}` exited with {}",
+                output.status
+            )));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+            ProviderError::CommandFailed(format!("invalid `agy {prompt}` response: {e}"))
+        })?;
+        if value["status"] != "SUCCESS" || value["command"]["name"] != name {
+            return Err(ProviderError::CommandFailed(format!(
+                "unexpected `agy {prompt}` response"
+            )));
+        }
+        Ok(value)
+    }
+
     fn open_channel(&self) -> Receiver<ProviderEvent> {
         let (tx, rx) = crossbeam_channel::unbounded();
         *self.event_sender.lock().unwrap() = Some(tx);
@@ -554,26 +583,23 @@ impl Provider for AgyProvider {
         &self,
         working_dir: &std::path::Path,
     ) -> Result<Vec<SlashCommandInfo>, ProviderError> {
-        let output = self
-            .run_probe_in(
-                &["-p", "/skills", "--output-format", "json"],
-                Some(working_dir),
-            )
-            .map_err(|e| ProviderError::CommandFailed(format!("`agy /skills` failed: {e}")))?;
-        if !output.status.success() {
-            return Err(ProviderError::CommandFailed(format!(
-                "`agy /skills` exited with {}",
-                output.status
-            )));
+        let help = self.command_probe("help", working_dir)?;
+        let cli_commands = help["command"]["data"]["commands"]
+            .as_array()
+            .ok_or_else(|| {
+                ProviderError::CommandFailed("missing commands in `agy /help` response".into())
+            })?;
+        let mut reserved: std::collections::HashSet<&str> =
+            AGY_CLI_COMMANDS.iter().copied().collect();
+        for command in cli_commands {
+            if let Some(name) = command["name"].as_str() {
+                reserved.insert(name);
+            }
+            if let Some(aliases) = command["aliases"].as_array() {
+                reserved.extend(aliases.iter().filter_map(Value::as_str));
+            }
         }
-        let value: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
-            ProviderError::CommandFailed(format!("invalid `agy /skills` response: {e}"))
-        })?;
-        if value["status"] != "SUCCESS" || value["command"]["name"] != "skills" {
-            return Err(ProviderError::CommandFailed(
-                "unexpected `agy /skills` response".into(),
-            ));
-        }
+        let value = self.command_probe("skills", working_dir)?;
         let skills = value["command"]["data"]["skills"]
             .as_array()
             .ok_or_else(|| {
@@ -583,7 +609,7 @@ impl Provider for AgyProvider {
             .iter()
             .filter_map(|skill| {
                 let name = skill["name"].as_str()?;
-                if name.is_empty() || AGY_CLI_COMMANDS.contains(&name) {
+                if name.is_empty() || reserved.contains(name) {
                     return None;
                 }
                 Some(SlashCommandInfo {

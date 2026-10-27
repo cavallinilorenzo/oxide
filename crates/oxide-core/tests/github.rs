@@ -44,6 +44,9 @@ fn remove_worktree(root: &Path, worktree: &str) {
             return;
         }
         last_error = String::from_utf8_lossy(&out.stderr).into_owned();
+        if !Path::new(worktree).exists() {
+            return;
+        }
         // Windows may briefly hold files after Git has closed the worktree.
         if !last_error.contains("Permission denied") || attempt == 9 {
             break;

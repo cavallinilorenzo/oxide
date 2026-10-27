@@ -1040,18 +1040,24 @@ impl Core {
         &self,
         provider: &str,
         project_id: u32,
+        thread_id: Option<u32>,
     ) -> Result<Vec<oxide_provider::SlashCommandInfo>> {
         let customizations = self.settings().settings.claude_customizations;
-        let key = format!("{provider}|{customizations:?}|{project_id}");
-        if let Some(cached) = self.slash_catalogs.lock().unwrap().get(&key) {
+        let key = format!("{provider}|{customizations:?}|{project_id}|{thread_id:?}");
+        if provider != "codex"
+            && let Some(cached) = self.slash_catalogs.lock().unwrap().get(&key)
+        {
             return Ok(cached.clone());
         }
-        let working_dir = self
-            .list_projects()?
-            .into_iter()
-            .find(|p| p.id == project_id)
-            .map(|p| PathBuf::from(p.path))
-            .unwrap_or_else(|| self.user_home.clone());
+        let working_dir = if thread_id.is_some() {
+            PathBuf::from(self.checkout_path(project_id, thread_id)?)
+        } else {
+            self.list_projects()?
+                .into_iter()
+                .find(|p| p.id == project_id)
+                .map(|p| PathBuf::from(p.path))
+                .unwrap_or_else(|| self.user_home.clone())
+        };
         let reported = match provider {
             "claude" => {
                 let mut p = oxide_provider::claude::ClaudeCodeProvider::new();
@@ -1069,7 +1075,7 @@ impl Core {
             _ => Ok(Vec::new()),
         };
         let catalog = slash_catalog::merge(reported.as_ref().cloned().unwrap_or_default());
-        if reported.is_ok() {
+        if provider != "codex" && reported.is_ok() {
             self.slash_catalogs
                 .lock()
                 .unwrap()

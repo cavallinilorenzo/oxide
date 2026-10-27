@@ -1,11 +1,15 @@
-#![cfg(unix)]
-
+#[cfg(unix)]
 use oxide_provider::Provider;
+#[cfg(unix)]
 use oxide_provider::codex::CodexProvider;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::path::PathBuf;
 
+#[cfg(unix)]
 fn make_fake_cli(dir: &std::path::Path, version: &str, logged_in: bool) -> PathBuf {
     let script_path = dir.join("fake-codex.sh");
     let auth_exit = if logged_in { 0 } else { 1 };
@@ -33,6 +37,7 @@ exit 0
     script_path
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_detect_missing_cli() {
     let provider = CodexProvider::with_command("nonexistent_codex_binary_xyz_123");
@@ -51,6 +56,7 @@ fn codex_detect_missing_cli() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_detect_installed_and_authenticated_pinned_version() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -65,6 +71,7 @@ fn codex_detect_installed_and_authenticated_pinned_version() {
     assert_eq!(detection.warning, None);
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_detect_installed_outside_pinned_range_gives_warning_not_block() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -87,6 +94,7 @@ fn codex_detect_installed_outside_pinned_range_gives_warning_not_block() {
     assert!(warning.contains("2.5.0"));
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_detect_installed_but_logged_out() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -106,6 +114,7 @@ fn codex_detect_installed_but_logged_out() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn two_threads_share_one_app_server_process_each_with_its_own_cwd() {
     use oxide_provider::codex::CodexAppServer;
@@ -246,6 +255,7 @@ fn two_threads_share_one_app_server_process_each_with_its_own_cwd() {
     p2.shutdown().expect("p2 shutdown should succeed");
 }
 
+#[cfg(unix)]
 #[test]
 fn server_initiated_approval_answered_while_client_request_in_flight_no_deadlock() {
     use oxide_provider::{
@@ -336,6 +346,7 @@ fn server_initiated_approval_answered_while_client_request_in_flight_no_deadlock
     provider.shutdown().expect("shutdown should succeed");
 }
 
+#[cfg(unix)]
 #[test]
 fn version_mismatch_at_handshake_produces_warning_not_block() {
     use oxide_provider::{PermissionMode, ProviderEvent, StartContext, TurnStatus};
@@ -386,6 +397,7 @@ fn version_mismatch_at_handshake_produces_warning_not_block() {
     provider.shutdown().expect("shutdown must succeed");
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_provider_handles_interrupt() {
     use oxide_provider::{PermissionMode, ProviderEvent, StartContext, TurnStatus};
@@ -436,6 +448,7 @@ fn codex_provider_handles_interrupt() {
     provider.shutdown().expect("shutdown should succeed");
 }
 
+#[cfg(unix)]
 #[test]
 fn codex_provider_resume_passes_session_id() {
     use oxide_provider::{PermissionMode, ProviderEvent, StartContext};
@@ -465,4 +478,257 @@ fn codex_provider_resume_passes_session_id() {
     }
 
     provider.shutdown().expect("shutdown should succeed");
+}
+
+mod native_commands {
+    use oxide_provider::{
+        ItemKind, PermissionMode, Provider, ProviderEvent, SlashRoute, StartContext, TurnStatus,
+        codex::CodexProvider,
+    };
+    use std::path::PathBuf;
+
+    fn fake_cli(dir: &std::path::Path) -> PathBuf {
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/codex/fake_codex.py");
+        #[cfg(windows)]
+        {
+            let wrapper = dir.join("fake-codex.cmd");
+            std::fs::write(
+                &wrapper,
+                format!("@echo off\r\npy -3 \"{}\" %*\r\n", script.display()),
+            )
+            .unwrap();
+            wrapper
+        }
+        #[cfg(unix)]
+        {
+            let _ = dir;
+            script
+        }
+    }
+
+    #[test]
+    fn codex_catalog_offers_native_commands_and_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let commands = provider.slash_commands(dir.path()).unwrap();
+        let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["compact", "review", "sample-skill"]);
+        assert!(commands.iter().all(|c| c.route == SlashRoute::Native));
+    }
+
+    #[test]
+    fn catalog_refetches_skills_after_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_FAKE_SKILLS_CHANGE", "1");
+        assert!(
+            provider
+                .slash_commands(dir.path())
+                .unwrap()
+                .iter()
+                .any(|c| c.name == "sample-skill")
+        );
+        let refreshed = provider.slash_commands(dir.path()).unwrap();
+        assert!(refreshed.iter().any(|c| c.name == "new-skill"));
+        assert!(!refreshed.iter().any(|c| c.name == "sample-skill"));
+    }
+
+    #[test]
+    fn compact_is_a_turn_with_command_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        provider.send_prompt("/compact").unwrap();
+        let mut started = false;
+        let mut output = 0;
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+                ProviderEvent::TurnStarted { prompt, .. } => {
+                    assert_eq!(prompt, "/compact");
+                    started = true;
+                }
+                ProviderEvent::ItemCompleted {
+                    kind: ItemKind::SlashCommandOutput,
+                    content,
+                    ..
+                } => {
+                    assert!(!content.is_empty());
+                    output += 1;
+                }
+                ProviderEvent::TurnCompleted { status, .. } => {
+                    assert_eq!(status, TurnStatus::Completed);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(started);
+        assert_eq!(output, 1);
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn review_runs_inline_and_preserves_unknown_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("wire.log");
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        provider.send_prompt("/review check security").unwrap();
+        let mut review = false;
+        let mut unknown = false;
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+                ProviderEvent::ItemCompleted {
+                    kind: ItemKind::SlashCommandOutput,
+                    content,
+                    ..
+                } if content.contains("Review findings") => review = true,
+                ProviderEvent::Unknown { raw } if raw.contains("futureReviewItem") => {
+                    unknown = true
+                }
+                ProviderEvent::TurnCompleted { status, .. } => {
+                    assert_eq!(status, TurnStatus::Completed);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(review && unknown);
+        let wire = std::fs::read_to_string(log).unwrap();
+        assert!(wire.contains("review/start") && wire.contains("check security"));
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn skill_is_sent_as_structured_input_followed_by_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("wire.log");
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        provider.send_prompt("/sample-skill do the thing").unwrap();
+        while !matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            ProviderEvent::TurnCompleted { .. }
+        ) {}
+        let wire = std::fs::read_to_string(log).unwrap();
+        let requests: Vec<serde_json::Value> = wire
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let request = requests
+            .iter()
+            .find(|v| v["data"]["method"] == "turn/start")
+            .unwrap();
+        assert_eq!(
+            request["data"]["params"]["input"],
+            serde_json::json!([
+                {"type":"skill", "name":"sample-skill", "path":"/skills/sample/SKILL.md"},
+                {"type":"text", "text":"do the thing"}
+            ])
+        );
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn rejected_native_command_ends_the_turn_with_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_FAKE_REJECT_REVIEW", "1");
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        assert!(provider.send_prompt("/review").is_err());
+        loop {
+            if let ProviderEvent::TurnCompleted { status, .. } =
+                rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap()
+            {
+                assert_eq!(status, TurnStatus::Error);
+                break;
+            }
+        }
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn skills_changed_reaches_the_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_FAKE_SKILLS_CHANGE", "1");
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        provider.slash_commands(dir.path()).unwrap();
+        while !matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            ProviderEvent::SlashCommandsChanged
+        ) {}
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn listed_skill_stays_structured_if_refresh_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("wire.log");
+        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
+        provider.set_env("OXIDE_FAKE_SKILLS_FAIL_AFTER_FIRST", "1");
+        let rx = provider
+            .start(&StartContext {
+                working_dir: dir.path().into(),
+                model: None,
+                effort: None,
+                permission_mode: PermissionMode::Ask,
+            })
+            .unwrap();
+        provider.slash_commands(dir.path()).unwrap();
+        provider.send_prompt("/sample-skill hello").unwrap();
+        while !matches!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            ProviderEvent::TurnCompleted { .. }
+        ) {}
+        let wire = std::fs::read_to_string(log).unwrap();
+        let requests: Vec<serde_json::Value> = wire
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let request = requests
+            .iter()
+            .find(|v| v["data"]["method"] == "turn/start")
+            .unwrap();
+        assert_eq!(request["data"]["params"]["input"][0]["type"], "skill");
+        provider.shutdown().unwrap();
+    }
 }

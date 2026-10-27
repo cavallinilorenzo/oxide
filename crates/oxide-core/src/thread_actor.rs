@@ -534,6 +534,9 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
         ProviderEvent::UsageLimits { windows } => {
             state.usage.report(&state.provider_name, &windows);
         }
+        ProviderEvent::SlashCommandsChanged => {
+            state.broadcast(ThreadEvent::SlashCommandsChanged);
+        }
         ProviderEvent::Unknown { raw: raw_str } => {
             if let Some(turn_id) = state.current_turn_id() {
                 let _ = storage.write_unknown_event(turn_id, raw_str.clone());

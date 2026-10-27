@@ -65,10 +65,16 @@ impl Fixture {
 
     /// Every `gh` invocation so far, as its argument list.
     fn gh_calls(&self) -> Vec<Vec<String>> {
-        let log = std::fs::read_to_string(self.gh_dir.join("calls.jsonl")).unwrap_or_default();
-        log.lines()
-            .map(|l| {
-                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(self.gh_dir.join("calls"))
+            .map(|dir| dir.map(|e| e.unwrap().path()).collect())
+            .unwrap_or_default();
+        // Named by time, so by order of invocation.
+        files.sort();
+        files
+            .iter()
+            .map(|file| {
+                let v: serde_json::Value =
+                    serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
                 v["args"]
                     .as_array()
                     .unwrap()
@@ -692,6 +698,214 @@ fn merge_uses_an_allowed_method_and_can_delete_the_branch() {
     // Merged pull requests leave the open list.
     let open = f.core.list_pull_requests(f.project.id, false, "").unwrap();
     assert!(open.is_empty());
+}
+
+#[test]
+fn detail_reports_who_reviews_who_is_assigned_and_whether_it_can_merge() {
+    use oxide_core::{MergeState, ReviewDecision, ReviewState};
+    let f = fixture();
+    let mut pr = detailed_pr();
+    pr["createdAt"] = "2026-05-01T09:00:00Z".into();
+    pr["mergeable"] = "CONFLICTING".into();
+    pr["mergeStateStatus"] = "DIRTY".into();
+    pr["reviewDecision"] = "CHANGES_REQUESTED".into();
+    pr["additions"] = 10.into();
+    pr["deletions"] = 4.into();
+    pr["assignees"] = serde_json::json!([{"login": "lorenzo"}]);
+    pr["labels"] = serde_json::json!([{"name": "bug", "color": "d73a4a"}]);
+    pr["reviewRequests"] = serde_json::json!([
+        {"__typename": "User", "login": "ana"},
+        {"__typename": "Team", "name": "core", "slug": "core"},
+    ]);
+    pr["latestReviews"] = serde_json::json!([
+        {"author": {"login": "bob"}, "state": "CHANGES_REQUESTED"},
+        {"author": {"login": "ana"}, "state": "APPROVED"},
+    ]);
+    pr["reviews"] = serde_json::json!([
+        {"author": {"login": "bob"}, "state": "CHANGES_REQUESTED", "body": "Rename it",
+         "submittedAt": "2026-05-01T11:00:00Z"},
+        {"author": {"login": "ana"}, "state": "COMMENTED", "body": "", "submittedAt": "2026-05-01T12:00:00Z"},
+    ]);
+    let mut state = state_with_prs(&[pr]);
+    state["viewer"] = "lorenzo".into();
+    state["default_merge"] = "SQUASH".into();
+    install_gh(&f, state);
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+
+    assert_eq!(detail.pull_request.created_at, "2026-05-01T09:00:00Z");
+    assert_eq!(detail.merge_state, MergeState::Conflicting);
+    assert_eq!(
+        detail.review_decision,
+        Some(ReviewDecision::ChangesRequested)
+    );
+    assert_eq!((detail.additions, detail.deletions), (10, 4));
+    assert_eq!(detail.assignees, ["lorenzo"]);
+    assert_eq!(detail.labels[0].name, "bug");
+    assert_eq!(detail.viewer, "lorenzo");
+    assert_eq!(
+        detail.default_merge_method,
+        Some(oxide_core::MergeMethod::Squash)
+    );
+    let reviewers: Vec<(&str, ReviewState)> = detail
+        .reviewers
+        .iter()
+        .map(|r| (r.login.as_str(), r.state))
+        .collect();
+    // A new request overrides the earlier verdict.
+    assert_eq!(
+        reviewers,
+        [
+            ("bob", ReviewState::ChangesRequested),
+            ("ana", ReviewState::Requested),
+            ("core", ReviewState::Requested),
+        ]
+    );
+    // The review with a body joins the conversation, in order; the empty comment-only one does not.
+    let thread: Vec<(&str, Option<ReviewState>)> = detail
+        .comments
+        .iter()
+        .map(|c| (c.author.as_str(), c.review))
+        .collect();
+    assert_eq!(
+        thread,
+        [
+            ("reviewer", None),
+            ("bob", Some(ReviewState::ChangesRequested))
+        ]
+    );
+}
+
+#[test]
+fn checks_carry_the_link_to_their_run() {
+    let f = fixture();
+    let mut pr = detailed_pr();
+    pr["statusCheckRollup"] = serde_json::json!([
+        {"__typename": "CheckRun", "name": "web", "status": "COMPLETED", "conclusion": "FAILURE",
+         "detailsUrl": "https://github.com/fake/repo/actions/runs/1"},
+        {"__typename": "StatusContext", "context": "ci/legacy", "state": "FAILURE",
+         "targetUrl": "https://ci.example.com/build/9"},
+        {"__typename": "StatusContext", "context": "ci/odd", "state": "FAILURE",
+         "targetUrl": "javascript:alert(1)"},
+    ]);
+    install_gh(&f, state_with_prs(&[pr]));
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    let urls: Vec<Option<&str>> = detail.checks.iter().map(|c| c.url.as_deref()).collect();
+    assert_eq!(
+        urls,
+        [
+            Some("https://github.com/fake/repo/actions/runs/1"),
+            Some("https://ci.example.com/build/9"),
+            None
+        ]
+    );
+}
+
+#[test]
+fn the_default_merge_method_is_github_s_pick_only_when_the_repository_allows_it() {
+    use oxide_core::MergeMethod;
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["default_merge"] = "SQUASH".into();
+    state["repo"] = serde_json::json!({"squashMergeAllowed": false});
+    install_gh(&f, state);
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.default_merge_method, None);
+    assert!(detail.merge_methods.contains(&MergeMethod::Merge));
+}
+
+#[test]
+fn a_draft_is_marked_ready_and_back_through_gh() {
+    let f = fixture();
+    let mut pr = detailed_pr();
+    pr["isDraft"] = true.into();
+    install_gh(&f, state_with_prs(&[pr]));
+    f.core
+        .set_pull_request_draft(f.project.id, 5, false)
+        .unwrap();
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.phase, oxide_core::PullRequestPhase::Open);
+    f.core
+        .set_pull_request_draft(f.project.id, 5, true)
+        .unwrap();
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.phase, oxide_core::PullRequestPhase::Draft);
+    let ready: Vec<Vec<String>> = f
+        .gh_calls()
+        .into_iter()
+        .filter(|c| c[..2] == ["pr", "ready"])
+        .collect();
+    assert_eq!(
+        ready,
+        [vec!["pr", "ready", "5"], vec!["pr", "ready", "5", "--undo"]]
+    );
+}
+
+#[test]
+fn settings_edit_reviewers_assignees_and_labels_in_one_call() {
+    use oxide_core::PullRequestEdit;
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["repo"] = serde_json::json!({
+        "assignableUsers": [{"login": "Zed"}, {"login": "ana"}],
+        "labels": [{"name": "bug", "color": "d73a4a"}],
+    });
+    install_gh(&f, state);
+    let candidates = f.core.pull_request_candidates(f.project.id).unwrap();
+    assert_eq!(candidates.users, ["ana", "Zed"]);
+    assert_eq!(candidates.labels[0].name, "bug");
+
+    f.core
+        .edit_pull_request(
+            f.project.id,
+            5,
+            &PullRequestEdit {
+                add_reviewers: vec!["ana".into(), "bob".into()],
+                add_assignees: vec!["ana".into()],
+                add_labels: vec!["bug".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let edits: Vec<Vec<String>> = f
+        .gh_calls()
+        .into_iter()
+        .filter(|c| c[..2] == ["pr", "edit"])
+        .collect();
+    assert_eq!(
+        edits,
+        [[
+            "pr",
+            "edit",
+            "5",
+            "--add-reviewer",
+            "ana,bob",
+            "--add-assignee",
+            "ana",
+            "--add-label",
+            "bug"
+        ]]
+    );
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    assert_eq!(detail.assignees, ["ana"]);
+
+    // Nothing to change, nothing to ask GitHub.
+    let before = f.gh_calls().len();
+    f.core
+        .edit_pull_request(f.project.id, 5, &PullRequestEdit::default())
+        .unwrap();
+    assert_eq!(f.gh_calls().len(), before);
+}
+
+#[test]
+fn only_https_links_reach_the_browser() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    f.core
+        .open_link("https://github.com/fake/repo/actions/runs/1")
+        .unwrap();
+    assert!(f.core.open_link("file:///etc/passwd").is_err());
+    assert!(f.core.open_link("http://example.com").is_err());
+    assert_eq!(f.system.opened.lock().unwrap().len(), 1);
 }
 
 /// Publishes `add-b` (with `file` holding `content`) and leaves `main` checked out.

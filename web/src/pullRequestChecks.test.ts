@@ -1,36 +1,63 @@
 import { describe, expect, it } from "vitest";
-import { dedupeChecks, readiness, relativeTime } from "./pullRequestReview";
+import type { PullRequestCheck } from "./bindings";
+import { avatarUrl, dedupeChecks, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
+
+const check = (name: string, state: PullRequestCheck["state"]): PullRequestCheck => ({ name, state, url: null });
+const open = { phase: "open", mergeState: "clean", reviewDecision: null } as const;
 
 describe("dedupeChecks", () => {
   it("keeps the worst state per name and lists failures first", () => {
     const out = dedupeChecks([
-      { name: "rust", state: "success" },
-      { name: "web", state: "success" },
-      { name: "rust", state: "pending" },
-      { name: "lint", state: "failure" },
+      check("rust", "success"),
+      check("web", "success"),
+      check("rust", "pending"),
+      check("lint", "failure"),
     ]);
-    expect(out).toEqual([
-      { name: "lint", state: "failure" },
-      { name: "rust", state: "pending" },
-      { name: "web", state: "success" },
-    ]);
+    expect(out).toEqual([check("lint", "failure"), check("rust", "pending"), check("web", "success")]);
   });
 });
 
 describe("readiness", () => {
-  it("blocks on draft, then failures, then running checks", () => {
-    expect(readiness([], true).tone).toBe("neutral");
-    expect(readiness([{ name: "a", state: "failure" }], false).label).toBe("1 check failing");
-    expect(
-      readiness(
-        [
-          { name: "a", state: "pending" },
-          { name: "a", state: "success" },
-        ],
-        false,
-      ).tone,
-    ).toBe("warn");
-    expect(readiness([{ name: "a", state: "success" }], false)).toEqual({ tone: "ok", label: "All checks passed" });
+  it("blocks on draft, then conflicts, then failures, then running checks", () => {
+    expect(readiness({ ...open, phase: "draft", checks: [] }).tone).toBe("neutral");
+    expect(readiness({ ...open, checks: [check("a", "failure")] }).label).toBe("1 check failing");
+    expect(readiness({ ...open, checks: [check("a", "pending"), check("a", "success")] }).tone).toBe("warn");
+    expect(readiness({ ...open, mergeState: "conflicting", checks: [check("a", "failure")] }).tone).toBe("bad");
+    expect(readiness({ ...open, checks: [check("a", "success")] })).toEqual({ tone: "ok", label: "Ready to merge" });
+  });
+
+  it("puts a request for changes ahead of passing checks", () => {
+    const r = readiness({ ...open, reviewDecision: "changesRequested", checks: [check("a", "success")] });
+    expect(r).toEqual({ tone: "bad", label: "Changes requested" });
+  });
+});
+
+describe("mergeRequirements", () => {
+  it("lists conflicts, review and checks, worst first", () => {
+    const rows = mergeRequirements({
+      phase: "open",
+      mergeState: "conflicting",
+      reviewDecision: "approved",
+      checks: [check("a", "pending")],
+    });
+    expect(rows.map((r) => [r.kind, r.tone])).toEqual([
+      ["conflicts", "bad"],
+      ["checks", "warn"],
+      ["review", "ok"],
+    ]);
+  });
+
+  it("says when the branch is behind or the conflicts are still being computed", () => {
+    expect(mergeRequirements({ ...open, mergeState: "behind", checks: [] })[0]).toMatchObject({ kind: "behind", tone: "warn" });
+    expect(mergeRequirements({ ...open, mergeState: "unknown", checks: [] })[0].title).toBe("Checking for conflicts…");
+    expect(mergeRequirements({ ...open, phase: "merged", mergeState: "unknown", checks: [] })).toEqual([]);
+  });
+});
+
+describe("avatarUrl", () => {
+  it("points at the user's GitHub avatar, and at the bot's for `app/` logins", () => {
+    expect(avatarUrl("octocat")).toBe("https://github.com/octocat.png?size=40");
+    expect(avatarUrl("app/dependabot", 64)).toBe("https://github.com/dependabot.png?size=64");
   });
 });
 

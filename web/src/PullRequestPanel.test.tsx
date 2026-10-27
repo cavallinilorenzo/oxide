@@ -170,7 +170,7 @@ it.each(["ctrlKey", "metaKey"])("submits with %s+Enter and preserves draft choic
 it("notifies the parent and reloads the PR after successful creation", async () => {
   vi.spyOn(commands, "createPullRequest").mockResolvedValue({
     status: "ok", data: { number: 10, title: "Polish PR creation", url: "https://github.com/example/repo/pull/10",
-      head: branch, base: "main", draft: false, author: "demo" },
+      head: branch, base: "main", draft: false, author: "demo", createdAt: "2026-10-27T09:00:00Z" },
   });
   await render();
   await submit();

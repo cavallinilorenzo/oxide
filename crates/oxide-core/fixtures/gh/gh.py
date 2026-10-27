@@ -5,22 +5,31 @@ State lives next to this script in `state.json`, which the test writes:
   {"auth": "ok" | "logged_out", "default_branch": "main", "next_number": 7, "prs": {"<branch>": {...}},
    "repo": {"mergeCommitAllowed": true, ...}}
 A PR may also carry "author", "body", "comments", "statusCheckRollup" and "diff" (a unified diff).
-Every invocation is appended to `calls.jsonl` as {"args": [...], "cwd": "..."}.
+Every invocation is recorded in its own file under `calls/` as {"args": [...], "cwd": "..."}:
+concurrent invocations must not share a file, appends are not atomic on Windows.
 """
+import datetime
 import json
 import os
 import subprocess
 import sys
+import time
 
 here = os.path.dirname(os.path.abspath(__file__))
 state_path = os.path.join(here, "state.json")
 args = sys.argv[1:]
 
-with open(os.path.join(here, "calls.jsonl"), "a") as f:
-    f.write(json.dumps({"args": args, "cwd": os.getcwd()}) + "\n")
+calls_dir = os.path.join(here, "calls")
+os.makedirs(calls_dir, exist_ok=True)
+with open(os.path.join(calls_dir, "%020d-%d.json" % (time.time_ns(), os.getpid())), "w") as f:
+    f.write(json.dumps({"args": args, "cwd": os.getcwd()}))
 
 with open(state_path) as f:
     state = json.load(f)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def flag(name):
@@ -74,6 +83,40 @@ if args[:2] == ["repo", "view"]:
     print(json.dumps(repo))
     sys.exit(0)
 
+if args[:2] == ["api", "user"]:
+    print(state.get("viewer", "me"))
+    sys.exit(0)
+
+if args[:2] == ["api", "graphql"]:
+    # viewerDefaultMergeMethod, printed through --jq; empty when the test sets none.
+    print(state.get("default_merge", ""))
+    sys.exit(0)
+
+if args[:2] == ["pr", "ready"]:
+    by_number(number_arg())["isDraft"] = "--undo" in args
+    save()
+    sys.exit(0)
+
+if args[:2] == ["pr", "update-branch"]:
+    by_number(number_arg())["updated"] = True
+    save()
+    sys.exit(0)
+
+if args[:2] == ["pr", "edit"]:
+    pr = by_number(number_arg())
+    csv = lambda name: [v for v in (flag(name) or "").split(",") if v]
+    pr["assignees"] = [
+        a for a in pr.get("assignees", []) if a["login"] not in csv("--remove-assignee")
+    ] + [{"login": login} for login in csv("--add-assignee")]
+    pr["labels"] = [
+        l for l in pr.get("labels", []) if l["name"] not in csv("--remove-label")
+    ] + [{"name": name, "color": "ededed"} for name in csv("--add-label")]
+    pr["reviewRequests"] = [
+        r for r in pr.get("reviewRequests", []) if r["login"] not in csv("--remove-reviewer")
+    ] + [{"__typename": "User", "login": login} for login in csv("--add-reviewer")]
+    save()
+    sys.exit(0)
+
 if args[:2] == ["api", "repos/{owner}/{repo}/branches?per_page=100"]:
     if state.get("branches_error"):
         sys.stderr.write(state["branches_error"])
@@ -106,7 +149,7 @@ if args[:2] == ["pr", "diff"]:
 if args[:2] == ["pr", "comment"]:
     pr = by_number(number_arg())
     pr.setdefault("comments", []).append(
-        {"author": {"login": "me"}, "body": read_body(), "createdAt": "2026-01-01T00:00:00Z"}
+        {"author": {"login": "me"}, "body": read_body(), "createdAt": now()}
     )
     save()
     sys.exit(0)

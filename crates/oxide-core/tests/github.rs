@@ -32,6 +32,30 @@ fn commit_file(dir: &Path, name: &str, content: &str, message: &str) {
     git(dir, &["commit", "-qm", message]);
 }
 
+fn remove_worktree(root: &Path, worktree: &str) {
+    let mut last_error = String::new();
+    for attempt in 0..10 {
+        let out = Command::new("git")
+            .args(["worktree", "remove", "--force", worktree])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        if out.status.success() {
+            return;
+        }
+        last_error = String::from_utf8_lossy(&out.stderr).into_owned();
+        if !Path::new(worktree).exists() {
+            return;
+        }
+        // Windows may briefly hold files after Git has closed the worktree.
+        if !last_error.contains("Permission denied") || attempt == 9 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("git worktree remove --force {worktree:?}: {last_error}");
+}
+
 #[derive(Default)]
 struct RecordingSystem {
     opened: Mutex<Vec<String>>,
@@ -1153,15 +1177,7 @@ fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
         .unwrap();
     let branch = thread.branch.clone().unwrap();
     // Move the branch into the main checkout, where pull requests are created from.
-    git(
-        &f.work,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            &thread.worktree_path.unwrap(),
-        ],
-    );
+    remove_worktree(&f.work, &thread.worktree_path.unwrap());
     git(&f.work, &["checkout", "-q", &branch]);
     commit_file(&f.work, "b.txt", "b\n", "Add b");
 

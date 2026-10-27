@@ -4,6 +4,7 @@ import {
   DotFillIcon,
   GearIcon,
   GitMergeIcon,
+  GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
   SyncIcon,
   XCircleFillIcon,
@@ -12,6 +13,32 @@ import { useCallback, useRef, useState } from "react";
 import type { MergeMethod } from "./bindings";
 import { Popover } from "./Popover";
 import { mergeLabel, type MergeRequirement, type Tone } from "./pullRequestReview";
+
+/** The action in flight. Its button keeps its colour and shows a spinner; the others wait. */
+export type Pending = "merge" | "auto" | "close" | "ready" | "update" | "comment" | "checkout" | "edit";
+
+/** Button content while its work runs. */
+export function Working({ on, label, children }: { on: boolean; label: string; children: React.ReactNode }) {
+  return on ? (
+    <>
+      <SyncIcon size={14} className="spin" /> {label}
+    </>
+  ) : (
+    <>{children}</>
+  );
+}
+
+/** Shown over the pull request once it was merged or closed, just before the list comes back. */
+export function Outcome({ kind }: { kind: "merged" | "closed" }) {
+  return (
+    <div className={`pr-outcome ${kind}`} role="status">
+      <span className="pr-outcome-badge">
+        {kind === "merged" ? <GitMergeIcon size={28} /> : <GitPullRequestClosedIcon size={28} />}
+      </span>
+      <strong>{kind === "merged" ? "Merged" : "Closed"}</strong>
+    </div>
+  );
+}
 
 export function ToneIcon({ tone, size = 16 }: { tone: Tone; size?: number }) {
   if (tone === "ok") return <CheckCircleFillIcon size={size} />;
@@ -24,10 +51,12 @@ export function ToneIcon({ tone, size = 16 }: { tone: Tone; size?: number }) {
 export function MergeStatus({
   requirements,
   busy,
+  updating,
   onUpdateBranch,
 }: {
   requirements: MergeRequirement[];
   busy: boolean;
+  updating: boolean;
   onUpdateBranch: () => void;
 }) {
   if (requirements.length === 0) return null;
@@ -42,8 +71,8 @@ export function MergeStatus({
               {r.detail && r.tone !== "ok" && <p className="pr-req-detail">{r.detail}</p>}
             </div>
             {r.kind === "behind" && (
-              <button disabled={busy} onClick={onUpdateBranch}>
-                <SyncIcon size={14} /> Update branch
+              <button className={updating ? "pending" : undefined} disabled={busy} onClick={onUpdateBranch}>
+                <SyncIcon size={14} className={updating ? "spin" : undefined} /> {updating ? "Updating…" : "Update branch"}
               </button>
             )}
           </li>
@@ -67,6 +96,7 @@ interface MergeFooterProps {
   head: string;
   deleteBranch: boolean;
   busy: boolean;
+  pending: Pending | null;
   canMerge: boolean;
   /** Offer to merge by itself once the checks pass: the merge is blocked only by a wait. */
   canAutoMerge: boolean;
@@ -78,10 +108,23 @@ interface MergeFooterProps {
   onMerge: () => void;
   onAutoMerge: () => void;
   onReady: () => void;
+  onClose: () => void;
 }
 
 /** Always in view: the verdict, the merge button, and its options out of the way behind a gear. */
 export function MergeFooter(p: MergeFooterProps) {
+  const closeButton = (
+    <button
+      className={p.pending === "close" ? "pending" : undefined}
+      disabled={p.busy}
+      onClick={p.onClose}
+      title="Close without merging"
+    >
+      <Working on={p.pending === "close"} label="Closing…">
+        <GitPullRequestClosedIcon size={14} /> Close
+      </Working>
+    </button>
+  );
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -102,9 +145,12 @@ export function MergeFooter(p: MergeFooterProps) {
           <GitPullRequestDraftIcon size={14} /> Draft: not ready for review yet
         </p>
         <div className="pr-merge-row">
-          <button className="primary" disabled={p.busy} onClick={p.onReady}>
-            Ready for review
+          <button className={`primary${p.pending === "ready" ? " pending" : ""}`} disabled={p.busy} onClick={p.onReady}>
+            <Working on={p.pending === "ready"} label="Marking ready…">
+              Ready for review
+            </Working>
           </button>
+          {closeButton}
         </div>
       </footer>
     );
@@ -113,6 +159,7 @@ export function MergeFooter(p: MergeFooterProps) {
     return (
       <footer className="pr-merge" aria-label="Merge">
         <p className="pr-merge-status">This repository allows no merge method.</p>
+        <div className="pr-merge-row">{closeButton}</div>
       </footer>
     );
   }
@@ -124,17 +171,27 @@ export function MergeFooter(p: MergeFooterProps) {
       </p>
       <div className="pr-merge-row">
         <button
-          className={`primary${p.tone === "bad" ? " risky" : ""}`}
+          className={`primary${p.tone === "bad" ? " risky" : ""}${p.pending === "merge" ? " pending" : ""}`}
           disabled={!p.canMerge}
           onClick={p.onMerge}
         >
-          <GitMergeIcon size={14} /> {mergeLabel(p.method)}
+          <Working on={p.pending === "merge"} label="Merging…">
+            <GitMergeIcon size={14} /> {mergeLabel(p.method)}
+          </Working>
         </button>
         {p.canAutoMerge && (
-          <button disabled={p.busy || p.autoMerge} onClick={p.onAutoMerge} title="Merge by itself once the required checks pass">
-            {p.autoMerge ? "Auto-merge on" : "Merge when ready"}
+          <button
+            className={p.pending === "auto" ? "pending" : undefined}
+            disabled={p.busy || p.autoMerge}
+            onClick={p.onAutoMerge}
+            title="Merge by itself once the required checks pass"
+          >
+            <Working on={p.pending === "auto"} label="Turning on…">
+              {p.autoMerge ? "Auto-merge on" : "Merge when ready"}
+            </Working>
           </button>
         )}
+        {closeButton}
         <button
           ref={trigger}
           className="icon-btn"

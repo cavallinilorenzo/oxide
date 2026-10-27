@@ -8,6 +8,7 @@ import {
   PlusIcon,
   RepoPullIcon,
   RepoPushIcon,
+  SyncIcon,
   TriangleDownIcon,
   XIcon,
 } from "@primer/octicons-react";
@@ -136,22 +137,22 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
       )}
       {status.behind > 0 && (
         <button
-          className="btn pull-button"
+          className={`btn pull-button${busy ? " pending" : ""}`}
           disabled={busy}
           title={`Fast-forward ${status.behind} commit${status.behind === 1 ? "" : "s"} from ${status.upstream ?? "upstream"}`}
           onClick={() => void act(() => commands.pull(projectId))}
         >
-          <RepoPullIcon size={14} /> Pull
+          {busy ? <SyncIcon size={14} className="spin" /> : <RepoPullIcon size={14} />} Pull
         </button>
       )}
       <div ref={actionsRef} className={`split-button${action.kind === "up-to-date" ? "" : " primary"}`}>
         <button
-          className="git-primary"
+          className={`git-primary${busy || push.busy ? " pending" : ""}`}
           disabled={busy || push.busy || action.kind === "up-to-date" || action.blockedReason !== null}
           title={action.blockedReason ?? undefined}
           onClick={() => (action.kind === "commit-push" ? onOpenDiff() : void pushNow())}
         >
-          {action.kind === "up-to-date" ? <CheckIcon size={14} /> : action.kind === "commit-push" ? <GitCommitIcon size={14} /> : <RepoPushIcon size={14} />}
+          {busy || push.busy ? <SyncIcon size={14} className="spin" /> : action.kind === "up-to-date" ? <CheckIcon size={14} /> : action.kind === "commit-push" ? <GitCommitIcon size={14} /> : <RepoPushIcon size={14} />}
           {action.label.replace(/^✓\s*/, "")}
         </button>
         <button

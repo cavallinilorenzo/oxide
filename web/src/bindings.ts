@@ -123,6 +123,8 @@ export const commands = {
 	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
 	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
 	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean, auto: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch, auto })),
+	/**  Closes a pull request without merging it. */
+	closePullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("close_pull_request", { projectId, number })),
 	/**  Checks the pull request's branch out in the main checkout. */
 	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
 	/**  Opens a GitHub link, such as a check's run, in the system browser. */

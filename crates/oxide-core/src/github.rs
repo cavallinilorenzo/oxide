@@ -1118,6 +1118,13 @@ pub fn merge_pull_request(
     Ok(())
 }
 
+/// Closes a pull request without merging it, leaving the base branch alone.
+pub fn close_pull_request(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["pr", "close", &number.to_string()])?;
+    Ok(())
+}
+
 /// Checks the pull request's branch out in `cwd`. Git's refusal is the error.
 pub fn checkout_pull_request(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
     gh.require_ready(cwd)?;

@@ -173,7 +173,7 @@ export function DispatchDialog({ projectId, issue, onClose, onDispatched }: Disp
           <button type="button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" disabled={busy || form === null || form.prompt.trim() === ""}>
+          <button type="submit" className={busy ? "pending" : undefined} disabled={busy || form === null || form.prompt.trim() === ""}>
             {busy ? "Dispatching…" : "Dispatch"}
           </button>
         </div>

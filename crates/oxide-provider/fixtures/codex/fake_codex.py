@@ -36,6 +36,7 @@ def send_msg(msg):
 version = os.environ.get("OXIDE_FAKE_VERSION", "0.163.0")
 active_threads = {}
 pending_approvals = {}
+skills_list_count = 0
 
 for line in sys.stdin:
     line = line.strip()
@@ -100,6 +101,19 @@ for line in sys.stdin:
                 ]
             }
         })
+    elif method == "skills/list":
+        skills_list_count += 1
+        if os.environ.get("OXIDE_FAKE_SKILLS_FAIL_AFTER_FIRST") and skills_list_count > 1:
+            send_msg({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": "skills unavailable"}})
+            continue
+        cwd = (params.get("cwds") or ["."])[0]
+        name = "new-skill" if os.environ.get("OXIDE_FAKE_SKILLS_CHANGE") and skills_list_count > 1 else "sample-skill"
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": {"data": [{
+            "cwd": cwd, "errors": [], "skills": [{"name": name,
+            "description": "A sample skill", "path": "/skills/sample/SKILL.md",
+            "enabled": True, "scope": "user"}]}]}})
+        if os.environ.get("OXIDE_FAKE_SKILLS_CHANGE") and skills_list_count == 1:
+            send_msg({"method": "skills/changed", "params": {}})
     elif method == "thread/start":
         thread_id = f"thread-codex-{len(active_threads) + 1}"
         active_threads[thread_id] = {
@@ -133,6 +147,25 @@ for line in sys.stdin:
                 }
             }
         })
+    elif method == "review/start":
+        if os.environ.get("OXIDE_FAKE_REJECT_REVIEW"):
+            send_msg({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32602, "message": "review rejected"}})
+            continue
+        t_id = params["threadId"]
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": {"reviewThreadId": t_id, "turn": {"id": "review-1", "status": "inProgress", "items": []}}})
+        send_msg({"method": "turn/started", "params": {"threadId": t_id, "turn": {"id": "review-1", "status": "inProgress"}}})
+        for item in [{"id": "review-item", "type": "exitedReviewMode", "review": "Review findings: no issues."}, {"id": "future-item", "type": "futureReviewItem", "payload": "retained"}]:
+            send_msg({"method": "item/started", "params": {"threadId": t_id, "turnId": "review-1", "item": item}})
+            send_msg({"method": "item/completed", "params": {"threadId": t_id, "turnId": "review-1", "item": item}})
+        send_msg({"method": "turn/completed", "params": {"threadId": t_id, "turn": {"id": "review-1", "status": "completed"}}})
+    elif method == "thread/compact/start":
+        t_id = params["threadId"]
+        send_msg({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+        send_msg({"method": "turn/started", "params": {"threadId": t_id, "turn": {"id": "compact-1", "status": "inProgress"}}})
+        send_msg({"method": "item/started", "params": {"threadId": t_id, "turnId": "compact-1", "item": {"id": "compact-item", "type": "contextCompaction"}}})
+        send_msg({"method": "item/completed", "params": {"threadId": t_id, "turnId": "compact-1", "item": {"id": "compact-item", "type": "contextCompaction"}}})
+        send_msg({"method": "thread/compacted", "params": {"threadId": t_id, "turnId": "compact-1"}})
+        send_msg({"method": "turn/completed", "params": {"threadId": t_id, "turn": {"id": "compact-1", "status": "completed"}}})
     elif method == "turn/start":
         t_id = params.get("threadId", "thread-codex-1")
         inputs = params.get("input", [])

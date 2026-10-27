@@ -257,6 +257,7 @@ export function applyThreadEvent(
       break;
     }
 
+    case "SlashCommandsChanged":
     case "Unknown": {
       break;
     }

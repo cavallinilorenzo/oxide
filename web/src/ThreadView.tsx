@@ -189,6 +189,7 @@ export function ThreadView({
   }, [draft, threadId]);
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
@@ -198,13 +199,20 @@ export function ThreadView({
   useEffect(() => {
     if (!slashOpen) return;
     let active = true;
-    void commands.listSlashCommands(slashProvider, projectId).then((res) => {
+    void commands.listSlashCommands(slashProvider, projectId, threadId).then((res) => {
       if (active && res.status === "ok") setSlashCommands(res.data);
     });
     return () => {
       active = false;
     };
-  }, [slashOpen, slashProvider, projectId]);
+  }, [slashOpen, slashProvider, projectId, threadId, slashRevision]);
+
+  // A draft or idle Thread may not have registered a Provider event stream yet.
+  useEffect(() => {
+    if (!slashOpen || slashProvider !== "codex") return;
+    const timer = window.setInterval(() => setSlashRevision((n) => n + 1), 5000);
+    return () => window.clearInterval(timer);
+  }, [slashOpen, slashProvider]);
 
   const handleInputChange = (val: string) => {
     setSlashIndex(0);
@@ -295,6 +303,7 @@ export function ThreadView({
     const early: SequencedThreadEvent[] = [];
     const channel = new Channel<SequencedThreadEvent>();
     channel.onmessage = (event) => {
+      if (event.event.type === "SlashCommandsChanged") setSlashRevision((n) => n + 1);
       if (snapshotApplied) batcher.push(event);
       else early.push(event);
     };

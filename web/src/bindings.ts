@@ -62,9 +62,7 @@ export const commands = {
 	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
 	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
 	/**  The Slash command catalog the `/` menu offers for a Provider in a Project. */
-
 	listSlashCommands: (provider: string, projectId: number, threadId: number | null, refresh: boolean) => typedError<SlashCommand_Serialize[], AppError>(__TAURI_INVOKE("list_slash_commands", { provider, projectId, threadId, refresh })),
-
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
 	/**
 	 *  Up to `limit` Turns of a Thread from position `offset`, for paging in

@@ -65,10 +65,16 @@ impl Fixture {
 
     /// Every `gh` invocation so far, as its argument list.
     fn gh_calls(&self) -> Vec<Vec<String>> {
-        let log = std::fs::read_to_string(self.gh_dir.join("calls.jsonl")).unwrap_or_default();
-        log.lines()
-            .map(|l| {
-                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(self.gh_dir.join("calls"))
+            .map(|dir| dir.map(|e| e.unwrap().path()).collect())
+            .unwrap_or_default();
+        // Named by time, so by order of invocation.
+        files.sort();
+        files
+            .iter()
+            .map(|file| {
+                let v: serde_json::Value =
+                    serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
                 v["args"]
                     .as_array()
                     .unwrap()

@@ -5,20 +5,24 @@ State lives next to this script in `state.json`, which the test writes:
   {"auth": "ok" | "logged_out", "default_branch": "main", "next_number": 7, "prs": {"<branch>": {...}},
    "repo": {"mergeCommitAllowed": true, ...}}
 A PR may also carry "author", "body", "comments", "statusCheckRollup" and "diff" (a unified diff).
-Every invocation is appended to `calls.jsonl` as {"args": [...], "cwd": "..."}.
+Every invocation is recorded in its own file under `calls/` as {"args": [...], "cwd": "..."}:
+concurrent invocations must not share a file, appends are not atomic on Windows.
 """
 import datetime
 import json
 import os
 import subprocess
 import sys
+import time
 
 here = os.path.dirname(os.path.abspath(__file__))
 state_path = os.path.join(here, "state.json")
 args = sys.argv[1:]
 
-with open(os.path.join(here, "calls.jsonl"), "a") as f:
-    f.write(json.dumps({"args": args, "cwd": os.getcwd()}) + "\n")
+calls_dir = os.path.join(here, "calls")
+os.makedirs(calls_dir, exist_ok=True)
+with open(os.path.join(calls_dir, "%020d-%d.json" % (time.time_ns(), os.getpid())), "w") as f:
+    f.write(json.dumps({"args": args, "cwd": os.getcwd()}))
 
 with open(state_path) as f:
     state = json.load(f)

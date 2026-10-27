@@ -61,4 +61,12 @@ fn slash_catalog_refresh_is_thread_scoped_and_persisted_outside_the_project() {
         core.thread_slash_commands("fake", other_id, Some(thread.id), false)
             .is_err()
     );
+    drop(core);
+    let reopened = Core::open(&oxide_home).unwrap();
+    assert_eq!(
+        reopened
+            .thread_slash_commands("fake", project_id, Some(thread.id), false)
+            .unwrap(),
+        catalog
+    );
 }

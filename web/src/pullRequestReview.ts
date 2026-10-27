@@ -1,8 +1,15 @@
-import type { MergeMethod, PullRequestCheck } from "./bindings";
+import type { MergeMethod, MergeState, PullRequestCheck, PullRequestPhase, ReviewDecision } from "./bindings";
 
-/** The method to preselect: the user's current pick if still allowed, else the first allowed. */
-export function defaultMergeMethod(allowed: MergeMethod[], current: MergeMethod | null): MergeMethod | null {
-  return current !== null && allowed.includes(current) ? current : (allowed[0] ?? null);
+/** The method to preselect: the user's current pick if still allowed, else the one the web
+ *  merge box would offer them, else the first allowed. */
+export function defaultMergeMethod(
+  allowed: MergeMethod[],
+  current: MergeMethod | null,
+  preferred: MergeMethod | null = null,
+): MergeMethod | null {
+  if (current !== null && allowed.includes(current)) return current;
+  if (preferred !== null && allowed.includes(preferred)) return preferred;
+  return allowed[0] ?? null;
 }
 
 const MERGE_LABELS: Record<MergeMethod, string> = {
@@ -55,16 +62,89 @@ export function summarizeChecks(checks: PullRequestCheck[]): string {
   return parts.join(", ");
 }
 
-export type Readiness = { tone: "ok" | "warn" | "bad" | "neutral"; label: string };
+export type Tone = "ok" | "warn" | "bad" | "neutral";
 
-/** The one-glance answer to "can I merge this?", shown beside the merge button. */
-export function readiness(checks: PullRequestCheck[], draft: boolean): Readiness {
-  if (draft) return { tone: "neutral", label: "Draft: mark it ready on GitHub to merge" };
+/** One line of the merge box: what stands between the pull request and the base branch. */
+export interface MergeRequirement {
+  kind: "draft" | "conflicts" | "behind" | "review" | "checks";
+  tone: Tone;
+  title: string;
+  detail?: string;
+}
+
+export interface MergeInputs {
+  phase: PullRequestPhase;
+  checks: PullRequestCheck[];
+  mergeState: MergeState;
+  reviewDecision: ReviewDecision | null;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** The merge box, laid out as the web does: review, checks, conflicts. Worst first. */
+export function mergeRequirements({ phase, checks, mergeState, reviewDecision }: MergeInputs): MergeRequirement[] {
+  const rows: MergeRequirement[] = [];
+  if (phase === "draft") {
+    rows.push({
+      kind: "draft",
+      tone: "neutral",
+      title: "This pull request is still a draft",
+      detail: "Mark it ready for review to merge it.",
+    });
+  }
+  if (reviewDecision === "changesRequested") {
+    rows.push({ kind: "review", tone: "bad", title: "Changes requested", detail: "A reviewer asked for changes." });
+  } else if (reviewDecision === "reviewRequired") {
+    rows.push({ kind: "review", tone: "warn", title: "Review required", detail: "An approving review is needed to merge." });
+  } else if (reviewDecision === "approved") {
+    rows.push({ kind: "review", tone: "ok", title: "Changes approved" });
+  }
   const { failing, pending } = countChecks(checks);
-  if (failing > 0) return { tone: "bad", label: `${failing} ${failing === 1 ? "check" : "checks"} failing` };
-  if (pending > 0) return { tone: "warn", label: `${pending} ${pending === 1 ? "check" : "checks"} still running` };
-  if (checks.length === 0) return { tone: "neutral", label: "No checks reported" };
-  return { tone: "ok", label: "All checks passed" };
+  if (failing > 0) {
+    rows.push({ kind: "checks", tone: "bad", title: `${plural(failing, "check")} failing`, detail: "Open a failing check to see what went wrong." });
+  } else if (pending > 0) {
+    rows.push({ kind: "checks", tone: "warn", title: `${plural(pending, "check")} still running` });
+  } else if (checks.length > 0) {
+    rows.push({ kind: "checks", tone: "ok", title: "All checks passed" });
+  }
+  if (mergeState === "conflicting") {
+    rows.push({
+      kind: "conflicts",
+      tone: "bad",
+      title: "This branch has conflicts that must be resolved",
+      detail: "Check the branch out to resolve them, then push.",
+    });
+  } else if (mergeState === "behind") {
+    rows.push({ kind: "behind", tone: "warn", title: "This branch is out of date with the base branch" });
+  } else if (mergeState === "unknown") {
+    if (phase === "draft" || phase === "open") {
+      rows.push({
+        kind: "conflicts",
+        tone: "neutral",
+        title: "Checking for conflicts…",
+        detail: "It is still being worked out. Reload in a moment.",
+      });
+    }
+  } else {
+    rows.push({ kind: "conflicts", tone: "ok", title: "No conflicts with the base branch" });
+  }
+  const rank: Record<Tone, number> = { bad: 0, warn: 1, neutral: 2, ok: 3 };
+  // Among equals, what blocks the merge button comes first: conflicts, then review, then checks.
+  const kindRank: Record<MergeRequirement["kind"], number> = { draft: 0, conflicts: 1, behind: 2, review: 3, checks: 4 };
+  return rows.sort((a, b) => rank[a.tone] - rank[b.tone] || kindRank[a.kind] - kindRank[b.kind]);
+}
+
+/** The one-glance answer to "can I merge this?", shown above the merge button. */
+export function readiness(inputs: MergeInputs): { tone: Tone; label: string } {
+  const first = mergeRequirements(inputs)[0];
+  if (!first) return { tone: "neutral", label: "No checks reported" };
+  if (first.tone === "ok") return { tone: "ok", label: "Ready to merge" };
+  return { tone: first.tone, label: first.title };
+}
+
+/** Where a user's avatar is served from. Bots log in as `app/name` through `gh`. */
+export function avatarUrl(login: string, size = 40): string {
+  return `https://github.com/${encodeURIComponent(login.replace(/^app\//, ""))}.png?size=${size}`;
 }
 
 /** "5m", "3h", "2d", "4w", "8mo", "2y": short enough for a narrow row. */

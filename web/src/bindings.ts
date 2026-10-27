@@ -125,6 +125,16 @@ export const commands = {
 	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch })),
 	/**  Checks the pull request's branch out in the main checkout. */
 	checkoutPullRequest: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("checkout_pull_request", { projectId, number })),
+	/**  Opens a GitHub link, such as a check's run, in the system browser. */
+	openLink: (url: string) => typedError<null, AppError>(__TAURI_INVOKE("open_link", { url })),
+	/**  Moves a pull request out of draft (`draft` false), or back into it. */
+	setPullRequestDraft: (projectId: number, number: number, draft: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_pull_request_draft", { projectId, number, draft })),
+	/**  Brings a pull request's branch up to date with its base. */
+	updatePullRequestBranch: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("update_pull_request_branch", { projectId, number })),
+	/**  The people and labels a pull request's settings can pick from. */
+	pullRequestCandidates: (projectId: number) => typedError<PullRequestCandidates, AppError>(__TAURI_INVOKE("pull_request_candidates", { projectId })),
+	/**  Changes a pull request's reviewers, assignees and labels. */
+	editPullRequest: (projectId: number, number: number, edit: PullRequestEdit) => typedError<null, AppError>(__TAURI_INVOKE("edit_pull_request", { projectId, number, edit })),
 	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
 	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
 	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
@@ -491,6 +501,8 @@ export type ItemSnapshot_Serialize = {
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+export type MergeState = "clean" | "conflicting" | "behind" | "blocked" | "unstable" | "unknown";
+
 export type ModelInfo = ModelInfo_Serialize | ModelInfo_Deserialize;
 
 export type ModelInfo_Deserialize = {
@@ -589,28 +601,69 @@ export type PullRequest = {
 	base: string,
 	head: string,
 	author: string,
+	createdAt: string,
 };
 
-export type PullRequestCheck = {
+export type PullRequestCandidates = {
+	users: string[],
+	labels: PullRequestLabel[],
+};
+
+export type PullRequestCheck = PullRequestCheck_Serialize | PullRequestCheck_Deserialize;
+
+export type PullRequestCheck_Deserialize = {
 	name: string,
 	state: CheckState,
+	/**  Where GitHub shows the run, to find out why it failed. */
+	url?: string | null,
 };
 
-export type PullRequestComment = {
+export type PullRequestCheck_Serialize = {
+	name: string,
+	state: CheckState,
+	/**  Where GitHub shows the run, to find out why it failed. */
+	url: string | null,
+};
+
+export type PullRequestComment = PullRequestComment_Serialize | PullRequestComment_Deserialize;
+
+export type PullRequestComment_Deserialize = {
 	author: string,
 	body: string,
 	createdAt: string,
+	/**  Set when the entry is a review rather than a plain comment. */
+	review?: ReviewState | null,
+};
+
+export type PullRequestComment_Serialize = {
+	author: string,
+	body: string,
+	createdAt: string,
+	/**  Set when the entry is a review rather than a plain comment. */
+	review: ReviewState | null,
 };
 
 export type PullRequestDetail = PullRequestDetail_Serialize | PullRequestDetail_Deserialize;
 
 export type PullRequestDetail_Deserialize = {
 	pullRequest: PullRequest,
+	phase: PullRequestPhase,
 	body: string,
-	checks: PullRequestCheck[],
-	comments: PullRequestComment[],
+	checks: PullRequestCheck_Deserialize[],
+	comments: PullRequestComment_Deserialize[],
+	mergeState: MergeState,
+	reviewDecision?: ReviewDecision | null,
+	reviewers: PullRequestReviewer[],
+	assignees: string[],
+	labels: PullRequestLabel[],
+	additions: number,
+	deletions: number,
+	/**  The signed-in GitHub user. */
+	viewer: string,
 	/**  The merge methods the repository allows. */
 	mergeMethods: MergeMethod[],
+	/**  The method GitHub's own merge box would preselect for the user. */
+	defaultMergeMethod?: MergeMethod | null,
 	/**  Whether the repository deletes merged branches on its own. */
 	deleteBranchOnMerge: boolean,
 	/**  The changed files, for the Diff Surface. */
@@ -619,11 +672,23 @@ export type PullRequestDetail_Deserialize = {
 
 export type PullRequestDetail_Serialize = {
 	pullRequest: PullRequest,
+	phase: PullRequestPhase,
 	body: string,
-	checks: PullRequestCheck[],
-	comments: PullRequestComment[],
+	checks: PullRequestCheck_Serialize[],
+	comments: PullRequestComment_Serialize[],
+	mergeState: MergeState,
+	reviewDecision: ReviewDecision | null,
+	reviewers: PullRequestReviewer[],
+	assignees: string[],
+	labels: PullRequestLabel[],
+	additions: number,
+	deletions: number,
+	/**  The signed-in GitHub user. */
+	viewer: string,
 	/**  The merge methods the repository allows. */
 	mergeMethods: MergeMethod[],
+	/**  The method GitHub's own merge box would preselect for the user. */
+	defaultMergeMethod: MergeMethod | null,
 	/**  Whether the repository deletes merged branches on its own. */
 	deleteBranchOnMerge: boolean,
 	/**  The changed files, for the Diff Surface. */
@@ -637,7 +702,26 @@ export type PullRequestDraft = {
 	head: string,
 };
 
+export type PullRequestEdit = {
+	addReviewers: string[],
+	removeReviewers: string[],
+	addAssignees: string[],
+	removeAssignees: string[],
+	addLabels: string[],
+	removeLabels: string[],
+};
+
+export type PullRequestLabel = {
+	name: string,
+	color: string,
+};
+
 export type PullRequestPhase = "draft" | "open" | "merged" | "closed";
+
+export type PullRequestReviewer = {
+	login: string,
+	state: ReviewState,
+};
 
 export type PullRequestState = PullRequestState_Serialize | PullRequestState_Deserialize;
 
@@ -658,6 +742,10 @@ export type PullRequestState_Serialize = {
 	defaultBranch: string | null,
 	pullRequest: PullRequest | null,
 };
+
+export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
+
+export type ReviewState = "requested" | "approved" | "changesRequested" | "commented" | "dismissed";
 
 export type Selection = Selection_Serialize | Selection_Deserialize;
 

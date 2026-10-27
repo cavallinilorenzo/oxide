@@ -34,8 +34,10 @@ pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
     BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail,
-    IssueSummary, IssuesState, MergeMethod, PullRequest, PullRequestCheck, PullRequestComment,
-    PullRequestDetail, PullRequestDraft, PullRequestInput, PullRequestPhase, PullRequestState,
+    IssueSummary, IssuesState, MergeMethod, MergeState, PullRequest, PullRequestCandidates,
+    PullRequestCheck, PullRequestComment, PullRequestDetail, PullRequestDraft, PullRequestEdit,
+    PullRequestInput, PullRequestLabel, PullRequestPhase, PullRequestReviewer, PullRequestState,
+    ReviewDecision, ReviewState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -1465,6 +1467,12 @@ impl Core {
         Ok(())
     }
 
+    /// Opens a GitHub link, such as a check's run, in the system browser.
+    pub fn open_link(&self, url: &str) -> Result<()> {
+        self.activity.open_url(github::checked_url(url)?);
+        Ok(())
+    }
+
     /// Open pull requests of the Project's repository: only the user's own, if
     /// `mine`, and matching the GitHub search query, if not empty.
     pub fn list_pull_requests(
@@ -1485,6 +1493,31 @@ impl Core {
     /// Adds a conversation comment to a pull request.
     pub fn comment_pull_request(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
         github::comment_pull_request(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Moves a pull request out of draft (`draft` false), or back into it.
+    pub fn set_pull_request_draft(&self, project_id: u32, number: u32, draft: bool) -> Result<()> {
+        github::set_pull_request_draft(&self.gh, &self.main_checkout(project_id)?, number, draft)
+    }
+
+    /// Brings a pull request's branch up to date with its base.
+    pub fn update_pull_request_branch(&self, project_id: u32, number: u32) -> Result<()> {
+        github::update_pull_request_branch(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// The people and labels a pull request's settings can pick from.
+    pub fn pull_request_candidates(&self, project_id: u32) -> Result<PullRequestCandidates> {
+        github::pull_request_candidates(&self.gh, &self.main_checkout(project_id)?)
+    }
+
+    /// Changes a pull request's reviewers, assignees and labels.
+    pub fn edit_pull_request(
+        &self,
+        project_id: u32,
+        number: u32,
+        edit: &PullRequestEdit,
+    ) -> Result<()> {
+        github::edit_pull_request(&self.gh, &self.main_checkout(project_id)?, number, edit)
     }
 
     /// Merges a pull request with one of the methods its repository allows,

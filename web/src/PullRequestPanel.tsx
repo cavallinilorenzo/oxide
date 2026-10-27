@@ -75,7 +75,6 @@ function PullRequestBody({
   onRefresh,
 }: PullRequestPanelProps & { manual: number; onRefresh: () => void }) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -95,12 +94,6 @@ function PullRequestBody({
       active = false;
     };
   }, [projectId, refreshKey, manual]);
-
-  async function openOnGithub() {
-    setError(null);
-    const result = await commands.openPullRequest(projectId);
-    if (result.status === "error") setError(result.error.message);
-  }
 
   if (loaded.state === "loading") {
     return (
@@ -141,7 +134,6 @@ function PullRequestBody({
             onRefresh();
           }}
           onReviewFiles={onReviewFiles}
-          onOpenOnGithub={() => void openOnGithub()}
         />
       ) : (
         <CreateForm
@@ -155,9 +147,6 @@ function PullRequestBody({
             onRefresh();
           }}
         />
-      )}
-      {error && (
-        <PullRequestError title="Couldn’t open the pull request" message={error} />
       )}
     </section>
   );

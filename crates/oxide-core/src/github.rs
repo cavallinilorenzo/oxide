@@ -46,6 +46,7 @@ pub struct PullRequest {
     pub base: String,
     pub head: String,
     pub author: String,
+    pub created_at: String,
 }
 
 /// Where a pull request stands, as a Board card shows it.
@@ -120,14 +121,89 @@ impl CheckState {
 pub struct PullRequestCheck {
     pub name: String,
     pub state: CheckState,
+    /// Where GitHub shows the run, to find out why it failed.
+    pub url: Option<String>,
 }
 
+/// Whether the pull request can be merged as it is, as GitHub's merge box decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeState {
+    Clean,
+    /// The branch conflicts with its base.
+    Conflicting,
+    /// The base has moved on.
+    Behind,
+    /// Required reviews or checks are missing.
+    Blocked,
+    /// Checks that are not required are failing.
+    Unstable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewState {
+    /// Asked for a review, has not given one.
+    Requested,
+    Approved,
+    ChangesRequested,
+    Commented,
+    Dismissed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewer {
+    pub login: String,
+    pub state: ReviewState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestLabel {
+    pub name: String,
+    /// Hex without the `#`.
+    pub color: String,
+}
+
+/// A conversation entry: a comment, or a review that said something.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestComment {
     pub author: String,
     pub body: String,
     pub created_at: String,
+    /// Set when the entry is a review rather than a plain comment.
+    pub review: Option<ReviewState>,
+}
+
+/// Who and what a pull request can be assigned, for the settings pickers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCandidates {
+    pub users: Vec<String>,
+    pub labels: Vec<PullRequestLabel>,
+}
+
+/// Changes to a pull request's reviewers, assignees and labels.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestEdit {
+    pub add_reviewers: Vec<String>,
+    pub remove_reviewers: Vec<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
 }
 
 /// Everything the Pull request Surface shows for one pull request.
@@ -135,11 +211,23 @@ pub struct PullRequestComment {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDetail {
     pub pull_request: PullRequest,
+    pub phase: PullRequestPhase,
     pub body: String,
     pub checks: Vec<PullRequestCheck>,
     pub comments: Vec<PullRequestComment>,
+    pub merge_state: MergeState,
+    pub review_decision: Option<ReviewDecision>,
+    pub reviewers: Vec<PullRequestReviewer>,
+    pub assignees: Vec<String>,
+    pub labels: Vec<PullRequestLabel>,
+    pub additions: u32,
+    pub deletions: u32,
+    /// The signed-in GitHub user.
+    pub viewer: String,
     /// The merge methods the repository allows.
     pub merge_methods: Vec<MergeMethod>,
+    /// The method GitHub's own merge box would preselect for the user.
+    pub default_merge_method: Option<MergeMethod>,
     /// Whether the repository deletes merged branches on its own.
     pub delete_branch_on_merge: bool,
     /// The changed files, for the Diff Surface.
@@ -373,7 +461,7 @@ impl Gh {
     }
 }
 
-const PR_FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,author";
+const PR_FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,author,createdAt";
 
 /// Most pull requests the list shows.
 const MAX_LISTED: &str = "100";
@@ -391,7 +479,113 @@ fn pull_request_from(v: &serde_json::Value) -> PullRequest {
         base: text(&v["baseRefName"]),
         head: text(&v["headRefName"]),
         author: text(&v["author"]["login"]),
+        created_at: text(&v["createdAt"]),
     }
+}
+
+fn phase_from(v: &serde_json::Value) -> PullRequestPhase {
+    match v["state"].as_str() {
+        Some("MERGED") => PullRequestPhase::Merged,
+        Some("CLOSED") => PullRequestPhase::Closed,
+        _ if v["isDraft"].as_bool() == Some(true) => PullRequestPhase::Draft,
+        _ => PullRequestPhase::Open,
+    }
+}
+
+fn merge_state_from(v: &serde_json::Value) -> MergeState {
+    if v["mergeable"].as_str() == Some("CONFLICTING") {
+        return MergeState::Conflicting;
+    }
+    match v["mergeStateStatus"].as_str() {
+        Some("DIRTY") => MergeState::Conflicting,
+        Some("BEHIND") => MergeState::Behind,
+        Some("BLOCKED") => MergeState::Blocked,
+        Some("UNSTABLE") => MergeState::Unstable,
+        Some("CLEAN" | "HAS_HOOKS") => MergeState::Clean,
+        _ => MergeState::Unknown,
+    }
+}
+
+fn review_state_from(state: Option<&str>) -> Option<ReviewState> {
+    match state? {
+        "APPROVED" => Some(ReviewState::Approved),
+        "CHANGES_REQUESTED" => Some(ReviewState::ChangesRequested),
+        "COMMENTED" => Some(ReviewState::Commented),
+        "DISMISSED" => Some(ReviewState::Dismissed),
+        _ => None,
+    }
+}
+
+/// People asked for a review, and the latest verdict of those who gave one.
+fn reviewers_from(v: &serde_json::Value) -> Vec<PullRequestReviewer> {
+    let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
+    let mut reviewers: Vec<PullRequestReviewer> = Vec::new();
+    for review in list("latestReviews") {
+        if let Some(state) = review_state_from(review["state"].as_str()) {
+            reviewers.push(PullRequestReviewer {
+                login: text(&review["author"]["login"]),
+                state,
+            });
+        }
+    }
+    for request in list("reviewRequests") {
+        // A user has a `login`, a team a `name`.
+        let login = request["login"]
+            .as_str()
+            .or_else(|| request["name"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        // A new request overrides the earlier verdict of the same person.
+        reviewers.retain(|r| r.login != login);
+        reviewers.push(PullRequestReviewer {
+            login,
+            state: ReviewState::Requested,
+        });
+    }
+    reviewers
+}
+
+fn labels_from(value: &serde_json::Value) -> Vec<PullRequestLabel> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|l| PullRequestLabel {
+            name: text(&l["name"]),
+            color: text(&l["color"]),
+        })
+        .collect()
+}
+
+/// Comments and the reviews that said something, oldest first, as the web conversation shows them.
+fn conversation_from(v: &serde_json::Value) -> Vec<PullRequestComment> {
+    let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
+    let mut entries: Vec<PullRequestComment> = list("comments")
+        .iter()
+        .map(|c| PullRequestComment {
+            author: text(&c["author"]["login"]),
+            body: text(&c["body"]),
+            created_at: text(&c["createdAt"]),
+            review: None,
+        })
+        .collect();
+    for review in list("reviews") {
+        let Some(state) = review_state_from(review["state"].as_str()) else {
+            continue;
+        };
+        let body = text(&review["body"]);
+        if body.trim().is_empty() && state == ReviewState::Commented {
+            continue;
+        }
+        entries.push(PullRequestComment {
+            author: text(&review["author"]["login"]),
+            body,
+            created_at: text(&review["submittedAt"]),
+            review: Some(state),
+        });
+    }
+    entries.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    entries
 }
 
 /// A check run or a commit status, as `statusCheckRollup` lists them.
@@ -418,6 +612,12 @@ fn check_from(v: &serde_json::Value) -> PullRequestCheck {
             .unwrap_or_default()
             .to_string(),
         state,
+        // Check runs have a `detailsUrl`, commit statuses a `targetUrl`.
+        url: v["detailsUrl"]
+            .as_str()
+            .or_else(|| v["targetUrl"].as_str())
+            .filter(|url| url.starts_with("https://"))
+            .map(str::to_string),
     }
 }
 
@@ -662,12 +862,7 @@ pub fn branch_pull_request(gh: &Gh, cwd: &Path, branch: &str) -> Result<Option<B
     else {
         return Ok(None);
     };
-    let phase = match v["state"].as_str() {
-        Some("MERGED") => PullRequestPhase::Merged,
-        Some("CLOSED") => PullRequestPhase::Closed,
-        _ if v["isDraft"].as_bool() == Some(true) => PullRequestPhase::Draft,
-        _ => PullRequestPhase::Open,
-    };
+    let phase = phase_from(v);
     let mut tally = [0u32; 3];
     for check in v["statusCheckRollup"].as_array().into_iter().flatten() {
         tally[match check_from(check).state {
@@ -691,24 +886,58 @@ pub fn branch_pull_request(gh: &Gh, cwd: &Path, branch: &str) -> Result<Option<B
 pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullRequestDetail> {
     gh.require_ready(cwd)?;
     let n = number.to_string();
-    let fields = format!("{PR_FIELDS},body,comments,statusCheckRollup");
-    let v = parse(&gh.run(cwd, &["pr", "view", &n, "--json", &fields])?)?;
-    let (merge_methods, delete_branch_on_merge) = merge_settings(gh, cwd)?;
-    let patch = gh.run(cwd, &["pr", "diff", &n, "--color=never"])?;
+    let fields = format!(
+        "{PR_FIELDS},body,comments,reviews,latestReviews,reviewRequests,assignees,labels,\
+         additions,deletions,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup"
+    );
+    // Independent round trips to GitHub: run them side by side.
+    let (view, settings, patch, default_method, viewer) = std::thread::scope(|scope| {
+        let settings = scope.spawn(|| merge_settings(gh, cwd));
+        let patch = scope.spawn(|| gh.run(cwd, &["pr", "diff", &n, "--color=never"]));
+        let default_method = scope.spawn(|| viewer_default_merge_method(gh, cwd));
+        let viewer = scope.spawn(|| viewer_login(gh, cwd));
+        let view = gh.run(cwd, &["pr", "view", &n, "--json", &fields]);
+        fn join<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+            handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        }
+        (
+            view,
+            join(settings),
+            join(patch),
+            join(default_method),
+            join(viewer),
+        )
+    });
+    let v = parse(&view?)?;
+    let (merge_methods, delete_branch_on_merge) = settings?;
+    let patch = patch?;
 
     let pull_request = pull_request_from(&v);
     let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
     Ok(PullRequestDetail {
+        phase: phase_from(&v),
         body: text(&v["body"]),
         checks: list("statusCheckRollup").iter().map(check_from).collect(),
-        comments: list("comments")
+        comments: conversation_from(&v),
+        merge_state: merge_state_from(&v),
+        review_decision: match v["reviewDecision"].as_str() {
+            Some("APPROVED") => Some(ReviewDecision::Approved),
+            Some("CHANGES_REQUESTED") => Some(ReviewDecision::ChangesRequested),
+            Some("REVIEW_REQUIRED") => Some(ReviewDecision::ReviewRequired),
+            _ => None,
+        },
+        reviewers: reviewers_from(&v),
+        assignees: list("assignees")
             .iter()
-            .map(|c| PullRequestComment {
-                author: text(&c["author"]["login"]),
-                body: text(&c["body"]),
-                created_at: text(&c["createdAt"]),
-            })
+            .map(|a| text(&a["login"]))
             .collect(),
+        labels: labels_from(&v["labels"]),
+        additions: v["additions"].as_u64().unwrap_or(0) as u32,
+        deletions: v["deletions"].as_u64().unwrap_or(0) as u32,
+        viewer: viewer.unwrap_or_default(),
+        default_merge_method: default_method.filter(|m| merge_methods.contains(m)),
         merge_methods,
         delete_branch_on_merge,
         diff: Diff {
@@ -717,6 +946,110 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
         },
         pull_request,
     })
+}
+
+/// The method the web merge box preselects for the signed-in user, if GitHub says.
+fn viewer_default_merge_method(gh: &Gh, cwd: &Path) -> Option<MergeMethod> {
+    let out = gh
+        .run(
+            cwd,
+            &[
+                "api",
+                "graphql",
+                "-F",
+                "owner={owner}",
+                "-F",
+                "name={repo}",
+                "-f",
+                "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){viewerDefaultMergeMethod}}",
+                "--jq",
+                ".data.repository.viewerDefaultMergeMethod",
+            ],
+        )
+        .ok()?;
+    match out.trim() {
+        "MERGE" => Some(MergeMethod::Merge),
+        "SQUASH" => Some(MergeMethod::Squash),
+        "REBASE" => Some(MergeMethod::Rebase),
+        _ => None,
+    }
+}
+
+fn viewer_login(gh: &Gh, cwd: &Path) -> Option<String> {
+    let out = gh.run(cwd, &["api", "user", "--jq", ".login"]).ok()?;
+    Some(out.trim().to_string()).filter(|login| !login.is_empty())
+}
+
+/// Moves a pull request out of draft, or back into it.
+pub fn set_pull_request_draft(gh: &Gh, cwd: &Path, number: u32, draft: bool) -> Result<()> {
+    gh.require_ready(cwd)?;
+    let n = number.to_string();
+    let mut args = vec!["pr", "ready", &n];
+    if draft {
+        args.push("--undo");
+    }
+    gh.run(cwd, &args)?;
+    Ok(())
+}
+
+/// Merges the base branch into the pull request's branch.
+pub fn update_pull_request_branch(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["pr", "update-branch", &number.to_string()])?;
+    Ok(())
+}
+
+/// Who can review or be assigned, and the labels the repository has.
+pub fn pull_request_candidates(gh: &Gh, cwd: &Path) -> Result<PullRequestCandidates> {
+    gh.require_ready(cwd)?;
+    let repo = parse(&gh.run(cwd, &["repo", "view", "--json", "assignableUsers,labels"])?)?;
+    let mut users: Vec<String> = repo["assignableUsers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|u| text(&u["login"]))
+        .collect();
+    users.sort_by_key(|u| u.to_lowercase());
+    Ok(PullRequestCandidates {
+        users,
+        labels: labels_from(&repo["labels"]),
+    })
+}
+
+/// Applies the changes to reviewers, assignees and labels in one `gh` call.
+pub fn edit_pull_request(gh: &Gh, cwd: &Path, number: u32, edit: &PullRequestEdit) -> Result<()> {
+    gh.require_ready(cwd)?;
+    let n = number.to_string();
+    let joined: Vec<(&str, String)> = [
+        ("--add-reviewer", &edit.add_reviewers),
+        ("--remove-reviewer", &edit.remove_reviewers),
+        ("--add-assignee", &edit.add_assignees),
+        ("--remove-assignee", &edit.remove_assignees),
+        ("--add-label", &edit.add_labels),
+        ("--remove-label", &edit.remove_labels),
+    ]
+    .into_iter()
+    .filter(|(_, names)| !names.is_empty())
+    .map(|(flag, names)| (flag, names.join(",")))
+    .collect();
+    if joined.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["pr", "edit", &n];
+    for (flag, value) in &joined {
+        args.extend([*flag, value.as_str()]);
+    }
+    gh.run(cwd, &args)?;
+    Ok(())
+}
+
+/// A link for the system browser, which only ever gets `https`.
+pub fn checked_url(url: &str) -> Result<&str> {
+    if url.starts_with("https://") {
+        Ok(url)
+    } else {
+        Err(Error::Github(format!("Unexpected link: {url}")))
+    }
 }
 
 /// Adds a conversation comment.

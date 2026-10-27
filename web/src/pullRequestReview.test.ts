@@ -11,6 +11,12 @@ describe("defaultMergeMethod", () => {
     expect(defaultMergeMethod(["rebase"], null)).toBe("rebase");
   });
 
+  it("prefers the method GitHub's merge box would offer over the first allowed", () => {
+    expect(defaultMergeMethod(["merge", "squash"], null, "squash")).toBe("squash");
+    expect(defaultMergeMethod(["merge"], null, "squash")).toBe("merge");
+    expect(defaultMergeMethod(["merge", "squash"], "merge", "squash")).toBe("merge");
+  });
+
   it("is null when the repository allows no merge", () => {
     expect(defaultMergeMethod([], "merge")).toBeNull();
   });
@@ -31,15 +37,15 @@ describe("summarizeChecks", () => {
 
   it("counts failing and pending checks first, as they need attention", () => {
     const checks = [
-      { name: "a", state: "success" as const },
-      { name: "b", state: "failure" as const },
-      { name: "c", state: "pending" as const },
-      { name: "d", state: "success" as const },
+      { name: "a", state: "success" as const, url: null },
+      { name: "b", state: "failure" as const, url: null },
+      { name: "c", state: "pending" as const, url: null },
+      { name: "d", state: "success" as const, url: null },
     ];
     expect(summarizeChecks(checks)).toBe("1 failing, 1 running, 2 passing");
   });
 
   it("omits the empty kinds", () => {
-    expect(summarizeChecks([{ name: "a", state: "success" }])).toBe("1 passing");
+    expect(summarizeChecks([{ name: "a", state: "success", url: null }])).toBe("1 passing");
   });
 });

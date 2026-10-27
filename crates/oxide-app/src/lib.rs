@@ -977,6 +977,7 @@ pub struct PullRequest {
     pub base: String,
     pub head: String,
     pub author: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1000,6 +1001,51 @@ pub enum CheckState {
 pub struct PullRequestCheck {
     pub name: String,
     pub state: CheckState,
+    /// Where GitHub shows the run, to find out why it failed.
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeState {
+    Clean,
+    Conflicting,
+    Behind,
+    Blocked,
+    Unstable,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewState {
+    Requested,
+    Approved,
+    ChangesRequested,
+    Commented,
+    Dismissed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewer {
+    pub login: String,
+    pub state: ReviewState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestLabel {
+    pub name: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1008,17 +1054,49 @@ pub struct PullRequestComment {
     pub author: String,
     pub body: String,
     pub created_at: String,
+    /// Set when the entry is a review rather than a plain comment.
+    pub review: Option<ReviewState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCandidates {
+    pub users: Vec<String>,
+    pub labels: Vec<PullRequestLabel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestEdit {
+    pub add_reviewers: Vec<String>,
+    pub remove_reviewers: Vec<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDetail {
     pub pull_request: PullRequest,
+    pub phase: PullRequestPhase,
     pub body: String,
     pub checks: Vec<PullRequestCheck>,
     pub comments: Vec<PullRequestComment>,
+    pub merge_state: MergeState,
+    pub review_decision: Option<ReviewDecision>,
+    pub reviewers: Vec<PullRequestReviewer>,
+    pub assignees: Vec<String>,
+    pub labels: Vec<PullRequestLabel>,
+    pub additions: u32,
+    pub deletions: u32,
+    /// The signed-in GitHub user.
+    pub viewer: String,
     /// The merge methods the repository allows.
     pub merge_methods: Vec<MergeMethod>,
+    /// The method GitHub's own merge box would preselect for the user.
+    pub default_merge_method: Option<MergeMethod>,
     /// Whether the repository deletes merged branches on its own.
     pub delete_branch_on_merge: bool,
     /// The changed files, for the Diff Surface.
@@ -1296,6 +1374,69 @@ async fn merge_pull_request(
 ) -> Result<(), AppError> {
     git_blocking(&core, move |core| {
         core.merge_pull_request(project_id, number, convert(&method), delete_branch)
+    })
+    .await
+}
+
+/// Opens a GitHub link, such as a check's run, in the system browser.
+#[tauri::command]
+#[specta::specta]
+async fn open_link(core: State<'_, Arc<Core>>, url: String) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.open_link(&url)).await
+}
+
+/// Moves a pull request out of draft (`draft` false), or back into it.
+#[tauri::command]
+#[specta::specta]
+async fn set_pull_request_draft(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    draft: bool,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.set_pull_request_draft(project_id, number, draft)
+    })
+    .await
+}
+
+/// Brings a pull request's branch up to date with its base.
+#[tauri::command]
+#[specta::specta]
+async fn update_pull_request_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.update_pull_request_branch(project_id, number)
+    })
+    .await
+}
+
+/// The people and labels a pull request's settings can pick from.
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_candidates(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<PullRequestCandidates, AppError> {
+    git_blocking(&core, move |core| core.pull_request_candidates(project_id))
+        .await
+        .map(|candidates| convert(&candidates))
+}
+
+/// Changes a pull request's reviewers, assignees and labels.
+#[tauri::command]
+#[specta::specta]
+async fn edit_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    edit: PullRequestEdit,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.edit_pull_request(project_id, number, &convert(&edit))
     })
     .await
 }
@@ -1904,6 +2045,11 @@ pub fn builder() -> Builder<tauri::Wry> {
         comment_pull_request,
         merge_pull_request,
         checkout_pull_request,
+        open_link,
+        set_pull_request_draft,
+        update_pull_request_branch,
+        pull_request_candidates,
+        edit_pull_request,
         issues_state,
         list_issues,
         issue_detail,

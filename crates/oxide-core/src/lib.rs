@@ -1535,7 +1535,10 @@ impl Core {
         self.git.mutate(&cwd, || {
             // Deleting the branch may move the checkout off it, which a
             // working Thread must not see.
-            if delete_branch && !auto && let Some(reason) = self.checkout_blocked_reason(project_id)? {
+            if delete_branch
+                && !auto
+                && let Some(reason) = self.checkout_blocked_reason(project_id)?
+            {
                 return Err(Error::Git(reason));
             }
             github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch, auto)

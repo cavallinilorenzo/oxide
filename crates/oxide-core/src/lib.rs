@@ -1114,7 +1114,7 @@ impl Core {
                 })?;
                 let path = folder.join("catalogs.json");
                 let bytes =
-                    serde_json::to_vec(&*catalogs).map_err(|e| Error::Provider(e.to_string()))?;
+                    serde_json::to_vec(&updated).map_err(|e| Error::Provider(e.to_string()))?;
                 fs::write(&path, bytes).map_err(|source| Error::Io { path, source })?;
                 *catalogs = updated;
                 Ok(catalog)

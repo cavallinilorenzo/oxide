@@ -188,6 +188,7 @@ export function ThreadView({
   }, [draft, threadId]);
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const slashGeneration = useRef(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
@@ -197,6 +198,7 @@ export function ThreadView({
   useEffect(() => {
     if (threadId && transcript.thread?.id !== threadId) return;
     let active = true;
+    const generation = ++slashGeneration.current;
     setSlashCommands([]);
     void (async () => {
       const cached = await commands.listSlashCommands(slashProvider, projectId, threadId, false);
@@ -207,7 +209,10 @@ export function ThreadView({
       if (refreshed.status === "ok") setSlashCommands(refreshed.data);
       else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
     })();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (slashGeneration.current === generation) slashGeneration.current++;
+    };
   }, [threadId, transcript.thread?.id, slashProvider, projectId]);
 
   const handleInputChange = (val: string) => {
@@ -650,7 +655,9 @@ export function ThreadView({
     const slash = parseSlashCommand(input);
     if (slash.type === "reload-cache") {
       handleInputChange("");
+      const generation = slashGeneration.current;
       const result = await commands.listSlashCommands(slashProvider, projectId, threadId, true);
+      if (generation !== slashGeneration.current) return;
       if (result.status === "ok") setSlashCommands(result.data);
       else setCommandError("Could not refresh the Slash command catalog. Any previous cache remains available.");
       return;

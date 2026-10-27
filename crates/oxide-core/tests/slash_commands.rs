@@ -47,6 +47,12 @@ fn slash_catalog_refresh_is_thread_scoped_and_persisted_outside_the_project() {
             .join("cache/slash-commands/catalogs.json")
             .is_file()
     );
+    let stored =
+        std::fs::read_to_string(oxide_home.join("cache/slash-commands/catalogs.json")).unwrap();
+    assert!(
+        stored.contains("reload-cache"),
+        "refreshed catalog must be persisted"
+    );
     assert!(!project.join(".oxide").exists());
     let other = temp.path().join("other");
     std::fs::create_dir_all(other.join(".git")).unwrap();

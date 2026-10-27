@@ -280,7 +280,9 @@ export function PullRequestReview({
   const inputs = { phase, checks: detail.checks, mergeState: detail.mergeState, reviewDecision: detail.reviewDecision ?? null };
   const status = readiness(inputs);
   const requirements = live ? mergeRequirements(inputs) : [];
-  const canMerge = phase === "open" && method !== null && !busy && detail.mergeState !== "conflicting";
+  // GitHub reports "blocked" while required checks run or a review is missing, and the merge would be refused.
+  const mergeBlocked = ["conflicting", "blocked", "behind"].includes(detail.mergeState);
+  const canMerge = phase === "open" && method !== null && !busy && !mergeBlocked;
 
   async function act(run: () => Promise<Outcome>) {
     setBusy(true);

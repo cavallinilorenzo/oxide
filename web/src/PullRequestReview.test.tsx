@@ -108,6 +108,15 @@ it("lists conflicts and offers no merge while the branch conflicts", async () =>
   expect(button(/Squash and merge/).disabled).toBe(true);
 });
 
+it("offers no merge while GitHub's branch policy blocks it, e.g. required checks still running", async () => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({
+    status: "ok",
+    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null }] }),
+  });
+  await render();
+  expect(button(/Squash and merge/).disabled).toBe(true);
+});
+
 it("preselects the merge method GitHub's own merge box would, not the first allowed", async () => {
   const merge = vi.spyOn(commands, "mergePullRequest").mockResolvedValue({ status: "ok", data: null });
   await render();

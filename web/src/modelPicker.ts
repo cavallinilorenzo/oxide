@@ -3,7 +3,7 @@ import type { ModelInfo as BindingsModelInfo } from "./bindings";
 export type ModelInfo = BindingsModelInfo;
 
 export interface SlashCommandParseResult {
-  type: "model" | "effort" | "other" | "none";
+  type: "model" | "effort" | "rename" | "diff" | "permissions" | "other" | "none";
   command: string;
   arg?: string;
 }
@@ -26,6 +26,9 @@ export function parseSlashCommand(input: string): SlashCommandParseResult {
   }
   if (command === "/effort") {
     return { type: "effort", command, arg: arg || undefined };
+  }
+  if (command === "/rename" || command === "/diff" || command === "/permissions") {
+    return { type: command.slice(1) as "rename" | "diff" | "permissions", command, arg: arg || undefined };
   }
 
   return { type: "other", command, arg: arg || undefined };

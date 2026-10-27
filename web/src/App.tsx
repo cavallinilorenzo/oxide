@@ -609,6 +609,12 @@ export function App() {
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
+                  onOpenDefaultDiff={() => {
+                    setShowTools(true);
+                    setActiveTool("Diff");
+                    setChosenDiffScope(null);
+                    setDiffFocus(null);
+                  }}
                   onInitialLoad={onStartupThreadLoaded}
                   threadId={selectedThreadId}
                   projectId={selected.id}

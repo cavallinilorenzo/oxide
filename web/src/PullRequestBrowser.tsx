@@ -205,6 +205,7 @@ export function PullRequestReview({
   const [method, setMethod] = useState<MergeMethod | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [merged, setMerged] = useState(false);
+  const [autoMerge, setAutoMerge] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -280,7 +281,11 @@ export function PullRequestReview({
   const inputs = { phase, checks: detail.checks, mergeState: detail.mergeState, reviewDecision: detail.reviewDecision ?? null };
   const status = readiness(inputs);
   const requirements = live ? mergeRequirements(inputs) : [];
-  const canMerge = phase === "open" && method !== null && !busy && detail.mergeState !== "conflicting";
+  // GitHub reports "blocked" while required checks run or a review is missing, and the merge would be refused.
+  const mergeBlocked = ["conflicting", "blocked", "behind"].includes(detail.mergeState);
+  const canMerge = phase === "open" && method !== null && !busy && !mergeBlocked;
+  // Only a wait (checks, review) can be left to GitHub; conflicts and a stale branch need the user.
+  const canAutoMerge = phase === "open" && method !== null && detail.mergeState === "blocked";
 
   async function act(run: () => Promise<Outcome>) {
     setBusy(true);
@@ -300,10 +305,15 @@ export function PullRequestReview({
 
   async function merge() {
     if (method === null) return;
-    if (await act(() => commands.mergePullRequest(projectId, number, method, deleteBranch))) {
+    if (await act(() => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
       setMerged(true);
       onChanged();
     }
+  }
+
+  async function mergeWhenReady() {
+    if (method === null) return;
+    if (await act(() => commands.mergePullRequest(projectId, number, method, deleteBranch, true))) setAutoMerge(true);
   }
 
   async function checkout() {
@@ -444,11 +454,14 @@ export function PullRequestReview({
           deleteBranch={deleteBranch}
           busy={busy}
           canMerge={canMerge}
+          canAutoMerge={canAutoMerge}
+          autoMerge={autoMerge}
           tone={status.tone}
           status={status.label}
           onMethod={setMethod}
           onDeleteBranch={setDeleteBranch}
           onMerge={() => void merge()}
+          onAutoMerge={() => void mergeWhenReady()}
           onReady={() => void setDraft(false)}
         />
       ) : (

@@ -1371,9 +1371,10 @@ async fn merge_pull_request(
     number: u32,
     method: MergeMethod,
     delete_branch: bool,
+    auto: bool,
 ) -> Result<(), AppError> {
     git_blocking(&core, move |core| {
-        core.merge_pull_request(project_id, number, convert(&method), delete_branch)
+        core.merge_pull_request(project_id, number, convert(&method), delete_branch, auto)
     })
     .await
 }

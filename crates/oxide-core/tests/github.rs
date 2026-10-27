@@ -683,18 +683,22 @@ fn merge_uses_an_allowed_method_and_can_delete_the_branch() {
 
     let err = f
         .core
-        .merge_pull_request(f.project.id, 5, MergeMethod::Rebase, false)
+        .merge_pull_request(f.project.id, 5, MergeMethod::Rebase, false, false)
         .unwrap_err();
     assert!(err.to_string().contains("rebase"), "{err}");
     assert!(merge_calls().is_empty());
 
     f.core
-        .merge_pull_request(f.project.id, 5, MergeMethod::Squash, true)
+        .merge_pull_request(f.project.id, 5, MergeMethod::Squash, true, false)
         .unwrap();
     assert_eq!(
         merge_calls(),
         [["pr", "merge", "5", "--squash", "--delete-branch"]]
     );
+    f.core
+        .merge_pull_request(f.project.id, 5, MergeMethod::Squash, true, true)
+        .unwrap();
+    assert_eq!(merge_calls()[1], ["pr", "merge", "5", "--squash", "--auto"]);
     // Merged pull requests leave the open list.
     let open = f.core.list_pull_requests(f.project.id, false, "").unwrap();
     assert!(open.is_empty());

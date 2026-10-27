@@ -162,7 +162,8 @@ export function ThreadView({
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
-  const permissionControlRef = useRef<HTMLDivElement>(null);
+  const permissionControlRef = useRef<HTMLButtonElement>(null);
+  const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   const [draftProvider, setDraftProvider] = useState<string>("claude");
@@ -531,6 +532,12 @@ export function ThreadView({
   const currentMode = transcript.thread?.permissionMode || draftMode;
   const currentProvider = transcript.thread?.provider || draftProvider;
   const providerCaps = providerCapsEntry?.provider === currentProvider ? providerCapsEntry.caps : null;
+  useEffect(() => {
+    if (openPermissionsWhenReady && providerCaps) {
+      permissionControlRef.current?.click();
+      setOpenPermissionsWhenReady(false);
+    }
+  }, [openPermissionsWhenReady, providerCaps]);
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
     let active = true;
@@ -657,14 +664,25 @@ export function ThreadView({
     }
     if (slash.type === "permissions") {
       if (!slash.arg) {
-        permissionControlRef.current?.querySelector("button")?.click();
+        if (providerCaps) permissionControlRef.current?.click();
+        else {
+          const result = await commands.getProviderCapabilities(currentProvider);
+          if (result.status === "ok") {
+            setProviderCaps({ provider: currentProvider, caps: result.data });
+            setOpenPermissionsWhenReady(true);
+          } else setCommandError("Could not load permission modes for this Provider.");
+        }
       } else {
         const modes: Record<string, PermissionMode> = { ask: "ask", "auto-edit": "auto-edit", full: "full-access" };
         const mode = modes[slash.arg];
         if (!mode) setCommandError("Choose ask, auto-edit, or full.");
-        else if (!offeredModes.some((item) => item.mode === mode)) {
-          setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
-        } else void handlePermissionChange(mode);
+        else {
+          const result = providerCaps ? null : await commands.getProviderCapabilities(currentProvider);
+          const supported = providerCaps?.supportedPermissionModes ?? (result?.status === "ok" ? result.data.supportedPermissionModes : null);
+          if (!supported) setCommandError("Could not load permission modes for this Provider.");
+          else if (!supported.includes(mode)) setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
+          else void handlePermissionChange(mode);
+        }
       }
       handleInputChange("");
       return;
@@ -994,7 +1012,8 @@ export function ThreadView({
               <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
               <ChevronDownIcon size={12} className="cv" />
             </button>
-            <div ref={permissionControlRef}><Dropdown
+            <Dropdown
+              triggerRef={permissionControlRef}
               label="Permission mode"
               triggerClassName="cbtn compact"
               minMenuWidth={200}
@@ -1005,7 +1024,7 @@ export function ThreadView({
                 return { value: item.mode, label: item.label, icon: <PermIcon size={14} /> };
               })}
               onChange={(mode) => void handlePermissionChange(mode)}
-            /></div>
+            />
           </div>
           {imagesOffered && (
             <>

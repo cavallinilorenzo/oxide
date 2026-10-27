@@ -9,6 +9,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
 let root: Root;
 const onChanged = vi.fn();
+const onBack = vi.fn();
 
 function detail(overrides: Partial<PullRequestDetail> = {}): PullRequestDetail {
   return {
@@ -65,11 +66,12 @@ afterEach(async () => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   onChanged.mockReset();
+  onBack.mockReset();
 });
 
 async function render() {
   await act(async () =>
-    root.render(<PullRequestReview projectId={1} number={174} refreshKey={0} onBack={() => {}} onChanged={onChanged} onReviewFiles={() => {}} />),
+    root.render(<PullRequestReview projectId={1} number={174} refreshKey={0} onBack={onBack} onChanged={onChanged} onReviewFiles={() => {}} />),
   );
 }
 const button = (name: string | RegExp) =>
@@ -142,6 +144,52 @@ it("preselects the merge method GitHub's own merge box would, not the first allo
   await click(button(/Squash and merge/));
   expect(merge).toHaveBeenCalledWith(1, 174, "squash", false, false);
   expect(onChanged).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the merge button coloured while merging, then confirms and returns to the list", async () => {
+  vi.useFakeTimers();
+  let finish!: () => void;
+  vi.spyOn(commands, "mergePullRequest").mockReturnValue(
+    new Promise((resolve) => (finish = () => resolve({ status: "ok", data: null }))),
+  );
+  await render();
+  await click(button(/Squash and merge/));
+  const merging = button(/Merging/);
+  expect(merging.disabled).toBe(true);
+  expect(merging.classList.contains("pending")).toBe(true);
+  await act(async () => finish());
+  expect(host.querySelector(".pr-outcome.merged")!.textContent).toContain("Merged");
+  expect(onBack).not.toHaveBeenCalled();
+  await act(async () => void vi.advanceTimersByTime(1500));
+  expect(onBack).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+it("closes a pull request without merging it, then returns to the list", async () => {
+  vi.useFakeTimers();
+  const close = vi.spyOn(commands, "closePullRequest").mockResolvedValue({ status: "ok", data: null });
+  const merge = vi.spyOn(commands, "mergePullRequest");
+  await render();
+  await click(button(/^\s*Close /));
+  expect(close).toHaveBeenCalledWith(1, 174);
+  expect(merge).not.toHaveBeenCalled();
+  expect(host.querySelector(".pr-outcome.closed")!.textContent).toContain("Closed");
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  await act(async () => void vi.advanceTimersByTime(1500));
+  expect(onBack).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+it("stays on the pull request and shows the error when closing fails", async () => {
+  vi.spyOn(commands, "closePullRequest").mockResolvedValue({
+    status: "error",
+    error: { message: "Could not close" } as never,
+  });
+  await render();
+  await click(button(/^\s*Close /));
+  expect(host.querySelector(".pr-outcome")).toBeNull();
+  expect(host.querySelector(".pr-error")!.textContent).toContain("Could not close");
+  expect(onBack).not.toHaveBeenCalled();
 });
 
 it("keeps 'delete branch' in the merge options and sends the choice with the merge", async () => {

@@ -159,6 +159,11 @@ if args[:2] == ["pr", "merge"]:
     save()
     sys.exit(0)
 
+if args[:2] == ["pr", "close"]:
+    by_number(number_arg())["state"] = "CLOSED"
+    save()
+    sys.exit(0)
+
 if args[:2] == ["pr", "checkout"]:
     head = by_number(number_arg())["headRefName"]
     for cmd in (

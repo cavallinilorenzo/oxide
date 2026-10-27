@@ -705,6 +705,22 @@ fn merge_uses_an_allowed_method_and_can_delete_the_branch() {
 }
 
 #[test]
+fn closing_a_pull_request_leaves_the_open_list_without_merging() {
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    f.core.close_pull_request(f.project.id, 5).unwrap();
+    let closes: Vec<_> = f
+        .gh_calls()
+        .into_iter()
+        .filter(|c| c[..2] == ["pr", "close"])
+        .collect();
+    assert_eq!(closes, [["pr", "close", "5"]]);
+    assert!(f.gh_calls().iter().all(|c| c[..2] != ["pr", "merge"]));
+    let open = f.core.list_pull_requests(f.project.id, false, "").unwrap();
+    assert!(open.is_empty());
+}
+
+#[test]
 fn detail_reports_who_reviews_who_is_assigned_and_whether_it_can_merge() {
     use oxide_core::{MergeState, ReviewDecision, ReviewState};
     let f = fixture();

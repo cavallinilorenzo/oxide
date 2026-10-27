@@ -300,7 +300,7 @@ function CreateIssueView({ projectId, onBack, onCreated }: CreateIssueViewProps)
           onChange={(e) => setBody(e.target.value)}
         />
         <div className="pr-actions">
-          <button type="submit" disabled={busy || !canSubmitIssue(title)}>
+          <button type="submit" className={busy ? "pending" : undefined} disabled={busy || !canSubmitIssue(title)}>
             {busy ? "Creating…" : "Submit new issue"}
           </button>
           <button type="button" onClick={onBack} disabled={busy}>
@@ -453,7 +453,7 @@ function IssueDetailView({
         )}
         <button onClick={() => void handleOpenOnGithub()}>Open on GitHub</button>
         {issue.state === "OPEN" && (
-          <button onClick={() => void handleCloseIssue()} disabled={busy}>
+          <button className={busy ? "pending" : undefined} onClick={() => void handleCloseIssue()} disabled={busy}>
             {busy ? "Closing…" : "Close issue"}
           </button>
         )}
@@ -484,7 +484,7 @@ function IssueDetailView({
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
           />
-          <button type="submit" disabled={busy || !canSubmitComment(commentText)}>
+          <button type="submit" className={busy ? "pending" : undefined} disabled={busy || !canSubmitComment(commentText)}>
             {busy ? "Posting…" : "Comment"}
           </button>
         </form>

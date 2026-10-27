@@ -1545,6 +1545,11 @@ impl Core {
         })
     }
 
+    /// Closes a pull request on GitHub without merging it.
+    pub fn close_pull_request(&self, project_id: u32, number: u32) -> Result<()> {
+        github::close_pull_request(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
     /// Checks a pull request's branch out in the main checkout, under the
     /// branch picker's rules: Git's refusal is the error, and it is refused
     /// while a Thread is working.

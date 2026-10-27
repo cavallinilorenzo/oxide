@@ -12,7 +12,7 @@ import {
   MarkGithubIcon,
   SearchIcon,
 } from "@primer/octicons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   commands,
   type GitStatus,
@@ -25,7 +25,7 @@ import {
 import { Avatar } from "./Avatar";
 import { Checks } from "./PullRequestChecks";
 import { Markdown } from "./PullRequestMarkdown";
-import { MergeFooter, MergeStatus } from "./PullRequestMerge";
+import { MergeFooter, MergeStatus, Outcome, type Pending, Working } from "./PullRequestMerge";
 import { NO_EDIT, PullRequestPeople, ReviewStateIcon } from "./PullRequestPeople";
 import { defaultMergeMethod, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
 
@@ -181,13 +181,12 @@ interface PullRequestReviewProps {
   projectId: number;
   number: number;
   refreshKey: number;
-  /** Absent when the pull request is the branch's own: there is no list to go back to. */
-  onBack?: () => void;
+  onBack: () => void;
   onChanged: () => void;
   onReviewFiles: (number: number) => void;
 }
 
-type Outcome = { status: "ok" } | { status: "error"; error: { message: string } };
+type Result = { status: "ok" } | { status: "error"; error: { message: string } };
 
 export function PullRequestReview({
   projectId,
@@ -200,7 +199,20 @@ export function PullRequestReview({
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const busy = pending !== null;
+  // Set once the pull request was merged or closed: a short confirmation, then the list.
+  const [done, setDone] = useState<"merged" | "closed" | null>(null);
+  const backRef = useRef(onBack);
+  useEffect(() => {
+    backRef.current = onBack;
+  });
+  // The confirmation is shown for a moment, then the list of pull requests comes back.
+  useEffect(() => {
+    if (done === null) return;
+    const timer = setTimeout(() => backRef.current(), 1400);
+    return () => clearTimeout(timer);
+  }, [done]);
   const [comment, setComment] = useState("");
   const [method, setMethod] = useState<MergeMethod | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
@@ -235,13 +247,9 @@ export function PullRequestReview({
   const loadedPr = loaded.state === "ready" ? loaded.detail.pullRequest : null;
   const nav = (
     <div className="pr-nav">
-      {onBack ? (
-        <button className="pr-back" onClick={onBack}>
-          <ArrowLeftIcon size={14} /> Pull requests
-        </button>
-      ) : (
-        <span className="pr-nav-title">This branch</span>
-      )}
+      <button className="pr-back" onClick={onBack}>
+        <ArrowLeftIcon size={14} /> Pull requests
+      </button>
       <span className="grow" />
       {loadedPr && (
         <button
@@ -287,17 +295,17 @@ export function PullRequestReview({
   // Only a wait (checks, review) can be left to GitHub; conflicts and a stale branch need the user.
   const canAutoMerge = phase === "open" && method !== null && detail.mergeState === "blocked";
 
-  async function act(run: () => Promise<Outcome>) {
-    setBusy(true);
+  async function act(kind: Pending, run: () => Promise<Result>) {
+    setPending(kind);
     setError(null);
     const result = await run();
-    setBusy(false);
+    setPending(null);
     if (result.status === "error") setError(result.error.message);
     return result.status === "ok";
   }
 
   async function sendComment() {
-    if (await act(() => commands.commentPullRequest(projectId, number, comment))) {
+    if (await act("comment", () => commands.commentPullRequest(projectId, number, comment))) {
       setComment("");
       setReload((n) => n + 1);
     }
@@ -305,34 +313,42 @@ export function PullRequestReview({
 
   async function merge() {
     if (method === null) return;
-    if (await act(() => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
+    if (await act("merge", () => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
       setMerged(true);
+      setDone("merged");
       onChanged();
     }
   }
 
   async function mergeWhenReady() {
     if (method === null) return;
-    if (await act(() => commands.mergePullRequest(projectId, number, method, deleteBranch, true))) setAutoMerge(true);
+    if (await act("auto", () => commands.mergePullRequest(projectId, number, method, deleteBranch, true))) setAutoMerge(true);
+  }
+
+  async function closePullRequest() {
+    if (await act("close", () => commands.closePullRequest(projectId, number))) {
+      setDone("closed");
+      onChanged();
+    }
   }
 
   async function checkout() {
-    if (await act(() => commands.checkoutPullRequest(projectId, number))) onChanged();
+    if (await act("checkout", () => commands.checkoutPullRequest(projectId, number))) onChanged();
   }
-
   /** Runs a change to the pull request on GitHub, then shows its new state. */
-  async function change(run: () => Promise<Outcome>) {
-    const ok = await act(run);
+  async function change(kind: Pending, run: () => Promise<Result>) {
+    const ok = await act(kind, run);
     if (ok) setReload((n) => n + 1);
     return ok;
   }
 
-  const setDraft = (draft: boolean) => change(() => commands.setPullRequestDraft(projectId, number, draft));
+  const setDraft = (draft: boolean) => change("ready", () => commands.setPullRequestDraft(projectId, number, draft));
   const edit = (partial: Partial<PullRequestEdit>) =>
-    change(() => commands.editPullRequest(projectId, number, { ...NO_EDIT, ...partial }));
+    change("edit", () => commands.editPullRequest(projectId, number, { ...NO_EDIT, ...partial }));
 
   return (
     <div className="pr-review">
+      {done && <Outcome kind={done} />}
       {nav}
       <div className="pr-scroll">
         <header className="pr-hero">
@@ -375,18 +391,26 @@ export function PullRequestReview({
           </button>
           {live && (
             <button
+              className={pending === "checkout" ? "pending" : undefined}
               disabled={busy || git.pickerDisabledReason !== null}
               title={git.pickerDisabledReason ?? "Check this branch out in the main checkout"}
               onClick={() => void checkout()}
             >
-              Check out
+              <Working on={pending === "checkout"} label="Checking out…">
+                Check out
+              </Working>
             </button>
           )}
         </div>
         {live && git.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
 
         {detail.body.trim() && <Description body={detail.body} />}
-        {live && <MergeStatus requirements={requirements} busy={busy} onUpdateBranch={() => void change(() => commands.updatePullRequestBranch(projectId, number))} />}
+        {live && <MergeStatus
+            requirements={requirements}
+            busy={busy}
+            updating={pending === "update"}
+            onUpdateBranch={() => void change("update", () => commands.updatePullRequestBranch(projectId, number))}
+          />}
         <Checks checks={detail.checks} onOpen={(url) => void openLink(url)} />
         <PullRequestPeople
           projectId={projectId}
@@ -429,10 +453,13 @@ export function PullRequestReview({
               />
               <button
                 type="submit"
+                className={pending === "comment" ? "pending" : undefined}
                 disabled={busy || !comment.trim()}
                 title={`Send (${shortcutLabel}${shortcutLabel === "⌘" ? "↩" : "Enter"})`}
               >
-                Comment
+                <Working on={pending === "comment"} label="Commenting…">
+                  Comment
+                </Working>
               </button>
             </div>
           </form>
@@ -453,6 +480,7 @@ export function PullRequestReview({
           head={pr.head}
           deleteBranch={deleteBranch}
           busy={busy}
+          pending={pending}
           canMerge={canMerge}
           canAutoMerge={canAutoMerge}
           autoMerge={autoMerge}
@@ -463,6 +491,7 @@ export function PullRequestReview({
           onMerge={() => void merge()}
           onAutoMerge={() => void mergeWhenReady()}
           onReady={() => void setDraft(false)}
+          onClose={() => void closePullRequest()}
         />
       ) : (
         <footer className="pr-merge" aria-label="Merge">

@@ -1379,6 +1379,20 @@ async fn merge_pull_request(
     .await
 }
 
+/// Closes a pull request without merging it.
+#[tauri::command]
+#[specta::specta]
+async fn close_pull_request(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.close_pull_request(project_id, number)
+    })
+    .await
+}
+
 /// Opens a GitHub link, such as a check's run, in the system browser.
 #[tauri::command]
 #[specta::specta]
@@ -2045,6 +2059,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull_request_detail,
         comment_pull_request,
         merge_pull_request,
+        close_pull_request,
         checkout_pull_request,
         open_link,
         set_pull_request_draft,

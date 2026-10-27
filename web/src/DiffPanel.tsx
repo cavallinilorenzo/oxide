@@ -1,6 +1,6 @@
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
-import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, UnfoldIcon } from "@primer/octicons-react";
+import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon, UnfoldIcon } from "@primer/octicons-react";
 import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, type PanelScope } from "./diffScope";
@@ -256,11 +256,11 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
             <span className="commit-count">
               {selected.length === 0 ? "No files selected" : `${files.filter((f) => !unchecked.has(f.path)).length} of ${files.length} files`}
             </span>
-            <button type="submit" className="btn" disabled={!ready}>
-              <GitCommitIcon size={14} /> Commit
+            <button type="submit" className={`btn${committing ? " pending" : ""}`} disabled={!ready}>
+              {committing ? <SyncIcon size={14} className="spin" /> : <GitCommitIcon size={14} />} Commit
             </button>
-            <button type="button" className="btn primary" disabled={!ready} onClick={() => void runCommit(true)} title={`Commit & Push (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"})`}>
-              <RepoPushIcon size={14} /> Commit &amp; Push
+            <button type="button" className={`btn primary${push.busy ? " pending" : ""}`} disabled={!ready} onClick={() => void runCommit(true)} title={`Commit & Push (${shortcutLabel}${shortcutLabel === "\u2318" ? "\u21a9" : "Enter"})`}>
+              {push.busy ? <SyncIcon size={14} className="spin" /> : <RepoPushIcon size={14} />} Commit &amp; Push
             </button>
           </div>
           {(commitError ?? push.error) && (

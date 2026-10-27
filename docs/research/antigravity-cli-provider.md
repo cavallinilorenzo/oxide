@@ -69,3 +69,11 @@ CLI-owned names and aliases. `agy -p /help --output-format json` also returns a
 structured `command.data.commands` list with names and aliases. Both sources
 are used to exclude collisions from the passthrough catalog. This list must be reviewed when supporting newer versions.
 The probe does not establish whether separate legacy custom commands are included.
+
+The two JSON probes have been verified with 1.4.8, not every version in the
+pinned 1.4.x range. If the CLI does not return the expected command payload,
+Oxide falls back to its own commands. The existing catalog API probes the project
+root rather than a dispatched Thread's worktree, so differing worktree skills
+are not yet represented accurately. The CLI setting `disableSlashCommands` may
+prevent the probes from executing as commands; its effect on these probes has
+not been verified.

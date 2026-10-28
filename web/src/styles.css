@@ -1119,6 +1119,7 @@ html.macos .header,
 .effort-select-row { display: flex; flex-direction: column; gap: 6px; }
 .effort-options { display: flex; flex-direction: column; gap: 2px; }
 .effort-option { width: 100%; justify-content: space-between; min-height: 32px; padding: 6px 8px; border-color: transparent; background: transparent; text-align: left; }
+.effort-option-trail { display: inline-flex; align-items: center; gap: 8px; }
 .effort-option:hover:not(:disabled), .effort-option[aria-selected="true"] { background: var(--bg4); border-color: transparent; }
 .effort-option[aria-selected="true"] { color: var(--acc2); }
 .model-picker-layout { display: flex; height: 380px; }

@@ -36,12 +36,13 @@ import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
-import { isClearCommand, stopsTurn } from "./shortcuts";
+import { isClearCommand, isEffortMenuShortcut, isModelPickerShortcut, modelDigitShortcut, shortcutLabel, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { loadDraftModel, saveDraftModel } from "./draftModel";
-import { parseSlashCommand, resolveDefaultModel } from "./modelPicker";
+import { parseSlashCommand, resolveDefaultModel, resolveFavourite } from "./modelPicker";
+import { cachedCatalogs } from "./modelCatalogCache";
 import { readableModel } from "./headerLines";
 import { filterSlashCommands, pickSlashCommand, slashQuery } from "./slashMenu";
 import {
@@ -639,6 +640,59 @@ export function ThreadView({
     }
   };
 
+  const closeModelPicker = useCallback(() => setModelPickerOpen(false), []);
+  /** Where focus was when a shortcut opened the picker, so closing it by keyboard hands focus back. */
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (modelPickerOpen) return;
+    const target = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    if (target?.isConnected) target.focus();
+  }, [modelPickerOpen]);
+
+  // Model and Effort shortcuts act on the latest state without re-subscribing on every render.
+  const modelShortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    modelShortcutRef.current = (e) => {
+      const toggle = isModelPickerShortcut(e) ? "model" : isEffortMenuShortcut(e) ? "effort" : null;
+      if (toggle) {
+        e.preventDefault();
+        if (isTurnActive || sending) return;
+        if (modelPickerOpen && modelPickerMode === toggle) {
+          setModelPickerOpen(false);
+          return;
+        }
+        if (!modelPickerOpen && document.activeElement instanceof HTMLElement) {
+          restoreFocusRef.current = document.activeElement;
+        }
+        setModelPickerMode(toggle);
+        setModelPickerOpen(true);
+        return;
+      }
+      const index = modelDigitShortcut(e);
+      if (index === null || modelPickerOpen) return;
+      e.preventDefault();
+      if (isTurnActive || sending) return;
+      void (async () => {
+        const [favourites, catalogs] = await Promise.all([
+          commands.getFavouriteModels(),
+          cachedCatalogs(["claude", "codex", "antigravity", ...(currentProvider === "fake" ? ["fake"] : [])]),
+        ]);
+        if (favourites.status !== "ok") return;
+        const target = resolveFavourite(index, catalogs, favourites.data, currentEffort, currentProvider);
+        if (!target) return;
+        const locked = turnCount > 0 && !(providerCaps?.midThreadModelSwitch ?? true);
+        if (target.provider === currentProvider && locked) return;
+        await handleSelectModelAndEffort(target.provider, target.model, target.effort);
+      })();
+    };
+  });
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => modelShortcutRef.current(e);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   useEffect(() => {
     let active = true;
     if (currentProvider === "claude") {
@@ -1021,7 +1075,7 @@ export function ThreadView({
               }}
               disabled={isTurnActive || sending}
               aria-label={`Model: ${displayModel}`}
-              title={`Model: ${displayModel} (/model)`}
+              title={`Model: ${displayModel} (${shortcutLabel}⇧M, /model)`}
             >
               <ProviderMark provider={currentProvider} size={14} />
               <span className="t">{displayModel}</span>
@@ -1042,7 +1096,7 @@ export function ThreadView({
               disabled={isTurnActive || sending}
               aria-label="Effort"
               aria-expanded={modelPickerOpen && modelPickerMode === "effort"}
-              title={`Effort: ${currentEffort || "Default"} (/effort)`}
+              title={`Effort: ${currentEffort || "Default"} (${shortcutLabel}⇧E, /effort)`}
             >
               <LightBulbIcon size={14} />
               <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
@@ -1119,7 +1173,7 @@ export function ThreadView({
       {modelPickerOpen && (
         <ModelEffortPicker
           open={modelPickerOpen}
-          onClose={() => setModelPickerOpen(false)}
+          onClose={closeModelPicker}
           currentProvider={currentProvider}
           currentModel={currentModel}
           currentEffort={currentEffort}

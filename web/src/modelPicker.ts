@@ -155,3 +155,50 @@ export function resolveDefaultModel(
     effort: effort ?? chosen.defaultEffort ?? chosen.supportedEfforts[0] ?? null,
   };
 }
+
+/** Provider order used wherever catalogs are merged, so the Favourites list is stable. */
+const PROVIDER_ORDER = ["claude", "codex", "antigravity"];
+
+/** The models the Favourites tab shows, in its order: current ones first, then legacy ones. */
+export function favouriteModelList(
+  catalogs: Record<string, ModelInfo[]>,
+  favourites: string[],
+  effort: string | null
+): ModelInfo[] {
+  const providers = Object.keys(catalogs).sort((a, b) => {
+    const rank = (p: string) => (PROVIDER_ORDER.includes(p) ? PROVIDER_ORDER.indexOf(p) : PROVIDER_ORDER.length);
+    return rank(a) - rank(b);
+  });
+  const favouriteModels = providers
+    .flatMap((p) => catalogs[p] ?? [])
+    .filter((model) => favourites.some((id) => modelFamilyId(id) === modelFamilyId(model.id)));
+  const { current, legacy } = filterModels(collapseEffortVariants(favouriteModels, effort), "");
+  return [...current, ...legacy];
+}
+
+/** What choosing `model` means: its Provider, and the current Effort if it supports it, else its default. */
+export function chooseModel(
+  model: ModelInfo,
+  catalogs: Record<string, ModelInfo[]>,
+  currentEffort: string | null,
+  fallbackProvider: string
+): { provider: string; model: string; effort: string | null } {
+  const provider =
+    Object.entries(catalogs).find(([, list]) => list.some((m) => m.id === model.id))?.[0] ?? fallbackProvider;
+  const effort = model.supportedEfforts.includes(currentEffort || "")
+    ? currentEffort
+    : model.defaultEffort ?? (model.supportedEfforts[0] || null);
+  return { provider, model: model.id, effort };
+}
+
+/** Favourite number `index` (1-based) as a Provider, model and Effort, or null when there is no such Favourite. */
+export function resolveFavourite(
+  index: number,
+  catalogs: Record<string, ModelInfo[]>,
+  favourites: string[],
+  currentEffort: string | null,
+  fallbackProvider: string
+): { provider: string; model: string; effort: string | null } | null {
+  const model = applyModelShortcut(index, favouriteModelList(catalogs, favourites, currentEffort));
+  return model ? chooseModel(model, catalogs, currentEffort, fallbackProvider) : null;
+}

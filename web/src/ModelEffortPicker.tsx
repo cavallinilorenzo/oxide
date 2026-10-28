@@ -1,11 +1,14 @@
-import { shortcutLabel } from "./shortcuts";
+import { effortDigitShortcut, modelDigitShortcut, shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
+import { catalogCache } from "./modelCatalogCache";
 import {
   applyModelShortcut,
+  chooseModel,
   collapseEffortVariants,
+  favouriteModelList,
   filterModels,
   modelFamilyId,
   selectedModelInfo,
@@ -17,8 +20,6 @@ const PROVIDERS = [
   { id: "antigravity", name: "Antigravity" },
 ] as const;
 
-/** Last known catalog per Provider, so reopening the picker is instant. */
-const catalogCache = new Map<string, ModelInfo[]>();
 const TAB_KEY = "oxide:model-picker-tab";
 
 function rememberedTab(fallback: string): string {
@@ -203,11 +204,7 @@ export function ModelEffortPicker({
   // Determine models for the current tab
   const tabModels = useMemo(() => {
     if (activeTab === "favourites") {
-      const allModels = Object.values(catalogs).flat();
-      const favouriteModels = allModels.filter((model) =>
-        favourites.some((id) => modelFamilyId(id) === modelFamilyId(model.id))
-      );
-      return collapseEffortVariants(favouriteModels, selectedEffort);
+      return favouriteModelList(catalogs, favourites, selectedEffort);
     }
     return collapseEffortVariants(catalogs[activeTab] || [], selectedEffort);
   }, [activeTab, catalogs, favourites, selectedEffort]);
@@ -230,18 +227,12 @@ export function ModelEffortPicker({
   const handleSelectModel = useCallback(
     (model: ModelInfo, isLocked: boolean) => {
       if (isLocked) return;
-      const providerForModel =
+      const choice =
         activeTab === "favourites"
-          ? (Object.entries(catalogs).find(([, list]) =>
-              list.some((m) => m.id === model.id)
-            )?.[0] ?? currentProvider)
-          : activeTab;
+          ? chooseModel(model, catalogs, selectedEffort, currentProvider)
+          : { ...chooseModel(model, {}, selectedEffort, activeTab), model: model.id };
 
-      const effortToUse = model.supportedEfforts.includes(selectedEffort || "")
-        ? selectedEffort
-        : model.defaultEffort ?? (model.supportedEfforts[0] || null);
-
-      onSelectModelAndEffort(providerForModel, model.id, effortToUse);
+      onSelectModelAndEffort(choice.provider, choice.model, choice.effort);
       onClose();
     },
     [
@@ -263,7 +254,9 @@ export function ModelEffortPicker({
     }
   };
 
-  // Keyboard shortcut listener: ⌘1-9 and Escape
+  const effortChoices = activeModelInfo?.supportedEfforts ?? [];
+
+  // Keyboard shortcut listener: ⌘1-9 (1-9 in the Effort menu) and Escape
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -274,9 +267,18 @@ export function ModelEffortPicker({
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+      if (effortMode) {
+        const index = effortDigitShortcut(e);
+        if (index === null) return;
         e.preventDefault();
-        const index = parseInt(e.key, 10);
+        const effort = effortChoices[index - 1];
+        if (effort) handleSelectEffort(effort);
+        return;
+      }
+
+      const index = modelDigitShortcut(e);
+      if (index !== null) {
+        e.preventDefault();
         const target = applyModelShortcut(index, flatVisible);
         if (target) {
           const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
@@ -297,6 +299,8 @@ export function ModelEffortPicker({
     effortMode,
     modelSwitchLocked,
     handleSelectModel,
+    handleSelectEffort,
+    effortChoices,
     onClose,
   ]);
 
@@ -351,7 +355,7 @@ export function ModelEffortPicker({
                 options[next]?.focus();
               }}
             >
-              {efforts.map((effort) => (
+              {efforts.map((effort, index) => (
                 <button
                   key={effort}
                   type="button"
@@ -363,7 +367,10 @@ export function ModelEffortPicker({
                   onClick={() => handleSelectEffort(effort)}
                 >
                   <span>{effort.charAt(0).toUpperCase() + effort.slice(1)}</span>
-                  {effortValue === effort && <CheckIcon size={16} />}
+                  <span className="effort-option-trail">
+                    {effortValue === effort && <CheckIcon size={16} />}
+                    {index < 9 && <span className="model-shortcut">{index + 1}</span>}
+                  </span>
                 </button>
               ))}
             </div>

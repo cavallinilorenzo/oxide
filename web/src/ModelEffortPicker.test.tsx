@@ -25,9 +25,9 @@ it("shows only the selected Codex model's reasoning levels", async () => {
     currentProvider="codex" currentModel={model} currentEffort="medium" turnCount={0}
     midThreadModelSwitch onSelectModelAndEffort={() => {}} initialMode="effort" />);
   await act(async () => render("gpt-6-luna"));
-  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low", "Medium", "High", "Xhigh", "Max"]);
+  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low1", "Medium2", "High3", "Xhigh4", "Max5"]);
   await act(async () => render("gpt-6.1-terra"));
-  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low", "Medium", "High", "Xhigh", "Max", "Ultra"]);
+  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low1", "Medium2", "High3", "Xhigh4", "Max5", "Ultra6"]);
 });
 
 it("returns to Favourites when the model picker is reopened", async () => {

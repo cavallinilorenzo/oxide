@@ -63,18 +63,20 @@ export function ModelEffortPicker({
   const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>(() =>
     Object.fromEntries(catalogCache)
   );
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState<string[]>(PROVIDERS.map((p) => p.id));
+  const [detecting, setDetecting] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
   const tabs = useMemo(
-    () => [...PROVIDERS.map((p) => p.id as string), ...(currentProvider === "fake" ? ["fake"] : [])],
-    [currentProvider]
+    () => ["favourites", ...PROVIDERS.filter((p) => detecting || !unavailable.includes(p.id)).map((p) => p.id as string), ...(currentProvider === "fake" ? ["fake"] : [])],
+    [currentProvider, unavailable, detecting]
   );
   const ctx = useMemo<PickerContext>(
-    () => ({ tabs, catalogs, currentProvider, currentModel, locked: modelSwitchLocked }),
-    [tabs, catalogs, currentProvider, currentModel, modelSwitchLocked]
+    () => ({ tabs, catalogs, currentProvider, currentModel, locked: modelSwitchLocked, favourites, unavailable }),
+    [tabs, catalogs, currentProvider, currentModel, modelSwitchLocked, favourites, unavailable]
   );
   const ctxRef = useRef(ctx);
   useLayoutEffect(() => { ctxRef.current = ctx; });
@@ -106,15 +108,22 @@ export function ModelEffortPicker({
     let active = true;
 
     async function load() {
-      const favRes = await commands.getFavouriteModels();
-      if (active && favRes.status === "ok") {
+      const detected = await Promise.all(PROVIDERS.map(async ({ id }) => {
+        try {
+          const result = await commands.detectProvider(id);
+          return { id, installed: result.status === "ok" && result.data.installed };
+        } catch { return { id, installed: false }; }
+      }));
+      if (!active) return;
+      setUnavailable(detected.filter((p) => !p.installed).map((p) => p.id));
+      setDetecting(false);
+      const favRes = await commands.getFavouriteModels().catch(() => null);
+      if (active && favRes?.status === "ok") {
         setFavourites(favRes.data);
       }
 
       const providersToFetch = [
-        "claude",
-        "codex",
-        "antigravity",
+        ...detected.filter((p) => p.installed).map((p) => p.id),
         ...(currentProvider === "fake" ? ["fake"] : []),
       ];
 
@@ -126,6 +135,7 @@ export function ModelEffortPicker({
       // Each Provider lands as soon as it answers; the slow ones (spawning a CLI)
       // never hold up the others. Cached lists show instantly, then refresh quietly.
       let pending = providersToFetch.length;
+      if (pending === 0) setLoading(false);
       if (!providersToFetch.every((p) => catalogCache.has(p))) setLoading(true);
       await Promise.all(
         providersToFetch.map(async (p) => {
@@ -136,6 +146,8 @@ export function ModelEffortPicker({
             }
             const fresh = await commands.getModelCatalog(p, true);
             if (fresh.status === "ok" && fresh.data.length > 0) apply(p, fresh.data);
+          } catch {
+            // A failed refresh leaves the cached catalog available.
           } finally {
             pending -= 1;
             if (active && pending === 0) setLoading(false);
@@ -249,7 +261,7 @@ export function ModelEffortPicker({
     const shortcutNumber = index + 1 <= 9 ? index + 1 : null;
     return (
       <div
-        key={m.id}
+    key={`${row.provider}:${m.id}`}
         id={optionId(index)}
         className={`model-row ${legacy ? "legacy-row" : ""} ${row.isCurrent ? "selected" : ""} ${
           isHighlighted ? "highlighted" : ""
@@ -265,7 +277,8 @@ export function ModelEffortPicker({
           <div className="model-name-row">
             <span className="model-name">{m.name}</span>
             {row.isCurrent && <span className="current-badge">Active</span>}
-            {row.locked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
+            {state.tab === "favourites" && <span className="dim">{capitalise(row.provider)}</span>}
+            {row.locked && <span className="locked-badge"><LockIcon size={10} /> {unavailable.includes(row.provider) ? "Not installed" : "Locked"}</span>}
           </div>
           {m.description && <div className="model-desc">{m.description}</div>}
         </div>
@@ -298,17 +311,19 @@ export function ModelEffortPicker({
       <div className="modal model-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="model-picker-header">
           <nav className="provider-tabs" aria-label="Providers">
-            {tabs.map((id) => (
+            {["favourites", ...PROVIDERS.map((p) => p.id), ...(currentProvider === "fake" ? ["fake"] : [])].map((id) => (
               <button
                 key={id}
                 type="button"
                 tabIndex={-1}
                 className={`provider-tab ${state.tab === id ? "active" : ""}`}
                 aria-current={state.tab === id}
+                disabled={unavailable.includes(id)}
+                title={unavailable.includes(id) ? detecting ? "Checking installation…" : `${capitalise(id)} is not installed on this system` : undefined}
                 onMouseDown={keepFocus}
                 onClick={() => dispatch({ type: "set-tab", tab: id })}
               >
-                {id !== "fake" && <ProviderMark provider={id} size={14} />}
+                {id === "favourites" ? <StarIcon size={14} /> : id !== "fake" && <ProviderMark provider={id} size={14} />}
                 <span>{PROVIDERS.find((p) => p.id === id)?.name ?? capitalise(id)}</span>
               </button>
             ))}
@@ -332,9 +347,9 @@ export function ModelEffortPicker({
 
         <div className="model-picker-body">
           <div className="models-list-scroll">
-            {loading && flatVisible.length === 0 && <div className="models-loading">Loading catalog...</div>}
+            {loading && flatVisible.length === 0 && <div className="models-loading" role="status">{detecting ? "Checking installed Providers…" : "Loading catalog…"}</div>}
 
-            {!loading && flatVisible.length === 0 && <div className="models-empty">No models found.</div>}
+            {!loading && flatVisible.length === 0 && <div className="models-empty">{state.tab === "favourites" ? "Star a model in a Provider tab to keep it here." : "No models found."}</div>}
 
             <div
               ref={listRef}

@@ -349,6 +349,7 @@ impl Gh {
             )
             .ok_or(GhError::Missing)?,
         );
+        oxide_provider::process::hide_console(&mut command);
         // cmd.exe cannot safely carry newlines in a batch argument. gh accepts body text
         // on stdin, preserving descriptions and comments when it is installed as a shim.
         #[cfg(windows)]

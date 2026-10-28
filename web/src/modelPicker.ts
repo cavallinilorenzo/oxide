@@ -217,6 +217,8 @@ export interface PickerContext {
   currentModel: string | null;
   /** The Thread has Turns and its Provider can't switch Model mid-Thread. */
   locked: boolean;
+  favourites?: string[];
+  unavailable?: string[];
 }
 
 export interface PickerState {
@@ -250,6 +252,15 @@ export function pickerRows(
   tab: string,
   effort: string | null
 ): { current: PickerRow[]; legacy: PickerRow[] } {
+  if (tab === "favourites") {
+    const providers = [...PROVIDER_ORDER, ...Object.keys(ctx.catalogs).filter((p) => !PROVIDER_ORDER.includes(p))];
+    const rows = providers.flatMap((provider) => {
+      const group = pickerRows(ctx, provider, effort);
+      return [...group.current, ...group.legacy].filter((row) =>
+        ctx.favourites?.some((id) => modelFamilyId(id) === modelFamilyId(row.model.id)));
+    });
+    return { current: rows.filter((r) => !r.model.isLegacy), legacy: rows.filter((r) => r.model.isLegacy) };
+  }
   const models = collapseEffortVariants(ctx.catalogs[tab] ?? [], effort);
   const toRow = (model: ModelInfo): PickerRow => {
     const provider = tab;
@@ -257,7 +268,7 @@ export function pickerRows(
       provider === ctx.currentProvider &&
       ctx.currentModel !== null &&
       modelFamilyId(model.id) === modelFamilyId(ctx.currentModel);
-    return { model, provider, isCurrent, locked: provider === ctx.currentProvider && ctx.locked && !isCurrent };
+    return { model, provider, isCurrent, locked: !!ctx.unavailable?.includes(provider) || (provider === ctx.currentProvider && ctx.locked && !isCurrent) };
   };
   const { current, legacy } = filterModels(models, "");
   return { current: current.map(toRow), legacy: legacy.map(toRow) };
@@ -319,6 +330,7 @@ export function pickerReduce(state: PickerState, action: PickerAction, ctx: Pick
       return pickerReduce(state, { type: "set-tab", tab }, ctx);
     }
     case "set-tab": {
+      if (!ctx.tabs.includes(action.tab)) return state;
       const moved = { ...state, tab: action.tab };
       return highlight(ctx, moved, startingFamily(ctx, moved));
     }
@@ -327,6 +339,7 @@ export function pickerReduce(state: PickerState, action: PickerAction, ctx: Pick
       return !row || row.locked || state.highlighted === action.family ? state : highlight(ctx, state, action.family);
     }
     case "sync":
+      if (!ctx.tabs.includes(state.tab)) return openPicker(ctx, ctx.tabs[0] ?? "favourites", state.effort);
       return highlightedRow(ctx, state) ? state : highlight(ctx, state, startingFamily(ctx, state));
   }
 }

@@ -32,6 +32,7 @@ function setup(opts: { threadId: number | null; status?: string; turnCount?: num
     if (command === "get_settings") return { settings: { defaultProvider: "claude", providers: {} }, errors: [] };
     if (command === "get_provider_capabilities") return { supportedPermissionModes: ["auto-edit"], midThreadModelSwitch: opts.midThread ?? true };
     if (command === "get_favourite_models") return opts.favourites ?? ["sonnet", "gpt", "haiku"];
+    if (command === "detect_provider") return { installed: true, available: true, authenticated: true, version: "1", warning: null };
     if (command === "get_model_catalog") return catalogs[(args as { provider: string }).provider] ?? [];
     if (command === "git_status") return { branch: "main" };
     if (command === "list_slash_commands") return [];
@@ -232,7 +233,11 @@ it("Tab and Shift+Tab cycle the Provider tabs", async () => {
   await key("Tab");
   expect(activeTab()).toContain("Antigravity");
   await key("Tab");
+  expect(activeTab()).toContain("Favourites");
+  await key("Tab");
   expect(activeTab()).toContain("Claude");
+  await key("Tab", { shiftKey: true });
+  expect(activeTab()).toContain("Favourites");
   await key("Tab", { shiftKey: true });
   expect(activeTab()).toContain("Antigravity");
 });

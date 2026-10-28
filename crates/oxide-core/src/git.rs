@@ -111,7 +111,8 @@ pub(crate) fn run(cwd: &Path, args: &[&str]) -> Result<String> {
 }
 
 pub(crate) fn run_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    let output = oxide_provider::process::hide_console(&mut command)
         .args(args)
         .current_dir(cwd)
         .envs(env.iter().copied())
@@ -421,10 +422,8 @@ pub fn push(cwd: &Path, allow_protected: bool) -> Result<()> {
                 .into(),
         ));
     }
-    if status.upstream.is_some() {
-        run(cwd, &["push"])?;
-    } else {
-        run(cwd, &["push", "-u", "origin", "HEAD"])?;
-    }
+    // A newly created branch can inherit main's upstream. Never let
+    // push.default or an inherited upstream choose a different branch.
+    run(cwd, &["push", "-u", "origin", "HEAD"])?;
     Ok(())
 }

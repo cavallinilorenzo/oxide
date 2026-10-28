@@ -638,8 +638,8 @@ html.macos .header,
 /* ── Terminal ─────────────────────────────────────────────── */
 .terminal-region { position: relative; display: flex; flex-direction: column; height: var(--terminal-height, 200px); min-height: 140px; flex: none; }
 .terminal-region[hidden] { display: none; }
-.terminal { height: 100%; min-height: 0; flex: 1; border-top: 1px solid var(--line); display: flex; flex-direction: column; background: #0a0b0e; }
-.terminal.terminal-hidden { display: none; }
+section.terminal { height: 100%; min-height: 0; flex: 1; border-top: 1px solid var(--line); display: flex; flex-direction: column; background: #0a0b0e; }
+section.terminal.terminal-hidden { display: none; }
 .terminal-label { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--dim); font-size: 12px; }
 .terminal-error { color: var(--red); font-size: 12px; margin-left: 8px; }
 .terminal-host { flex: 1; min-height: 0; padding: 6px 10px; background: #0a0b0e; }
@@ -1306,7 +1306,7 @@ html.macos .header,
 }
 
 .app-menu { display: flex; align-items: center; gap: 2px; flex: none; margin-left: -6px; }
-.app-menu button { padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: default; }
+.app-menu button { padding: 2px 7px; min-height: 24px; line-height: 20px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; cursor: default; }
 .app-menu button:hover, .app-menu button:focus-visible { background: var(--bg4); color: var(--fg-bright); }
 
 /* Keep actions comfortably inside narrow sidebars; shortcuts remain in their tooltips. */
@@ -1318,6 +1318,57 @@ html.macos .header,
 .app-menu-item { position: relative; }
 .app-menu-popup { position: absolute; top: calc(100% + 3px); left: 0; z-index: 120; min-width: 180px; padding: 6px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px #0009; }
 .app-menu .app-menu-popup button { display: flex; width: 100%; text-align: left; padding: 5px 8px; }
+
+/* The Project is still useful when no Thread is selected. */
+.project-overview { flex: 1; min-height: 0; overflow: auto; padding: clamp(24px, 5vw, 64px) clamp(20px, 4vw, 56px); }
+.project-overview-content { max-width: 760px; margin: auto; }
+.project-overview-mark { color: var(--dim); margin-bottom: 20px; }
+.project-overview h1 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 34px); line-height: 1.2; font-weight: 650; overflow-wrap: anywhere; }
+.project-overview-path { color: var(--dim); font: 12px var(--mono); margin: 0; overflow-wrap: anywhere; }
+.project-overview-intro { color: var(--dim); max-width: 55ch; margin: 24px 0 20px; line-height: 1.7; }
+.project-overview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.project-overview-summary { display: flex; gap: 24px; flex-wrap: wrap; padding: 24px 0; margin: 24px 0 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--dim); font-variant-numeric: tabular-nums; }
+.project-overview-recent h2 { font-size: 14px; font-weight: 600; margin: 28px 0 12px; }
+.project-overview-recent ul { list-style: none; padding: 0; margin: 0; }
+.project-overview-recent button { width: 100%; border: 0; background: transparent; padding: 12px 8px; text-align: left; }
+.project-overview-recent button > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.project-overview-recent time { font-size: 12px; }
+.project-overview-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.project-overview-links button { background: none; border: 0; color: var(--acc2); padding: 0 4px; }
+.provider-tab:disabled { opacity: .4; background: transparent; border-color: transparent; cursor: not-allowed; }
+.pr-new { padding: 12px var(--pr-pad); border-bottom: 1px solid var(--line); }
+.pr-new button { width: 100%; justify-content: center; }
+.pr-create { padding: 16px var(--pr-pad); overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 18px; }
+.pr-create > * { flex-shrink: 0; }
+.pr-compose-heading { display: flex; align-items: center; gap: 8px; }
+.pr-create h2 { font-size: 16px; margin: 0; }
+.pr-compose-branches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pr-compose-branches .mono { flex: 1 1 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pr-compose-branches label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pr-create select { min-width: 0; max-width: 100%; }
+.pr-create-title { display: flex; flex-direction: column; gap: 8px; font-weight: 600; }
+.pr-create-title input { width: 100%; }
+.pr-create-draft { display: flex; gap: 8px; align-items: center; }
+.pr-create > p { margin: 0; line-height: 1.6; }
+.pr-create > .primary { justify-content: center; flex: none; }
+.pr-create-error { color: var(--red); overflow-wrap: anywhere; }
+.pr-create-error pre { white-space: pre-wrap; font-size: 12px; }
+@keyframes project-arrive {
+  from { transform: translateY(8px); opacity: .65; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .project-overview-content { animation: project-arrive 320ms cubic-bezier(.16, 1, .3, 1); }
+  .branch-menu, .git-menu, .app-menu-popup { animation: project-arrive 140ms cubic-bezier(.16, 1, .3, 1); transform-origin: top; }
+  .pr-create { animation: project-arrive 220ms cubic-bezier(.16, 1, .3, 1); }
+  .project-overview-actions .primary { transition: box-shadow 180ms ease-out, background-color 180ms ease-out; }
+  .project-overview-actions .primary:hover { box-shadow: 0 4px 14px #0005; }
+}
+@media (max-width: 900px) {
+  .project-overview { padding: 24px 16px; }
+  .project-overview-summary { gap: 12px; }
+  .project-overview-recent time { display: none; }
+}
 
 .window-controls { display: flex; align-self: stretch; flex: none; margin-left: 4px; }
 .window-controls button { justify-content: center; width: 38px; min-height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--fg); }

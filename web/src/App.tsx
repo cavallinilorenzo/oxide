@@ -31,6 +31,7 @@ import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import { performThreadDelete, selectionAfterDelete, threadsAfterDelete } from "./deleteThread";
 import { GitHeader } from "./GitHeader";
+import { ProjectOverview } from "./ProjectOverview";
 import { ProjectPalette } from "./ProjectPalette";
 import { QuitDialog } from "./QuitDialog";
 import { ThreadView } from "./ThreadView";
@@ -94,6 +95,7 @@ export function App() {
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
   const [showBoard, setShowBoard] = useState(false);
+  const [createPrRequest, setCreatePrRequest] = useState(0);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const onProjectsScanned = useCallback((next: Project[]) => {
     setProjects((previous) => previous && previous.length === next.length && previous.every((project, index) => {
@@ -212,8 +214,10 @@ export function App() {
   }, []);
 
   const openPullRequest = useCallback(() => {
+    setShowSettings(false);
     setShowTools(true);
     setActiveTool("Pull request");
+    setCreatePrRequest((n) => n + 1);
   }, []);
 
   useEffect(() => {
@@ -247,18 +251,6 @@ export function App() {
     }
     void commands.rememberSelection(selected.id, currentThreadId);
   }, [selected, threads, currentThreadId]);
-
-  // ⌘N, even from a hidden window: start a new Thread.
-  useEffect(() => {
-    const unlisten = listen("new-thread", () => {
-      setShowSettings(false);
-      setShowBoard(false);
-      setSelectedThreadId(null);
-    });
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, []);
 
   // Stable, since ThreadView resubscribes whenever it changes.
   const onThreadStatusChange = useCallback((threadId: number, status: ThreadStatus) => {
@@ -306,6 +298,15 @@ export function App() {
       rememberTerminalContext(selected.id, created.id);
     }
   }, [selected, createThreadIn, rememberTerminalContext]);
+
+  // The native menu follows the same creation path as the sidebar and shortcut.
+  useEffect(() => {
+    const unlisten = listen("new-thread", () => {
+      setShowSettings(false);
+      void startNewThread();
+    });
+    return () => { void unlisten.then((fn) => fn()); };
+  }, [startNewThread]);
 
   const openProject = useCallback((project: Project) => {
     restore.current = null;
@@ -446,8 +447,8 @@ export function App() {
   const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
   useEffect(() => {
-    if (!starting && (!selected || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
-  }, [starting, selected, startupThreadLoaded]);
+    if (!starting && (!selected || currentThreadId === null || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
+  }, [starting, selected, currentThreadId, startupThreadLoaded]);
 
   if (starting) {
     return (
@@ -621,6 +622,12 @@ export function App() {
                 setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
               }
             />
+          ) : selected && currentThreadId === null ? (
+            <ProjectOverview project={selected} threads={threads ?? []}
+              onNewThread={() => void startNewThread()}
+              onOpenThread={(id) => { setSelectedThreadId(id); rememberTerminalContext(selected.id, id); }}
+              onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
+              onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
@@ -740,6 +747,8 @@ export function App() {
             {activeTool === "Pull request" && selected && (
               <Suspense fallback={<Skeleton kind="list" label="Loading pull requests…" />}>
                 <PullRequestPanel
+                  createRequest={createPrRequest}
+                  onCreateHandled={() => setCreatePrRequest(0)}
                   projectId={selected.id}
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}

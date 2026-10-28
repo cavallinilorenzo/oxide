@@ -1,6 +1,7 @@
 import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { PullRequestCreate } from "./PullRequestCreate";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -41,6 +42,8 @@ interface PullRequestBrowserProps {
   onChanged: () => void;
   /** Shows the pull request's changed files in the Diff Surface. */
   onReviewFiles: (number: number) => void;
+  createRequest?: number;
+  onCreateHandled?: () => void;
 }
 
 
@@ -63,7 +66,14 @@ function Branches({ head, base }: { head: string; base: string }) {
 }
 
 /** Open pull requests of the repository: list, search, and one pull request to review. */
-export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles }: PullRequestBrowserProps) {
+export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
+  const [creating, setCreating] = useState(createRequest > 0);
+  const [seenCreateRequest, setSeenCreateRequest] = useState(createRequest);
+  if (seenCreateRequest !== createRequest) {
+    setSeenCreateRequest(createRequest);
+    if (createRequest > 0) setCreating(true);
+  }
+  useEffect(() => { if (createRequest > 0) onCreateHandled?.(); }, [createRequest, onCreateHandled]);
   const [mine, setMine] = useState(false);
   const [query, setQuery] = useState("");
   // Sent on submit, not per keystroke: every search is a `gh` call.
@@ -84,6 +94,10 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
     return () => clearTimeout(timer);
   }, [outcome]);
 
+  if (creating) return <PullRequestCreate projectId={projectId} onCancel={() => setCreating(false)} onCreated={(pr) => {
+    setCreating(false); setOpened(pr.number); onChanged();
+  }} />;
+
   if (opened !== null) {
     return (
       <PullRequestReview
@@ -103,6 +117,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
 
   return (
     <div className="pr-browser">
+      <div className="pr-new"><button className="btn primary" onClick={() => setCreating(true)}><GitPullRequestIcon size={14} /> New pull request</button></div>
       <form
         className="pr-search"
         role="search"

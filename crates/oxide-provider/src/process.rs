@@ -15,6 +15,16 @@ use std::time::Instant;
 /// How long a process group gets between SIGTERM and SIGKILL.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
+/// Background CLI calls must not create a visible console in the Windows app.
+pub fn hide_console(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// Makes `command` start in a new process group led by the child (pgid == pid).
 /// Windows stdio children run without a console window; PTY shells own their console.
 pub fn spawn_in_own_group(command: &mut Command) -> &mut Command {
@@ -621,6 +631,20 @@ mod windows_process {
 mod windows_tests {
     use super::*;
     use std::process::Stdio;
+
+    #[test]
+    fn background_command_has_no_console_window() {
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-NonInteractive", "-Command",
+            "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); }'; [ConsoleProbe]::GetConsoleWindow().ToInt64()"]);
+        let output = hide_console(&mut command).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "0");
+    }
 
     fn sleeper() -> std::process::Child {
         let mut command = Command::new("cmd.exe");

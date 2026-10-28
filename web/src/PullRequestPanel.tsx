@@ -5,6 +5,8 @@ export { REFRESH_INTERVAL_MS };
 
 interface PullRequestPanelProps {
   projectId: number;
+  createRequest?: number;
+  onCreateHandled?: () => void;
   /** Changes after the user's own Git changes (commit, push, pull, checkout), which refresh the panel. */
   refreshKey: number;
   /** Called after a pull request was created, merged or checked out, so other Git views reload. */

@@ -165,6 +165,28 @@ fn push_sets_upstream_on_first_push_and_publishes_commits() {
 }
 
 #[test]
+fn push_publishes_current_branch_even_with_an_inherited_upstream() {
+    let f = fixture();
+    f.core.create_branch(f.project.id, "topic").unwrap();
+    git(&f.work, &["branch", "--set-upstream-to=origin/main"]);
+    git(&f.work, &["config", "push.default", "upstream"]);
+    commit_file(&f.work, "topic.txt", "topic\n");
+    let main = git(&f.remote, &["rev-parse", "main"]);
+
+    f.core.push(f.project.id, false).unwrap();
+
+    assert_eq!(git(&f.remote, &["rev-parse", "main"]), main);
+    assert_eq!(
+        git(&f.remote, &["rev-parse", "topic"]),
+        git(&f.work, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        f.core.git_status(f.project.id).unwrap().upstream.as_deref(),
+        Some("origin/topic")
+    );
+}
+
+#[test]
 fn push_on_main_needs_explicit_consent() {
     let f = fixture();
     commit_file(&f.work, "m.txt", "m\n");

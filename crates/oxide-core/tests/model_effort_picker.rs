@@ -1,4 +1,4 @@
-use oxide_core::{Core, PermissionMode, TurnStatus};
+use oxide_core::{Core, PermissionMode, ThreadEvent, TurnStatus};
 use oxide_provider::{FakeProvider, Provider, ProviderEvent};
 use tempfile::tempdir;
 
@@ -178,9 +178,19 @@ fn turn_records_model_and_effort_used() {
 
     core.register_fake_provider(thread.id, fake);
 
-    // Turn 1
+    let (_, events) = core.subscribe_thread(thread.id).unwrap();
+    let wait_for_turn = || loop {
+        let event = events
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        if matches!(event.event, ThreadEvent::TurnCompleted { .. }) {
+            break;
+        }
+    };
+
+    // Wait for persisted completion instead of racing a fixed 50ms delay on Windows.
     core.send_prompt(thread.id, "Turn 1").unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    wait_for_turn();
 
     let page1 = core.list_turns(thread.id, 0, 10).unwrap();
     assert_eq!(page1.turns.len(), 1);
@@ -193,7 +203,7 @@ fn turn_records_model_and_effort_used() {
 
     // Turn 2
     core.send_prompt(thread.id, "Turn 2").unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    wait_for_turn();
 
     let page2 = core.list_turns(thread.id, 0, 10).unwrap();
     assert_eq!(page2.turns.len(), 2);

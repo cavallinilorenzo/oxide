@@ -29,6 +29,23 @@ const render = () =>
   );
 const listCalls = () => vi.mocked(commands.listPullRequests).mock.calls.length;
 
+it("opens creation from the Git header and keeps the form open after consuming its request", async () => {
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({ status: "ok", data: { branch: "topic", upstream: null, ahead: 1, behind: 0, added: 0, removed: 0, changedFiles: 0, protected: false, unpublished: true, pickerDisabledReason: null } });
+  vi.spyOn(commands, "pullRequestDraft").mockResolvedValue({ status: "ok", data: { title: "Topic", body: "", base: "main", head: "topic" } });
+  vi.spyOn(commands, "pullRequestBaseBranches").mockResolvedValue({ status: "ok", data: ["main"] });
+  const handled = vi.fn();
+  const view = (request: number) => <PullRequestPanel projectId={1} refreshKey={0} createRequest={request} onCreateHandled={handled} onChanged={() => {}} onReviewFiles={() => {}} />;
+  await act(async () => root.render(view(1)));
+  expect(handled).toHaveBeenCalled();
+  expect(host.querySelector('[aria-label="Create pull request"]')).not.toBeNull();
+  await act(async () => root.render(view(0)));
+  expect(host.querySelector('[aria-label="Create pull request"]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Back to pull requests"]')!.click());
+  expect(host.querySelector('[aria-label="Create pull request"]')).toBeNull();
+  await act(async () => root.render(view(1)));
+  expect(host.querySelector('[aria-label="Create pull request"]')).not.toBeNull();
+});
+
 it("shows the open pull requests without a branch tab or a manual reload button", async () => {
   await render();
   expect(host.querySelector('[role="tablist"]')).toBeNull();

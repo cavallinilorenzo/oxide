@@ -23,23 +23,31 @@ export function usePushFlow(projectId: number, onDone: () => void, onOpenPullReq
     if ("branch" in mode) steps.push(() => commands.createBranch(projectId, mode.branch));
     steps.push(before, () => commands.push(projectId, "main" in mode && mode.main));
     let failed = false;
-    for (const step of steps) {
-      const result = await step();
-      if (result && result.status === "error") {
-        setError(result.error.message);
-        failed = true;
-        break;
+    try {
+      for (const step of steps) {
+        const result = await step();
+        if (result && result.status === "error") {
+          setError(result.error.message);
+          failed = true;
+          break;
+        }
       }
+    } catch (cause) {
+      failed = true;
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+      onDone();
     }
-    setBusy(false);
-    onDone();
     if (!failed && "branch" in mode && mode.openPr) onOpenPullRequest?.();
   }
 
   /** `before` is the step that precedes the push, e.g. the commit; null for a bare Push. */
   async function start(before: () => Promise<Outcome> | null) {
     setError(null);
-    const result = await commands.gitStatus(projectId);
+    let result;
+    try { result = await commands.gitStatus(projectId); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return; }
     if (result.status === "error") return setError(result.error.message);
     const blocked = pushBlockedReason(result.data);
     if (blocked) return setError(blocked);

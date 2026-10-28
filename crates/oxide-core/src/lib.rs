@@ -34,10 +34,11 @@ pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
     BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueCloseReason,
-    IssueComment, IssueDetail, IssueEdit, IssueSummary, IssuesState, MergeMethod, MergeState,
-    PullRequest, PullRequestCandidates, PullRequestCheck, PullRequestComment, PullRequestDetail,
-    PullRequestDraft, PullRequestEdit, PullRequestInput, PullRequestLabel, PullRequestPhase,
-    PullRequestReviewer, PullRequestState, ReviewDecision, ReviewState,
+    IssueComment, IssueDetail, IssueEdit, IssueSummary, IssueTemplateFile, IssuesState,
+    MergeMethod, MergeState, PullRequest, PullRequestCandidates, PullRequestCheck,
+    PullRequestComment, PullRequestDetail, PullRequestDraft, PullRequestEdit, PullRequestInput,
+    PullRequestLabel, PullRequestPhase, PullRequestReviewer, PullRequestState, ReviewDecision,
+    ReviewState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -1450,6 +1451,11 @@ impl Core {
     /// Detailed issue with its description, status and comments.
     pub fn issue_detail(&self, project_id: u32, number: u32) -> Result<IssueDetail> {
         github::issue_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// The files of the repository's issue templates directory on GitHub.
+    pub fn issue_templates(&self, project_id: u32) -> Result<Vec<IssueTemplateFile>> {
+        github::issue_templates(&self.gh, &self.main_checkout(project_id)?)
     }
 
     /// Creates an issue with title, body, assignees and labels.

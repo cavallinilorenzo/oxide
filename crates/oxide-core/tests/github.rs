@@ -1273,6 +1273,25 @@ fn issues_state_reports_guidance_when_missing_or_logged_out() {
 }
 
 #[test]
+fn issue_templates_are_read_from_github_and_a_missing_directory_means_none() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    assert!(f.core.issue_templates(f.project.id).unwrap().is_empty());
+
+    let mut state = ok_state();
+    state["issue_templates"] = serde_json::json!({
+        "bug_report.yml": "name: Bug report\n",
+        "config.yml": "blank_issues_enabled: false\n",
+        "notes.txt": "not a template",
+    });
+    install_gh(&f, state);
+    let files = f.core.issue_templates(f.project.id).unwrap();
+    let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
+    assert_eq!(names, ["bug_report.yml", "config.yml"]);
+    assert_eq!(files[0].content, "name: Bug report\n");
+}
+
+#[test]
 fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
     let f = fixture();
     install_gh(&f, ok_state());

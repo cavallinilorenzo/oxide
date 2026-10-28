@@ -139,6 +139,8 @@ export const commands = {
 	editPullRequest: (projectId: number, number: number, edit: PullRequestEdit) => typedError<null, AppError>(__TAURI_INVOKE("edit_pull_request", { projectId, number, edit })),
 	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
 	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
+	/**  The repository's issue templates (`.github/ISSUE_TEMPLATE`) as raw files; empty when it has none. */
+	issueTemplates: (projectId: number) => typedError<IssueTemplateFile[], AppError>(__TAURI_INVOKE("issue_templates", { projectId })),
 	listIssues: (projectId: number, closed: boolean, mine: boolean, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, closed, mine, search })),
 	issueDetail: (projectId: number, number: number) => typedError<IssueDetail, AppError>(__TAURI_INVOKE("issue_detail", { projectId, number })),
 	createIssue: (projectId: number, title: string, body: string, assignees: string[], labels: string[]) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body, assignees, labels })),
@@ -498,6 +500,11 @@ export type IssueSummary = {
 	createdAt: string,
 	labels: PullRequestLabel[],
 	assignees: string[],
+};
+
+export type IssueTemplateFile = {
+	name: string,
+	content: string,
 };
 
 export type IssuesState = IssuesState_Serialize | IssuesState_Deserialize;

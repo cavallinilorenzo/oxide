@@ -249,6 +249,7 @@ pub struct Shortcuts {
     diff: String,
     previous_thread: String,
     next_thread: String,
+    close_thread: String,
     toggle_tools: String,
     toggle_board: String,
     open_settings: String,

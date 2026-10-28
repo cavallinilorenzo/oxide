@@ -864,6 +864,7 @@ export type Shortcuts = {
 	diff: string,
 	previousThread: string,
 	nextThread: string,
+	closeThread: string,
 	toggleTools: string,
 	toggleBoard: string,
 	openSettings: string,

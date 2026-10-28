@@ -3,7 +3,7 @@ use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use oxide_provider::process::ProcessRegistry;
 #[cfg(unix)]
 use oxide_provider::process::{SHUTDOWN_GRACE, terminate_group};
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -133,7 +133,11 @@ impl TerminalSession {
             while let Ok(command) = receiver.recv() {
                 match command {
                     SessionCommand::Write(input, reply) => {
-                        let _ = reply.send(writer.write_all(&input).and_then(|_| writer.flush()));
+                        #[cfg(unix)]
+                        let result = write_terminal_input(&mut writer, master.as_ref(), &input);
+                        #[cfg(windows)]
+                        let result = writer.write_all(&input).and_then(|_| writer.flush());
+                        let _ = reply.send(result);
                     }
                     SessionCommand::Resize(size, reply) => {
                         let result = master.resize(size).map_err(|error| error.to_string());
@@ -223,6 +227,30 @@ impl TerminalSession {
             let _ = result.recv();
         }
     }
+}
+
+#[cfg(unix)]
+fn write_terminal_input(
+    writer: &mut dyn Write,
+    master: &dyn MasterPty,
+    input: &[u8],
+) -> std::io::Result<()> {
+    let mut start = 0;
+    for (index, byte) in input.iter().enumerate() {
+        if *byte != 0x03 {
+            continue;
+        }
+        writer.write_all(&input[start..index])?;
+        let signaled = master.process_group_leader().is_some_and(|process_group| {
+            process_group > 0 && unsafe { libc::kill(-process_group, libc::SIGINT) } == 0
+        });
+        if !signaled {
+            writer.write_all(&input[index..index + 1])?;
+        }
+        start = index + 1;
+    }
+    writer.write_all(&input[start..])?;
+    writer.flush()
 }
 
 #[cfg(unix)]

@@ -54,13 +54,14 @@ export const commands = {
 	setFavouriteModels: (favourites: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_favourite_models", { favourites })),
 	setThreadModelAndEffort: (threadId: number, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_thread_model_and_effort", { threadId, model, effort })),
 	listThreads: (projectId: number) => typedError<Thread_Serialize[], AppError>(__TAURI_INVOKE("list_threads", { projectId })),
-	sendPrompt: (threadId: number, prompt: string, attachments: string[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, prompt, attachments })),
-	/**  Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path. */
-	saveAttachment: (bytes: number[], extension: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { bytes, extension })),
-	/**  Bytes of a stored attachment, for rendering it in the Transcript. */
-	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
-	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
-	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
+	sendPrompt: (threadId: number, segments: PromptInput[]) => typedError<null, AppError>(__TAURI_INVOKE("send_prompt", { threadId, segments })),
+	/**
+	 *  Copies each file (drag & drop, the file dialog) into Attachment storage. A file that can't
+	 *  be accepted comes back with its reason; the others are stored regardless.
+	 */
+	attachPaths: (paths: string[]) => typedError<AttachOutcome_Serialize[], AppError>(__TAURI_INVOKE("attach_paths", { paths })),
+	/**  Forgets an Attachment the user took out of a prompt before sending it. */
+	discardAttachment: (id: string) => __TAURI_INVOKE<void>("discard_attachment", { id }),
 	/**  The Slash command catalog the `/` menu offers for a Provider in a Project. */
 	listSlashCommands: (provider: string, projectId: number, threadId: number | null, refresh: boolean) => typedError<SlashCommand_Serialize[], AppError>(__TAURI_INVOKE("list_slash_commands", { provider, projectId, threadId, refresh })),
 	interruptThread: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_thread", { threadId })),
@@ -198,6 +199,36 @@ export type ApprovalSnapshot_Serialize = {
 	createdAt: string,
 	decidedAt: string | null,
 };
+
+/**  What happened to one file offered as an Attachment: it was stored, or here is why not. */
+export type AttachOutcome = AttachOutcome_Serialize | AttachOutcome_Deserialize;
+
+/**  What happened to one file offered as an Attachment: it was stored, or here is why not. */
+export type AttachOutcome_Deserialize = {
+	path: string,
+	attachment?: Attachment | null,
+	error?: string | null,
+};
+
+/**  What happened to one file offered as an Attachment: it was stored, or here is why not. */
+export type AttachOutcome_Serialize = {
+	path: string,
+	attachment: Attachment | null,
+	error: string | null,
+};
+
+/**  A file the user put inside a prompt. */
+export type Attachment = {
+	id: string,
+	/**  The original file name. */
+	name: string,
+	attachmentKind: AttachmentKind,
+	mediaType: string,
+	sizeBytes: number,
+	path: string,
+};
+
+export type AttachmentKind = "image" | "pdf" | "text" | "other";
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
@@ -600,13 +631,20 @@ export type Project = {
 	missing: boolean,
 };
 
+/**  One piece of the prompt being sent: text, or a stored Attachment by id. */
+export type PromptInput = { kind: "text"; text: string } | { kind: "attachment"; id: string };
+
+/**  One piece of a prompt in the Transcript: text, or an Attachment at its place. */
+export type PromptSegment = { kind: "text"; text: string } | { kind: "attachment"; id: string; name: string; attachmentKind: AttachmentKind; mediaType: string; sizeBytes: number; path: string };
+
 export type Provider = "claude" | "codex" | "antigravity";
 
 export type ProviderCapabilities = {
 	supportedPermissionModes: PermissionMode[],
 	interactiveApprovals: boolean,
 	supportsReasoning: boolean,
-	imageAttachments: boolean,
+	/**  Attachment kinds the Provider takes as native content; the rest reach it as file paths. */
+	nativeAttachmentKinds: AttachmentKind[],
 	midThreadModelSwitch: boolean,
 	reportsUsageLimits: boolean,
 };
@@ -900,7 +938,6 @@ export type Thread = Thread_Serialize | Thread_Deserialize;
 
 export type ThreadCapabilities = {
 	reasoningText: boolean,
-	imageAttachments: boolean,
 };
 
 export type ThreadEvent = ThreadEvent_Serialize | ThreadEvent_Deserialize;
@@ -910,7 +947,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	prompt: string,
 	model?: string | null,
 	effort?: string | null,
-	attachments: string[],
+	segments: PromptSegment[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
@@ -953,7 +990,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	prompt: string,
 	model: string | null,
 	effort: string | null,
-	attachments: string[],
+	segments: PromptSegment[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
@@ -1089,7 +1126,7 @@ export type TurnSnapshot_Deserialize = {
 	prompt: string,
 	model?: string | null,
 	effort?: string | null,
-	attachments: string[],
+	segments: PromptSegment[],
 	status: TurnStatus,
 	startedAt: string,
 	completedAt?: string | null,
@@ -1105,7 +1142,7 @@ export type TurnSnapshot_Serialize = {
 	prompt: string,
 	model: string | null,
 	effort: string | null,
-	attachments: string[],
+	segments: PromptSegment[],
 	status: TurnStatus,
 	startedAt: string,
 	completedAt: string | null,

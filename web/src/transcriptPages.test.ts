@@ -8,7 +8,7 @@ function turn(position: number): TurnSnapshot {
     id: position + 1,
     turnIndex: 0,
     prompt: `prompt ${position}`,
-    attachments: [],
+    segments: [],
     status: "completed",
     startedAt: "",
     completedAt: null,

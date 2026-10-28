@@ -304,15 +304,79 @@ pub struct SlashCommandInfo {
     pub route: SlashRoute,
 }
 
+/// What an Attachment is, decided by Core from its extension and content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    Image,
+    Pdf,
+    Text,
+    Other,
+}
+
+/// A file the user put inside a prompt, stored under the Oxide home.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    /// The original file name, which is also the stored file's name.
+    pub name: String,
+    #[serde(rename = "attachmentKind")]
+    pub kind: AttachmentKind,
+    pub media_type: String,
+    pub size_bytes: u64,
+    pub path: PathBuf,
+}
+
+/// One piece of a prompt, in the order the user wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PromptSegment {
+    Text { text: String },
+    Attachment(Attachment),
+}
+
+impl PromptSegment {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+}
+
+/// The prompt as plain text, each Attachment reading `[name]`.
+pub fn render_prompt(segments: &[PromptSegment]) -> String {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            PromptSegment::Text { text } => text.clone(),
+            PromptSegment::Attachment(a) => format!("[{}]", a.name),
+        })
+        .collect()
+}
+
+/// The text that names an Attachment at its place in the prompt.
+pub fn attachment_marker(attachment: &Attachment) -> String {
+    format!("[Attachment: {}]", attachment.name)
+}
+
+/// The text that hands an Attachment to the agent as a file: its marker and where it lives.
+pub fn attachment_path_reference(attachment: &Attachment) -> String {
+    format!(
+        "{} (file: {})",
+        attachment_marker(attachment),
+        attachment.path.display()
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
-    /// The Provider accepts image attachments with a prompt.
+    /// The Attachment kinds the Provider takes as native content. Any other kind reaches it as
+    /// a path reference in the prompt text.
     #[serde(default)]
-    pub image_attachments: bool,
+    pub native_attachment_kinds: Vec<AttachmentKind>,
     #[serde(default)]
     pub mid_thread_model_switch: bool,
     /// The Provider reports Usage limits (5-hour and weekly) through `UsageLimits` events.
@@ -454,15 +518,19 @@ pub trait Provider: Send + 'static {
         session_id: &str,
         context: &StartContext,
     ) -> Result<Receiver<ProviderEvent>, ProviderError>;
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError>;
-    /// Sends a prompt with image files. Only called when `image_attachments` holds.
-    fn send_prompt_with_images(
+    /// Sends a prompt made of text and Attachments, delivering each Attachment at its place in
+    /// the text: natively when the Provider takes its kind, else as a path reference. Fails
+    /// rather than dropping an Attachment.
+    fn send_prompt_with_segments(
         &mut self,
-        prompt: &str,
-        _images: &[PathBuf],
-    ) -> Result<(), ProviderError> {
-        self.send_prompt(prompt)
+        segments: &[PromptSegment],
+    ) -> Result<(), ProviderError>;
+    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+        self.send_prompt_with_segments(&[PromptSegment::text(prompt)])
     }
+    /// Tells the adapter where Attachments are stored, so it can make that folder readable under
+    /// every Permission mode it offers. Called before `start` and `resume`.
+    fn allow_attachments_dir(&mut self, _dir: &Path) {}
     fn interrupt(&mut self) -> Result<(), ProviderError>;
     fn respond_to_approval(
         &mut self,
@@ -600,6 +668,7 @@ pub struct FakeRecorder {
     resumes: Arc<Mutex<Vec<String>>>,
     shutdowns: Arc<Mutex<u32>>,
     prompts: Arc<Mutex<Vec<String>>>,
+    segments: Arc<Mutex<Vec<Vec<PromptSegment>>>>,
 }
 
 impl FakeRecorder {
@@ -618,9 +687,14 @@ impl FakeRecorder {
         *self.shutdowns.lock().unwrap()
     }
 
-    /// Every prompt sent, in order.
+    /// Every prompt sent, in order, as plain text.
     pub fn prompts(&self) -> Vec<String> {
         self.prompts.lock().unwrap().clone()
+    }
+
+    /// The segments of every prompt sent, in order.
+    pub fn segments(&self) -> Vec<Vec<PromptSegment>> {
+        self.segments.lock().unwrap().clone()
     }
 }
 
@@ -635,6 +709,8 @@ pub struct FakeProvider {
     current_permission_mode: Arc<Mutex<PermissionMode>>,
     reusable: bool,
     session_not_found: bool,
+    /// Why this Fake refuses prompts that carry Attachments, if it does.
+    attachment_refusal: Option<String>,
 }
 
 impl Default for FakeProvider {
@@ -649,7 +725,7 @@ impl Default for FakeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: true,
+                native_attachment_kinds: vec![AttachmentKind::Image],
                 mid_thread_model_switch: true,
                 reports_usage_limits: false,
             },
@@ -668,6 +744,7 @@ impl Default for FakeProvider {
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
             reusable: false,
             session_not_found: false,
+            attachment_refusal: None,
         }
     }
 }
@@ -686,6 +763,7 @@ impl FakeProvider {
             current_permission_mode: Arc::new(Mutex::new(PermissionMode::Ask)),
             reusable: false,
             session_not_found: false,
+            attachment_refusal: None,
         }
     }
 
@@ -724,6 +802,12 @@ impl FakeProvider {
     pub fn reusable(mut self) -> Self {
         self.reusable = true;
         self
+    }
+
+    /// Makes every prompt that carries an Attachment fail with `reason`, as an adapter does when
+    /// it cannot give the Provider read access to the file.
+    pub fn refuse_attachments(&mut self, reason: impl Into<String>) {
+        self.attachment_refusal = Some(reason.into());
     }
 
     /// Makes every `resume` fail as if the Provider had lost the session.
@@ -788,18 +872,30 @@ impl Provider for FakeProvider {
         Ok(self.open_channel())
     }
 
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+    fn send_prompt_with_segments(
+        &mut self,
+        segments: &[PromptSegment],
+    ) -> Result<(), ProviderError> {
+        if let Some(reason) = &self.attachment_refusal
+            && segments
+                .iter()
+                .any(|s| matches!(s, PromptSegment::Attachment(_)))
+        {
+            return Err(ProviderError::CommandFailed(reason.clone()));
+        }
+        let prompt = render_prompt(segments);
+        self.recorder.prompts.lock().unwrap().push(prompt.clone());
         self.recorder
-            .prompts
+            .segments
             .lock()
             .unwrap()
-            .push(prompt.to_string());
+            .push(segments.to_vec());
         if let Some(ref handler) = *self.prompt_handler.lock().unwrap() {
-            handler(prompt);
+            handler(&prompt);
         } else if let Some(ref sender) = *self.event_sender.lock().unwrap() {
             let _ = sender.send(ProviderEvent::TurnStarted {
                 turn_index: 0,
-                prompt: prompt.to_string(),
+                prompt,
             });
         }
         Ok(())

@@ -1,7 +1,7 @@
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use oxide_provider::{
-    ApprovalDecision, ItemKind, PermissionMode, Provider, ProviderCapabilities, ProviderError,
-    ProviderEvent, StartContext, TurnStatus,
+    ApprovalDecision, ItemKind, PermissionMode, PromptSegment, Provider, ProviderCapabilities,
+    ProviderError, ProviderEvent, StartContext, TurnStatus,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -21,8 +21,7 @@ use crate::usage::{ActorServices, UsageHub};
 
 pub enum ThreadActorMsg {
     SendPrompt {
-        prompt: String,
-        attachments: Vec<PathBuf>,
+        segments: Vec<PromptSegment>,
         reply: mpsc::Sender<Result<()>>,
     },
     Interrupt {
@@ -107,11 +106,10 @@ impl ThreadActorHandle {
         Ok(Self { sender: tx })
     }
 
-    pub fn send_prompt(&self, prompt: String, attachments: Vec<PathBuf>) -> Result<()> {
+    pub fn send_prompt(&self, segments: Vec<PromptSegment>) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(ThreadActorMsg::SendPrompt {
-            prompt,
-            attachments,
+            segments,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -230,8 +228,8 @@ struct ActorState {
     current_turn: Option<CurrentTurn>,
     pending_deltas: HashMap<u32, PendingDelta>,
     capabilities: ProviderCapabilities,
-    /// Attachments of the prompt in flight, claimed by the Turn it starts.
-    pending_attachments: Vec<String>,
+    /// The prompt in flight, claimed by the Turn it starts.
+    pending_segments: Option<Vec<PromptSegment>>,
     /// Items withheld from the Transcript (reasoning the Provider shouldn't expose).
     dropped_items: HashSet<u32>,
     pending_approval_id: Option<String>,
@@ -286,7 +284,7 @@ impl ActorState {
             current_turn: None,
             pending_deltas: HashMap::new(),
             capabilities,
-            pending_attachments: Vec::new(),
+            pending_segments: None,
             dropped_items: HashSet::new(),
             pending_approval_id: None,
             seq: 0,
@@ -382,7 +380,11 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             state.next_turn_index += 1;
             state.dropped_items.clear();
             checkpoint::take(&state.checkout, state.thread_id, turn_index, Phase::Start);
-            let attachments = std::mem::take(&mut state.pending_attachments);
+            let segments = state
+                .pending_segments
+                .take()
+                .unwrap_or_else(|| vec![PromptSegment::text(prompt.clone())]);
+            let prompt = crate::attachments::render(&segments);
             let (mut model, mut effort) = (None, None);
             let mut id = None;
             let mut new_title = None;
@@ -390,7 +392,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 state.thread_id,
                 turn_index,
                 prompt.clone(),
-                attachments.clone(),
+                segments.clone(),
             ) {
                 id = Some(started.id);
                 model = started.model;
@@ -409,7 +411,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     prompt,
                     model,
                     effort,
-                    attachments,
+                    segments,
                 },
                 raw,
             );
@@ -673,8 +675,23 @@ fn run_thread_actor(
                     Err(_) => break,
                 };
                 match msg {
-                    ThreadActorMsg::SendPrompt { prompt, attachments, reply } => {
+                    ThreadActorMsg::SendPrompt { segments, reply } => {
+                        let prompt = crate::attachments::render(&segments);
                         let trimmed = prompt.trim();
+                        let has_attachments = segments
+                            .iter()
+                            .any(|s| matches!(s, PromptSegment::Attachment(_)));
+                        if has_attachments
+                            && let Some(command) = oxide_run_command(trimmed)
+                        {
+                            let _ = reply.send(Err(
+                                crate::attachments::AttachmentError::WithOxideCommand {
+                                    command: command.to_string(),
+                                }
+                                .into(),
+                            ));
+                            continue;
+                        }
                         if trimmed == "/model" {
                             // Selector action - intercepted, never reaches provider
                             let _ = reply.send(Ok(()));
@@ -734,15 +751,6 @@ fn run_thread_actor(
                             continue;
                         }
 
-                        if !attachments.is_empty() && !state.capabilities.image_attachments {
-                            let _ = reply.send(Err(Error::Io {
-                                path: PathBuf::from("attachments"),
-                                source: std::io::Error::other(
-                                    "this Provider does not accept image attachments",
-                                ),
-                            }));
-                            continue;
-                        }
                         if let Err(e) = ensure_provider_started(
                             &mut *provider, &mut state, &storage, &working_dir, &mut prx,
                         ) {
@@ -750,21 +758,27 @@ fn run_thread_actor(
                             continue;
                         }
                         state.idle_since = None;
-                        state.pending_attachments = attachments
-                            .iter()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect();
-                        let sent = if attachments.is_empty() {
-                            provider.send_prompt(&prompt)
-                        } else {
-                            provider.send_prompt_with_images(&prompt, &attachments)
-                        };
-                        let p_res = sent.map_err(|e| Error::Io {
-                            path: PathBuf::from("provider"),
-                            source: std::io::Error::other(e.to_string()),
+                        state.pending_segments = Some(segments.clone());
+                        let sent = provider.send_prompt_with_segments(&segments);
+                        let p_res = sent.map_err(|e| {
+                            if has_attachments {
+                                // Say why the Attachments were refused, not where.
+                                Error::Provider(match e {
+                                    ProviderError::CommandFailed(reason) => reason,
+                                    other => other.to_string(),
+                                })
+                            } else {
+                                Error::Io {
+                                    path: PathBuf::from("provider"),
+                                    source: std::io::Error::other(e.to_string()),
+                                }
+                            }
                         });
-                        if p_res.is_err() && state.current_turn.is_none() {
-                            state.idle_since = Some(state.clock.now());
+                        if p_res.is_err() {
+                            state.pending_segments = None;
+                            if state.current_turn.is_none() {
+                                state.idle_since = Some(state.clock.now());
+                            }
                         }
                         let _ = reply.send(p_res);
                     }
@@ -871,7 +885,6 @@ fn run_thread_actor(
                         }
                         snapshot.capabilities = ThreadCapabilities {
                             reasoning_text: state.capabilities.supports_reasoning,
-                            image_attachments: state.capabilities.image_attachments,
                         };
                         snapshot.supported_permission_modes = provider.capabilities().supported_permission_modes;
                         state.subscribers.push(sub_tx);
@@ -1026,4 +1039,13 @@ fn provider_channel_closed(
 ) {
     *prx = crossbeam_channel::never();
     provider_exited(state, storage, None, None, None);
+}
+
+/// The name of the Slash command Oxide itself runs that `text` starts with, if any.
+fn oxide_run_command(text: &str) -> Option<&'static str> {
+    let rest = text.strip_prefix('/')?;
+    let word = rest.split_whitespace().next()?;
+    ["model", "effort", "clear", "permissions"]
+        .into_iter()
+        .find(|name| *name == word)
 }

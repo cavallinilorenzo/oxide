@@ -20,7 +20,7 @@ describe("transcript reducer", () => {
         continuedFrom: null,
         continuedIn: null,
       },
-      capabilities: { reasoningText: true, imageAttachments: false },
+      capabilities: { reasoningText: true },
       turns: [
         {
           id: 10,
@@ -28,7 +28,7 @@ describe("transcript reducer", () => {
           prompt: "Hello",
           model: null,
           effort: null,
-          attachments: [],
+          segments: [],
           status: "completed",
           startedAt: "2026-10-22T10:00:00Z",
           completedAt: "2026-10-22T10:00:05Z",
@@ -74,7 +74,10 @@ describe("transcript reducer", () => {
           prompt: "Streaming prompt",
           model: "Opus 5.5",
           effort: "high",
-          attachments: ["/home/.oxide/attachments/a.png"],
+          segments: [
+            { kind: "text", text: "Streaming prompt " },
+            { kind: "attachment", id: "a1", name: "a.png", attachmentKind: "image", mediaType: "image/png", sizeBytes: 3, path: "/home/.oxide/attachments/a1/a.png" },
+          ],
         },
       },
     });
@@ -83,7 +86,7 @@ describe("transcript reducer", () => {
     expect(state.turns[0].status).toBe("running");
     expect(state.turns[0].model).toBe("Opus 5.5");
     expect(state.turns[0].effort).toBe("high");
-    expect(state.turns[0].attachments).toEqual(["/home/.oxide/attachments/a.png"]);
+    expect(state.turns[0].segments.map((s) => s.kind)).toEqual(["text", "attachment"]);
 
     // ItemStarted
     state = applyThreadEvent(state, {
@@ -168,7 +171,7 @@ describe("transcript reducer", () => {
   const startedTurn = () =>
     applyThreadEvent(initialTranscriptState(null), {
       seq: 1,
-      event: { type: "TurnStarted", payload: { turn_index: 0, prompt: "Go", model: null, effort: null, attachments: [] } },
+      event: { type: "TurnStarted", payload: { turn_index: 0, prompt: "Go", model: null, effort: null, segments: [] } },
     });
 
   it("keeps a failed Turn's error message and stderr tail", () => {
@@ -227,7 +230,7 @@ describe("transcript reducer", () => {
           prompt: "Please delete files",
           model: null,
           effort: null,
-          attachments: [],
+          segments: [],
         },
       },
     });
@@ -280,7 +283,7 @@ describe("transcript reducer", () => {
           prompt: "Another action",
           model: null,
           effort: null,
-          attachments: [],
+          segments: [],
         },
       },
     });
@@ -417,7 +420,7 @@ describe("transcript reducer", () => {
   it("updates thread title on ThreadRenamed event", () => {
     let state = initialTranscriptState({
       thread: sampleThread(),
-      capabilities: { reasoningText: true, imageAttachments: false },
+      capabilities: { reasoningText: true },
       turns: [],
       turnOffset: 0,
       turnCount: 0,
@@ -478,7 +481,7 @@ function sampleThread(): Thread {
 }
 
 function startTurn(seq: number, prompt: string): SequencedThreadEvent {
-  return { seq, event: { type: "TurnStarted", payload: { turn_index: 0, prompt, attachments: [] } } };
+  return { seq, event: { type: "TurnStarted", payload: { turn_index: 0, prompt, segments: [] } } };
 }
 
 function completeTurn(seq: number): SequencedThreadEvent {

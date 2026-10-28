@@ -1,6 +1,8 @@
 import { Skeleton } from "./Skeleton";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowUpIcon,
@@ -13,24 +15,45 @@ import {
   ShieldCheckIcon,
   SquareFillIcon,
   UnlockIcon,
-  XIcon,
   type Icon,
 } from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
+  type Attachment,
   type ContinuedThread,
   type Detection,
   type ModelInfo,
   type PermissionMode,
   type SequencedThreadEvent,
+  type PromptSegment,
   type SlashCommand,
   type Thread,
-  type ThreadCapabilities,
   type ThreadStatus,
   type ProviderCapabilities,
 } from "./bindings";
 import { TurnView } from "./TurnView";
+import { ComposerInput, type ComposerHandle } from "./ComposerInput";
+import {
+  MAX_ATTACHMENTS,
+  TOO_MANY_MESSAGE,
+  baseName,
+  busyChip,
+  chipFor,
+  chipsOf,
+  decodeDraft,
+  encodeDraft,
+  hasAttachments,
+  hasContent,
+  isBusy,
+  normalize,
+  plainText,
+  replaceChip,
+  toPromptInput,
+  toPromptSegments,
+  typedText,
+  type ComposerSegment,
+} from "./attachments";
 import { ThreadHeader } from "./ThreadHeader";
 import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
@@ -82,26 +105,31 @@ interface ThreadViewProps {
 }
 
 
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/bmp": "bmp",
-};
-
 interface Outgoing {
   threadId: number | null;
-  prompt: string;
-  attachments: string[];
+  segments: PromptSegment[];
   /** Turns present when it was sent; the real Turn lands at this index. */
   baseCount: number;
   startedAt: string;
 }
 
-interface PendingImage {
-  path: string;
-  previewUrl: string;
+/** How a file offered as an Attachment fares once Core has looked at it. */
+type Stored = { attachment: Attachment } | { error: string };
+
+function errorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error) return String((error as { message: unknown }).message);
+  return "The file could not be attached.";
+}
+
+async function readBytes(file: File): Promise<Uint8Array> {
+  if (typeof file.arrayBuffer === "function") return new Uint8Array(await file.arrayBuffer());
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 /** Octicon names: lock = Ask, shield = Auto-edit, open lock = Full access. */
@@ -157,13 +185,17 @@ export function ThreadView({
   const [settledThreadId, setSettledThreadId] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
-  const [input, setInput] = useState(draft ?? "");
+  const [value, setValue] = useState<ComposerSegment[]>(() => decodeDraft(draft ?? ""));
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const [sending, setSending] = useState(false);
   // The prompt just sent, shown before Core confirms the Turn so sending feels instant.
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
-  const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
+  const composerFormRef = useRef<HTMLFormElement>(null);
+  const [dropActive, setDropActive] = useState(false);
+  /** Attachments taken out of the prompt, forgotten by Core once the prompt is sent. */
+  const removedAttachments = useRef(new Set<string>());
   const permissionControlRef = useRef<HTMLButtonElement>(null);
   const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
@@ -185,8 +217,8 @@ export function ThreadView({
   const requestedPagesRef = useRef(new Set<number>());
 
   useEffect(() => {
-    if (draft !== undefined) {
-      setInput(draft);
+    if (draft !== undefined && draft !== encodeDraft(valueRef.current)) {
+      setValue(decodeDraft(draft));
     }
   }, [draft, threadId]);
 
@@ -194,6 +226,7 @@ export function ThreadView({
   const slashGeneration = useRef({ active: true });
   const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
+  const input = plainText(value);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
   const slashProvider = transcript.thread?.provider || draftProvider;
@@ -234,11 +267,158 @@ export function ThreadView({
     return () => { active = false; window.clearInterval(timer); };
   }, [slashOpen, slashProvider, projectId, threadId, slashRevision]);
 
-  const handleInputChange = (val: string) => {
-    setSlashIndex(0);
-    setInput(val);
-    onDraftChange?.(val);
+  /** The prompt changed (typing, a chip removed, a file stored): keep it and tell the parent. */
+  const commit = (next: ComposerSegment[]) => {
+    valueRef.current = next;
+    setValue(next);
+    onDraftChange?.(encodeDraft(next));
   };
+
+  /** The user edited the prompt in the editor. */
+  const handleComposerChange = (next: ComposerSegment[]) => {
+    const before = new Set(chipsOf(valueRef.current).flatMap((c) => (c.id ? [c.id] : [])));
+    const after = new Set(chipsOf(next).flatMap((c) => (c.id ? [c.id] : [])));
+    for (const id of before) if (!after.has(id)) removedAttachments.current.add(id);
+    for (const id of after) removedAttachments.current.delete(id);
+    setSlashIndex(0);
+    commit(next);
+  };
+
+  /** Replaces the whole prompt with text and puts the caret at its end. */
+  const handleInputChange = (text: string) => {
+    setSlashIndex(0);
+    const next = normalize([{ kind: "text", text }]);
+    composerRef.current?.replace(next);
+    commit(next);
+  };
+
+  const attach = (
+    entries: { label: string; store: () => Promise<Stored> }[],
+    at?: number,
+  ) => {
+    if (entries.length === 0) return;
+    const room = Math.max(0, MAX_ATTACHMENTS - chipsOf(valueRef.current).length);
+    const accepted = entries.slice(0, room);
+    const failures: string[] = [];
+    if (accepted.length < entries.length) failures.push(TOO_MANY_MESSAGE);
+    if (accepted.length === 0) {
+      setCommandError(failures.join(" "));
+      return;
+    }
+    setCommandError(null);
+    const chips = accepted.map((e) => busyChip(e.label));
+    composerRef.current?.insert(chips, at);
+    let pending = accepted.length;
+    accepted.forEach((entry, i) => {
+      const chip = chips[i];
+      void entry.store().then((result) => {
+        if ("attachment" in result) {
+          commit(replaceChip(valueRef.current, chip.key, chipFor(result.attachment, chip.key)));
+        } else {
+          composerRef.current?.discardChip(chip.key);
+          commit(replaceChip(valueRef.current, chip.key, null));
+          failures.push(result.error);
+        }
+        pending -= 1;
+        if (pending === 0 && failures.length > 0) setCommandError(failures.join(" "));
+      });
+    });
+  };
+
+  const attachPaths = (paths: string[], at?: number) => {
+    if (paths.length === 0) return;
+    // Only as many as fit are stored; `attach` reports the rest as too many.
+    const room = Math.max(0, MAX_ATTACHMENTS - chipsOf(valueRef.current).length);
+    const batch = room > 0 ? commands.attachPaths(paths.slice(0, room)) : null;
+    attach(
+      paths.map((path, i) => ({
+        label: baseName(path),
+        store: async (): Promise<Stored> => {
+          const res = await batch;
+          if (!res) return { error: TOO_MANY_MESSAGE };
+          if (res.status !== "ok") return { error: res.error.message };
+          const outcome = res.data[i];
+          return outcome?.attachment
+            ? { attachment: outcome.attachment }
+            : { error: outcome?.error ?? "The file could not be attached." };
+        },
+      })),
+      at,
+    );
+  };
+
+  const attachFiles = (files: File[], at?: number) => {
+    attach(
+      files.map((file) => ({
+        label: file.name || "pasted image",
+        store: async (): Promise<Stored> => {
+          try {
+            const bytes = await readBytes(file);
+            const attachment = await invoke<Attachment>("attach_bytes", bytes, {
+              headers: { "x-oxide-name": encodeURIComponent(file.name) },
+            });
+            return { attachment };
+          } catch (error) {
+            return { error: errorMessage(error) };
+          }
+        },
+      })),
+      at,
+    );
+  };
+
+  const pickFiles = async () => {
+    const at = composerRef.current?.caret() ?? undefined;
+    let picked: string | string[] | null;
+    try {
+      picked = await openFileDialog({ multiple: true, directory: false, title: "Attach files" });
+    } catch (error) {
+      setCommandError(errorMessage(error));
+      return;
+    }
+    if (!picked) return;
+    attachPaths(Array.isArray(picked) ? picked : [picked], at);
+  };
+
+  // Files dropped on the window arrive as native paths; only drops on the composer attach.
+  const dropHandler = useRef<(paths: string[]) => void>(() => {});
+  dropHandler.current = (paths) => {
+    const composer = composerRef.current;
+    attachPaths(paths, composer?.isFocused() ? (composer.caret() ?? undefined) : undefined);
+  };
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const overComposer = (position: { x: number; y: number }) => {
+      const rect = composerFormRef.current?.getBoundingClientRect();
+      if (!rect) return false;
+      const x = position.x / window.devicePixelRatio;
+      const y = position.y / window.devicePixelRatio;
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    try {
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const drag = event.payload;
+          if (drag.type === "leave") setDropActive(false);
+          else if (drag.type === "drop") {
+            setDropActive(false);
+            if (overComposer(drag.position) && drag.paths.length > 0) dropHandler.current(drag.paths);
+          } else setDropActive(overComposer(drag.position));
+        })
+        .then((stop) => {
+          if (cancelled) stop();
+          else unlisten = stop;
+        })
+        .catch(() => {});
+    } catch {
+      // No webview (tests, a plain browser): drag & drop is simply unavailable.
+    }
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -351,52 +531,10 @@ export function ThreadView({
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {
     if (prefill && prefill.threadId === threadId) {
-      setInput(prefill.text);
+      setValue(decodeDraft(prefill.text));
       onPrefillUsed();
     }
   }, [prefill, threadId, onPrefillUsed]);
-
-  // Before a Thread exists, ask what the Provider it will use supports.
-  useEffect(() => {
-    if (threadId) return;
-    let active = true;
-    void commands.providerCapabilities(draftProvider).then((caps) => {
-      if (active) setNewThreadCaps(caps);
-    });
-    return () => {
-      active = false;
-    };
-  }, [threadId, draftProvider]);
-
-  const imagesOffered = (threadId ? transcript.capabilities : newThreadCaps)?.imageAttachments ?? false;
-
-  const addImage = async (file: File) => {
-    const ext = IMAGE_EXTENSIONS[file.type];
-    if (!ext) return;
-    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    const saved = await commands.saveAttachment(bytes, ext);
-    if (saved.status !== "ok") {
-      console.error("Failed to store image:", saved.error);
-      return;
-    }
-    setPendingImages((prev) => [...prev, { path: saved.data, previewUrl: URL.createObjectURL(file) }]);
-  };
-
-  const removeImage = (path: string) => {
-    setPendingImages((prev) => {
-      const gone = prev.find((i) => i.path === path);
-      if (gone) URL.revokeObjectURL(gone.previewUrl);
-      return prev.filter((i) => i.path !== path);
-    });
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    if (!imagesOffered) return;
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type in IMAGE_EXTENSIONS);
-    if (files.length === 0) return;
-    e.preventDefault();
-    files.forEach((f) => void addImage(f));
-  };
 
   const turnCount = transcript.turnOffset + transcript.turns.length;
   // Until the real Turn arrives, the sent prompt stands in for it.
@@ -405,10 +543,10 @@ export function ThreadView({
   const outgoingTurn: TranscriptTurn | null = pendingOutgoing && {
     id: 0,
     turnIndex: pendingOutgoing.baseCount,
-    prompt: pendingOutgoing.prompt,
+    prompt: plainText(pendingOutgoing.segments),
     model: null,
     effort: null,
-    attachments: pendingOutgoing.attachments,
+    segments: pendingOutgoing.segments,
     status: "running",
     startedAt: pendingOutgoing.startedAt,
     completedAt: null,
@@ -723,17 +861,22 @@ export function ThreadView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const prompt = input.trim();
-    if (!prompt || sending || turnIsRunning(transcript.status)) return;
+    if (!hasContent(value) || isBusy(value) || sending || turnIsRunning(transcript.status)) return;
     setCommandError(null);
 
-    if (isClearCommand(input)) {
+    const typed = typedText(value);
+    const slash = parseSlashCommand(typed);
+    if (hasAttachments(value) && (isClearCommand(typed) || (slash.type !== "none" && slash.type !== "other"))) {
+      setCommandError(`Attachments can't be sent with ${slash.command || typed.trim()}. Remove them or send the command alone.`);
+      return;
+    }
+
+    if (isClearCommand(typed)) {
       handleInputChange("");
       onClearThread?.();
       return;
     }
 
-    const slash = parseSlashCommand(input);
     if (slash.type === "reload-cache") {
       handleInputChange("");
       const generation = slashGeneration.current;
@@ -799,16 +942,24 @@ export function ThreadView({
       return;
     }
 
+    // Kept until Core takes the prompt, so a failure can give it back untouched.
+    const sentValue = value;
+    const segments = toPromptInput(value);
     setSending(true);
     handleInputChange("");
     followRef.current = true;
     setOutgoing({
       threadId,
-      prompt,
-      attachments: pendingImages.map((i) => i.path),
+      segments: toPromptSegments(value),
       baseCount: turnCount,
       startedAt: new Date().toISOString(),
     });
+    const giveBack = (message: string) => {
+      setOutgoing(null);
+      composerRef.current?.replace(sentValue);
+      commit(sentValue);
+      setCommandError(message);
+    };
 
     try {
       let targetThreadId = threadId;
@@ -831,20 +982,20 @@ export function ThreadView({
           onThreadCreated(created.data);
         } else {
           console.error("Failed to create thread:", created.error);
-          setOutgoing(null);
+          giveBack(created.error.message);
           setSending(false);
           return;
         }
       }
 
-      const attachments = pendingImages.map((i) => i.path);
-      pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
-      setPendingImages([]);
-
-      const sent = await commands.sendPrompt(targetThreadId, prompt, attachments);
-      if (sent.status !== "ok") setOutgoing(null);
+      const sent = await commands.sendPrompt(targetThreadId, segments);
+      if (sent.status !== "ok") giveBack(sent.error.message);
+      else {
+        for (const id of removedAttachments.current) void commands.discardAttachment(id);
+        removedAttachments.current.clear();
+      }
     } catch (err) {
-      setOutgoing(null);
+      giveBack(errorMessage(err));
       throw err;
     } finally {
       setSending(false);
@@ -985,23 +1136,11 @@ export function ThreadView({
           </button>
         </div>
       ) : (
-      <form className="composer" onSubmit={handleSubmit}>
-        {pendingImages.length > 0 && (
-          <div className="pending-images">
-            {pendingImages.map((img) => (
-              <div className="pending-image" key={img.path}>
-                <img src={img.previewUrl} alt="Pending attachment" />
-                <button
-                  type="button"
-                  aria-label="Remove image"
-                  onClick={() => removeImage(img.path)}
-                >
-                  <XIcon size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      <form
+        ref={composerFormRef}
+        className={dropActive ? "composer drop-target" : "composer"}
+        onSubmit={handleSubmit}
+      >
         {slashMatches.length > 0 && (
           <ul className="slash-menu" role="listbox" aria-label="Slash commands">
             {slashMatches.map((c, i) => (
@@ -1022,20 +1161,19 @@ export function ThreadView({
             ))}
           </ul>
         )}
-        <textarea
-          className="composer-input"
-          aria-label="Message to agent"
-          rows={Math.max(2, Math.min(10, input.split("\n").length))}
+        <ComposerInput
+          ref={composerRef}
+          ariaLabel="Message to agent"
+          value={value}
+          onChange={handleComposerChange}
+          onPasteFiles={(files) => attachFiles(files, composerRef.current?.caret() ?? undefined)}
           placeholder={
             isTurnActive
               ? "Working… (Esc to stop)"
               : turnCount === 0
-                ? "Ask for changes, or attach images  (/model, /effort, /clear)"
+                ? "Ask for changes, or attach files  (/model, /effort, /clear)"
                 : "Send a follow-up  (/clear starts a new Thread)"
           }
-          value={input}
-          onChange={(e) => handleInputChange(e.target.value)}
-          onPaste={handlePaste}
           onKeyDown={(e) => {
             if (slashMatches.length > 0 && !e.nativeEvent.isComposing) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1049,11 +1187,10 @@ export function ThreadView({
                 const pick = slashMatches[Math.min(slashIndex, slashMatches.length - 1)];
                 const action = pickSlashCommand(pick, e.key === "Tab" ? "Tab" : "Enter", input);
                 if ("insert" in action) {
-                  e.preventDefault();
                   handleInputChange(action.insert);
                   return;
                 }
-                e.currentTarget.form?.requestSubmit();
+                e.currentTarget.closest("form")?.requestSubmit();
                 return;
               }
             }
@@ -1062,7 +1199,7 @@ export function ThreadView({
               stop();
             } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
+              e.currentTarget.closest("form")?.requestSubmit();
             }
           }}
           disabled={sending}
@@ -1095,37 +1232,22 @@ export function ThreadView({
               onChange={(mode) => void handlePermissionChange(mode)}
             />
           </div>
-          {imagesOffered && (
-            <>
-              <button
-                type="button"
-                className="cbtn"
-                aria-label="Attach image"
-                title="Attach image"
-                disabled={isTurnActive || sending}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <PaperclipIcon size={16} />
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                onChange={(e) => {
-                  Array.from(e.target.files ?? []).forEach((f) => void addImage(f));
-                  e.target.value = "";
-                }}
-              />
-            </>
-          )}
+          <button
+            type="button"
+            className="cbtn"
+            aria-label="Attach files"
+            title="Attach files"
+            disabled={isTurnActive || sending}
+            onClick={() => void pickFiles()}
+          >
+            <PaperclipIcon size={16} />
+          </button>
           {isTurnActive ? (
             <button type="button" className="send stop" onClick={stop} aria-label="Stop" title="Stop (Esc)">
               <SquareFillIcon size={12} />
             </button>
           ) : (
-            <button type="submit" className="send" disabled={!input.trim() || sending} aria-label="Send" title="Send (↩)">
+            <button type="submit" className="send" disabled={!hasContent(value) || isBusy(value) || sending} aria-label="Send" title="Send (↩)">
               <ArrowUpIcon size={16} />
             </button>
           )}

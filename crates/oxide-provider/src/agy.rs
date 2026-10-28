@@ -7,9 +7,9 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
-    TurnStatus,
+    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode,
+    PromptSegment, Provider, ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo,
+    SlashRoute, StartContext, TurnStatus, attachment_path_reference,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
@@ -148,6 +148,8 @@ pub struct AgyProvider {
     interrupted: Arc<AtomicBool>,
     closed: Arc<AtomicBool>,
     registry: Option<Arc<ProcessRegistry>>,
+    /// Where Attachments live; granted to the CLI with `--add-dir` so it can read them.
+    attachments_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for AgyProvider {
@@ -173,6 +175,7 @@ impl AgyProvider {
             interrupted: Arc::new(AtomicBool::new(false)),
             closed: Arc::new(AtomicBool::new(false)),
             registry: None,
+            attachments_dir: None,
         }
     }
 
@@ -380,7 +383,23 @@ impl Provider for AgyProvider {
         self.begin(context, Some(session_id.to_string()))
     }
 
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+    fn allow_attachments_dir(&mut self, dir: &std::path::Path) {
+        self.attachments_dir = Some(dir.to_path_buf());
+    }
+
+    fn send_prompt_with_segments(
+        &mut self,
+        segments: &[PromptSegment],
+    ) -> Result<(), ProviderError> {
+        // The CLI takes text only: each Attachment is a path reference at its place.
+        let prompt = segments
+            .iter()
+            .map(|segment| match segment {
+                PromptSegment::Text { text } => text.clone(),
+                PromptSegment::Attachment(a) => attachment_path_reference(a),
+            })
+            .collect::<String>();
+        let prompt = prompt.as_str();
         let (context, conversation) = {
             let session = self.session.lock().unwrap();
             let context = session
@@ -414,6 +433,9 @@ impl Provider for AgyProvider {
         }
         if context.permission_mode == PermissionMode::FullAccess {
             cmd.arg("--dangerously-skip-permissions");
+        }
+        if let Some(dir) = &self.attachments_dir {
+            cmd.arg("--add-dir").arg(dir);
         }
         cmd.current_dir(&context.working_dir)
             .stdin(if cfg!(windows) {
@@ -451,7 +473,7 @@ impl Provider for AgyProvider {
         let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
         self.send(ProviderEvent::TurnStarted {
             turn_index,
-            prompt: prompt.to_string(),
+            prompt: crate::render_prompt(segments),
         });
 
         let Some(tx) = self.event_sender.lock().unwrap().clone() else {
@@ -653,7 +675,7 @@ impl Provider for AgyProvider {
             supported_permission_modes: vec![PermissionMode::AutoEdit, PermissionMode::FullAccess],
             interactive_approvals: false,
             supports_reasoning: false,
-            image_attachments: false,
+            native_attachment_kinds: Vec::new(),
             mid_thread_model_switch: true,
             reports_usage_limits: false,
         }

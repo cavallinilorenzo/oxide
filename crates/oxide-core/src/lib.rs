@@ -2,6 +2,7 @@
 //! The App shell exposes [`Core`] to the webview; tests drive it headless.
 
 mod activity;
+pub mod attachments;
 mod board;
 mod checkpoint;
 mod clock;
@@ -59,12 +60,15 @@ pub use worktree::{DeleteOutcome, DispatchRequest};
 use rusqlite::Connection;
 use serde::Serialize;
 
+pub use attachments::{
+    AttachmentError, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_PROMPT, PromptInput,
+};
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 pub use oxide_provider::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
-    ProviderCapabilities, TurnStatus, UsageStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, Detection,
+    ItemKind, ModelInfo, PromptSegment, ProviderCapabilities, TurnStatus, UsageStatus,
 };
 use settings::SettingsStore;
 pub use settings::{
@@ -79,7 +83,6 @@ pub use usage::{UsageLimitWindow, UsageLimits};
 
 const DB_FILE: &str = "oxide.db";
 const PROCESSES_FILE: &str = "processes.json";
-static ATTACHMENT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// How many of a Thread's most recent Turns it opens on; older Turns are paged
 /// in with [`Core::list_turns`].
@@ -164,7 +167,7 @@ impl Core {
         let storage = StorageHandle::new(home.join(DB_FILE))?;
         let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
         let usage = Arc::new(usage::UsageHub::new(home.join(DB_FILE)));
-        Ok(Self {
+        let core = Self {
             home: home.clone(),
             user_home: std::env::var_os("HOME")
                 .or_else(|| std::env::var_os("USERPROFILE"))
@@ -194,7 +197,9 @@ impl Core {
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                     .unwrap_or_default(),
             ),
-        })
+        };
+        core.remove_abandoned_attachments();
+        Ok(core)
     }
 
     pub fn set_real_time_ticker(&self, enabled: bool) {
@@ -667,13 +672,16 @@ impl Core {
                 [thread_id],
                 |r| r.get(0),
             )?;
-            let mut stmt = db.prepare("SELECT attachments FROM turns WHERE thread_id = ?1")?;
+            let mut stmt =
+                db.prepare("SELECT segments, attachments FROM turns WHERE thread_id = ?1")?;
             let attachments: Vec<PathBuf> = stmt
-                .query_map([thread_id], |r| r.get::<_, String>(0))?
-                .filter_map(|json| json.ok())
-                .filter_map(|json| serde_json::from_str::<Vec<String>>(&json).ok())
-                .flatten()
-                .map(PathBuf::from)
+                .query_map([thread_id], |r| {
+                    Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
+                })?
+                .filter_map(|row| row.ok())
+                .flat_map(|(segments, legacy)| {
+                    attachments::stored_paths(segments.as_deref(), &legacy)
+                })
                 .collect();
             drop(stmt);
             let tx = db.unchecked_transaction()?;
@@ -696,8 +704,9 @@ impl Core {
         };
 
         checkpoint::forget(checkpoint_root, thread_id);
-        for path in attachments.iter().filter(|p| self.is_stored_attachment(p)) {
-            let _ = std::fs::remove_file(path);
+        let store = self.attachment_store();
+        for path in &attachments {
+            store.remove_stored(path);
         }
         self.board.publish_deleted(project_id, thread_id);
         Ok(())
@@ -793,7 +802,7 @@ impl Core {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: false,
+                native_attachment_kinds: Vec::new(),
                 mid_thread_model_switch: true,
                 reports_usage_limits: false,
             },
@@ -987,6 +996,8 @@ impl Core {
                 Box::new(oxide_provider::FakeProvider::scripted())
             };
 
+        let mut provider = provider;
+        provider.allow_attachments_dir(&self.attachments_dir());
         let real_time = self.real_time_ticker.load(Ordering::Relaxed);
         let actor = ThreadActorHandle::new(
             thread_id,
@@ -1007,46 +1018,22 @@ impl Core {
     }
 
     pub fn send_prompt(&self, thread_id: u32, prompt: &str) -> Result<()> {
-        self.send_prompt_with_attachments(thread_id, prompt, &[])
+        self.send_prompt_segments(
+            thread_id,
+            &[PromptInput::Text {
+                text: prompt.to_string(),
+            }],
+        )
     }
 
-    /// Sends a prompt with image attachments previously stored by [`Core::save_attachment`].
-    /// Fails if the Provider doesn't accept images or a path is outside the attachments folder.
-    pub fn send_prompt_with_attachments(
-        &self,
-        thread_id: u32,
-        prompt: &str,
-        attachments: &[PathBuf],
-    ) -> Result<()> {
-        if let Some(bad) = attachments.iter().find(|p| !self.is_stored_attachment(p)) {
-            return Err(Error::Io {
-                path: bad.clone(),
-                source: std::io::Error::other("attachment is not stored under the Oxide home"),
-            });
-        }
+    /// Sends a prompt made of text and stored Attachments, in the order given. Fails before the
+    /// Turn starts if an Attachment is missing, there are too many, or the Provider can't take
+    /// them.
+    pub fn send_prompt_segments(&self, thread_id: u32, input: &[PromptInput]) -> Result<()> {
+        let segments = self.attachment_store().resolve(input)?;
         self.ensure_worktree(thread_id)?;
         let actor = self.get_or_create_thread_actor(thread_id)?;
-        actor.send_prompt(prompt.to_string(), attachments.to_vec())
-    }
-
-    /// Reads a stored attachment; refuses paths outside the attachments folder.
-    pub fn read_attachment(&self, path: &Path) -> Result<Vec<u8>> {
-        let io = |source| Error::Io {
-            path: path.to_path_buf(),
-            source,
-        };
-        if !self.is_stored_attachment(path) {
-            return Err(io(std::io::Error::other("not stored under the Oxide home")));
-        }
-        fs::read(path).map_err(io)
-    }
-
-    /// Whether `path` resolves (symlinks and `..` included) to a file inside the attachments folder.
-    fn is_stored_attachment(&self, path: &Path) -> bool {
-        match (path.canonicalize(), self.attachments_dir().canonicalize()) {
-            (Ok(path), Ok(dir)) => path.starts_with(dir),
-            _ => false,
-        }
+        actor.send_prompt(segments)
     }
 
     /// The catalog for a Project before a Thread exists.
@@ -1145,7 +1132,6 @@ impl Core {
         let caps = self.get_provider_capabilities(provider);
         ThreadCapabilities {
             reasoning_text: caps.supports_reasoning,
-            image_attachments: caps.image_attachments,
         }
     }
 
@@ -1153,32 +1139,46 @@ impl Core {
         self.home.join("attachments")
     }
 
-    /// Stores an image under `<home>/attachments/` and returns its path.
-    pub fn save_attachment(&self, bytes: &[u8], extension: &str) -> Result<PathBuf> {
-        const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-        let ext = extension.to_ascii_lowercase();
-        let dir = self.attachments_dir();
-        if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-            return Err(Error::Io {
-                path: dir,
-                source: std::io::Error::other(format!("unsupported image type `{extension}`")),
-            });
-        }
-        fs::create_dir_all(&dir).map_err(|source| Error::Io {
-            path: dir.clone(),
-            source,
-        })?;
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default();
-        let seq = ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
-        let path = dir.join(format!("{nanos}-{seq}.{ext}"));
-        fs::write(&path, bytes).map_err(|source| Error::Io {
-            path: path.clone(),
-            source,
-        })?;
-        Ok(path)
+    /// Copies the file at `path` into Attachment storage (drag & drop, file dialog).
+    pub fn attach_path(&self, path: &Path) -> Result<Attachment> {
+        self.attachment_store().attach_path(path)
+    }
+
+    /// Stores pasted bytes as an Attachment, named `name` or, if none, after what they are.
+    pub fn attach_bytes(&self, name: Option<&str>, bytes: &[u8]) -> Result<Attachment> {
+        self.attachment_store().attach_bytes(name, bytes)
+    }
+
+    /// Forgets an Attachment the user removed from a prompt before sending it.
+    pub fn discard_attachment(&self, id: &str) {
+        self.attachment_store().remove(id);
+    }
+
+    fn attachment_store(&self) -> attachments::AttachmentStore {
+        attachments::AttachmentStore::new(self.attachments_dir())
+    }
+
+    /// Removes stored Attachments a day old or more that no Turn refers to.
+    fn remove_abandoned_attachments(&self) {
+        let referenced: std::collections::HashSet<String> = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let Ok(mut stmt) = db.prepare("SELECT segments, attachments FROM turns") else {
+                return;
+            };
+            let Ok(rows) = stmt.query_map([], |r| {
+                Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?))
+            }) else {
+                return;
+            };
+            rows.filter_map(|row| row.ok())
+                .flat_map(|(segments, legacy)| {
+                    attachments::stored_paths(segments.as_deref(), &legacy)
+                })
+                .filter_map(|path| attachments::id_of_path(&self.attachments_dir(), &path))
+                .collect()
+        };
+        self.attachment_store()
+            .remove_abandoned(|id| referenced.contains(id));
     }
 
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {

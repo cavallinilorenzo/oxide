@@ -2,9 +2,10 @@
 
 use crate::process;
 use crate::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
-    PermissionMode, Provider, ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo,
-    SlashRoute, StartContext, TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
+    ActivityCategory, ApprovalDecision, ApprovalKind, AttachmentKind, Detection, ItemKind,
+    ModelInfo, PermissionMode, PromptSegment, Provider, ProviderCapabilities, ProviderError,
+    ProviderEvent, SlashCommandInfo, SlashRoute, StartContext, TurnStatus, UsageStatus,
+    UsageWindow, UsageWindowKind, attachment_marker, attachment_path_reference, render_prompt,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -1003,7 +1004,7 @@ impl CodexProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: false,
+                native_attachment_kinds: vec![AttachmentKind::Image],
                 mid_thread_model_switch: true,
                 reports_usage_limits: true,
             })),
@@ -1304,7 +1305,14 @@ impl Provider for CodexProvider {
         Ok(rx)
     }
 
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
+    fn send_prompt_with_segments(
+        &mut self,
+        segments: &[PromptSegment],
+    ) -> Result<(), ProviderError> {
+        let prompt = render_prompt(segments);
+        let prompt = prompt.as_str();
+        // Native requests take text only: every Attachment is a path reference there.
+        let flat = flat_prompt(segments);
         let tid = self
             .thread_id
             .lock()
@@ -1332,7 +1340,7 @@ impl Provider for CodexProvider {
         if let Some(rest) = prompt.trim().strip_prefix("/review")
             && (rest.is_empty() || rest.starts_with(char::is_whitespace))
         {
-            let instructions = rest.trim();
+            let instructions = flat.trim().strip_prefix("/review").unwrap_or(rest).trim();
             let target = if instructions.is_empty() {
                 json!({"type": "uncommittedChanges"})
             } else {
@@ -1346,7 +1354,7 @@ impl Provider for CodexProvider {
             return self.finish_native_request(&tid, turn_index, result);
         }
 
-        let mut input = vec![json!({"type": "text", "text": prompt})];
+        let mut input = codex_input(segments);
         if let Some(command) = prompt.trim_start().strip_prefix('/') {
             let split = command.find(char::is_whitespace).unwrap_or(command.len());
             let name = &command[..split];
@@ -1362,11 +1370,20 @@ impl Provider for CodexProvider {
                 && let Some(skill) = skills
                     .into_iter()
                     .find(|skill| skill["name"].as_str() == Some(name) && skill["path"].is_string())
+                && let Some(first) = input.first().and_then(|i| i["text"].as_str())
             {
-                input = vec![
+                let rest = first
+                    .trim_start()
+                    .strip_prefix('/')
+                    .and_then(|c| c.get(split..))
+                    .unwrap_or_default()
+                    .trim_start()
+                    .to_owned();
+                input[0] = json!({"type": "text", "text": rest});
+                input.insert(
+                    0,
                     json!({"type": "skill", "name": name, "path": skill["path"]}),
-                    json!({"type": "text", "text": command[split..].trim_start()}),
-                ];
+                );
             }
         }
 
@@ -1376,61 +1393,6 @@ impl Provider for CodexProvider {
         let mut params = json!({
             "threadId": tid,
             "input": input,
-            "sandboxPolicy": sandbox_policy,
-            "approvalPolicy": approval_policy,
-        });
-
-        if let Some(ref m) = *self.active_model.lock().unwrap() {
-            params["model"] = json!(m);
-        }
-        if let Some(ref eff) = *self.active_effort.lock().unwrap() {
-            params["effort"] = json!(eff);
-        }
-
-        self.app_server.start_turn(&tid, "turn/start", params)?;
-        Ok(())
-    }
-
-    fn send_prompt_with_images(
-        &mut self,
-        prompt: &str,
-        images: &[PathBuf],
-    ) -> Result<(), ProviderError> {
-        let tid = self
-            .thread_id
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| ProviderError::CommandFailed("Thread not started".into()))?;
-
-        let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
-        self.app_server.record_active_turn(tid.clone(), turn_index);
-
-        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
-            let _ = sender.send(ProviderEvent::TurnStarted {
-                turn_index,
-                prompt: prompt.to_string(),
-            });
-        }
-
-        let mut input_arr = vec![json!({
-            "type": "text",
-            "text": prompt
-        })];
-
-        for img in images {
-            input_arr.push(json!({
-                "type": "localImage",
-                "path": img.to_string_lossy()
-            }));
-        }
-
-        let mode = *self.active_permission_mode.lock().unwrap();
-        let (sandbox_policy, approval_policy) = Self::map_permission_mode_to_turn_start(mode);
-
-        let mut params = json!({
-            "threadId": tid,
-            "input": input_arr,
             "sandboxPolicy": sandbox_policy,
             "approvalPolicy": approval_policy,
         });
@@ -1550,4 +1512,48 @@ impl Provider for CodexProvider {
 /// Codex only surfaces `commandExecution` as a tool call, so every one is a command run.
 fn codex_category(kind: ItemKind) -> Option<ActivityCategory> {
     (kind == ItemKind::ToolCall).then_some(ActivityCategory::Run)
+}
+
+/// The prompt as text with every Attachment as a path reference.
+fn flat_prompt(segments: &[PromptSegment]) -> String {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            PromptSegment::Text { text } => text.clone(),
+            PromptSegment::Attachment(a) => attachment_path_reference(a),
+        })
+        .collect()
+}
+
+/// The `turn/start` input: text items interleaved with `localImage` items for images; every
+/// other Attachment is a path reference in the text. Each is preceded by its name marker.
+fn codex_input(segments: &[PromptSegment]) -> Vec<serde_json::Value> {
+    fn push_text(items: &mut Vec<serde_json::Value>, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if let Some(last) = items.last_mut()
+            && last["type"] == "text"
+        {
+            let joined = format!("{}{text}", last["text"].as_str().unwrap_or_default());
+            last["text"] = json!(joined);
+            return;
+        }
+        items.push(json!({"type": "text", "text": text}));
+    }
+    let mut items = Vec::new();
+    for segment in segments {
+        match segment {
+            PromptSegment::Text { text } => push_text(&mut items, text),
+            PromptSegment::Attachment(a) if a.kind == AttachmentKind::Image => {
+                push_text(&mut items, &attachment_marker(a));
+                items.push(json!({"type": "localImage", "path": a.path.to_string_lossy()}));
+            }
+            PromptSegment::Attachment(a) => push_text(&mut items, &attachment_path_reference(a)),
+        }
+    }
+    if items.is_empty() {
+        items.push(json!({"type": "text", "text": ""}));
+    }
+    items
 }

@@ -27,7 +27,7 @@ const turn = (over: Partial<TranscriptTurn>): TranscriptTurn => ({
   prompt: "do it",
   model: null,
   effort: null,
-  attachments: [],
+  segments: [],
   status: "completed",
   startedAt: "2026-10-22T10:00:00Z",
   completedAt: "2026-10-22T10:00:42Z",
@@ -133,4 +133,24 @@ it("keeps the Activity open while new Items stream in", async () => {
   await click(buttonWith("Explored 1 file"));
   await render({ ...running, items: [worked[0], worked[2]] });
   expect(buttonWith("Explored 1 file · Ran 1 command")?.getAttribute("aria-expanded")).toBe("true");
+});
+
+
+it("draws Attachments as chips between the words of the prompt, the same for every Provider", async () => {
+  const attachment = (name: string, attachmentKind: "image" | "pdf" | "text" | "other") => ({
+    kind: "attachment" as const, id: `id-${name}`, name, attachmentKind, mediaType: "x/y", sizeBytes: 2048, path: `/h/attachments/id-${name}/${name}`,
+  });
+  await render(turn({
+    prompt: "Compare [a.png] with [spec.pdf]",
+    segments: [
+      { kind: "text", text: "Compare " }, attachment("a.png", "image"),
+      { kind: "text", text: " with " }, attachment("spec.pdf", "pdf"),
+    ],
+  }));
+  const bubble = container.querySelector(".user-bubble")!;
+  const chips = Array.from(bubble.querySelectorAll('[role="img"]'));
+  expect(chips.map((c) => c.getAttribute("aria-label"))).toEqual(["Attachment, a.png, image", "Attachment, spec.pdf, PDF"]);
+  expect(chips[0].getAttribute("title")).toBe("a.png · 2.0 KB");
+  expect(Array.from(bubble.childNodes).map((n) => n.textContent)).toEqual(["Compare ", "a.png", " with ", "spec.pdf"]);
+  expect(bubble.querySelector("img, button")).toBeNull();
 });

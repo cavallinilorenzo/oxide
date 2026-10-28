@@ -243,11 +243,15 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
     });
     #[cfg(not(windows))]
     if blocks {
-        command.env("PS1", r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#);
+        let prompt = r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#;
+        command.env("PS1", prompt);
         command.env("PS2", "");
         // macOS's /bin/sh ignores this dynamic PS1 prompt, so block completion
-        // markers never fire and Ctrl+C can terminate the shell itself.
-        command.args(["-c", "stty -echo; exec /bin/bash --noprofile --norc -i"]);
+        // markers never fire and Ctrl+C can terminate the shell itself. Pass
+        // PS1 directly to bash because the wrapper shell clears it on startup.
+        let script =
+            format!("stty -echo; exec PS1='{prompt}' PS2='' /bin/bash --noprofile --norc -i");
+        command.args(["-c", &script]);
     }
     command.cwd(dunce::simplified(cwd));
     command.env("TERM", "xterm-256color");

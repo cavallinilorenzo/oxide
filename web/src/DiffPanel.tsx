@@ -1,5 +1,6 @@
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
+import { useQuery, type QueryResult } from "./queryCache";
 import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon, UnfoldIcon } from "@primer/octicons-react";
 import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
@@ -50,48 +51,36 @@ export function DiffPanel(props: DiffPanelProps) {
 }
 
 function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest }: DiffPanelProps) {
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
+  // The window regaining focus reloads the diff, like the Pull request tab.
+  const [focusTick, setFocusTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setFocusTick((n) => n + 1);
+    window.addEventListener("focus", bump);
+    return () => window.removeEventListener("focus", bump);
+  }, []);
+  const query = useQuery(
+    `p${projectId}:diff:${scope}:${threadId ?? ""}:${reviewedPr ?? ""}`,
+    async (): Promise<QueryResult<Diff>> => {
+      if ((scope === "turn" && threadId === null) || (scope === "pr" && reviewedPr === null)) {
+        return { status: "ok", data: { base: null, files: [] } };
+      }
+      return scope === "turn"
+        ? await commands.gitTurnDiff(threadId!)
+        : scope === "pr"
+          ? await commands.pullRequestDetail(projectId, reviewedPr!).then((r) =>
+              r.status === "ok" ? { status: "ok" as const, data: r.data.diff } : r,
+            )
+          : await commands.gitDiff(projectId, scope);
+    },
+    `${refreshKey}#${focusTick}`,
+  );
+  const loaded: Loaded = query.state === "ready" ? { state: "ready", diff: query.data } : query;
   // Files the user took out of the commit; everything starts checked.
   const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const push = usePushFlow(projectId, onChanged, onOpenPullRequest);
-
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      if (scope === "turn" && threadId === null) {
-        setLoaded({ state: "ready", diff: { base: null, files: [] } });
-        return;
-      }
-      if (scope === "pr" && reviewedPr === null) {
-        setLoaded({ state: "ready", diff: { base: null, files: [] } });
-        return;
-      }
-      const result =
-        scope === "turn"
-          ? await commands.gitTurnDiff(threadId!)
-          : scope === "pr"
-            ? await commands.pullRequestDetail(projectId, reviewedPr!).then((r) =>
-                r.status === "ok" ? { status: "ok" as const, data: r.data.diff } : r,
-              )
-            : await commands.gitDiff(projectId, scope);
-      if (!active) return;
-      setLoaded(
-        result.status === "ok"
-          ? { state: "ready", diff: result.data }
-          : { state: "error", message: result.error.message },
-      );
-    };
-    void load();
-    const reload = () => void load();
-    window.addEventListener("focus", reload);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", reload);
-    };
-  }, [projectId, threadId, scope, reviewedPr, refreshKey]);
 
   const files = loaded.state === "ready" ? loaded.diff.files : [];
   const focused = matchDiffFile(files, focus);

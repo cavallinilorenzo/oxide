@@ -8,6 +8,7 @@ import {
   XCircleFillIcon,
 } from "@primer/octicons-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { getQueryData, setQueryData } from "./queryCache";
 import { Avatar } from "./Avatar";
 import {
   commands,
@@ -47,19 +48,28 @@ export type Candidates =
 
 /** The people and labels GitHub offers, fetched the first time a picker opens. */
 export function useCandidates(projectId: number) {
-  const [candidates, setCandidates] = useState<Candidates>({ state: "idle" });
+  const key = `p${projectId}:candidates`;
+  const cached = getQueryData<PullRequestCandidates>(key);
+  const [candidates, setCandidates] = useState<Candidates>(
+    cached ? { state: "ready", data: cached } : { state: "idle" },
+  );
   const requested = useRef(false);
   const load = useCallback(() => {
     if (requested.current) return;
     requested.current = true;
-    setCandidates({ state: "loading" });
+    setCandidates((current) => (current.state === "ready" ? current : { state: "loading" }));
     void commands.pullRequestCandidates(projectId).then((result) => {
       if (result.status === "error") requested.current = false;
-      setCandidates(
-        result.status === "ok" ? { state: "ready", data: result.data } : { state: "error", message: result.error.message },
+      else setQueryData(key, result.data);
+      setCandidates((current) =>
+        result.status === "ok"
+          ? { state: "ready", data: result.data }
+          : current.state === "ready"
+            ? current
+            : { state: "error", message: result.error.message },
       );
     });
-  }, [projectId]);
+  }, [projectId, key]);
   return { candidates, load };
 }
 

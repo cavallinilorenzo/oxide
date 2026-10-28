@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import { clearQueryCache } from "./queryCache";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands } from "./bindings";
@@ -10,6 +11,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  clearQueryCache();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -55,4 +57,40 @@ it("reloads periodically while visible, and not while hidden", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+const pr = (number: number, title: string) => ({
+  number,
+  title,
+  author: "alice",
+  url: "",
+  head: "feat",
+  base: "main",
+  draft: false,
+  createdAt: "2026-01-01T00:00:00Z",
+});
+
+it("shows the previous list at once on remount, and the refreshed one when it lands", async () => {
+  vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "ok", data: [pr(1, "First PR")] });
+  await render();
+  await act(() => root.unmount());
+  root = createRoot(host);
+  let resolve!: (r: Awaited<ReturnType<typeof commands.listPullRequests>>) => void;
+  vi.mocked(commands.listPullRequests).mockImplementation(() => new Promise((r) => (resolve = r)));
+  await render();
+  expect(host.textContent).toContain("First PR");
+  expect(host.textContent).not.toContain("Loading…");
+  await act(async () => resolve({ status: "ok", data: [pr(2, "Second PR")] }));
+  expect(host.textContent).toContain("Second PR");
+  expect(host.textContent).not.toContain("First PR");
+});
+
+it("keeps the list with a notice when a refresh fails", async () => {
+  vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "ok", data: [pr(1, "First PR")] });
+  await render();
+  vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "error", error: { message: "offline" } });
+  await act(async () => void window.dispatchEvent(new Event("focus")));
+  expect(host.textContent).toContain("First PR");
+  expect(host.textContent).toContain("offline");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
 });

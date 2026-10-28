@@ -298,7 +298,7 @@ fn create_shell_init_file(id: u32) -> Result<PathBuf> {
         .open(&path)
         .map_err(|error| Error::Terminal(format!("create terminal shell init file: {error}")))?;
     file.write_all(
-        b"stty -echo\n__oxide_interrupt_foreground() {\n  local pid\n  for pid in $(/usr/bin/pgrep -P \"$$\"); do\n    kill -TERM \"$pid\" 2>/dev/null\n  done\n}\ntrap __oxide_interrupt_foreground INT\n",
+        b"stty isig -echo\n__oxide_interrupt_foreground() {\n  local pid\n  for pid in $(/usr/bin/pgrep -P \"$$\"); do\n    kill -TERM \"$pid\" 2>/dev/null\n  done\n}\ntrap __oxide_interrupt_foreground INT\n",
     )
         .map_err(|error| Error::Terminal(format!("write terminal shell init file: {error}")))?;
     Ok(path)

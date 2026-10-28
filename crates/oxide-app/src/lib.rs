@@ -1174,6 +1174,13 @@ pub struct IssueEdit {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct IssueTemplateFile {
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct IssuesState {
     pub availability: GithubAvailability,
     pub guidance: Option<String>,
@@ -1262,6 +1269,18 @@ async fn issues_state(
     git_blocking(&core, move |core| core.issues_state(project_id))
         .await
         .map(|state| convert(&state))
+}
+
+/// The repository's issue templates (`.github/ISSUE_TEMPLATE`) as raw files; empty when it has none.
+#[tauri::command]
+#[specta::specta]
+async fn issue_templates(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<IssueTemplateFile>, AppError> {
+    git_blocking(&core, move |core| core.issue_templates(project_id))
+        .await
+        .map(|files| convert(&files))
 }
 
 #[tauri::command]
@@ -2129,6 +2148,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull_request_candidates,
         edit_pull_request,
         issues_state,
+        issue_templates,
         list_issues,
         issue_detail,
         create_issue,

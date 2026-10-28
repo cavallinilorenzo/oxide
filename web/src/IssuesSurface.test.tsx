@@ -40,6 +40,7 @@ beforeEach(() => {
     status: "ok",
     data: { availability: "ready", guidance: null },
   });
+  vi.spyOn(commands, "issueTemplates").mockResolvedValue({ status: "ok", data: [] });
   vi.spyOn(commands, "listIssues").mockResolvedValue({ status: "ok", data: [summary()] });
   vi.spyOn(commands, "issueDetail").mockResolvedValue({ status: "ok", data: detail() });
 });

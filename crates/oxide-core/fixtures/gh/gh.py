@@ -117,6 +117,19 @@ if args[:2] == ["pr", "edit"]:
     save()
     sys.exit(0)
 
+TEMPLATES_DIR = "repos/{owner}/{repo}/contents/.github/ISSUE_TEMPLATE"
+if len(args) > 1 and args[0] == "api" and args[1].startswith(TEMPLATES_DIR):
+    # `state["issue_templates"]` maps file names to their text; absent, the directory is missing.
+    files = state.get("issue_templates")
+    if files is None:
+        sys.stderr.write("gh: Not Found (HTTP 404)")
+        sys.exit(1)
+    if args[1] == TEMPLATES_DIR:
+        print("\n".join(sorted(files)))
+    else:
+        sys.stdout.write(files[args[1][len(TEMPLATES_DIR) + 1:]])
+    sys.exit(0)
+
 if args[:2] == ["api", "repos/{owner}/{repo}/branches?per_page=100"]:
     if state.get("branches_error"):
         sys.stderr.write(state["branches_error"])

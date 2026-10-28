@@ -1308,6 +1308,20 @@ html.macos .header,
 .pr-views .issue-create-details .pr-field { padding: 10px 0; }
 .pr-views .pr-create-actions button:first-child { margin-left: 0; }
 
+/* Issues: the template chooser and the fields of an issue form. */
+.pr-views .issue-templates { list-style: none; margin: 0; padding: 0; display: grid; }
+.pr-views .issue-templates li + li { border-top: 1px solid var(--line); }
+.pr-views .issue-template { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-3) var(--space-2); border: 0; border-radius: var(--radius-control); background: none; text-align: left; color: var(--dim); }
+.pr-views .issue-template:hover:not(:disabled) { background: var(--bg3); }
+.pr-views .issue-template-body { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.pr-views .issue-template-name { display: flex; align-items: center; gap: var(--space-2); color: var(--fg-bright); font-weight: 600; }
+.pr-views .issue-template-about { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.pr-views .issue-template-badge { padding: 0 var(--space-2); border: 1px solid var(--line-strong); border-radius: 999px; color: var(--dim); font-size: 11px; font-weight: 500; }
+.pr-views .issue-form-note { color: var(--dim); font-size: 13px; line-height: 1.5; }
+.pr-views .issue-field-label { font-size: 14px; font-weight: 600; color: var(--fg-bright); }
+.pr-views .issue-options { display: grid; gap: var(--space-2); }
+.pr-views .issue-option { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; color: var(--fg); }
+.pr-views .issue-option input { width: auto; min-height: 0; margin: 0; }
 /* Shortcut chip on a button, as GitHub draws it. */
 .kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: #0000002e; font: inherit; font-size: 12px; font-weight: 500; }
 

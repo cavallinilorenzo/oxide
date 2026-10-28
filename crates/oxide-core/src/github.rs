@@ -1195,6 +1195,14 @@ pub enum IssueCloseReason {
     NotPlanned,
 }
 
+/// One file of the repository's `.github/ISSUE_TEMPLATE` directory, `config.yml` included.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueTemplateFile {
+    pub name: String,
+    pub content: String,
+}
+
 /// Changes to an issue's text, assignees and labels; `None` leaves the text alone.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1314,6 +1322,74 @@ pub fn list_issues(
         .as_array()
         .map(|issues| issues.iter().map(issue_summary_from).collect())
         .unwrap_or_default())
+}
+
+/// The issue templates the repository offers on GitHub, as the files they are written in.
+/// Parsing stays with the caller: the YAML forms and Markdown templates are the web's format.
+pub fn issue_templates(gh: &Gh, cwd: &Path) -> Result<Vec<IssueTemplateFile>> {
+    gh.require_ready(cwd)?;
+    const DIR: &str = "repos/{owner}/{repo}/contents/.github/ISSUE_TEMPLATE";
+    let listing = match gh.run(
+        cwd,
+        &[
+            "api",
+            DIR,
+            "--jq",
+            r#".[] | select(.type == "file") | .name"#,
+        ],
+    ) {
+        Ok(listing) => listing,
+        // No such directory: the repository has no templates, which is not a failure.
+        Err(GhError::Failed(message))
+            if message.contains("Not Found") || message.contains("404") =>
+        {
+            return Ok(Vec::new());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let names: Vec<&str> = listing
+        .lines()
+        .map(str::trim)
+        .filter(|name| {
+            let name = name.to_ascii_lowercase();
+            [".yml", ".yaml", ".md"]
+                .iter()
+                .any(|ext| name.ends_with(ext))
+        })
+        .collect();
+    let fetched: Vec<Result<IssueTemplateFile>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = names
+            .iter()
+            .map(|name| {
+                scope.spawn(move || {
+                    let path = format!("{DIR}/{name}");
+                    let content = gh.run(
+                        cwd,
+                        &[
+                            "api",
+                            &path,
+                            "-H",
+                            "Accept: application/vnd.github.raw+json",
+                        ],
+                    )?;
+                    Ok(IssueTemplateFile {
+                        name: (*name).to_string(),
+                        content,
+                    })
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect()
+    });
+    let mut files = fetched.into_iter().collect::<Result<Vec<_>>>()?;
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(files)
 }
 
 pub fn issue_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<IssueDetail> {

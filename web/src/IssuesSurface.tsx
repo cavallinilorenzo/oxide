@@ -1,19 +1,18 @@
-import { ArrowLeftIcon, CommentIcon } from "@primer/octicons-react";
-import { useCallback, useEffect, useState } from "react";
-import {
-  commands,
-  type IssueDetail,
-  type IssuesState_Serialize,
-  type IssueSummary,
-  type Thread,
-} from "./bindings";
-import { DispatchDialog } from "./DispatchDialog";
-import type { DispatchIssue } from "./dispatch";
-import { canSubmitComment, canSubmitIssue, formatIssueLabel } from "./issueView";
+import { CommentIcon, PlusIcon, SearchIcon } from "@primer/octicons-react";
+import { useEffect, useState } from "react";
+import { commands, type IssuesState_Serialize, type IssueSummary, type Thread } from "./bindings";
+import { Avatar } from "./Avatar";
+import { IssueCreate } from "./IssueCreate";
+import { IssueDetailView } from "./IssueDetailView";
+import { IssueStateIcon } from "./IssueStateIcon";
+import { issuePhase } from "./issueView";
+import { LabelChip } from "./PullRequestPeople";
+import { relativeTime } from "./pullRequestReview";
+import { useAutoRefresh } from "./useAutoRefresh";
 
 export interface IssuesSurfaceProps {
   projectId: number;
-  /** Changes after user mutations/actions that should refresh the surface. */
+  /** Changes after the user's own actions that should reload the surface. */
   refreshKey?: number;
   /** Called after issue mutations (create/close/comment), so parent views can react if needed. */
   onChanged?: () => void;
@@ -21,480 +20,245 @@ export interface IssuesSurfaceProps {
   onDispatched?: (thread: Thread) => void;
 }
 
-type SurfaceState =
+type Availability =
   | { state: "loading" }
   | { state: "error"; message: string }
   | { state: "guidance"; guidance: string }
   | { state: "ready"; issuesState: IssuesState_Serialize };
 
+/** How long typing pauses before the search runs: every search is a `gh` call. */
+const SEARCH_DELAY_MS = 350;
+
+/** The repository's issues on GitHub, through `gh`. Like the Pull request tab it reloads by
+ *  itself: when opened, after the user's own changes, when the window regains focus, and
+ *  periodically while visible. State belongs to one Project, so a different one remounts it. */
 export function IssuesSurface(props: IssuesSurfaceProps) {
-  return <IssuesSurfaceBody key={props.projectId} {...props} />;
+  return <IssuesViews key={props.projectId} {...props} />;
 }
 
-function IssuesSurfaceBody({ projectId, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
-  const [surfaceState, setSurfaceState] = useState<SurfaceState>({ state: "loading" });
-  const [openedIssue, setOpenedIssue] = useState<number | null>(null);
+function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
+  const tick = useAutoRefresh();
+  const reload = refreshKey + tick;
+  const [availability, setAvailability] = useState<Availability>({ state: "loading" });
+  const [opened, setOpened] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
-  const [manual, setManual] = useState(0);
+  // Bumped after the list changed under it (a new issue, a closed one), beyond the timer.
   const [listRevision, setListRevision] = useState(0);
-  const [search, setSearch] = useState("");
-
-  const reloadSurface = useCallback(() => setManual((n) => n + 1), []);
-  const reloadList = useCallback(() => setListRevision((n) => n + 1), []);
 
   useEffect(() => {
     let active = true;
-    void (async () => {
-      const state = await commands.issuesState(projectId);
+    void commands.issuesState(projectId).then((result) => {
       if (!active) return;
-      if (state.status === "error") {
-        setSurfaceState({ state: "error", message: state.error.message });
-      } else if (state.data.availability !== "ready") {
-        setSurfaceState({
+      if (result.status === "error") {
+        setAvailability({ state: "error", message: result.error.message });
+      } else if (result.data.availability !== "ready") {
+        setAvailability({
           state: "guidance",
-          guidance: state.data.guidance ?? "The GitHub CLI is not ready.",
+          guidance: result.data.guidance ?? "The GitHub CLI is not ready.",
         });
       } else {
-        setSurfaceState({ state: "ready", issuesState: state.data });
+        setAvailability({ state: "ready", issuesState: result.data });
       }
-    })();
+    });
     return () => {
       active = false;
     };
-  }, [projectId, refreshKey, manual]);
+  }, [projectId, reload]);
 
-  const refreshButton = (
-    <button className="pr-refresh" onClick={reloadSurface} title="Reload from GitHub">
-      Refresh
-    </button>
-  );
+  const changed = () => {
+    setListRevision((n) => n + 1);
+    onChanged?.();
+  };
 
   let content: React.ReactNode;
-
-  if (surfaceState.state === "loading") {
-    content = null;
-  } else if (surfaceState.state === "error") {
+  if (availability.state === "loading") {
+    content = <p className="pr-empty">Loading…</p>;
+  } else if (availability.state === "error") {
     content = (
-      <>
-        <p role="alert">{surfaceState.message}</p>
-        <div className="pr-actions">{refreshButton}</div>
-      </>
+      <p role="alert" className="pr-empty error">
+        {availability.message}
+      </p>
     );
-  } else if (surfaceState.state === "guidance") {
-    content = (
-      <>
-        <p className="pr-guidance">{surfaceState.guidance}</p>
-        <div className="pr-actions">{refreshButton}</div>
-      </>
-    );
+  } else if (availability.state === "guidance") {
+    content = <p className="pr-empty">{availability.guidance}</p>;
   } else if (creating) {
     content = (
-      <CreateIssueView
+      <IssueCreate
         projectId={projectId}
         onBack={() => setCreating(false)}
         onCreated={(created) => {
-          reloadList();
           setCreating(false);
-          setOpenedIssue(created.number);
-          onChanged?.();
+          setOpened(created.number);
+          changed();
         }}
       />
     );
-  } else if (openedIssue !== null) {
+  } else if (opened !== null) {
     content = (
       <IssueDetailView
         projectId={projectId}
-        number={openedIssue}
-        refreshKey={refreshKey}
+        number={opened}
+        refreshKey={reload}
         onBack={() => {
-          setOpenedIssue(null);
-          reloadList();
+          setOpened(null);
+          setListRevision((n) => n + 1);
         }}
-        onMutation={() => {
-          reloadList();
-          onChanged?.();
-        }}
+        onChanged={changed}
         onDispatched={onDispatched}
       />
     );
   } else {
     content = (
-      <IssuesListView
+      <IssueList
         projectId={projectId}
-        refreshKey={refreshKey}
-        listRevision={listRevision}
-        manualKey={manual}
-        search={search}
-        onSearchChange={setSearch}
-        onSelectIssue={(num) => setOpenedIssue(num)}
-        onStartCreate={() => setCreating(true)}
-        onRefresh={() => {
-          reloadSurface();
-          reloadList();
-        }}
+        refreshKey={reload + listRevision}
+        onOpen={setOpened}
+        onCreate={() => setCreating(true)}
       />
     );
   }
 
   return (
-    <section className="pr-panel issues-surface" aria-label="Issues">
-      {content}
-    </section>
-  );
-}
-
-interface IssuesListViewProps {
-  projectId: number;
-  refreshKey: number;
-  listRevision: number;
-  manualKey: number;
-  search: string;
-  onSearchChange: (search: string) => void;
-  onSelectIssue: (number: number) => void;
-  onStartCreate: () => void;
-  onRefresh: () => void;
-}
-
-type ListState =
-  | { state: "loading" }
-  | { state: "error"; message: string }
-  | { state: "ready"; issues: IssueSummary[] };
-
-function IssuesListView({
-  projectId,
-  refreshKey,
-  listRevision,
-  manualKey,
-  search,
-  onSearchChange,
-  onSelectIssue,
-  onStartCreate,
-  onRefresh,
-}: IssuesListViewProps) {
-  const [query, setQuery] = useState(search);
-  const [list, setList] = useState<ListState>({ state: "loading" });
-
-  useEffect(() => {
-    let active = true;
-    void commands.listIssues(projectId, search).then((result) => {
-      if (!active) return;
-      if (result.status === "ok") {
-        setList({ state: "ready", issues: result.data });
-      } else {
-        setList({ state: "error", message: result.error.message });
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, search, refreshKey, listRevision, manualKey]);
-
-  return (
-    <div className="issues-browser">
-      <div className="pr-actions" style={{ justifyContent: "space-between" }}>
-        <button onClick={onStartCreate} title="Create a new issue">
-          + New issue
-        </button>
-        <button onClick={onRefresh} title="Reload from GitHub">
-          Refresh
-        </button>
-      </div>
-
-      <form
-        className="pr-search issues-search"
-        role="search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSearchChange(query.trim());
-        }}
-      >
-        <input
-          aria-label="Search issues"
-          placeholder="Search issues"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <button type="submit">Search</button>
-      </form>
-
-      {list.state === "loading" && <p className="pr-guidance">Loading issues…</p>}
-      {list.state === "error" && <p role="alert">{list.message}</p>}
-      {list.state === "ready" && list.issues.length === 0 && (
-        <p className="pr-guidance">No issues found.</p>
-      )}
-      {list.state === "ready" && list.issues.length > 0 && (
-        <ul className="pr-list issues-list" aria-label="Issue list">
-          {list.issues.map((issue) => (
-            <li key={issue.number}>
-              <button
-                className="pr-row issue-row"
-                onClick={() => onSelectIssue(issue.number)}
-              >
-                <span className="pr-row-title">
-                  {formatIssueLabel(issue)}
-                  {issue.state === "CLOSED" && <span className="badge">closed</span>}
-                </span>
-                <span className="pr-row-meta issue-row-meta">
-                  opened by {issue.author}
-                  {issue.commentsCount > 0 && (
-                    <>
-                      {" · "}
-                      <CommentIcon size={12} /> {issue.commentsCount}
-                    </>
-                  )}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="pr-views">
+      <section className="pr-panel pr-panel-flush" aria-label="Issues">
+        {content}
+      </section>
     </div>
   );
 }
 
-interface CreateIssueViewProps {
+type List = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; issues: IssueSummary[] };
+
+interface IssueListProps {
   projectId: number;
-  onBack: () => void;
-  onCreated: (issue: IssueSummary) => void;
+  refreshKey: number;
+  onOpen: (number: number) => void;
+  onCreate: () => void;
 }
 
-function CreateIssueView({ projectId, onBack, onCreated }: CreateIssueViewProps) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) {
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [closed, setClosed] = useState(false);
+  const [mine, setMine] = useState(false);
+  const [list, setList] = useState<List>({ state: "loading" });
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitIssue(title)) return;
-    setBusy(true);
-    setError(null);
-    const result = await commands.createIssue(projectId, title.trim(), body.trim());
-    setBusy(false);
-    if (result.status === "ok") {
-      onCreated(result.data);
-    } else {
-      setError(result.error.message);
-    }
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
 
+  useEffect(() => {
+    let active = true;
+    void commands.listIssues(projectId, closed, mine, search).then((result) => {
+      if (!active) return;
+      setList(
+        result.status === "ok"
+          ? { state: "ready", issues: result.data }
+          : { state: "error", message: result.error.message },
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId, closed, mine, search, refreshKey]);
+
+  const filtered = search !== "" || mine;
   return (
-    <div className="issue-create">
-      <button className="pr-back issue-back" onClick={onBack}>
-        <ArrowLeftIcon size={14} /> Issues
-      </button>
-      <h3>New issue</h3>
-      <form className="pr-form" onSubmit={(e) => void handleSubmit(e)}>
-        <input
-          aria-label="Title"
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          autoFocus
-        />
-        <textarea
-          aria-label="Description"
-          placeholder="Leave a comment or description"
-          rows={6}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        <div className="pr-actions">
-          <button type="submit" className={busy ? "pending" : undefined} disabled={busy || !canSubmitIssue(title)}>
-            {busy ? "Creating…" : "Submit new issue"}
+    <div className="pr-browser">
+      <form className="pr-search issue-search" role="search" onSubmit={(e) => e.preventDefault()}>
+        <label className="pr-search-field">
+          <SearchIcon size={14} />
+          <input
+            aria-label="Search issues"
+            placeholder="Search issues"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+      </form>
+      <div className="issue-new">
+        <button className="primary" onClick={onCreate}>
+          <PlusIcon size={16} /> New issue
+        </button>
+      </div>
+      <div className="issue-filters">
+        <div className="pr-seg" role="group" aria-label="State">
+          <button aria-pressed={!closed} onClick={() => setClosed(false)}>
+            Open
           </button>
-          <button type="button" onClick={onBack} disabled={busy}>
-            Cancel
+          <button aria-pressed={closed} onClick={() => setClosed(true)}>
+            Closed
           </button>
         </div>
-        {error && (
-          <p role="alert" className="git-error-text">
-            {error}
-          </p>
-        )}
-      </form>
-    </div>
-  );
-}
-
-interface IssueDetailViewProps {
-  projectId: number;
-  number: number;
-  refreshKey: number;
-  onBack: () => void;
-  onMutation: () => void;
-  onDispatched?: (thread: Thread) => void;
-}
-
-type DetailState =
-  | { state: "loading" }
-  | { state: "error"; message: string }
-  | { state: "ready"; issue: IssueDetail };
-
-function IssueDetailView({
-  projectId,
-  number,
-  refreshKey,
-  onBack,
-  onMutation,
-  onDispatched,
-}: IssueDetailViewProps) {
-  const [detailState, setDetailState] = useState<DetailState>({ state: "loading" });
-  const [commentText, setCommentText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [localReload, setLocalReload] = useState(0);
-  const [starting, setStarting] = useState<DispatchIssue | null>(null);
-
-  const reloadDetail = useCallback(() => setLocalReload((n) => n + 1), []);
-
-  useEffect(() => {
-    let active = true;
-    void commands.issueDetail(projectId, number).then((result) => {
-      if (!active) return;
-      if (result.status === "ok") {
-        setDetailState({ state: "ready", issue: result.data });
-      } else {
-        setDetailState({ state: "error", message: result.error.message });
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, number, refreshKey, localReload]);
-
-  async function handleOpenOnGithub() {
-    setError(null);
-    const result = await commands.openIssue(projectId, number);
-    if (result.status === "error") setError(result.error.message);
-  }
-
-  async function handleCloseIssue() {
-    setBusy(true);
-    setError(null);
-    const result = await commands.closeIssue(projectId, number);
-    setBusy(false);
-    if (result.status === "ok") {
-      onMutation();
-      reloadDetail();
-    } else {
-      setError(result.error.message);
-    }
-  }
-
-  async function handleSendComment(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitComment(commentText)) return;
-    setBusy(true);
-    setError(null);
-    const result = await commands.commentIssue(projectId, number, commentText.trim());
-    setBusy(false);
-    if (result.status === "ok") {
-      setCommentText("");
-      onMutation();
-      reloadDetail();
-    } else {
-      setError(result.error.message);
-    }
-  }
-
-  const back = (
-    <button className="pr-back issue-back" onClick={onBack}>
-      <ArrowLeftIcon size={14} /> Issues
-    </button>
-  );
-
-  if (detailState.state === "loading") {
-    return <div className="issue-review">{back}</div>;
-  }
-
-  if (detailState.state === "error") {
-    return (
-      <div className="issue-review">
-        {back}
-        <p role="alert">{detailState.message}</p>
-      </div>
-    );
-  }
-
-  const { issue } = detailState;
-
-  return (
-    <div className="issue-review">
-      {back}
-      {starting && onDispatched && (
-        <DispatchDialog
-          projectId={projectId}
-          issue={starting}
-          onClose={() => setStarting(null)}
-          onDispatched={(thread) => {
-            setStarting(null);
-            onDispatched(thread);
-          }}
-        />
-      )}
-      <h3>
-        {formatIssueLabel(issue)}
-        <span className="badge" style={{ marginLeft: 6 }}>
-          {issue.state.toLowerCase()}
-        </span>
-      </h3>
-      <p className="pr-row-meta">
-        opened by {issue.author}
-      </p>
-
-      <div className="pr-actions">
-        {onDispatched && issue.state === "OPEN" && (
-          <button
-            onClick={() => setStarting({ number: issue.number, title: issue.title, body: issue.body, url: issue.url })}
-          >
-            Start thread from issue
-          </button>
-        )}
-        <button onClick={() => void handleOpenOnGithub()}>Open on GitHub</button>
-        {issue.state === "OPEN" && (
-          <button className={busy ? "pending" : undefined} onClick={() => void handleCloseIssue()} disabled={busy}>
-            {busy ? "Closing…" : "Close issue"}
-          </button>
-        )}
-        <button onClick={reloadDetail} title="Reload issue">
-          Refresh
+        <button
+          type="button"
+          className="pr-chip"
+          aria-pressed={mine}
+          title="Only issues you opened"
+          onClick={() => setMine((m) => !m)}
+        >
+          Mine
         </button>
       </div>
-
-      {issue.body.trim() && <pre className="pr-body issue-body">{issue.body}</pre>}
-
-      <section aria-label="Conversation">
-        <h4>Conversation ({issue.comments.length})</h4>
-        {issue.comments.length === 0 && (
-          <p className="pr-guidance">No comments yet.</p>
+      <div className="pr-scroll">
+        {list.state === "loading" && <p className="pr-empty">Loading…</p>}
+        {list.state === "error" && (
+          <p role="alert" className="pr-empty error">
+            {list.message}
+          </p>
         )}
-        {issue.comments.map((c, i) => (
-          <article key={i} className="pr-comment issue-comment">
-            <header>{c.author}</header>
-            <pre>{c.body}</pre>
-          </article>
-        ))}
-
-        <form className="pr-form" onSubmit={(e) => void handleSendComment(e)}>
-          <textarea
-            aria-label="Comment"
-            placeholder="Leave a comment"
-            rows={3}
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-          />
-          <button type="submit" className={busy ? "pending" : undefined} disabled={busy || !canSubmitComment(commentText)}>
-            {busy ? "Posting…" : "Comment"}
-          </button>
-        </form>
-      </section>
-
-      {error && (
-        <p role="alert" className="git-error-text">
-          {error}
-        </p>
-      )}
+        {list.state === "ready" && list.issues.length === 0 && (
+          <p className="pr-empty">
+            {filtered ? "No issues match." : closed ? "No closed issues." : "No open issues."}
+          </p>
+        )}
+        {list.state === "ready" && list.issues.length > 0 && (
+          <ul className="pr-list" aria-label={closed ? "Closed issues" : "Open issues"}>
+            {list.issues.map((issue) => (
+              <li key={issue.number}>
+                <button className="pr-row" onClick={() => onOpen(issue.number)}>
+                  <IssueStateIcon phase={issuePhase(issue)} />
+                  <span className="pr-row-body">
+                    <span className="pr-row-title">{issue.title}</span>
+                    {issue.labels.length > 0 && (
+                      <span className="pr-labels">
+                        {issue.labels.map((l) => (
+                          <LabelChip key={l.name} label={l} />
+                        ))}
+                      </span>
+                    )}
+                    <span className="pr-row-meta">
+                      <Avatar login={issue.author} size={16} />
+                      <span className="pr-row-author">{issue.author}</span>
+                      <span aria-hidden>·</span>
+                      <span>#{issue.number}</span>
+                      {issue.createdAt && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <time dateTime={issue.createdAt}>{relativeTime(issue.createdAt)}</time>
+                        </>
+                      )}
+                      {issue.commentsCount > 0 && (
+                        <span className="issue-comments" title={`${issue.commentsCount} comments`}>
+                          <CommentIcon size={12} /> {issue.commentsCount}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  {issue.assignees.length > 0 && (
+                    <span className="issue-assignees" title={`Assigned to ${issue.assignees.join(", ")}`}>
+                      {issue.assignees.slice(0, 3).map((login) => (
+                        <Avatar key={login} login={login} size={18} />
+                      ))}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

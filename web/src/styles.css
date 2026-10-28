@@ -1271,3 +1271,30 @@ html.macos .header,
 .window-resize-northwest { top: 0; left: 0; cursor: nwse-resize; }
 .window-resize-southeast { bottom: 0; right: 0; cursor: nwse-resize; }
 .window-resize-southwest { bottom: 0; left: 0; cursor: nesw-resize; }
+
+/* Issues: the Pull request tab's layout, with a full-width search and New issue. */
+.pr-views .issue-search { border-bottom: 0; padding-bottom: 0; }
+.pr-views .issue-new { padding: var(--space-2) var(--pr-pad) 0; }
+.pr-views .issue-new .primary { width: 100%; height: 36px; justify-content: center; font-size: 14px; gap: var(--space-2); }
+.pr-views .issue-filters { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--pr-pad); border-bottom: 1px solid var(--line); }
+.pr-views .pr-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-control); overflow: hidden; }
+.pr-views .pr-seg > button { border: 0; border-radius: 0; background: none; color: var(--dim); min-height: var(--control-sm); padding: 0 var(--space-3); }
+.pr-views .pr-seg > button + button { border-left: 1px solid var(--line-strong); }
+.pr-views .pr-seg > button[aria-pressed="true"] { background: var(--bg4); color: var(--fg-bright); }
+.pr-views .issue-state-open { color: var(--green); }
+.pr-views .issue-state-completed { color: var(--purple); }
+.pr-views .issue-state-notPlanned { color: var(--faint); }
+.pr-views .issue-comments { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.pr-views .issue-assignees { display: flex; flex: none; margin-top: 2px; }
+.pr-views .issue-assignees .avatar + .avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--bg); }
+.pr-views .pr-row .pr-labels { margin: 1px 0; }
+.pr-views .issue-edit { margin-left: var(--space-1); vertical-align: middle; }
+.pr-views .pr-entry-card > header .issue-edit { margin-left: auto; }
+.pr-views .issue-title-edit { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.pr-views .issue-title-edit input { flex: 1 1 160px; min-width: 0; }
+.pr-views .issue-body-edit { display: grid; gap: var(--space-2); padding: var(--space-2); }
+.pr-views .issue-body-edit textarea { width: 100%; resize: vertical; line-height: 1.5; }
+.pr-views .issue-no-body { margin: 0; padding: 8px 10px; font-style: italic; }
+.pr-views .issue-write-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.pr-views .issue-preview { min-height: 120px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg2); }
+.pr-views .pr-create-field textarea { width: 100%; resize: vertical; line-height: 1.5; }

@@ -1128,10 +1128,13 @@ pub struct IssueSummary {
     pub number: u32,
     pub title: String,
     pub state: String,
+    pub state_reason: String,
     pub author: String,
     pub url: String,
     pub comments_count: u32,
     pub created_at: String,
+    pub labels: Vec<PullRequestLabel>,
+    pub assignees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1141,10 +1144,32 @@ pub struct IssueDetail {
     pub title: String,
     pub body: String,
     pub state: String,
+    pub state_reason: String,
     pub author: String,
     pub url: String,
     pub created_at: String,
     pub comments: Vec<IssueComment>,
+    pub labels: Vec<PullRequestLabel>,
+    pub assignees: Vec<String>,
+    pub viewer: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueCloseReason {
+    Completed,
+    NotPlanned,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueEdit {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -1244,11 +1269,15 @@ async fn issues_state(
 async fn list_issues(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    closed: bool,
+    mine: bool,
     search: String,
 ) -> Result<Vec<IssueSummary>, AppError> {
-    git_blocking(&core, move |core| core.list_issues(project_id, &search))
-        .await
-        .map(|list| list.iter().map(convert).collect())
+    git_blocking(&core, move |core| {
+        core.list_issues(project_id, closed, mine, &search)
+    })
+    .await
+    .map(|list| list.iter().map(convert).collect())
 }
 
 #[tauri::command]
@@ -1270,9 +1299,11 @@ async fn create_issue(
     project_id: u32,
     title: String,
     body: String,
+    assignees: Vec<String>,
+    labels: Vec<String>,
 ) -> Result<IssueSummary, AppError> {
     git_blocking(&core, move |core| {
-        core.create_issue(project_id, &title, &body)
+        core.create_issue(project_id, &title, &body, &assignees, &labels)
     })
     .await
     .map(|summary| convert(&summary))
@@ -1292,14 +1323,45 @@ async fn comment_issue(
     .await
 }
 
+/// Closes an issue with a reason, leaving `comment` first when it is not empty.
 #[tauri::command]
 #[specta::specta]
 async fn close_issue(
     core: State<'_, Arc<Core>>,
     project_id: u32,
     number: u32,
+    reason: IssueCloseReason,
+    comment: String,
 ) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.close_issue(project_id, number)).await
+    git_blocking(&core, move |core| {
+        core.close_issue(project_id, number, convert(&reason), &comment)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn reopen_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.reopen_issue(project_id, number)).await
+}
+
+/// Changes an issue's title, description, assignees and labels.
+#[tauri::command]
+#[specta::specta]
+async fn edit_issue(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    edit: IssueEdit,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.edit_issue(project_id, number, &convert(&edit))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2072,6 +2134,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_issue,
         comment_issue,
         close_issue,
+        reopen_issue,
+        edit_issue,
         open_issue,
         last_selection,
         remember_selection,

@@ -1,5 +1,6 @@
 use oxide_core::{
-    Core, GithubAvailability, Notification, ProjectSummary, PullRequestInput, System,
+    Core, GithubAvailability, IssueCloseReason, IssueEdit, Notification, ProjectSummary,
+    PullRequestInput, System,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1025,7 +1026,7 @@ fn list_and_search_issues_against_fake_gh() {
         }),
     );
 
-    let all = f.core.list_issues(f.project.id, "").unwrap();
+    let all = f.core.list_issues(f.project.id, false, false, "").unwrap();
     assert_eq!(all.len(), 2);
     assert_eq!(all[0].number, 1);
     assert_eq!(all[0].title, "First issue");
@@ -1033,7 +1034,10 @@ fn list_and_search_issues_against_fake_gh() {
     assert_eq!(all[1].number, 2);
     assert_eq!(all[1].comments_count, 1);
 
-    let searched = f.core.list_issues(f.project.id, "parser").unwrap();
+    let searched = f
+        .core
+        .list_issues(f.project.id, false, false, "parser")
+        .unwrap();
     assert_eq!(searched.len(), 1);
     assert_eq!(searched[0].number, 2);
 }
@@ -1093,17 +1097,25 @@ fn create_comment_and_close_issue_calling_gh() {
         }),
     );
 
-    // Create
+    // Create, with an assignee and a label
     let created = f
         .core
-        .create_issue(f.project.id, "New Feature", "Feature description")
+        .create_issue(
+            f.project.id,
+            "New Feature",
+            "Feature description",
+            &["alice".to_string()],
+            &["bug".to_string()],
+        )
         .unwrap();
     assert_eq!(created.number, 10);
     assert_eq!(created.title, "New Feature");
     assert_eq!(created.url, "https://github.com/fake/repo/issues/10");
+    assert_eq!(created.assignees, ["alice"]);
+    assert_eq!(created.labels[0].name, "bug");
 
     // List after create shows it
-    let list = f.core.list_issues(f.project.id, "").unwrap();
+    let list = f.core.list_issues(f.project.id, false, false, "").unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].number, 10);
 
@@ -1122,15 +1134,118 @@ fn create_comment_and_close_issue_calling_gh() {
         ["https://github.com/fake/repo/issues/10"]
     );
 
-    // Close
-    f.core.close_issue(f.project.id, 10).unwrap();
-    let open_list = f.core.list_issues(f.project.id, "").unwrap();
-    assert_eq!(open_list.len(), 0);
+    // Close: it leaves the open list and shows in the closed one, with its reason
+    f.core
+        .close_issue(
+            f.project.id,
+            10,
+            IssueCloseReason::NotPlanned,
+            "Out of scope",
+        )
+        .unwrap();
+    assert!(
+        f.core
+            .list_issues(f.project.id, false, false, "")
+            .unwrap()
+            .is_empty()
+    );
+    let closed = f
+        .core
+        .list_issues(f.project.id, true, false, "Feature")
+        .unwrap();
+    assert_eq!(closed.len(), 1);
+    assert_eq!(closed[0].state, "CLOSED");
+    assert_eq!(closed[0].state_reason, "NOT_PLANNED");
+    assert_eq!(closed[0].comments_count, 2);
 
-    // Searching finds closed issues
-    let search_all = f.core.list_issues(f.project.id, "Feature").unwrap();
-    assert_eq!(search_all.len(), 1);
-    assert_eq!(search_all[0].state, "CLOSED");
+    // Reopen
+    f.core.reopen_issue(f.project.id, 10).unwrap();
+    assert_eq!(
+        f.core
+            .list_issues(f.project.id, false, false, "")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn edit_issue_changes_text_assignees_and_labels() {
+    let f = fixture();
+    install_gh(
+        &f,
+        serde_json::json!({
+            "auth": "ok",
+            "default_branch": "main",
+            "viewer": "me",
+            "next_number": 4,
+            "issues": [
+                {
+                    "number": 3,
+                    "title": "Old title",
+                    "body": "Old body",
+                    "state": "OPEN",
+                    "author": {"login": "me"},
+                    "url": "https://github.com/fake/repo/issues/3",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "comments": [],
+                    "assignees": [{"login": "bob"}],
+                    "labels": [{"name": "bug", "color": "d73a4a"}]
+                },
+                {
+                    "number": 2,
+                    "title": "Someone else's",
+                    "body": "",
+                    "state": "OPEN",
+                    "author": {"login": "carol"},
+                    "url": "https://github.com/fake/repo/issues/2",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "comments": []
+                }
+            ]
+        }),
+    );
+
+    f.core
+        .edit_issue(
+            f.project.id,
+            3,
+            &IssueEdit {
+                title: Some("New title".into()),
+                body: Some("New body".into()),
+                add_assignees: vec!["alice".into()],
+                remove_assignees: vec!["bob".into()],
+                add_labels: vec!["docs".into()],
+                remove_labels: vec!["bug".into()],
+            },
+        )
+        .unwrap();
+    let detail = f.core.issue_detail(f.project.id, 3).unwrap();
+    assert_eq!(detail.title, "New title");
+    assert_eq!(detail.body, "New body");
+    assert_eq!(detail.assignees, ["alice"]);
+    assert_eq!(detail.labels.len(), 1);
+    assert_eq!(detail.labels[0].name, "docs");
+    assert_eq!(detail.viewer, "me");
+
+    // A blank title is refused before `gh` is asked
+    let err = f
+        .core
+        .edit_issue(
+            f.project.id,
+            3,
+            &IssueEdit {
+                title: Some("  ".into()),
+                ..IssueEdit::default()
+            },
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("title"), "{err}");
+
+    // "Mine" lists only what the signed-in user opened
+    let mine = f.core.list_issues(f.project.id, false, true, "").unwrap();
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].number, 3);
 }
 
 #[test]

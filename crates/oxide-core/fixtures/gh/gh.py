@@ -199,6 +199,16 @@ if args[:2] == ["pr", "view"]:
     print(json.dumps(pr))
     sys.exit(0)
 
+def issue_by_number(n):
+    for issue in state.get("issues", []):
+        if str(issue.get("number")) == str(n):
+            return issue
+    sys.stderr.write(f"issue {n} not found\n")
+    sys.exit(1)
+
+
+csv = lambda name: [v for v in (flag(name) or "").split(",") if v]
+
 if args[:2] == ["issue", "create"]:
     title = flag("--title")
     body = read_body()
@@ -209,10 +219,13 @@ if args[:2] == ["issue", "create"]:
         "title": title,
         "body": body,
         "state": "OPEN",
-        "author": {"login": "me"},
+        "stateReason": "",
+        "author": {"login": state.get("viewer", "me")},
         "url": f"https://github.com/fake/repo/issues/{num}",
         "createdAt": "2026-01-01T00:00:00Z",
-        "comments": []
+        "comments": [],
+        "assignees": [{"login": login} for login in csv("--assignee")],
+        "labels": [{"name": name, "color": "ededed"} for name in csv("--label")],
     }
     state.setdefault("issues", []).append(issue)
     save()
@@ -220,50 +233,62 @@ if args[:2] == ["issue", "create"]:
     sys.exit(0)
 
 if args[:2] == ["issue", "comment"]:
-    num = args[2]
-    body = read_body()
-    for issue in state.get("issues", []):
-        if str(issue.get("number")) == str(num):
-            issue.setdefault("comments", []).append({
-                "author": {"login": "me"},
-                "body": body,
-                "createdAt": "2026-01-01T00:00:00Z"
-            })
-            break
+    issue = issue_by_number(args[2])
+    issue.setdefault("comments", []).append({
+        "author": {"login": state.get("viewer", "me")},
+        "body": read_body(),
+        "createdAt": "2026-01-01T00:00:00Z"
+    })
     save()
     sys.exit(0)
 
 if args[:2] == ["issue", "close"]:
-    num = args[2]
-    for issue in state.get("issues", []):
-        if str(issue.get("number")) == str(num):
-            issue["state"] = "CLOSED"
-            break
+    issue = issue_by_number(args[2])
+    issue["state"] = "CLOSED"
+    issue["stateReason"] = "NOT_PLANNED" if flag("--reason") == "not planned" else "COMPLETED"
+    if flag("--comment"):
+        issue.setdefault("comments", []).append({
+            "author": {"login": state.get("viewer", "me")},
+            "body": flag("--comment"),
+            "createdAt": "2026-01-01T00:00:00Z"
+        })
+    save()
+    sys.exit(0)
+
+if args[:2] == ["issue", "reopen"]:
+    issue = issue_by_number(args[2])
+    issue["state"] = "OPEN"
+    issue["stateReason"] = "REOPENED"
+    save()
+    sys.exit(0)
+
+if args[:2] == ["issue", "edit"]:
+    issue = issue_by_number(args[2])
+    if "--title" in args:
+        issue["title"] = flag("--title")
+    if "--body" in args:
+        issue["body"] = flag("--body")
+    issue["assignees"] = [
+        a for a in issue.get("assignees", []) if a["login"] not in csv("--remove-assignee")
+    ] + [{"login": login} for login in csv("--add-assignee")]
+    issue["labels"] = [
+        l for l in issue.get("labels", []) if l["name"] not in csv("--remove-label")
+    ] + [{"name": name, "color": "ededed"} for name in csv("--add-label")]
     save()
     sys.exit(0)
 
 if args[:2] == ["issue", "view"]:
-    n = args[2]
-    found = None
-    for issue in state.get("issues", []):
-        if str(issue.get("number")) == str(n):
-            found = issue
-            break
-    if found is None:
-        sys.stderr.write(f"issue {n} not found\n")
-        sys.exit(1)
-    print(json.dumps(found))
+    print(json.dumps(issue_by_number(args[2])))
     sys.exit(0)
 
 if args[:2] == ["issue", "list"]:
     wanted_state = flag("--state")
-    if wanted_state == "all":
-        issues = list(state.get("issues", []))
-    elif wanted_state == "closed":
-        issues = [i for i in state.get("issues", []) if i.get("state") == "CLOSED"]
-    else:
-        issues = [i for i in state.get("issues", []) if i.get("state") == "OPEN"]
+    issues = [i for i in state.get("issues", []) if wanted_state == "all" or i.get("state", "").lower() == (wanted_state or "open")]
     issues.sort(key=lambda i: i["number"])
+    author = flag("--author")
+    if author:
+        login = state.get("viewer", "me") if author == "@me" else author
+        issues = [i for i in issues if i.get("author", {}).get("login") == login]
     query = flag("--search")
     if query:
         issues = [i for i in issues if query.lower() in i.get("title", "").lower() or query.lower() in i.get("body", "").lower()]

@@ -33,11 +33,11 @@ pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
 pub use github::{
-    BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueComment, IssueDetail,
-    IssueSummary, IssuesState, MergeMethod, MergeState, PullRequest, PullRequestCandidates,
-    PullRequestCheck, PullRequestComment, PullRequestDetail, PullRequestDraft, PullRequestEdit,
-    PullRequestInput, PullRequestLabel, PullRequestPhase, PullRequestReviewer, PullRequestState,
-    ReviewDecision, ReviewState,
+    BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueCloseReason,
+    IssueComment, IssueDetail, IssueEdit, IssueSummary, IssuesState, MergeMethod, MergeState,
+    PullRequest, PullRequestCandidates, PullRequestCheck, PullRequestComment, PullRequestDetail,
+    PullRequestDraft, PullRequestEdit, PullRequestInput, PullRequestLabel, PullRequestPhase,
+    PullRequestReviewer, PullRequestState, ReviewDecision, ReviewState,
 };
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
@@ -1429,9 +1429,22 @@ impl Core {
         github::issues_state(&self.gh, &self.main_checkout(project_id)?)
     }
 
-    /// Open issues of the repository, optionally narrowed by a search query.
-    pub fn list_issues(&self, project_id: u32, search: &str) -> Result<Vec<IssueSummary>> {
-        github::list_issues(&self.gh, &self.main_checkout(project_id)?, search)
+    /// Open or closed issues of the repository, optionally only the user's own and
+    /// narrowed by a search query.
+    pub fn list_issues(
+        &self,
+        project_id: u32,
+        closed: bool,
+        mine: bool,
+        search: &str,
+    ) -> Result<Vec<IssueSummary>> {
+        github::list_issues(
+            &self.gh,
+            &self.main_checkout(project_id)?,
+            closed,
+            mine,
+            search,
+        )
     }
 
     /// Detailed issue with its description, status and comments.
@@ -1439,9 +1452,23 @@ impl Core {
         github::issue_detail(&self.gh, &self.main_checkout(project_id)?, number)
     }
 
-    /// Creates an issue with title and body.
-    pub fn create_issue(&self, project_id: u32, title: &str, body: &str) -> Result<IssueSummary> {
-        github::create_issue(&self.gh, &self.main_checkout(project_id)?, title, body)
+    /// Creates an issue with title, body, assignees and labels.
+    pub fn create_issue(
+        &self,
+        project_id: u32,
+        title: &str,
+        body: &str,
+        assignees: &[String],
+        labels: &[String],
+    ) -> Result<IssueSummary> {
+        github::create_issue(
+            &self.gh,
+            &self.main_checkout(project_id)?,
+            title,
+            body,
+            assignees,
+            labels,
+        )
     }
 
     /// Adds a comment to an issue.
@@ -1449,9 +1476,31 @@ impl Core {
         github::comment_issue(&self.gh, &self.main_checkout(project_id)?, number, body)
     }
 
-    /// Closes an issue.
-    pub fn close_issue(&self, project_id: u32, number: u32) -> Result<()> {
-        github::close_issue(&self.gh, &self.main_checkout(project_id)?, number)
+    /// Closes an issue with a reason, and a comment when given.
+    pub fn close_issue(
+        &self,
+        project_id: u32,
+        number: u32,
+        reason: IssueCloseReason,
+        comment: &str,
+    ) -> Result<()> {
+        github::close_issue(
+            &self.gh,
+            &self.main_checkout(project_id)?,
+            number,
+            reason,
+            comment,
+        )
+    }
+
+    /// Reopens a closed issue.
+    pub fn reopen_issue(&self, project_id: u32, number: u32) -> Result<()> {
+        github::reopen_issue(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// Changes an issue's title, description, assignees and labels.
+    pub fn edit_issue(&self, project_id: u32, number: u32, edit: &IssueEdit) -> Result<()> {
+        github::edit_issue(&self.gh, &self.main_checkout(project_id)?, number, edit)
     }
 
     /// Opens an issue in the system browser.

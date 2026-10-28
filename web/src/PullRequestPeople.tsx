@@ -39,11 +39,29 @@ interface PullRequestPeopleProps {
   onConvertToDraft: () => void;
 }
 
-type Candidates =
+export type Candidates =
   | { state: "idle" }
   | { state: "loading" }
   | { state: "error"; message: string }
   | { state: "ready"; data: PullRequestCandidates };
+
+/** The people and labels GitHub offers, fetched the first time a picker opens. */
+export function useCandidates(projectId: number) {
+  const [candidates, setCandidates] = useState<Candidates>({ state: "idle" });
+  const requested = useRef(false);
+  const load = useCallback(() => {
+    if (requested.current) return;
+    requested.current = true;
+    setCandidates({ state: "loading" });
+    void commands.pullRequestCandidates(projectId).then((result) => {
+      if (result.status === "error") requested.current = false;
+      setCandidates(
+        result.status === "ok" ? { state: "ready", data: result.data } : { state: "error", message: result.error.message },
+      );
+    });
+  }, [projectId]);
+  return { candidates, load };
+}
 
 const REVIEW_WORD: Record<ReviewState, string> = {
   requested: "Awaiting review",
@@ -82,21 +100,8 @@ export function LabelChip({ label }: { label: PullRequestLabel }) {
 
 /** The pull request's people and labels, with the same settings the web sidebar offers. */
 export function PullRequestPeople({ projectId, detail, editable, busy, onEdit, onConvertToDraft }: PullRequestPeopleProps) {
-  const [candidates, setCandidates] = useState<Candidates>({ state: "idle" });
+  const { candidates, load } = useCandidates(projectId);
   const pr = detail.pullRequest;
-
-  const requested = useRef(false);
-  const load = useCallback(() => {
-    if (requested.current) return;
-    requested.current = true;
-    setCandidates({ state: "loading" });
-    void commands.pullRequestCandidates(projectId).then((result) => {
-      if (result.status === "error") requested.current = false;
-      setCandidates(
-        result.status === "ok" ? { state: "ready", data: result.data } : { state: "error", message: result.error.message },
-      );
-    });
-  }, [projectId]);
 
   const reviewerPeople = detail.reviewers.map((r) => r.login);
   return (
@@ -212,7 +217,7 @@ export function PullRequestPeople({ projectId, detail, editable, busy, onEdit, o
   );
 }
 
-function Field({
+export function Field({
   title,
   editable,
   picker,
@@ -260,7 +265,7 @@ interface PickerItem {
   color?: string;
 }
 
-function Picker({
+export function Picker({
   title,
   candidates,
   onOpen,

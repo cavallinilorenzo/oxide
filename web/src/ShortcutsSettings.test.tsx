@@ -11,11 +11,11 @@ document.body.append(container);
 const root = createRoot(container);
 afterEach(async () => { await act(async () => root.render(null)); });
 
-let latest: Shortcuts = DEFAULT_SHORTCUTS;
+const seen = { shortcuts: DEFAULT_SHORTCUTS as Shortcuts };
 function Harness() {
   const [shortcuts, setShortcuts] = useState<Shortcuts>(DEFAULT_SHORTCUTS);
-  latest = shortcuts;
-  return <ShortcutsSettings shortcuts={shortcuts} onChange={setShortcuts} errorsFor={() => []} />;
+  const change = (next: Shortcuts) => { seen.shortcuts = next; setShortcuts(next); };
+  return <ShortcutsSettings shortcuts={shortcuts} onChange={change} errorsFor={() => []} />;
 }
 
 const keyButton = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label} shortcut"]`)!;
@@ -28,20 +28,20 @@ it("records a new shortcut for an action, then resets it", async () => {
   act(() => keyButton("Terminal").click());
   expect(keyButton("Terminal").textContent).toBe("Press keys…");
   await press(keyButton("Terminal"), { key: "Meta", metaKey: true });
-  expect(latest.terminal).toBe("Mod+Shift+T");
+  expect(seen.shortcuts.terminal).toBe("Mod+Shift+T");
   await press(keyButton("Terminal"), { key: "j", code: "KeyJ", metaKey: true });
-  expect(latest.terminal).toBe("Mod+J");
+  expect(seen.shortcuts.terminal).toBe("Mod+J");
   expect(keyButton("Terminal").textContent).not.toBe("Press keys…");
 
   act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Reset Terminal shortcut"]')!.click());
-  expect(latest.terminal).toBe("Mod+Shift+T");
+  expect(seen.shortcuts.terminal).toBe("Mod+Shift+T");
 });
 
 it("refuses a shortcut another action uses, and Esc cancels recording", async () => {
   await act(async () => root.render(<Harness />));
   act(() => keyButton("Files").click());
   await press(keyButton("Files"), { key: "M", code: "KeyM", metaKey: true, shiftKey: true });
-  expect(latest.files).toBe("Mod+Shift+F");
+  expect(seen.shortcuts.files).toBe("Mod+Shift+F");
   expect(container.textContent).toContain("is already used by Model picker");
   await press(keyButton("Files"), { key: "Escape" });
   expect(keyButton("Files").textContent).not.toBe("Press keys…");
@@ -52,6 +52,6 @@ it("needs ⌘ or Ctrl in a new shortcut", async () => {
   await act(async () => root.render(<Harness />));
   act(() => keyButton("Diff").click());
   await press(keyButton("Diff"), { key: "x", code: "KeyX" });
-  expect(latest.diff).toBe("Mod+Shift+D");
+  expect(seen.shortcuts.diff).toBe("Mod+Shift+D");
   expect(container.textContent).toContain("Include ⌘");
 });

@@ -102,9 +102,7 @@ export function mergeRequirements({ phase, checks, mergeState, reviewDecision }:
   const { failing, pending } = countChecks(checks);
   if (failing > 0) {
     rows.push({ kind: "checks", tone: "bad", title: `${plural(failing, "check")} failing`, detail: "Open a failing check to see what went wrong." });
-  } else if (pending > 0) {
-    rows.push({ kind: "checks", tone: "warn", title: `${plural(pending, "check")} still running` });
-  } else if (checks.length > 0) {
+  } else if (pending === 0 && checks.length > 0) {
     rows.push({ kind: "checks", tone: "ok", title: "All checks passed" });
   }
   if (mergeState === "conflicting") {
@@ -137,6 +135,8 @@ export function mergeRequirements({ phase, checks, mergeState, reviewDecision }:
 /** The one-glance answer to "can I merge this?", shown above the merge button. */
 export function readiness(inputs: MergeInputs): { tone: Tone; label: string } {
   const first = mergeRequirements(inputs)[0];
+  // Running checks get no row in the merge box (the Checks list shows them), but they still mean "not yet".
+  if (first?.tone === "ok" && countChecks(inputs.checks).pending > 0) return { tone: "warn", label: "Checks still running" };
   if (!first) return { tone: "neutral", label: "No checks reported" };
   if (first.tone === "ok") return { tone: "ok", label: "Ready to merge" };
   return { tone: first.tone, label: first.title };

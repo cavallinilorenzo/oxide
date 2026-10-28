@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Settings_Deserialize as Settings } from "./bindings";
 import { SettingsView } from "./SettingsView";
+import { DEFAULT_SHORTCUTS } from "./shortcuts";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const container = document.createElement("div");
@@ -14,7 +15,7 @@ afterEach(async () => { await act(async () => root.render(null)); clearMocks(); 
 
 it("offers supported defaults with descriptions, warns about Full access and saves each Provider independently", async () => {
   const settings: Settings = {
-    defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
+    defaultProvider: "claude", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS, claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },
       codex: { model: null, effort: null, permissionMode: "auto-edit" },
@@ -72,7 +73,7 @@ it("offers supported defaults with descriptions, warns about Full access and sav
 
 it("groups model effort variants while keeping the saved effort selectable", async () => {
   const settings: Settings = {
-    defaultProvider: "antigravity", confirmQuit: true, editor: "",
+    defaultProvider: "antigravity", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS,
     claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },

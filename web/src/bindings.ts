@@ -896,6 +896,7 @@ export type Settings_Deserialize = {
 	confirmQuit: boolean,
 	editor: string,
 	claudeCustomizations: ClaudeCustomizations,
+	shortcuts: Shortcuts,
 };
 
 export type Settings_Serialize = {
@@ -904,6 +905,23 @@ export type Settings_Serialize = {
 	confirmQuit: boolean,
 	editor: string,
 	claudeCustomizations: ClaudeCustomizations,
+	shortcuts: Shortcuts,
+};
+
+export type Shortcuts = {
+	newThread: string,
+	openProject: string,
+	modelPicker: string,
+	pullRequests: string,
+	issues: string,
+	terminal: string,
+	files: string,
+	diff: string,
+	previousThread: string,
+	nextThread: string,
+	toggleTools: string,
+	toggleBoard: string,
+	openSettings: string,
 };
 
 export type SlashCommand = SlashCommand_Serialize | SlashCommand_Deserialize;

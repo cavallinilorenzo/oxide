@@ -1,29 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isProjectPaletteShortcut } from "./shortcuts";
 import { matchActions, matchProjects, moveHighlight } from "./paletteSearch";
-
-const press = (key: string, mods: Partial<Parameters<typeof isProjectPaletteShortcut>[0]> = {}) =>
-  isProjectPaletteShortcut({
-    key,
-    metaKey: true,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: true,
-    ...mods,
-  });
-
-describe("isProjectPaletteShortcut", () => {
-  it("is ⌘⇧N, whatever the case the browser reports", () => {
-    expect(press("n")).toBe(true);
-    expect(press("N")).toBe(true);
-  });
-  it("is not ⌘N, nor other chords", () => {
-    expect(press("n", { shiftKey: false })).toBe(false);
-    expect(press("n", { metaKey: false })).toBe(false);
-    expect(press("n", { altKey: true })).toBe(false);
-    expect(press("p")).toBe(false);
-  });
-});
 
 const project = (id: number, name: string, extra: object = {}) => ({
   id,

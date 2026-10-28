@@ -1,4 +1,5 @@
 import { shortcutLabel } from "./shortcuts";
+import { MarkdownEditor } from "./MarkdownEditor";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -438,12 +439,12 @@ export function PullRequestReview({
           >
             {detail.viewer && <Avatar login={detail.viewer} size={24} />}
             <div className="pr-compose-box">
-              <textarea
-                aria-label="Comment"
+              <MarkdownEditor
+                label="Comment"
                 placeholder="Leave a comment"
                 rows={3}
                 value={comment}
-                onChange={(e) => setComment(e.target.value)}
+                onChange={setComment}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();

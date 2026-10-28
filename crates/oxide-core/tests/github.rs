@@ -1288,7 +1288,8 @@ fn issue_templates_are_read_from_github_and_a_missing_directory_means_none() {
     let files = f.core.issue_templates(f.project.id).unwrap();
     let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
     assert_eq!(names, ["bug_report.yml", "config.yml"]);
-    assert_eq!(files[0].content, "name: Bug report\n");
+    // The fake `gh` prints through Python, which ends lines with CRLF on Windows.
+    assert_eq!(files[0].content.replace("\r\n", "\n"), "name: Bug report\n");
 }
 
 #[test]

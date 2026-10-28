@@ -119,7 +119,7 @@ function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: Iss
   }
 
   return (
-    <div className="pr-views issues-ui">
+    <div className="pr-views">
       <section className="pr-panel pr-panel-flush" aria-label="Issues">
         {content}
       </section>

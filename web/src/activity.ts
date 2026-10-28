@@ -1,6 +1,6 @@
 import type { ItemSnapshot } from "./bindings";
 
-/** The macro kind of a run of Items; `pondering` only ever names the live status. */
+/** The macro kind of a run of Items. */
 export type PhaseKind = "reasoning" | "explore" | "edit" | "run" | "delegate" | "other";
 
 /** One Item of an Activity; a Subagent's nested Items hang off `children`. */

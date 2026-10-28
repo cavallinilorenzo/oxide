@@ -474,6 +474,8 @@ html.macos .header,
 }
 .activity-live-sub { font: 11.5px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-live-timer { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+.activity-waiting .activity-live-dot { background: var(--yellow); animation: none; }
+.activity-waiting .activity-live-phrase { animation: none; color: var(--fg); background: none; }
 @keyframes activity-pulse { 50% { opacity: 0.35; } }
 @keyframes activity-shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) {

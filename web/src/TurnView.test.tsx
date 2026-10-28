@@ -117,7 +117,8 @@ it("shows no live line while waiting on an Approval", async () => {
       approvals: [{ id: 1, turnId: 1, approvalId: "a", kind: "command", summary: "rm", options: [], decision: null, createdAt: "", decidedAt: null }],
     }),
   );
-  expect(container.querySelector(".activity-live")).toBeNull();
+  expect(container.querySelector(".activity-live-timer")).toBeNull();
+  expect(container.textContent).toContain("Waiting for your approval");
 });
 
 it("renders no Activity for a Turn with no tool activity", async () => {

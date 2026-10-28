@@ -175,12 +175,15 @@ function LiveLine({ status, startedAt }: { status: LiveStatus; startedAt: string
 export function ActivityView({
   activity,
   live,
+  waiting,
   startedAt,
   workedMs,
 }: {
   activity: Activity | null;
   /** Set while the Turn runs and is not waiting on an Approval. */
   live: LiveStatus | null;
+  /** The Turn is paused on an Approval: it needs the user, it is not working. */
+  waiting: boolean;
   startedAt: string;
   /** How long the Turn took, once it has ended. */
   workedMs: number | null;
@@ -189,11 +192,17 @@ export function ActivityView({
   return (
     <div className="activity">
       {live && <LiveLine status={live} startedAt={startedAt} />}
+      {waiting && (
+        <div className="activity-live activity-waiting" role="status">
+          <span className="activity-live-dot" aria-hidden />
+          <span className="activity-live-phrase">Waiting for your approval</span>
+        </div>
+      )}
       {activity && (
         <div className="activity-summary">
           <Disclosure open={open} onToggle={() => setOpen((v) => !v)} className="activity-summary-toggle">
             <span className="collapsible-label">{summaryText(activity)}</span>
-            {!live && workedMs !== null && (
+            {!live && !waiting && workedMs !== null && (
               <span className="activity-worked">Worked for {formatElapsed(workedMs)}</span>
             )}
           </Disclosure>

@@ -187,10 +187,11 @@ export const TurnView = memo(function TurnView({
             <ProviderMark provider={provider} />
             <span>{modelEffortLabel(turn.model ?? null, turn.effort ?? null)}</span>
           </div>
-          {(activity || live) && (
+          {(activity || live || waitingOnApproval) && (
             <ActivityView
               activity={activity}
               live={live}
+              waiting={turn.status === "running" && waitingOnApproval}
               startedAt={turn.startedAt}
               workedMs={workedMs}
             />

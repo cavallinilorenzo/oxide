@@ -131,6 +131,11 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE items ADD COLUMN category TEXT;
 ",
+    // A Turn's prompt as segments: text and Attachments in order. NULL for Turns stored before,
+    // whose Attachments are the paths in `attachments`.
+    "
+    ALTER TABLE turns ADD COLUMN segments TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

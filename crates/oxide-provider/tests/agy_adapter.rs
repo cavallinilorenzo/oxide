@@ -116,7 +116,7 @@ fn agy_offers_only_the_modes_it_can_honour_and_no_attachments() {
         vec![PermissionMode::AutoEdit, PermissionMode::FullAccess]
     );
     assert!(!caps.interactive_approvals);
-    assert!(!caps.image_attachments);
+    assert!(caps.native_attachment_kinds.is_empty());
 }
 
 #[test]

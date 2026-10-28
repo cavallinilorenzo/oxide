@@ -37,7 +37,7 @@ export function turnIsRunning(status: ThreadStatus): boolean {
   return status === "working" || status === "needs-input";
 }
 
-const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false, imageAttachments: false };
+const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false };
 
 export function initialTranscriptState(snapshot: ThreadSnapshot | null): TranscriptState {
   if (!snapshot) {
@@ -108,7 +108,7 @@ export function applyThreadEvent(
         prompt: event.payload.prompt,
         model: event.payload.model ?? null,
         effort: event.payload.effort ?? null,
-        attachments: event.payload.attachments,
+        segments: event.payload.segments,
         status: "running",
         startedAt: new Date().toISOString(),
         completedAt: null,

@@ -99,6 +99,10 @@ for line in sys.stdin:
         prompt_text = ""
         if isinstance(data.get("message"), dict):
             prompt_text = data["message"].get("content", "")
+            if isinstance(prompt_text, list):
+                prompt_text = "".join(
+                    b.get("text", "") for b in prompt_text if b.get("type") == "text"
+                )
         elif "prompt" in data:
             prompt_text = data["prompt"]
 

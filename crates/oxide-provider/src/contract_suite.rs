@@ -1,4 +1,7 @@
-use crate::{ItemKind, Provider, ProviderEvent, StartContext, TurnStatus};
+use crate::{
+    Attachment, AttachmentKind, ItemKind, PromptSegment, Provider, ProviderEvent, StartContext,
+    TurnStatus,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -112,13 +115,52 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     assert!(unknown_seen, "unknown events must be passed through");
     assert!(turn_completed_seen, "turn completed must be emitted");
 
-    // 5. Model and Permission mode changes
+    // 5b. Model and Permission mode changes
     provider.set_model("opus").expect("set_model must succeed");
     provider
         .set_permission_mode(caps.supported_permission_modes[0])
         .expect("set_permission_mode must succeed");
 
-    // 6. Shutdown
+    // 6. A prompt with an Attachment: the Turn names it in place, however it was delivered.
+    let folder = std::env::temp_dir().join(format!("oxide-contract-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("temp dir");
+    let path = folder.join("note.txt");
+    std::fs::write(&path, "hello").expect("write attachment");
+    provider
+        .send_prompt_with_segments(&[
+            PromptSegment::text("Look at "),
+            PromptSegment::Attachment(Attachment {
+                id: "contract".into(),
+                name: "note.txt".into(),
+                kind: AttachmentKind::Text,
+                media_type: "text/plain".into(),
+                size_bytes: 5,
+                path,
+            }),
+        ])
+        .expect("send_prompt_with_segments must succeed");
+    let mut attachment_turn_seen = false;
+    while let Ok(event) = receiver.recv_timeout(Duration::from_secs(if attachment_turn_seen {
+        1
+    } else {
+        5
+    })) {
+        match event {
+            ProviderEvent::TurnStarted { prompt, .. } => {
+                assert_eq!(prompt, "Look at [note.txt]");
+                attachment_turn_seen = true;
+            }
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    let _ = std::fs::remove_dir_all(&folder);
+    assert!(
+        attachment_turn_seen,
+        "a prompt with an Attachment must start a Turn that names it"
+    );
+
+    // 7. Shutdown
     provider.shutdown().expect("shutdown must succeed");
     assert!(
         receiver.recv().is_err(),

@@ -44,6 +44,7 @@ const render = (threadId: number | null, draft = "") => act(async () => root.ren
   <ThreadView threadId={threadId} projectId={1} projectPath="/test" draft={draft}
     onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
     onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
+const composer = () => container.querySelector<HTMLElement>('[role="textbox"]')!;
 const press = (init: KeyboardEventInit) => act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 const label = (name: string) => container.querySelector(`[aria-label^="${name}"]`)?.textContent ?? "";
@@ -111,7 +112,7 @@ it("remembers a Favourite switch in a new-Thread draft without touching the draf
   await flush();
   expect(calls.some((c) => c.command === "set_thread_model_and_effort")).toBe(false);
   expect(label("Model")).toContain("GPT");
-  expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("half-written");
+  expect(composer().textContent).toBe("half-written");
   expect(localStorage.length).toBeGreaterThan(0);
 });
 
@@ -293,9 +294,9 @@ it("⌘n inside the picker applies the nth visible Model with its Effort", async
 it("/effort with no argument opens the picker", async () => {
   setup({ threadId: 7 });
   await render(7);
-  const box = container.querySelector("textarea") as HTMLTextAreaElement;
+  const box = composer();
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "/effort");
+    box.textContent = "/effort";
     box.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await act(async () => { box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
@@ -307,11 +308,11 @@ it("/effort with no argument opens the picker", async () => {
 it("returns focus to the composer after closing the picker, leaving the draft alone", async () => {
   setup({ threadId: 7 });
   await render(7, "keep me");
-  const box = container.querySelector("textarea") as HTMLTextAreaElement;
+  const box = composer();
   box.focus();
   await press(M);
   await key("ArrowLeft");
   await key("Escape");
   expect(document.activeElement).toBe(box);
-  expect(box.value).toBe("keep me");
+  expect(box.textContent).toBe("keep me");
 });

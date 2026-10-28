@@ -9,7 +9,8 @@ use crate::thread::{
     ThreadSummary, TurnError, TurnPage, TurnSnapshot, UnknownEventSnapshot,
 };
 use oxide_provider::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, PromptSegment,
+    TurnStatus,
 };
 
 /// What storage recorded when a Turn started.
@@ -25,7 +26,7 @@ pub enum StorageMsg {
         thread_id: u32,
         turn_index: u32,
         prompt: String,
-        attachments: Vec<String>,
+        segments: Vec<PromptSegment>,
         reply: mpsc::Sender<Result<TurnStarted>>,
     },
     UpdateTurnCompleted {
@@ -147,14 +148,14 @@ impl StorageHandle {
         thread_id: u32,
         turn_index: u32,
         prompt: String,
-        attachments: Vec<String>,
+        segments: Vec<PromptSegment>,
     ) -> Result<TurnStarted> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteTurnStarted {
             thread_id,
             turn_index,
             prompt,
-            attachments,
+            segments,
             reply: reply_tx,
         });
         reply_rx
@@ -374,7 +375,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 thread_id,
                 turn_index,
                 prompt,
-                attachments,
+                segments,
                 reply,
             } => {
                 let res = (|| -> Result<TurnStarted> {
@@ -388,11 +389,10 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         [thread_id],
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )?;
-                    let attachments_json =
-                        serde_json::to_string(&attachments).unwrap_or_else(|_| "[]".into());
+                    let segments_json = serde_json::to_string(&segments).ok();
                     tx.execute(
-                        "INSERT INTO turns (thread_id, turn_index, prompt, model, effort, attachments, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running')",
-                        rusqlite::params![thread_id, turn_index, prompt, model, effort, attachments_json],
+                        "INSERT INTO turns (thread_id, turn_index, prompt, model, effort, segments, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running')",
+                        rusqlite::params![thread_id, turn_index, prompt, model, effort, segments_json],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
                     let mut thread_title = None;
@@ -701,7 +701,7 @@ fn turn_page(
     limit: u32,
 ) -> Result<TurnPage> {
     let mut turn_stmt = conn.prepare_cached(
-        "SELECT id, turn_index, prompt, status, started_at, completed_at, model, effort, attachments, error_message, stderr_tail
+        "SELECT id, turn_index, prompt, status, started_at, completed_at, model, effort, attachments, error_message, stderr_tail, segments
          FROM turns WHERE thread_id = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3",
     )?;
     let turn_rows = turn_stmt.query_map(rusqlite::params![thread_id, limit, offset], |r| {
@@ -730,6 +730,7 @@ fn turn_page(
                     })
                 })
                 .transpose()?,
+            r.get::<_, Option<String>>(11)?,
         ))
     })?;
 
@@ -758,6 +759,7 @@ fn turn_page(
             effort,
             attachments,
             error,
+            segments,
         ) = t?;
         let item_rows = item_stmt.query_map([t_id], |r| {
             let kind_str: String = r.get(2)?;
@@ -809,10 +811,10 @@ fn turn_page(
         turns.push(TurnSnapshot {
             id: t_id,
             turn_index: t_idx,
-            prompt,
             model,
             effort,
-            attachments: serde_json::from_str(&attachments).unwrap_or_default(),
+            segments: crate::attachments::turn_segments(&prompt, segments.as_deref(), &attachments),
+            prompt,
             status,
             started_at,
             completed_at,

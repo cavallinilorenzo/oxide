@@ -1,5 +1,6 @@
 use oxide_provider::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, PromptSegment,
+    TurnStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -118,8 +119,8 @@ pub struct TurnSnapshot {
     /// The Model and Effort the Turn ran with.
     pub model: Option<String>,
     pub effort: Option<String>,
-    /// Paths of image attachments, stored under the Oxide home.
-    pub attachments: Vec<String>,
+    /// The prompt in order: text, and Attachments at the place the user put them.
+    pub segments: Vec<PromptSegment>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
@@ -134,7 +135,6 @@ pub struct TurnSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCapabilities {
     pub reasoning_text: bool,
-    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,7 +175,7 @@ pub enum ThreadEvent {
         prompt: String,
         model: Option<String>,
         effort: Option<String>,
-        attachments: Vec<String>,
+        segments: Vec<PromptSegment>,
     },
     ItemStarted {
         item_index: u32,

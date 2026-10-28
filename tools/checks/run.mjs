@@ -6,9 +6,11 @@
 //   node tools/checks/run.mjs --list        every check with its tiers
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { plan, validateCatalogue } from "./catalogue.mjs";
 
-const catalogue = JSON.parse(readFileSync(new URL("./catalogue.json", import.meta.url), "utf8"));
+const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+const catalogue =JSON.parse(readFileSync(new URL("./catalogue.json", import.meta.url), "utf8"));
 const problems = validateCatalogue(catalogue);
 if (problems.length > 0) {
   console.error(`Invalid catalogue:\n- ${problems.join("\n- ")}`);
@@ -31,12 +33,17 @@ try {
 }
 
 for (const { check, reason } of result.skipped) console.log(`skip  ${check.id}: ${reason}`);
+if (result.run.length === 0) {
+  // An explicitly requested check that cannot run here must not look green.
+  console.error(`Nothing to run for "${target}" on this platform.`);
+  process.exit(1);
+}
 
 const failures = [];
 for (const { check } of result.run) {
   console.log(`\n> ${check.id}: ${check.command.join(" ")}`);
   // Windows resolves pnpm/tauri shims only through the shell.
-  const run = spawnSync(check.command[0], check.command.slice(1), { stdio: "inherit", shell: process.platform === "win32" });
+  const run = spawnSync(check.command[0], check.command.slice(1), { stdio: "inherit", cwd: repoRoot, shell: process.platform === "win32" });
   if (run.status !== 0) failures.push(check);
 }
 

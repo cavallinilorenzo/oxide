@@ -134,6 +134,10 @@ test("gate fails naming a failed, cancelled or unexpectedly skipped job", () => 
   }
 });
 
+test("gate fails when it is given no results at all", () => {
+  assert.equal(evaluateGate({ results: {}, event: "push", skippedOn }).ok, false);
+});
+
 test("gate accepts pr-title skipped on push, but not on a pull request", () => {
   const results = { lint: "success", "pr-title": "skipped" };
   assert.equal(evaluateGate({ results, event: "push", skippedOn }).ok, true);

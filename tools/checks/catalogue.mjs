@@ -49,7 +49,7 @@ export function plan(catalogue, { target, platform, event }) {
   const byId = catalogue.checks.find((check) => check.id === target);
   const selected = byId ? [byId] : TIERS.includes(target) ? catalogue.checks.filter((c) => c.tiers.includes(target)) : null;
   if (!selected) {
-    const valid = [...catalogue.checks.map((c) => c.id), ...TIERS.filter((t) => t === "fast" || t === "pr")];
+    const valid = [...catalogue.checks.map((c) => c.id), ...TIERS];
     throw new Error(`Unknown target "${target}". Valid targets: ${valid.join(", ")}`);
   }
   const run = [];
@@ -104,6 +104,7 @@ export function conformance({ catalogue, workflows, guide }) {
 // job, the events where being skipped is by design. Anything but success is a
 // failure otherwise, so a job that never ran cannot count as green.
 export function evaluateGate({ results, event, skippedOn = {} }) {
+  if (Object.keys(results).length === 0) return { ok: false, message: "gate failed: no job results were passed to it" };
   const bad = Object.entries(results)
     .filter(([job, result]) => result !== "success" && !(result === "skipped" && skippedOn[job]?.includes(event)))
     .map(([job, result]) => `${job} (${result})`);

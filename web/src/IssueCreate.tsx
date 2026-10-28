@@ -1,4 +1,4 @@
-import { ArrowLeftIcon } from "@primer/octicons-react";
+import { ArrowLeftIcon, IssueOpenedIcon } from "@primer/octicons-react";
 import { useState } from "react";
 import { commands, type IssueSummary, type PullRequestLabel } from "./bindings";
 import { canSubmitIssue } from "./issueView";
@@ -51,7 +51,7 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
 
   return (
     <form
-      className="pr-review"
+      className="pr-review issue-create"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -63,7 +63,10 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
         </button>
       </div>
       <div className="pr-scroll">
-        <h3 className="pr-title">New issue</h3>
+        <div className="pr-create-heading">
+          <IssueOpenedIcon size={16} className="issue-state-open" />
+          <h3>New issue</h3>
+        </div>
         <div className="pr-create-field">
           <label htmlFor="issue-title">Title</label>
           <input
@@ -107,8 +110,9 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
               }}
             />
           )}
+          <span className="pr-create-hint">Markdown supported</span>
         </div>
-        <section className="pr-section pr-details" aria-label="Details">
+        <section className="pr-section issue-create-details" aria-label="Details">
           <Field
             title="Assignees"
             editable
@@ -176,24 +180,24 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
             {error}
           </p>
         )}
+        <footer className="pr-create-footer" aria-label="Create">
+          <div className="pr-create-actions">
+            <button type="button" onClick={onBack} disabled={busy}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={`primary${busy ? " pending" : ""}`}
+              disabled={!ready}
+              title={`Create (${shortcutLabel}${shortcutLabel === "⌘" ? "↩" : "Enter"})`}
+            >
+              <Working on={busy} label="Creating…">
+                <IssueOpenedIcon size={14} /> Create issue
+              </Working>
+            </button>
+          </div>
+        </footer>
       </div>
-      <footer className="pr-merge" aria-label="Create">
-        <div className="pr-merge-row">
-          <button
-            type="submit"
-            className={`primary${busy ? " pending" : ""}`}
-            disabled={!ready}
-            title={`Create (${shortcutLabel}${shortcutLabel === "⌘" ? "↩" : "Enter"})`}
-          >
-            <Working on={busy} label="Creating…">
-              Create issue
-            </Working>
-          </button>
-          <button type="button" onClick={onBack} disabled={busy}>
-            Cancel
-          </button>
-        </div>
-      </footer>
     </form>
   );
 }

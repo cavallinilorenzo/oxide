@@ -1298,3 +1298,8 @@ html.macos .header,
 .pr-views .issue-write-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .pr-views .issue-preview { min-height: 120px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg2); }
 .pr-views .pr-create-field textarea { width: 100%; resize: vertical; line-height: 1.5; }
+.pr-views .issue-create .pr-scroll { gap: var(--space-4); }
+.pr-views .issue-create textarea { min-height: 180px; padding: var(--space-2); }
+.pr-views .issue-create-details { border-top: 1px solid var(--line); padding-top: var(--space-1); gap: 0; }
+.pr-views .issue-create-details .pr-field { padding: 10px 0; }
+.pr-views .pr-create-actions button:first-child { margin-left: 0; }

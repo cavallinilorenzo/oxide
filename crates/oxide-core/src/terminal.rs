@@ -6,7 +6,7 @@ use oxide_provider::process::{SHUTDOWN_GRACE, terminate_group};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -77,16 +77,30 @@ impl TerminalSession {
                 pixel_height: 0,
             })
             .map_err(|e| Error::Terminal(format!("open terminal: {e}")))?;
-        let command = shell_command(cwd, blocks);
+        #[cfg(unix)]
+        let shell_init = if blocks {
+            Some(create_shell_init_file(id)?)
+        } else {
+            None
+        };
+        #[cfg(windows)]
+        let shell_init: Option<PathBuf> = None;
+        let command = shell_command(cwd, blocks, shell_init.as_deref());
         let shell = command
             .get_argv()
             .first()
             .map(|arg| arg.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let mut child = pair
-            .slave
-            .spawn_command(command)
-            .map_err(|e| Error::Terminal(format!("start terminal shell: {e}")))?;
+        let mut child = match pair.slave.spawn_command(command) {
+            Ok(child) => child,
+            Err(error) => {
+                #[cfg(unix)]
+                if let Some(path) = &shell_init {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(Error::Terminal(format!("start terminal shell: {error}")));
+            }
+        };
         let pid = child.process_id().unwrap_or_default();
         if let Err(error) = oxide_provider::process::attach_running_to_job(pid) {
             let _ = child.kill();
@@ -108,22 +122,13 @@ impl TerminalSession {
             .master
             .take_writer()
             .map_err(|e| Error::Terminal(format!("write terminal input: {e}")))?;
-        #[cfg(unix)]
-        let mut writer = writer;
-        #[cfg(unix)]
-        if blocks {
-            // Start the interactive bash shell without an intermediate /bin/sh
-            // so PS1 survives startup; keep Ctrl+C from terminating bash itself.
-            writer
-                .write_all(b"stty -echo\ntrap ':' INT\n")
-                .and_then(|_| writer.flush())
-                .map_err(|e| Error::Terminal(format!("configure terminal shell: {e}")))?;
-        }
         let subscribers = Arc::new(Mutex::new(Vec::<Sender<Vec<u8>>>::new()));
         let output_subscribers = Arc::clone(&subscribers);
         std::thread::spawn(move || read_output(reader, output_subscribers, blocks));
         let (commands, receiver) = unbounded();
         std::thread::spawn(move || {
+            #[cfg(unix)]
+            let shell_init = shell_init;
             let mut writer = writer;
             let master = pair.master;
             while let Ok(command) = receiver.recv() {
@@ -153,6 +158,10 @@ impl TerminalSession {
                             let _ = child.kill();
                         }
                         let _ = child.wait();
+                        #[cfg(unix)]
+                        if let Some(path) = shell_init {
+                            let _ = std::fs::remove_file(path);
+                        }
                         let _ = reply.send(());
                         break;
                     }
@@ -238,7 +247,12 @@ impl Drop for TerminalSession {
     }
 }
 
-fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
+fn shell_command(
+    cwd: &Path,
+    blocks: bool,
+    #[cfg(unix)] shell_init: Option<&Path>,
+    #[cfg(windows)] _shell_init: Option<&Path>,
+) -> portable_pty::CommandBuilder {
     #[cfg(windows)]
     let mut command = CommandBuilder::new("powershell.exe");
     #[cfg(windows)]
@@ -257,11 +271,35 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
         let prompt = r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#;
         command.env("PS1", prompt);
         command.env("PS2", "");
-        command.args(["--noprofile", "--norc", "-m", "-i"]);
+        command.args(["--noprofile", "-m", "-i"]);
+        if let Some(shell_init) = shell_init {
+            command.arg("--rcfile");
+            command.arg(shell_init);
+        }
     }
     command.cwd(dunce::simplified(cwd));
     command.env("TERM", "xterm-256color");
     command
+}
+
+#[cfg(unix)]
+fn create_shell_init_file(id: u32) -> Result<PathBuf> {
+    use std::io::Write as _;
+
+    static NEXT_INIT_FILE: AtomicU32 = AtomicU32::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "oxide-terminal-{}-{id}-{}.bashrc",
+        std::process::id(),
+        NEXT_INIT_FILE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| Error::Terminal(format!("create terminal shell init file: {error}")))?;
+    file.write_all(b"stty -echo\ntrap ':' INT\n")
+        .map_err(|error| Error::Terminal(format!("write terminal shell init file: {error}")))?;
+    Ok(path)
 }
 
 fn read_output(

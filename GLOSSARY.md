@@ -72,6 +72,9 @@ _Avoid_: Agent, backend, harness
 **Model**:
 A specific LLM a Provider offers, chosen per conversation (e.g. Opus 5.5).
 
+**Favourite Model**:
+A Model the user starred in the Model picker. Favourites are listed in the picker's Favourites tab, and ⌘1..9 outside the picker switches the Thread to the nth one in that order.
+
 **Effort**:
 The reasoning-depth setting a Provider exposes for a Model (e.g. low, high).
 _Avoid_: Thinking level, reasoning mode

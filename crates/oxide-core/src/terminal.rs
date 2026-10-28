@@ -271,11 +271,12 @@ fn shell_command(
         let prompt = r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#;
         command.env("PS1", prompt);
         command.env("PS2", "");
-        command.args(["--noprofile", "-m", "-i"]);
+        command.args(["--noprofile"]);
         if let Some(shell_init) = shell_init {
             command.arg("--rcfile");
             command.arg(shell_init);
         }
+        command.args(["-m", "-i"]);
     }
     command.cwd(dunce::simplified(cwd));
     command.env("TERM", "xterm-256color");

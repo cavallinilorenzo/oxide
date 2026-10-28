@@ -1,9 +1,10 @@
 import { modelDigitShortcut, shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
+import { LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
 import { catalogCache } from "./modelCatalogCache";
+import { effortBlurb, effortLook } from "./effortStyle";
 import {
   modelFamilyId,
   openPicker,
@@ -24,10 +25,10 @@ const PROVIDERS = [
 
 const TAB_KEY = "oxide:model-picker-tab";
 
-function rememberedTab(fallback: string): string {
+function rememberedTab(tabs: string[], fallback: string): string {
   try {
     const saved = localStorage.getItem(TAB_KEY);
-    return saved && (saved === "favourites" || PROVIDERS.some((p) => p.id === saved)) ? saved : fallback;
+    return saved && tabs.includes(saved) ? saved : fallback;
   } catch { return fallback; }
 }
 
@@ -63,26 +64,23 @@ export function ModelEffortPicker({
     Object.fromEntries(catalogCache)
   );
   const [loading, setLoading] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
+  const tabs = useMemo(
+    () => [...PROVIDERS.map((p) => p.id as string), ...(currentProvider === "fake" ? ["fake"] : [])],
+    [currentProvider]
+  );
   const ctx = useMemo<PickerContext>(
-    () => ({
-      tabs: ["favourites", ...PROVIDERS.map((p) => p.id), ...(currentProvider === "fake" ? ["fake"] : [])],
-      catalogs,
-      favourites,
-      currentProvider,
-      currentModel,
-      locked: modelSwitchLocked,
-    }),
-    [catalogs, favourites, currentProvider, currentModel, modelSwitchLocked]
+    () => ({ tabs, catalogs, currentProvider, currentModel, locked: modelSwitchLocked }),
+    [tabs, catalogs, currentProvider, currentModel, modelSwitchLocked]
   );
   const ctxRef = useRef(ctx);
   useLayoutEffect(() => { ctxRef.current = ctx; });
 
   const [state, setState] = useState<PickerState>(() =>
-    openPicker(ctx, rememberedTab(currentProvider), currentEffort)
+    openPicker(ctx, rememberedTab(tabs, currentProvider), currentEffort)
   );
   const stateRef = useRef(state);
   useLayoutEffect(() => { stateRef.current = state; });
@@ -91,7 +89,7 @@ export function ModelEffortPicker({
     []
   );
 
-  // Catalogs and Favourites land after opening; keep the highlight on a row that exists.
+  // Catalogs land after opening; keep the highlight on a row that exists.
   useEffect(() => dispatch({ type: "sync" }), [ctx, dispatch]);
 
   useEffect(() => {
@@ -99,7 +97,7 @@ export function ModelEffortPicker({
   }, [state.tab]);
 
   useEffect(() => {
-    if (open) searchInputRef.current?.focus();
+    if (open) listRef.current?.focus();
   }, [open]);
 
   // Load favourites and refresh catalogs
@@ -164,8 +162,8 @@ export function ModelEffortPicker({
   };
 
   const { current: visibleCurrent, legacy: visibleLegacy } = useMemo(
-    () => pickerRows(ctx, state.tab, state.search, state.effort),
-    [ctx, state.tab, state.search, state.effort]
+    () => pickerRows(ctx, state.tab, state.effort),
+    [ctx, state.tab, state.effort]
   );
   const flatVisible = useMemo(() => [...visibleCurrent, ...visibleLegacy], [visibleCurrent, visibleLegacy]);
   const highlightedIndex = flatVisible.findIndex(
@@ -192,7 +190,7 @@ export function ModelEffortPicker({
     [onSelectModelAndEffort, onClose]
   );
 
-  // The search field keeps focus, so the picker handles its keys at the window.
+  // The picker handles its keys at the window, so they work wherever focus sits.
   const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useLayoutEffect(() => { keyHandlerRef.current = (e) => {
     if (e.key === "Escape") {
@@ -236,7 +234,7 @@ export function ModelEffortPicker({
 
   if (!open) return null;
 
-  const isOtherProvider = state.tab !== currentProvider && state.tab !== "favourites";
+  const isOtherProvider = state.tab !== currentProvider;
   const highlightedProvider = flatVisible[highlightedIndex]?.provider;
   const startsNewThread = turnCount > 0 && !!highlightedProvider && highlightedProvider !== currentProvider;
   const efforts = highlightedModel?.supportedEfforts ?? [];
@@ -263,16 +261,6 @@ export function ModelEffortPicker({
         aria-selected={isHighlighted}
         aria-disabled={row.locked}
       >
-        <button
-          type="button"
-          className="fav-toggle-btn"
-          tabIndex={-1}
-          onClick={(e) => void toggleFavourite(m.id, e)}
-          aria-label={isFav ? "Unfavourite" : "Favourite"}
-        >
-          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
-        </button>
-
         <div className="model-details">
           <div className="model-name-row">
             <span className="model-name">{m.name}</span>
@@ -281,6 +269,16 @@ export function ModelEffortPicker({
           </div>
           {m.description && <div className="model-desc">{m.description}</div>}
         </div>
+
+        <button
+          type="button"
+          className={`fav-toggle-btn ${isFav ? "on" : ""}`}
+          tabIndex={-1}
+          onClick={(e) => void toggleFavourite(m.id, e)}
+          aria-label={isFav ? "Unfavourite" : "Favourite"}
+        >
+          {isFav ? <StarFillIcon size={13} /> : <StarIcon size={13} />}
+        </button>
 
         {shortcutNumber && (
           <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
@@ -291,172 +289,145 @@ export function ModelEffortPicker({
     );
   };
 
+  const look = effortIndex >= 0 ? effortLook(efforts[effortIndex]!, effortIndex, efforts.length) : null;
+  const markerAt = effortIndex >= 0 ? ((effortIndex + 0.5) / efforts.length) * 100 : 0;
+  const isDefaultEffort = !!state.effort && state.effort === highlightedModel?.defaultEffort;
+
   return (
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Model Selector">
       <div className="modal model-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="model-picker-header">
-          <h2>Model</h2>
+          <nav className="provider-tabs" aria-label="Providers">
+            {tabs.map((id) => (
+              <button
+                key={id}
+                type="button"
+                tabIndex={-1}
+                className={`provider-tab ${state.tab === id ? "active" : ""}`}
+                aria-current={state.tab === id}
+                onMouseDown={keepFocus}
+                onClick={() => dispatch({ type: "set-tab", tab: id })}
+              >
+                {id !== "fake" && <ProviderMark provider={id} size={14} />}
+                <span>{PROVIDERS.find((p) => p.id === id)?.name ?? capitalise(id)}</span>
+              </button>
+            ))}
+          </nav>
           <button type="button" className="close-button" onClick={onClose} aria-label="Close">
             <XIcon size={16} />
           </button>
         </div>
 
-        <div className="model-picker-layout">
-          {/* Provider Rail */}
-          <nav className="provider-rail" aria-label="Provider rail">
-            <button
-              type="button"
+        {startsNewThread && (
+          <div className="tab-info-banner" role="status">
+            Picking a model from another Provider starts a new Thread.
+          </div>
+        )}
+
+        {modelSwitchLocked && !isOtherProvider && (
+          <div className="tab-locked-banner" role="status">
+            <LockIcon size={12} /> Provider does not support mid-thread model switching.
+          </div>
+        )}
+
+        <div className="model-picker-body">
+          <div className="models-list-scroll">
+            {loading && flatVisible.length === 0 && <div className="models-loading">Loading catalog...</div>}
+
+            {!loading && flatVisible.length === 0 && <div className="models-empty">No models found.</div>}
+
+            <div
+              ref={listRef}
+              id="model-listbox"
+              role="listbox"
               tabIndex={-1}
-              className={`rail-tab ${state.tab === "favourites" ? "active" : ""}`}
-              aria-current={state.tab === "favourites"}
-              onMouseDown={keepFocus}
-              onClick={() => dispatch({ type: "set-tab", tab: "favourites" })}
+              aria-label="Models"
+              aria-activedescendant={highlightedIndex >= 0 ? optionId(highlightedIndex) : undefined}
+              className="models-listbox"
             >
-              <span className="rail-icon"><StarFillIcon size={14} /></span>
-              <span className="rail-text">Favourites</span>
-            </button>
+              {visibleCurrent.map((row, idx) => renderRow(row, idx, false))}
 
-            {PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                tabIndex={-1}
-                className={`rail-tab ${state.tab === p.id ? "active" : ""}`}
-                aria-current={state.tab === p.id}
-                onMouseDown={keepFocus}
-                onClick={() => dispatch({ type: "set-tab", tab: p.id })}
-              >
-                <ProviderMark provider={p.id} size={14} />
-                <span className="rail-text">{p.name}</span>
-              </button>
-            ))}
-
-            {currentProvider === "fake" && (
-              <button
-                type="button"
-                tabIndex={-1}
-                className={`rail-tab ${state.tab === "fake" ? "active" : ""}`}
-                aria-current={state.tab === "fake"}
-                onMouseDown={keepFocus}
-                onClick={() => dispatch({ type: "set-tab", tab: "fake" })}
-              >
-                <span className="rail-text">Fake</span>
-              </button>
-            )}
-          </nav>
-
-          {/* Model Catalog / Search */}
-          <div className="model-catalog-pane">
-            <div className="model-search-wrapper">
-              <input
-                ref={searchInputRef}
-                type="text"
-                role="combobox"
-                aria-expanded="true"
-                aria-controls="model-listbox"
-                aria-activedescendant={highlightedIndex >= 0 ? optionId(highlightedIndex) : undefined}
-                placeholder="Search models..."
-                value={state.search}
-                onChange={(e) => dispatch({ type: "search", text: e.target.value })}
-                className="model-search-input"
-                aria-label="Search models"
-              />
-            </div>
-
-            {startsNewThread && (
-              <div className="tab-info-banner" role="status">
-                Picking a model from another Provider starts a new Thread.
-              </div>
-            )}
-
-            {modelSwitchLocked && !isOtherProvider && (
-              <div className="tab-locked-banner" role="status">
-                <LockIcon size={12} /> Provider does not support mid-thread model switching.
-              </div>
-            )}
-
-            <div className="models-list-scroll">
-              {loading && flatVisible.length === 0 && <div className="models-loading">Loading catalog...</div>}
-
-              {!loading && flatVisible.length === 0 && (
-                <div className="models-empty">No models found.</div>
-              )}
-
-              <div id="model-listbox" role="listbox" aria-label="Models" className="models-listbox">
-                {visibleCurrent.length > 0 && (
-                  <div className="models-group" role="group" aria-label="Models">
-                    <div className="models-group-title" aria-hidden="true">Models</div>
-                    {visibleCurrent.map((row, idx) => renderRow(row, idx, false))}
-                  </div>
-                )}
-
-                {visibleLegacy.length > 0 && (
-                  <div className="models-group legacy-group" role="group" aria-label="Legacy Models">
-                    <div className="models-group-title" aria-hidden="true">Legacy Models</div>
-                    {visibleLegacy.map((row, idx) => renderRow(row, visibleCurrent.length + idx, true))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="effort-slider">
-              {efforts.length === 0 ? (
-                <span className="effort-label">
-                  {highlightedModel ? "This model has no effort levels." : "Select a model to see its effort levels."}
-                </span>
-              ) : (
+              {visibleLegacy.length > 0 && (
                 <>
-                  <span className="effort-label">Effort</span>
-                  <button
-                    type="button"
-                    className="effort-step"
-                    tabIndex={-1}
-                    aria-label="Lower effort"
-                    disabled={effortIndex <= 0}
-                    onMouseDown={keepFocus}
-                    onClick={() => dispatch({ type: "step-effort", delta: -1 })}
-                  >
-                    <ChevronLeftIcon size={14} />
-                  </button>
-                  <div
-                    className="effort-stops"
-                    role="slider"
-                    aria-label="Effort"
-                    aria-valuemin={0}
-                    aria-valuemax={efforts.length - 1}
-                    aria-valuenow={Math.max(0, effortIndex)}
-                    aria-valuetext={capitalise(state.effort ?? efforts[0]!)}
-                  >
-                    {efforts.map((effort) => (
-                      <span
-                        key={effort}
-                        className={`effort-stop ${effort === state.effort ? "active" : ""}`}
-                        onMouseDown={keepFocus}
-                        onClick={() => dispatch({ type: "set-effort", effort })}
-                      >
-                        {capitalise(effort)}
-                      </span>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="effort-step"
-                    tabIndex={-1}
-                    aria-label="Raise effort"
-                    disabled={effortIndex >= efforts.length - 1}
-                    onMouseDown={keepFocus}
-                    onClick={() => dispatch({ type: "step-effort", delta: 1 })}
-                  >
-                    <ChevronRightIcon size={14} />
-                  </button>
+                  <div className="models-group-title" aria-hidden="true">Legacy</div>
+                  {visibleLegacy.map((row, idx) => renderRow(row, visibleCurrent.length + idx, true))}
                 </>
               )}
             </div>
-
-            <div className="picker-legend">
-              ↑↓ Model · ←→ Effort · Tab Provider · ↩ Select · Esc Close
-            </div>
           </div>
+
+          <div
+            className="effort-panel"
+            data-tier={look?.tier ?? 0}
+            style={look ? ({ "--effort": look.color } as React.CSSProperties) : undefined}
+          >
+            {efforts.length === 0 ? (
+              <p className="effort-empty">
+                {highlightedModel ? "This model has no effort levels." : "Select a model to see its effort levels."}
+              </p>
+            ) : (
+              <>
+                <div className="effort-ends" aria-hidden="true">
+                  <span>Faster</span>
+                  <span>Smarter</span>
+                </div>
+                <div
+                  className="effort-track"
+                  role="slider"
+                  aria-label="Effort"
+                  aria-valuemin={0}
+                  aria-valuemax={efforts.length - 1}
+                  aria-valuenow={Math.max(0, effortIndex)}
+                  aria-valuetext={capitalise(state.effort ?? efforts[0]!)}
+                >
+                  <span className="effort-fill" style={{ width: `${markerAt}%` }} />
+                  <span className="effort-marker" style={{ left: `${markerAt}%` }} />
+                </div>
+                <div className="effort-stops" style={{ gridTemplateColumns: `repeat(${efforts.length}, 1fr)` }}>
+                  {efforts.map((effort, i) => {
+                    const active = effort === state.effort;
+                    const own = effortLook(effort, i, efforts.length);
+                    return (
+                      <button
+                        key={effort}
+                        type="button"
+                        tabIndex={-1}
+                        className={`effort-stop ${active ? "active" : ""}`}
+                        data-tier={own.tier}
+                        onMouseDown={keepFocus}
+                        onClick={() => dispatch({ type: "set-effort", effort })}
+                      >
+                        <span className="effort-word">{effort}</span>
+                        {active && own.sparkles > 0 && (
+                          <span className="effort-sparkles" aria-hidden="true">
+                            {Array.from({ length: own.sparkles }, (_, n) => (
+                              <i
+                                key={n}
+                                style={{
+                                  left: `${(n * 37 + 11) % 100}%`,
+                                  top: `${(n * 53 + 7) % 100}%`,
+                                  animationDelay: `${(n * 173) % 1400}ms`,
+                                  ["--s" as string]: `${3 + (n % 3)}px`,
+                                }}
+                              />
+                            ))}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="effort-blurb">
+                  {effortBlurb(state.effort ?? "")}
+                  {isDefaultEffort && <span className="effort-default">The default effort for this model</span>}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="picker-legend">
+          ↑↓ Model · ←→ Effort · Tab Provider · ↩ Select · Esc Close
         </div>
       </div>
     </div>

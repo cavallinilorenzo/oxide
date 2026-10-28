@@ -210,10 +210,9 @@ export function resolveFavourite(
 // ---- Model picker state: Provider tab, search, highlighted Model and pending Effort ----
 
 export interface PickerContext {
-  /** Tab ids in Tab-key order: "favourites", then one per Provider. */
+  /** Provider ids in Tab-key order. */
   tabs: string[];
   catalogs: Record<string, ModelInfo[]>;
-  favourites: string[];
   currentProvider: string;
   currentModel: string | null;
   /** The Thread has Turns and its Provider can't switch Model mid-Thread. */
@@ -222,7 +221,6 @@ export interface PickerContext {
 
 export interface PickerState {
   tab: string;
-  search: string;
   /** Family id of the highlighted Model. */
   highlighted: string | null;
   effort: string | null;
@@ -233,7 +231,6 @@ export type PickerAction =
   | { type: "step-effort"; delta: 1 | -1 }
   | { type: "cycle-tab"; delta: 1 | -1 }
   | { type: "set-tab"; tab: string }
-  | { type: "search"; text: string }
   | { type: "hover"; family: string }
   | { type: "set-effort"; effort: string }
   /** Re-aim the highlight after the rows changed underneath it (catalogs or Favourites arriving). */
@@ -247,35 +244,27 @@ export interface PickerRow {
   isCurrent: boolean;
 }
 
-/** The rows of `tab` for `search`, current Models first then legacy ones. `effort` picks the variant of effort-split Models. */
+/** The rows of Provider `tab`, current Models first then legacy ones. `effort` picks the variant of effort-split Models. */
 export function pickerRows(
   ctx: PickerContext,
   tab: string,
-  search: string,
   effort: string | null
 ): { current: PickerRow[]; legacy: PickerRow[] } {
-  const models =
-    tab === "favourites"
-      ? favouriteModelList(ctx.catalogs, ctx.favourites, effort)
-      : collapseEffortVariants(ctx.catalogs[tab] ?? [], effort);
+  const models = collapseEffortVariants(ctx.catalogs[tab] ?? [], effort);
   const toRow = (model: ModelInfo): PickerRow => {
-    const provider =
-      tab === "favourites"
-        ? Object.entries(ctx.catalogs).find(([, list]) => list.some((m) => m.id === model.id))?.[0] ??
-          ctx.currentProvider
-        : tab;
+    const provider = tab;
     const isCurrent =
       provider === ctx.currentProvider &&
       ctx.currentModel !== null &&
       modelFamilyId(model.id) === modelFamilyId(ctx.currentModel);
     return { model, provider, isCurrent, locked: provider === ctx.currentProvider && ctx.locked && !isCurrent };
   };
-  const { current, legacy } = filterModels(models, search);
+  const { current, legacy } = filterModels(models, "");
   return { current: current.map(toRow), legacy: legacy.map(toRow) };
 }
 
 function flatRows(ctx: PickerContext, state: PickerState): PickerRow[] {
-  const { current, legacy } = pickerRows(ctx, state.tab, state.search, state.effort);
+  const { current, legacy } = pickerRows(ctx, state.tab, state.effort);
   return [...current, ...legacy];
 }
 
@@ -299,7 +288,7 @@ function startingFamily(ctx: PickerContext, state: PickerState): string | null {
 
 /** A freshly opened picker: pending Effort is the Thread's, highlight starts on its Model. */
 export function openPicker(ctx: PickerContext, tab: string, effort: string | null): PickerState {
-  const state: PickerState = { tab, search: "", highlighted: null, effort };
+  const state: PickerState = { tab, highlighted: null, effort };
   return highlight(ctx, state, startingFamily(ctx, state));
 }
 
@@ -332,11 +321,6 @@ export function pickerReduce(state: PickerState, action: PickerAction, ctx: Pick
     case "set-tab": {
       const moved = { ...state, tab: action.tab };
       return highlight(ctx, moved, startingFamily(ctx, moved));
-    }
-    case "search": {
-      const searched = { ...state, search: action.text };
-      const first = flatRows(ctx, searched).find((r) => !r.locked);
-      return highlight(ctx, searched, first ? modelFamilyId(first.model.id) : null);
     }
     case "hover": {
       const row = flatRows(ctx, state).find((r) => modelFamilyId(r.model.id) === action.family);

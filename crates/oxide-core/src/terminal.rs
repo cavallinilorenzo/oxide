@@ -252,7 +252,7 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
         // clears PS1 on startup.
         command.args([
             "-c",
-            "stty -echo; exec env \"PS1=$OXIDE_PS1\" PS2='' /bin/bash --noprofile --norc -i",
+            "stty -echo; exec env \"PS1=$OXIDE_PS1\" PS2='' /bin/bash --noprofile --norc -m -i",
         ]);
     }
     command.cwd(dunce::simplified(cwd));

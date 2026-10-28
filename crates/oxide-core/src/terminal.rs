@@ -250,7 +250,7 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
         // markers never fire and Ctrl+C can terminate the shell itself. Pass
         // PS1 directly to bash because the wrapper shell clears it on startup.
         let script =
-            format!("stty -echo; exec PS1='{prompt}' PS2='' /bin/bash --noprofile --norc -i");
+            format!("stty -echo; exec env PS1='{prompt}' PS2='' /bin/bash --noprofile --norc -i");
         command.args(["-c", &script]);
     }
     command.cwd(dunce::simplified(cwd));

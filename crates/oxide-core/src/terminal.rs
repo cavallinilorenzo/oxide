@@ -54,9 +54,8 @@ impl TerminalSession {
         };
         #[cfg(not(windows))]
         let script = {
-            let quoted = format!("'{}'", command.replace('\'', "'\"'\"'"));
             format!(
-                "_oxide_token='{token}'; _oxide_exit=; printf '\\033]633;Oxide;{token};start\\007'; eval {quoted}; _oxide_exit=$?\n"
+                "_oxide_token='{token}'; _oxide_exit=; printf '\\033]633;Oxide;{token};start\\007'; __oxide_run_block() {{\n{command}\n}}; __oxide_run_block; _oxide_exit=$?; unset -f __oxide_run_block\n"
             )
         };
         self.write(script.as_bytes())

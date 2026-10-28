@@ -237,7 +237,8 @@ export function ModelEffortPicker({
   if (!open) return null;
 
   const isOtherProvider = state.tab !== currentProvider && state.tab !== "favourites";
-  const startsNewThread = turnCount > 0 && isOtherProvider;
+  const highlightedProvider = flatVisible[highlightedIndex]?.provider;
+  const startsNewThread = turnCount > 0 && !!highlightedProvider && highlightedProvider !== currentProvider;
   const efforts = highlightedModel?.supportedEfforts ?? [];
   const effortIndex = efforts.indexOf(state.effort ?? "");
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
@@ -427,16 +428,14 @@ export function ModelEffortPicker({
                     aria-valuetext={capitalise(state.effort ?? efforts[0]!)}
                   >
                     {efforts.map((effort) => (
-                      <button
+                      <span
                         key={effort}
-                        type="button"
-                        tabIndex={-1}
                         className={`effort-stop ${effort === state.effort ? "active" : ""}`}
                         onMouseDown={keepFocus}
                         onClick={() => dispatch({ type: "set-effort", effort })}
                       >
                         {capitalise(effort)}
-                      </button>
+                      </span>
                     ))}
                   </div>
                   <button

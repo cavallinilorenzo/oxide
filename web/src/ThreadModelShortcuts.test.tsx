@@ -243,6 +243,13 @@ it("Tab and Shift+Tab cycle the tabs and keep the search text", async () => {
   expect(activeTab()).toContain("Antigravity");
 });
 
+it("says so when the highlighted Model is from another Provider and the Thread has Turns", async () => {
+  await open({ threadId: 7, turnCount: 2 });
+  expect(container.textContent).not.toContain("starts a new Thread");
+  await key("Tab");
+  expect(container.textContent).toContain("starts a new Thread");
+});
+
 it("Enter does nothing when the search matches nothing", async () => {
   const calls = await open();
   await type("zzz");

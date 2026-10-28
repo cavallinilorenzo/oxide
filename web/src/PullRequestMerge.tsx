@@ -28,18 +28,6 @@ export function Working({ on, label, children }: { on: boolean; label: string; c
   );
 }
 
-/** Shown over the pull request once it was merged or closed, just before the list comes back. */
-export function Outcome({ kind }: { kind: "merged" | "closed" }) {
-  return (
-    <div className={`pr-outcome ${kind}`} role="status">
-      <span className="pr-outcome-badge">
-        {kind === "merged" ? <GitMergeIcon size={28} /> : <GitPullRequestClosedIcon size={28} />}
-      </span>
-      <strong>{kind === "merged" ? "Merged" : "Closed"}</strong>
-    </div>
-  );
-}
-
 export function ToneIcon({ tone, size = 16 }: { tone: Tone; size?: number }) {
   if (tone === "ok") return <CheckCircleFillIcon size={size} />;
   if (tone === "bad") return <XCircleFillIcon size={size} />;

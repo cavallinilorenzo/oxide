@@ -839,17 +839,10 @@ html.macos .header,
 
 /* Review */
 .pr-views .pr-nav { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) 0 var(--pr-pad); flex: none; }
-/* Merged or closed: a badge pops over the pull request, then the list comes back. */
-.pr-views .pr-review { position: relative; }
-.pr-views .pr-outcome { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: var(--space-3); background: color-mix(in srgb, var(--bg2) 92%, transparent); animation: pr-outcome-in 180ms ease-out; }
-.pr-views .pr-outcome strong { font-size: 15px; color: var(--fg-bright); animation: pr-outcome-rise 320ms 120ms ease-out backwards; }
-.pr-views .pr-outcome-badge { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 50%; color: #fff; animation: pr-outcome-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1); }
-.pr-views .pr-outcome.merged .pr-outcome-badge { background: #8957e5; box-shadow: 0 0 0 10px color-mix(in srgb, #8957e5 22%, transparent); }
-.pr-views .pr-outcome.closed .pr-outcome-badge { background: var(--red); box-shadow: 0 0 0 10px color-mix(in srgb, var(--red) 22%, transparent); }
-@keyframes pr-outcome-in { from { opacity: 0; } }
-@keyframes pr-outcome-pop { from { transform: scale(0.4); opacity: 0; } }
-@keyframes pr-outcome-rise { from { transform: translateY(6px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pr-views .pr-outcome, .pr-views .pr-outcome strong, .pr-views .pr-outcome-badge { animation: none; } }
+/* Merged or closed: a faint line on the list, easing out on its own. */
+.pr-views .pr-outcome { margin: 0 0 var(--space-2); font-size: 12px; color: var(--faint); animation: pr-outcome-out 4s ease-in forwards; }
+@keyframes pr-outcome-out { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pr-views .pr-outcome { animation: none; } }
 .pr-views .pr-back { color: var(--dim); min-height: var(--control-sm); margin-left: -6px; padding: 0 6px; border-radius: var(--radius-control); }
 .pr-views .pr-back:hover:not(:disabled) { color: var(--fg); background: var(--bg3); border: 0; }
 .pr-views .pr-hero { display: grid; gap: var(--space-2); }

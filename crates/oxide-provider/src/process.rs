@@ -16,6 +16,7 @@ use std::time::Instant;
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 /// Makes `command` start in a new process group led by the child (pgid == pid).
+/// Windows stdio children run without a console window; PTY shells own their console.
 pub fn spawn_in_own_group(command: &mut Command) -> &mut Command {
     #[cfg(unix)]
     {
@@ -27,7 +28,8 @@ pub fn spawn_in_own_group(command: &mut Command) -> &mut Command {
         use std::os::windows::process::CommandExt;
         command.creation_flags(
             windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP
-                | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+                | windows_sys::Win32::System::Threading::CREATE_SUSPENDED
+                | windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
         );
     }
     command

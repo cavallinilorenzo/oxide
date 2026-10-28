@@ -33,7 +33,41 @@ enum SessionCommand {
 }
 
 impl TerminalSession {
-    pub fn start(id: u32, cwd: &Path, registry: Arc<ProcessRegistry>) -> Result<Self> {
+    pub fn run_block(&self, command: &str, token: &str) -> Result<()> {
+        if token.is_empty()
+            || !token
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || command.len() > 64 * 1024
+        {
+            return Err(Error::Terminal(
+                "Invalid command block or command exceeds 64 KiB.".into(),
+            ));
+        }
+        #[cfg(windows)]
+        let script = {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(command);
+            format!(
+                "$global:LASTEXITCODE=0; $oxideOk=$true; [Console]::Write(([char]27)+']633;Oxide;{token};start'+[char]7); try {{ . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')))); $oxideOk=$? }} catch {{ Write-Error $_; $oxideOk=$false }} finally {{ $oxideExit=if($oxideOk){{$global:LASTEXITCODE}}else{{if($global:LASTEXITCODE){{$global:LASTEXITCODE}}else{{1}}}}; [Console]::Write(([char]27)+\"]633;Oxide;{token};end;$oxideExit;$($pwd.ProviderPath)\"+[char]7) }}\r"
+            )
+        };
+        #[cfg(not(windows))]
+        let script = {
+            let quoted = format!("'{}'", command.replace('\'', "'\"'\"'"));
+            format!(
+                "printf '\\033]633;Oxide;{token};start\\007'; eval {quoted}; _oxide_exit=$?; printf '\\033]633;Oxide;{token};end;%s;%s\\007' \"$_oxide_exit\" \"$PWD\"\n"
+            )
+        };
+        self.write(script.as_bytes())
+    }
+
+    pub fn start(
+        id: u32,
+        cwd: &Path,
+        registry: Arc<ProcessRegistry>,
+        blocks: bool,
+    ) -> Result<Self> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -43,7 +77,7 @@ impl TerminalSession {
                 pixel_height: 0,
             })
             .map_err(|e| Error::Terminal(format!("open terminal: {e}")))?;
-        let command = shell_command(cwd);
+        let command = shell_command(cwd, blocks);
         let shell = command
             .get_argv()
             .first()
@@ -76,7 +110,7 @@ impl TerminalSession {
             .map_err(|e| Error::Terminal(format!("write terminal input: {e}")))?;
         let subscribers = Arc::new(Mutex::new(Vec::<Sender<Vec<u8>>>::new()));
         let output_subscribers = Arc::clone(&subscribers);
-        std::thread::spawn(move || read_output(reader, output_subscribers));
+        std::thread::spawn(move || read_output(reader, output_subscribers, blocks));
         let (commands, receiver) = unbounded();
         std::thread::spawn(move || {
             let mut writer = writer;
@@ -193,18 +227,35 @@ impl Drop for TerminalSession {
     }
 }
 
-fn shell_command(cwd: &Path) -> portable_pty::CommandBuilder {
+fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
     #[cfg(windows)]
     let mut command = CommandBuilder::new("powershell.exe");
+    #[cfg(windows)]
+    if blocks {
+        // -Command - requires redirected stdin and cannot run inside ConPTY.
+        // A console reader keeps one persistent scope and still lets child programs own the PTY.
+        command.args(["-NoLogo", "-NoProfile", "-Command", "while ($true) { $oxideLine=[Console]::ReadLine(); if ($null -eq $oxideLine) { break }; try { . ([ScriptBlock]::Create($oxideLine)) } catch { Write-Error $_ } }"]);
+    }
     #[cfg(not(windows))]
-    let mut command =
-        CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()));
+    let mut command = CommandBuilder::new(if blocks {
+        "/bin/sh".into()
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+    });
+    #[cfg(not(windows))]
+    if blocks {
+        command.args(["-c", "stty -echo; export PS1='' PS2=''; exec /bin/sh -i"]);
+    }
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
     command
 }
 
-fn read_output(mut reader: Box<dyn Read + Send>, subscribers: Arc<Mutex<Vec<Sender<Vec<u8>>>>>) {
+fn read_output(
+    mut reader: Box<dyn Read + Send>,
+    subscribers: Arc<Mutex<Vec<Sender<Vec<u8>>>>>,
+    blocks: bool,
+) {
     let mut buffer = [0_u8; 16 * 1024];
     loop {
         match reader.read(&mut buffer) {
@@ -215,6 +266,10 @@ fn read_output(mut reader: Box<dyn Read + Send>, subscribers: Arc<Mutex<Vec<Send
                 subscribers.retain(|sender| sender.send(chunk.clone()).is_ok());
             }
         }
+    }
+    if blocks {
+        let mut subscribers = subscribers.lock().unwrap_or_else(|e| e.into_inner());
+        subscribers.retain(|sender| sender.send(b"\x1b]633;Oxide;closed\x07".to_vec()).is_ok());
     }
 }
 

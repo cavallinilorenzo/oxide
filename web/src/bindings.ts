@@ -76,6 +76,18 @@ export const commands = {
 	/**  A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`. */
 	subscribeUsageLimits: (provider: string, onEvent: Channel<UsageLimits_Deserialize>) => typedError<UsageLimits_Serialize | null, AppError>(__TAURI_INVOKE("subscribe_usage_limits", { provider, onEvent })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
+	startBlockTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_block_terminal", { projectId, threadId, onOutput })),
+	writeFile: (projectId: number, threadId: number | null, path: string, expected: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("write_file", { projectId, threadId, path, expected, content })),
+	languageTools: () => __TAURI_INVOKE<LanguageTool_Serialize[]>("language_tools"),
+	installLanguageSupport: (language: string, onProgress: Channel<string>) => typedError<LanguageTool_Serialize, AppError>(__TAURI_INVOKE("install_language_support", { language, onProgress })),
+	createFile: (projectId: number, threadId: number | null, path: string) => typedError<null, AppError>(__TAURI_INVOKE("create_file", { projectId, threadId, path })),
+	findFiles: (projectId: number, threadId: number | null, query: string) => typedError<string[], AppError>(__TAURI_INVOKE("find_files", { projectId, threadId, query })),
+	setEditorDirty: (id: string, dirty: boolean) => __TAURI_INVOKE<void>("set_editor_dirty", { id, dirty }),
+	runTerminalBlock: (terminalId: number, command: string, token: string) => typedError<null, AppError>(__TAURI_INVOKE("run_terminal_block", { terminalId, command, token })),
+	configureLanguageServer: (language: string, config: LanguageServerConfig_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("configure_language_server", { language, config })),
+	startLanguageServer: (projectId: number, threadId: number | null, language: string, onMessage: Channel<string>) => typedError<LanguageServer, AppError>(__TAURI_INVOKE("start_language_server", { projectId, threadId, language, onMessage })),
+	languageServerMessage: (id: number, message: string) => typedError<null, AppError>(__TAURI_INVOKE("language_server_message", { id, message })),
+	stopLanguageServer: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("stop_language_server", { id })),
 	writeTerminal: (terminalId: number, input: number[]) => typedError<null, AppError>(__TAURI_INVOKE("write_terminal", { terminalId, input })),
 	resizeTerminal: (terminalId: number, rows: number, cols: number) => typedError<null, AppError>(__TAURI_INVOKE("resize_terminal", { terminalId, rows, cols })),
 	closeTerminal: (terminalId: number) => typedError<null, AppError>(__TAURI_INVOKE("close_terminal", { terminalId })),
@@ -543,6 +555,49 @@ export type ItemSnapshot_Serialize = {
 	parentItemIndex: number | null,
 	category: ActivityCategory | null,
 	createdAt: string,
+};
+
+export type LanguageServer = {
+	id: number,
+	root: string,
+	language: string,
+	initializationOptions: string,
+};
+
+export type LanguageServerConfig = LanguageServerConfig_Serialize | LanguageServerConfig_Deserialize;
+
+export type LanguageServerConfig_Deserialize = {
+	command: string,
+	args: string[],
+	interpreter?: string | null,
+};
+
+export type LanguageServerConfig_Serialize = {
+	command: string,
+	args: string[],
+	interpreter: string | null,
+};
+
+export type LanguageTool = LanguageTool_Serialize | LanguageTool_Deserialize;
+
+export type LanguageTool_Deserialize = {
+	language: string,
+	name: string,
+	config: LanguageServerConfig_Deserialize,
+	installed: boolean,
+	resolvedPath?: string | null,
+	installCommand: string,
+	documentation: string,
+};
+
+export type LanguageTool_Serialize = {
+	language: string,
+	name: string,
+	config: LanguageServerConfig_Serialize,
+	installed: boolean,
+	resolvedPath: string | null,
+	installCommand: string,
+	documentation: string,
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";

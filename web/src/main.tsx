@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { highlighter } from "./highlighter";
 import "./styles.css";
+import "./workbench.css";
 
 // Start the highlight worker now so common grammars are compiled before the
 // first code block needs them.

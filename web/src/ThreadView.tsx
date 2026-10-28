@@ -60,6 +60,7 @@ const STICK_TO_BOTTOM = 48;
 const PAGE_LOAD_DELAY = 80;
 
 interface ThreadViewProps {
+  visible?: boolean;
   onOpenDefaultDiff?: () => void;
   onInitialLoad?: () => void;
   threadId: number | null;
@@ -136,6 +137,7 @@ export function getOfferedPermissionModes(
 }
 
 export function ThreadView({
+  visible = true,
   onOpenDefaultDiff,
   onInitialLoad,
   threadId,
@@ -660,6 +662,7 @@ export function ThreadView({
   const modelShortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     modelShortcutRef.current = (e) => {
+      if (!visible) return;
       if (isModelPickerShortcut(e)) {
         e.preventDefault();
         if (isTurnActive || sending) return;

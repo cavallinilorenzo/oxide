@@ -8,6 +8,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CommentDiscussionIcon,
+  CodeIcon,
   FileDiffIcon,
   FileDirectoryIcon,
   FileIcon,
@@ -53,6 +54,10 @@ const shortcut = isMac ? "\u2318" : "Ctrl+";
 const shortcutShift = isMac ? "\u2318\u21e7" : "Ctrl+Shift+";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
+const TerminalWorkbench = lazy(() => import("./TerminalWorkbench").then((module) => ({ default: module.TerminalWorkbench })));
+const CodeWorkbench = lazy(() => import("./CodeWorkbench").then((module) => ({ default: module.CodeWorkbench })));
+type WorkMode = "chat" | "terminal" | "code";
+type WorkbenchContext = { key: string; projectId: number; threadId: number | null; rootPath: string };
 
 type TerminalContext = { key: string; projectId: number; threadId: number | null };
 const terminalContextKey = (projectId: number, threadId: number | null) =>
@@ -74,6 +79,12 @@ const TOOL_TABS: { name: string; Icon: Icon }[] = [
 ];
 
 export function App() {
+  const [workMode, setWorkMode] = useState<WorkMode>(() => {
+    try { const mode = localStorage.getItem("oxide:work-mode"); return mode === "code" || mode === "terminal" ? mode : "chat"; } catch { return "chat"; }
+  });
+  const [workbenches, setWorkbenches] = useState<WorkbenchContext[]>([]);
+  const [installCommand, setInstallCommand] = useState<{ id: number; command: string } | null>(null);
+  const installSequence = useRef(0);
   const [showTools, setShowTools] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
@@ -129,6 +140,23 @@ export function App() {
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
+  const selectedThread = threads?.find((thread) => thread.id === currentThreadId);
+  const workbenchContext: WorkbenchContext | null = selected && threads !== null ? {
+    key: `${selected.id}:${selectedThread?.worktreePath ? currentThreadId : "main"}`,
+    projectId: selected.id, threadId: selectedThread?.worktreePath ? currentThreadId : null,
+    rootPath: selectedThread?.worktreePath ?? selected.path,
+  } : null;
+  if (workMode !== "chat" && workbenchContext && !workbenches.some((context) => context.key === workbenchContext.key)) {
+    setWorkbenches([...workbenches, workbenchContext]);
+  }
+  const [openedModes, setOpenedModes] = useState<Record<string, { code?: boolean; terminal?: boolean }>>({});
+  if (workMode !== "chat" && workbenchContext && !openedModes[workbenchContext.key]?.[workMode]) {
+    setOpenedModes({ ...openedModes, [workbenchContext.key]: { ...openedModes[workbenchContext.key], [workMode]: true } });
+  }
+  const runInstallCommand = useCallback((command: string) => {
+    setInstallCommand({ id: ++installSequence.current, command }); setWorkMode("terminal"); setShowSettings(false);
+  }, []);
+  useEffect(() => { try { localStorage.setItem("oxide:work-mode", workMode); } catch { /* A mode works without remembering it. */ } }, [workMode]);
   const diffThread = {
     board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
   };
@@ -292,6 +320,7 @@ export function App() {
     if (!selected) return;
     const created = await createThreadIn(selected.id);
     if (created) {
+      setWorkMode("chat");
       setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
@@ -358,6 +387,7 @@ export function App() {
   }, [threads]);
 
   const onThreadDeleted = useCallback((deletedId: number) => {
+    setWorkbenches((contexts) => contexts.filter((context) => context.threadId !== deletedId));
     setThreads((prev) => threadsAfterDelete(prev, deletedId));
     setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
   }, []);
@@ -370,6 +400,7 @@ export function App() {
         return;
       }
       if (isNewThreadShortcut(e)) {
+        if (workMode !== "chat") return;
         if (selected) {
           e.preventDefault();
           void startNewThread();
@@ -381,12 +412,12 @@ export function App() {
       e.preventDefault();
       if (toggle === "tools") setShowTools(showSettings || !showTools);
       else if (toggle === "terminal") setShowTerminal(showSettings || !showTerminal);
-      else if (toggle === "board") setShowBoard((v) => !v);
+      else if (toggle === "board") { setWorkMode("chat"); setShowBoard((v) => !v); }
       setShowSettings(toggle === "settings");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, startNewThread, showSettings, showTools, showTerminal]);
+  }, [selected, startNewThread, showSettings, showTools, showTerminal, workMode]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -447,8 +478,8 @@ export function App() {
   const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
   useEffect(() => {
-    if (!starting && (!selected || currentThreadId === null || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
-  }, [starting, selected, currentThreadId, startupThreadLoaded]);
+    if (!starting && (!selected || workMode !== "chat" || currentThreadId === null || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
+  }, [starting, selected, workMode, currentThreadId, startupThreadLoaded]);
 
   if (starting) {
     return (
@@ -475,7 +506,7 @@ export function App() {
       <WorkspaceOverlays ref={overlays} projects={projects ?? []} onProjectsScanned={onProjectsScanned}
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
-        {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); setShowBoard(false); setSelectedThreadId(null); }} />}
+        {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); void startNewThread(); }} />}
         <div className="header-project" data-tauri-drag-region>
         {selected ? (
           <span className="title" data-tauri-drag-region>
@@ -511,15 +542,19 @@ export function App() {
           </>
         )}
         {selected && (
-          <span role="group" aria-label="View" className="seg">
-            <button aria-pressed={!showBoard && !showSettings} title={`Chat (${shortcut}B)`} onClick={() => { setShowBoard(false); setShowSettings(false); }}>
+          <span role="group" aria-label="Work mode" className="seg work-mode-switch">
+            <button aria-pressed={workMode === "chat" && !showSettings} title="Chat" onClick={() => { setWorkMode("chat"); setShowBoard(false); setShowSettings(false); }}>
               <CommentDiscussionIcon size={14} /> Chat
             </button>
-            <button aria-pressed={showBoard && !showSettings} title={`Thread Board (${shortcut}B)`} onClick={() => { setShowBoard(true); setShowSettings(false); }}>
-              <ProjectIcon size={14} /> Board
+            <button aria-pressed={workMode === "terminal" && !showSettings} title="Terminal" onClick={() => { setWorkMode("terminal"); setShowSettings(false); }}>
+              <TerminalIcon size={14} /> Terminal
+            </button>
+            <button aria-pressed={workMode === "code" && !showSettings} title="Code editor" onClick={() => { setWorkMode("code"); setShowSettings(false); }}>
+              <CodeIcon size={14} /> Code
             </button>
           </span>
         )}
+        {selected && <button className="icon-btn" aria-label="Thread Board" title={`Thread Board (${shortcut}B)`} aria-pressed={workMode === "chat" && showBoard && !showSettings} onClick={() => { setWorkMode("chat"); setShowBoard((v) => !v); setShowSettings(false); }}><ProjectIcon size={16} /></button>}
         <button
           className="icon-btn"
           aria-pressed={showTools && !showSettings}
@@ -532,6 +567,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTerminal && !showSettings}
+          hidden={workMode === "terminal"}
           title={`Terminal (${shortcut}J)`}
           aria-label="Toggle Terminal"
           onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
@@ -578,6 +614,7 @@ export function App() {
             threads={threads}
             selectedThreadId={selectedThreadId}
             onSelectThread={(threadId) => {
+              setWorkMode("chat");
               setShowSettings(false);
               setShowBoard(false);
               setSelectedThreadId(threadId);
@@ -590,6 +627,7 @@ export function App() {
             onRenameThread={onThreadTitleChange}
             onOpenPalette={() => overlays.current?.openPalette()}
             onOpenBoard={(p) => {
+              setWorkMode("chat");
               if (p.id !== selected?.id) {
                 restore.current = null;
                 setSelectedId(p.id);
@@ -606,9 +644,9 @@ export function App() {
             {...layout.sidebar} onResize={sidebarSize.resize} onCommit={sidebarSize.commit} onReset={sidebarSize.reset} onCancel={sidebarSize.cancel} />
         </div>
         <div className="centre-column">
-          {showSettings ? (
-            <SettingsView onClose={() => setShowSettings(false)} />
-          ) : selected && showBoard ? (
+          {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
+          <div className="chat-workbench" hidden={workMode !== "chat" || showSettings}>
+          {selected && showBoard ? (
             <BoardView
               key={selected.id}
               projectId={selected.id}
@@ -632,6 +670,7 @@ export function App() {
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
+                  visible={workMode === "chat" && !showSettings}
                   onOpenDefaultDiff={() => {
                     setShowTools(true);
                     setActiveTool("Diff");
@@ -686,7 +725,12 @@ export function App() {
               </div>
             </main>
           )}
-          <div className="terminal-region" id="workspace-terminal" hidden={!showTerminal || showSettings || !currentTerminalContext}>
+          </div>
+          {workbenches.map((context) => <Suspense key={context.key} fallback={context.key === workbenchContext?.key && workMode !== "chat" ? <div className="workbench-loading" role="status">Opening {workMode}…</div> : null}>
+            {openedModes[context.key]?.code && <CodeWorkbench {...context} contextKey={context.key} visible={workMode === "code" && !showSettings && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} />}
+            {openedModes[context.key]?.terminal && <TerminalWorkbench {...context} contextKey={context.key} visible={workMode === "terminal" && !showSettings && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} />}
+          </Suspense>)}
+          <div className="terminal-region" id="workspace-terminal" hidden={!showTerminal || showSettings || workMode === "terminal" || !currentTerminalContext}>
             {showTerminal && !showSettings && currentTerminalContext && <ResizeHandle label="Resize Terminal" controls="workspace-terminal" axis="y" edge="start" direction={-1}
               {...layout.terminal} onResize={terminalSize.resize} onCommit={terminalSize.commit} onReset={terminalSize.reset} onCancel={terminalSize.cancel} />}
             {terminalContextsToRender.map((context) => (
@@ -984,7 +1028,10 @@ function AppMenu({ onNewThread }: { onNewThread: () => void }) {
   const menus: Record<string, { label: string; action: () => void }[]> = {
     Oxide: [{ label: "Quit Oxide", action: () => { void win.close(); } }],
     File: [{ label: "New Thread", action: onNewThread }],
-    Edit: ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"].map((label) => ({ label, action: () => { document.execCommand(label === "Select All" ? "selectAll" : label.toLowerCase()); } })),
+    Edit: ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"].map((label) => ({ label, action: () => {
+      const command = label === "Select All" ? "selectAll" : label.toLowerCase();
+      if (window.dispatchEvent(new CustomEvent("oxide-editor-edit", { detail: command, cancelable: true }))) document.execCommand(command);
+    } })),
     Window: [{ label: "Minimize", action: () => { void win.minimize(); } }, { label: "Maximize / Restore", action: () => { void win.toggleMaximize(); } }],
   };
   return <nav ref={root} className="app-menu" aria-label="Application menu">

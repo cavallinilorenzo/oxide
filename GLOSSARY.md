@@ -104,6 +104,14 @@ _Avoid_: Quota, rate limit (a rate limit is the Provider refusing a request; a U
 
 ## Layout
 
+**Work mode**:
+The central view of an Open Project: Chat for Provider conversations, Terminal for command blocks, or Code for editing files. Switching Work mode keeps the Project's Threads, open files and shell sessions available.
+_Avoid_: App type, separate app
+
+**Command block**:
+One command entered in Terminal Work mode, grouped with its output and exit status. It belongs to a persistent shell session, so its working directory and shell variables carry into the next Command block.
+_Avoid_: Turn, Thread, agent message
+
 **Surface**:
 A panel docked to the side or bottom of the window showing one tool for the current Project: Terminal, Files, Diff, Pull request, Issues.
 _Avoid_: Tab, pane, widget

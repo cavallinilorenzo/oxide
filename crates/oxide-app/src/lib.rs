@@ -684,6 +684,26 @@ fn start_terminal(
 
 #[tauri::command]
 #[specta::specta]
+fn start_block_terminal(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    on_output: tauri::ipc::Channel<Vec<u8>>,
+) -> Result<Terminal, AppError> {
+    let terminal = core.start_block_terminal(project_id, thread_id)?;
+    let rx = core.subscribe_terminal(terminal.id)?;
+    std::thread::spawn(move || {
+        while let Ok(chunk) = rx.recv() {
+            if on_output.send(chunk).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&terminal))
+}
+
+#[tauri::command]
+#[specta::specta]
 fn write_terminal(
     core: State<'_, Arc<Core>>,
     terminal_id: u32,
@@ -769,6 +789,199 @@ async fn read_file(
             binary: file.binary,
         })
         .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn write_file(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+    expected: String,
+    content: String,
+) -> Result<(), AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || {
+        core.write_file(project_id, thread_id, &path, &expected, &content)
+    })
+    .await
+    .map_err(|e| AppError {
+        message: e.to_string(),
+    })?
+    .map_err(AppError::from)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageServerConfig {
+    command: String,
+    args: Vec<String>,
+    interpreter: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageTool {
+    language: String,
+    name: String,
+    config: LanguageServerConfig,
+    installed: bool,
+    resolved_path: Option<String>,
+    install_command: String,
+    documentation: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageServer {
+    id: u32,
+    root: String,
+    language: String,
+    initialization_options: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn language_tools(core: State<'_, Arc<Core>>) -> Vec<LanguageTool> {
+    convert(&core.language_tools())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn install_language_support(
+    core: State<'_, Arc<Core>>,
+    language: String,
+    on_progress: tauri::ipc::Channel<String>,
+) -> Result<LanguageTool, AppError> {
+    let core = Arc::clone(&core);
+    let tool = tauri::async_runtime::spawn_blocking(move || {
+        core.install_language_support(&language, |message| {
+            let _ = on_progress.send(message.to_owned());
+        })
+    })
+    .await
+    .map_err(|e| AppError {
+        message: e.to_string(),
+    })??;
+    Ok(convert(&tool))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn create_file(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    path: String,
+) -> Result<(), AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.create_file(project_id, thread_id, &path))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+#[tauri::command]
+#[specta::specta]
+async fn find_files(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    query: String,
+) -> Result<Vec<String>, AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.find_files(project_id, thread_id, &query))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+#[tauri::command]
+#[specta::specta]
+fn set_editor_dirty(core: State<'_, Arc<Core>>, id: String, dirty: bool) {
+    core.set_editor_dirty(id, dirty);
+}
+
+#[tauri::command]
+#[specta::specta]
+fn run_terminal_block(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    command: String,
+    token: String,
+) -> Result<(), AppError> {
+    core.run_terminal_block(terminal_id, &command, &token)?;
+    Ok(())
+}
+#[tauri::command]
+#[specta::specta]
+fn configure_language_server(
+    core: State<'_, Arc<Core>>,
+    language: String,
+    config: LanguageServerConfig,
+) -> Result<(), AppError> {
+    core.configure_language_server(
+        &language,
+        oxide_core::LanguageServerConfig {
+            command: config.command,
+            args: config.args,
+            interpreter: config.interpreter,
+        },
+    )?;
+    Ok(())
+}
+#[tauri::command]
+#[specta::specta]
+async fn start_language_server(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    language: String,
+    on_message: tauri::ipc::Channel<String>,
+) -> Result<LanguageServer, AppError> {
+    let core = Arc::clone(&core);
+    let (summary, rx) = tauri::async_runtime::spawn_blocking(move || {
+        core.start_language_server(project_id, thread_id, &language)
+    })
+    .await
+    .map_err(|e| AppError {
+        message: e.to_string(),
+    })??;
+    std::thread::spawn(move || {
+        while let Ok(message) = rx.recv() {
+            if on_message.send(message).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(convert(&summary))
+}
+#[tauri::command]
+#[specta::specta]
+async fn language_server_message(
+    core: State<'_, Arc<Core>>,
+    id: u32,
+    message: String,
+) -> Result<(), AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.language_server_message(id, &message))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+#[tauri::command]
+#[specta::specta]
+async fn stop_language_server(core: State<'_, Arc<Core>>, id: u32) -> Result<(), AppError> {
+    let core = Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.stop_language_server(id))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -2131,6 +2344,18 @@ pub fn builder() -> Builder<tauri::Wry> {
         subscribe_board,
         subscribe_usage_limits,
         start_terminal,
+        start_block_terminal,
+        write_file,
+        language_tools,
+        install_language_support,
+        create_file,
+        find_files,
+        set_editor_dirty,
+        run_terminal_block,
+        configure_language_server,
+        start_language_server,
+        language_server_message,
+        stop_language_server,
         write_terminal,
         resize_terminal,
         close_terminal,
@@ -2264,6 +2489,13 @@ pub fn run() {
             tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } => {
+                let core = app.state::<Arc<Core>>();
+                if core.dirty_editor_count() > 0 {
+                    api.prevent_exit();
+                    show_main_window(app);
+                    let _ = app.emit("editor-quit-requested", core.dirty_editor_count());
+                    return;
+                }
                 if let Some(running) = app.state::<Arc<Core>>().quit_confirmation() {
                     api.prevent_exit();
                     show_main_window(app);

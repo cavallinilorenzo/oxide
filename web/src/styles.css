@@ -1133,14 +1133,17 @@ html.macos .header,
 .model-picker-header h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .model-picker-header .close-button { background: none; border: 0; color: var(--dim); padding: 4px; }
 .model-picker-header .close-button:hover { color: var(--fg); }
-.effort-menu { position: fixed; z-index: 120; width: 208px; max-width: calc(100vw - 24px); padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg2); box-shadow: 0 8px 24px #0006; }
 .effort-label { font-size: 11px; color: var(--dim); }
-.effort-select-row { display: flex; flex-direction: column; gap: 6px; }
-.effort-options { display: flex; flex-direction: column; gap: 2px; }
-.effort-option { width: 100%; justify-content: space-between; min-height: 32px; padding: 6px 8px; border-color: transparent; background: transparent; text-align: left; }
-.effort-option-trail { display: inline-flex; align-items: center; gap: 8px; }
-.effort-option:hover:not(:disabled), .effort-option[aria-selected="true"] { background: var(--bg4); border-color: transparent; }
-.effort-option[aria-selected="true"] { color: var(--acc2); }
+.effort-slider { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); min-height: 40px; }
+.effort-stops { display: flex; flex: 1; gap: 2px; justify-content: space-between; }
+.effort-stop { flex: 1; display: inline-flex; align-items: center; justify-content: center; min-height: 26px; padding: 2px 6px; border-radius: 6px; cursor: pointer; color: var(--dim); font-size: 12px; }
+.effort-stop:hover { background: var(--bg3); }
+.effort-stop.active { background: var(--bg4); color: var(--acc2); }
+.effort-step { display: inline-flex; align-items: center; justify-content: center; min-height: 26px; padding: 2px 6px; border-color: transparent; background: transparent; color: var(--dim); }
+.effort-step:disabled { opacity: 0.35; }
+.picker-legend { padding: 6px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--faint); }
+.model-row.highlighted:not(.locked) { background: var(--bg3); border-color: var(--line-strong); }
+.model-row.selected.highlighted { background: #2f81f726; }
 .model-picker-layout { display: flex; height: 380px; }
 .provider-rail { width: 150px; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 8px; gap: 2px; background: var(--bg); }
 .rail-tab { justify-content: flex-start; gap: 8px; padding: 7px 10px; border: 0; background: none; color: var(--dim); font-size: 12.5px; }
@@ -1283,7 +1286,6 @@ html.macos .header,
 .app-menu-item { position: relative; }
 .app-menu-popup { position: absolute; top: calc(100% + 3px); left: 0; z-index: 120; min-width: 180px; padding: 6px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 32px #0009; }
 .app-menu .app-menu-popup button { display: flex; width: 100%; text-align: left; padding: 5px 8px; }
-.effort-menu { max-height: calc(100vh - 24px); overflow-y: auto; }
 
 .window-controls { display: flex; align-self: stretch; flex: none; margin-left: 4px; }
 .window-controls button { justify-content: center; width: 38px; min-height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--fg); }

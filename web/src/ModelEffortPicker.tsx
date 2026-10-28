@@ -1,17 +1,19 @@
-import { effortDigitShortcut, modelDigitShortcut, shortcutLabel } from "./shortcuts";
+import { modelDigitShortcut, shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
+import { ChevronLeftIcon, ChevronRightIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
 import { catalogCache } from "./modelCatalogCache";
 import {
-  applyModelShortcut,
-  chooseModel,
-  collapseEffortVariants,
-  favouriteModelList,
-  filterModels,
   modelFamilyId,
-  selectedModelInfo,
+  openPicker,
+  pickerReduce,
+  pickerRows,
+  resolvePickerChoice,
+  type PickerAction,
+  type PickerContext,
+  type PickerRow,
+  type PickerState,
 } from "./modelPicker";
 
 const PROVIDERS = [
@@ -29,6 +31,8 @@ function rememberedTab(fallback: string): string {
   } catch { return fallback; }
 }
 
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export interface ModelEffortPickerProps {
   open: boolean;
   onClose: () => void;
@@ -42,8 +46,6 @@ export interface ModelEffortPickerProps {
     model: string | null,
     effort: string | null
   ) => void;
-  initialMode?: "model" | "effort";
-  anchorElement?: HTMLElement | null;
 }
 
 export function ModelEffortPicker({
@@ -55,90 +57,50 @@ export function ModelEffortPicker({
   turnCount,
   midThreadModelSwitch,
   onSelectModelAndEffort,
-  initialMode = "model",
-  anchorElement = null,
 }: ModelEffortPickerProps) {
-  const [activeTab, setActiveTab] = useState<string>(() => rememberedTab(currentProvider));
-  const [search, setSearch] = useState("");
   const [favourites, setFavourites] = useState<string[]>([]);
   const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>(() =>
     Object.fromEntries(catalogCache)
   );
   const [loading, setLoading] = useState(false);
-  const [selectedEffort, setSelectedEffort] = useState<string | null>(currentEffort);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const effortMenuRef = useRef<HTMLDivElement>(null);
-  const [effortMenuPosition, setEffortMenuPosition] = useState({
-    top: 0,
-    left: 0,
-    ready: false,
-  });
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
 
-  const effortMode = initialMode === "effort";
+  const ctx = useMemo<PickerContext>(
+    () => ({
+      tabs: ["favourites", ...PROVIDERS.map((p) => p.id), ...(currentProvider === "fake" ? ["fake"] : [])],
+      catalogs,
+      favourites,
+      currentProvider,
+      currentModel,
+      locked: modelSwitchLocked,
+    }),
+    [catalogs, favourites, currentProvider, currentModel, modelSwitchLocked]
+  );
+  const ctxRef = useRef(ctx);
+  useLayoutEffect(() => { ctxRef.current = ctx; });
+
+  const [state, setState] = useState<PickerState>(() =>
+    openPicker(ctx, rememberedTab(currentProvider), currentEffort)
+  );
+  const stateRef = useRef(state);
+  useLayoutEffect(() => { stateRef.current = state; });
+  const dispatch = useCallback(
+    (action: PickerAction) => setState((s) => pickerReduce(s, action, ctxRef.current)),
+    []
+  );
+
+  // Catalogs and Favourites land after opening; keep the highlight on a row that exists.
+  useEffect(() => dispatch({ type: "sync" }), [ctx, dispatch]);
 
   useEffect(() => {
-    if (!effortMode) {
-      try { localStorage.setItem(TAB_KEY, activeTab); } catch { /* The picker still works without storage. */ }
-    }
-  }, [activeTab, effortMode]);
+    try { localStorage.setItem(TAB_KEY, state.tab); } catch { /* The picker still works without storage. */ }
+  }, [state.tab]);
 
   useEffect(() => {
-    if (open) {
-      searchInputRef.current?.focus();
-    }
+    if (open) searchInputRef.current?.focus();
   }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !effortMode || !anchorElement) return;
-
-    const updatePosition = () => {
-      const menu = effortMenuRef.current;
-      if (!menu) return;
-
-      const triggerRect = anchorElement.getBoundingClientRect();
-      const menuRect = menu.getBoundingClientRect();
-      const left = Math.min(
-        Math.max(12, triggerRect.left),
-        Math.max(12, window.innerWidth - menuRect.width - 12)
-      );
-      const above = triggerRect.top - menuRect.height - 8;
-      const below = triggerRect.bottom + 8;
-      const top = Math.max(12, Math.min(above >= 12 ? above : below, window.innerHeight - menuRect.height - 12));
-
-      setEffortMenuPosition((current) =>
-        current.ready && current.top === top && current.left === left
-          ? current
-          : { top, left, ready: true }
-      );
-    };
-
-    updatePosition();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
-    if (effortMenuRef.current) observer?.observe(effortMenuRef.current);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open, effortMode, anchorElement]);
-
-  useEffect(() => {
-    if (!open || !effortMode) return;
-
-    const handleOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (effortMenuRef.current?.contains(target) || anchorElement?.contains(target)) return;
-      onClose();
-    };
-
-    document.addEventListener("pointerdown", handleOutsidePointer);
-    return () => document.removeEventListener("pointerdown", handleOutsidePointer);
-  }, [open, effortMode, anchorElement, onClose]);
 
   // Load favourites and refresh catalogs
   useEffect(() => {
@@ -201,184 +163,133 @@ export function ModelEffortPicker({
     await commands.setFavouriteModels(next);
   };
 
-  // Determine models for the current tab
-  const tabModels = useMemo(() => {
-    if (activeTab === "favourites") {
-      return favouriteModelList(catalogs, favourites, selectedEffort);
-    }
-    return collapseEffortVariants(catalogs[activeTab] || [], selectedEffort);
-  }, [activeTab, catalogs, favourites, selectedEffort]);
-
   const { current: visibleCurrent, legacy: visibleLegacy } = useMemo(
-    () => filterModels(tabModels, search),
-    [tabModels, search]
+    () => pickerRows(ctx, state.tab, state.search, state.effort),
+    [ctx, state.tab, state.search, state.effort]
   );
-
-  const flatVisible = useMemo(
-    () => [...visibleCurrent, ...visibleLegacy],
-    [visibleCurrent, visibleLegacy]
+  const flatVisible = useMemo(() => [...visibleCurrent, ...visibleLegacy], [visibleCurrent, visibleLegacy]);
+  const highlightedIndex = flatVisible.findIndex(
+    (r) => !r.locked && modelFamilyId(r.model.id) === state.highlighted
   );
+  const highlightedModel = flatVisible[highlightedIndex]?.model;
+  const optionId = (index: number) => `model-option-${index}`;
 
-  // Active model info to show supported efforts
-  const activeModelInfo = useMemo(() => {
-    return selectedModelInfo(catalogs[currentProvider] ?? [], currentModel);
-  }, [catalogs, currentProvider, currentModel]);
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    document.getElementById(optionId(highlightedIndex))?.scrollIntoView?.({ block: "nearest" });
+  }, [highlightedIndex]);
 
-  const handleSelectModel = useCallback(
-    (model: ModelInfo, isLocked: boolean) => {
-      if (isLocked) return;
-      const choice =
-        activeTab === "favourites"
-          ? chooseModel(model, catalogs, selectedEffort, currentProvider)
-          : { ...chooseModel(model, {}, selectedEffort, activeTab), model: model.id };
-
+  /** Apply `row` with the Effort the slider would show for it, and close. */
+  const applyRow = useCallback(
+    (row: PickerRow) => {
+      if (row.locked) return;
+      const aimed = pickerReduce(stateRef.current, { type: "hover", family: modelFamilyId(row.model.id) }, ctxRef.current);
+      const choice = resolvePickerChoice(aimed, ctxRef.current);
+      if (!choice) return;
       onSelectModelAndEffort(choice.provider, choice.model, choice.effort);
       onClose();
     },
-    [
-      activeTab,
-      catalogs,
-      currentProvider,
-      selectedEffort,
-      onSelectModelAndEffort,
-      onClose,
-    ]
+    [onSelectModelAndEffort, onClose]
   );
 
-  const handleSelectEffort = (effort: string) => {
-    setSelectedEffort(effort);
-    onSelectModelAndEffort(currentProvider, currentModel, effort);
-    if (effortMode) {
+  // The search field keeps focus, so the picker handles its keys at the window.
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useLayoutEffect(() => { keyHandlerRef.current = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
       onClose();
-      anchorElement?.focus();
+      return;
     }
-  };
-
-  const effortChoices = activeModelInfo?.supportedEfforts ?? [];
-
-  // Keyboard shortcut listener: ⌘1-9 (1-9 in the Effort menu) and Escape
+    const index = modelDigitShortcut(e);
+    if (index !== null) {
+      e.preventDefault();
+      const row = flatVisible[index - 1];
+      if (row) applyRow(row);
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case "ArrowDown": dispatch({ type: "move", delta: 1 }); break;
+      case "ArrowUp": dispatch({ type: "move", delta: -1 }); break;
+      case "ArrowRight": dispatch({ type: "step-effort", delta: 1 }); break;
+      case "ArrowLeft": dispatch({ type: "step-effort", delta: -1 }); break;
+      case "Tab": dispatch({ type: "cycle-tab", delta: e.shiftKey ? -1 : 1 }); break;
+      case "Enter": {
+        if (e.isComposing) return;
+        const choice = resolvePickerChoice(stateRef.current, ctxRef.current);
+        if (choice) {
+          onSelectModelAndEffort(choice.provider, choice.model, choice.effort);
+          onClose();
+        }
+        break;
+      }
+      default: return;
+    }
+    e.preventDefault();
+  }; });
   useEffect(() => {
     if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        if (effortMode) anchorElement?.focus();
-        return;
-      }
-
-      if (effortMode) {
-        const index = effortDigitShortcut(e);
-        if (index === null) return;
-        e.preventDefault();
-        const effort = effortChoices[index - 1];
-        if (effort) handleSelectEffort(effort);
-        return;
-      }
-
-      const index = modelDigitShortcut(e);
-      if (index !== null) {
-        e.preventDefault();
-        const target = applyModelShortcut(index, flatVisible);
-        if (target) {
-          const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
-          const isLocked = !isOtherProvider && modelSwitchLocked;
-          handleSelectModel(target, isLocked);
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    open,
-    flatVisible,
-    activeTab,
-    currentProvider,
-    anchorElement,
-    effortMode,
-    modelSwitchLocked,
-    handleSelectModel,
-    handleSelectEffort,
-    effortChoices,
-    onClose,
-  ]);
+    const onKeyDown = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   if (!open) return null;
 
-  const isOtherProvider = activeTab !== currentProvider && activeTab !== "favourites";
-  const startsNewThread = turnCount > 0 && isOtherProvider;
+  const isOtherProvider = state.tab !== currentProvider && state.tab !== "favourites";
+  const highlightedProvider = flatVisible[highlightedIndex]?.provider;
+  const startsNewThread = turnCount > 0 && !!highlightedProvider && highlightedProvider !== currentProvider;
+  const efforts = highlightedModel?.supportedEfforts ?? [];
+  const effortIndex = efforts.indexOf(state.effort ?? "");
+  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
-  if (effortMode) {
-    const efforts = activeModelInfo?.supportedEfforts ?? [];
-    const effortValue = efforts.includes(selectedEffort || "")
-      ? selectedEffort!
-      : activeModelInfo?.defaultEffort ?? efforts[0] ?? "";
+  const renderRow = (row: PickerRow, index: number, legacy: boolean) => {
+    const m = row.model;
+    const family = modelFamilyId(m.id);
+    const isFav = favourites.some((id) => modelFamilyId(id) === family);
+    const isHighlighted = index === highlightedIndex;
+    const shortcutNumber = index + 1 <= 9 ? index + 1 : null;
     return (
       <div
-        ref={effortMenuRef}
-        className="effort-menu"
-        role="group"
-        aria-label="Reasoning effort"
-        style={{
-          top: `${effortMenuPosition.top}px`,
-          left: `${effortMenuPosition.left}px`,
-          visibility: effortMenuPosition.ready ? "visible" : "hidden",
-        }}
+        key={m.id}
+        id={optionId(index)}
+        className={`model-row ${legacy ? "legacy-row" : ""} ${row.isCurrent ? "selected" : ""} ${
+          isHighlighted ? "highlighted" : ""
+        } ${row.locked ? "locked" : ""}`}
+        onClick={() => applyRow(row)}
+        onMouseMove={() => dispatch({ type: "hover", family })}
+        onMouseDown={keepFocus}
+        role="option"
+        aria-selected={isHighlighted}
+        aria-disabled={row.locked}
       >
-        {efforts.length === 0 ? (
-          <span className="effort-label">
-            {loading ? "Loading..." : !activeModelInfo ? "Select a model to see its effort levels." : "This model has no effort levels."}
-          </span>
-        ) : (
-          <div className="effort-select-row">
-            <span className="effort-label">Reasoning effort</span>
-            <div
-              className="effort-options"
-              role="listbox"
-              aria-label="Reasoning effort"
-              onKeyDown={(event) => {
-                const options = Array.from(
-                  event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='option']")
-                );
-                const index = options.findIndex((option) => option === document.activeElement);
-                let next: number;
-                switch (event.key) {
-                  case "ArrowDown": next = (index + 1 + options.length) % options.length; break;
-                  case "ArrowUp": next = (index - 1 + options.length) % options.length; break;
-                  case "Home": next = 0; break;
-                  case "End": next = options.length - 1; break;
-                  default: return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                options[next]?.focus();
-              }}
-            >
-              {efforts.map((effort, index) => (
-                <button
-                  key={effort}
-                  type="button"
-                  role="option"
-                  aria-selected={effortValue === effort}
-                  tabIndex={effortValue === effort ? 0 : -1}
-                  autoFocus={effortValue === effort}
-                  className="effort-option"
-                  onClick={() => handleSelectEffort(effort)}
-                >
-                  <span>{effort.charAt(0).toUpperCase() + effort.slice(1)}</span>
-                  <span className="effort-option-trail">
-                    {effortValue === effort && <CheckIcon size={16} />}
-                    {index < 9 && <span className="model-shortcut">{index + 1}</span>}
-                  </span>
-                </button>
-              ))}
-            </div>
+        <button
+          type="button"
+          className="fav-toggle-btn"
+          tabIndex={-1}
+          onClick={(e) => void toggleFavourite(m.id, e)}
+          aria-label={isFav ? "Unfavourite" : "Favourite"}
+        >
+          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
+        </button>
+
+        <div className="model-details">
+          <div className="model-name-row">
+            <span className="model-name">{m.name}</span>
+            {row.isCurrent && <span className="current-badge">Active</span>}
+            {row.locked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
           </div>
+          {m.description && <div className="model-desc">{m.description}</div>}
+        </div>
+
+        {shortcutNumber && (
+          <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
+            {shortcutLabel}{shortcutNumber}
+          </span>
         )}
       </div>
     );
-  }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label="Model Selector">
@@ -395,8 +306,11 @@ export function ModelEffortPicker({
           <nav className="provider-rail" aria-label="Provider rail">
             <button
               type="button"
-              className={`rail-tab ${activeTab === "favourites" ? "active" : ""}`}
-              onClick={() => setActiveTab("favourites")}
+              tabIndex={-1}
+              className={`rail-tab ${state.tab === "favourites" ? "active" : ""}`}
+              aria-current={state.tab === "favourites"}
+              onMouseDown={keepFocus}
+              onClick={() => dispatch({ type: "set-tab", tab: "favourites" })}
             >
               <span className="rail-icon"><StarFillIcon size={14} /></span>
               <span className="rail-text">Favourites</span>
@@ -406,8 +320,11 @@ export function ModelEffortPicker({
               <button
                 key={p.id}
                 type="button"
-                className={`rail-tab ${activeTab === p.id ? "active" : ""}`}
-                onClick={() => setActiveTab(p.id)}
+                tabIndex={-1}
+                className={`rail-tab ${state.tab === p.id ? "active" : ""}`}
+                aria-current={state.tab === p.id}
+                onMouseDown={keepFocus}
+                onClick={() => dispatch({ type: "set-tab", tab: p.id })}
               >
                 <ProviderMark provider={p.id} size={14} />
                 <span className="rail-text">{p.name}</span>
@@ -417,8 +334,11 @@ export function ModelEffortPicker({
             {currentProvider === "fake" && (
               <button
                 type="button"
-                className={`rail-tab ${activeTab === "fake" ? "active" : ""}`}
-                onClick={() => setActiveTab("fake")}
+                tabIndex={-1}
+                className={`rail-tab ${state.tab === "fake" ? "active" : ""}`}
+                aria-current={state.tab === "fake"}
+                onMouseDown={keepFocus}
+                onClick={() => dispatch({ type: "set-tab", tab: "fake" })}
               >
                 <span className="rail-text">Fake</span>
               </button>
@@ -431,9 +351,13 @@ export function ModelEffortPicker({
               <input
                 ref={searchInputRef}
                 type="text"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="model-listbox"
+                aria-activedescendant={highlightedIndex >= 0 ? optionId(highlightedIndex) : undefined}
                 placeholder="Search models..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={state.search}
+                onChange={(e) => dispatch({ type: "search", text: e.target.value })}
                 className="model-search-input"
                 aria-label="Search models"
               />
@@ -458,110 +382,79 @@ export function ModelEffortPicker({
                 <div className="models-empty">No models found.</div>
               )}
 
-              {/* Active models section */}
-              {visibleCurrent.length > 0 && (
-                <div className="models-group">
-                  <div className="models-group-title">Models</div>
-                  {visibleCurrent.map((m, idx) => {
-                    const isSelected = modelFamilyId(m.id) === modelFamilyId(currentModel ?? "");
-                    const isFav = favourites.some(
-                      (id) => modelFamilyId(id) === modelFamilyId(m.id)
-                    );
-                    const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
-                    const shortcutNumber = idx + 1 <= 9 ? idx + 1 : null;
+              <div id="model-listbox" role="listbox" aria-label="Models" className="models-listbox">
+                {visibleCurrent.length > 0 && (
+                  <div className="models-group" role="group" aria-label="Models">
+                    <div className="models-group-title" aria-hidden="true">Models</div>
+                    {visibleCurrent.map((row, idx) => renderRow(row, idx, false))}
+                  </div>
+                )}
 
-                    return (
-                      <div
-                        key={m.id}
-                        className={`model-row ${isSelected ? "selected" : ""} ${
-                          isItemLocked ? "locked" : ""
-                        }`}
-                        onClick={() => handleSelectModel(m, isItemLocked)}
-                        role="button"
-                        tabIndex={0}
-                        aria-disabled={isItemLocked}
+                {visibleLegacy.length > 0 && (
+                  <div className="models-group legacy-group" role="group" aria-label="Legacy Models">
+                    <div className="models-group-title" aria-hidden="true">Legacy Models</div>
+                    {visibleLegacy.map((row, idx) => renderRow(row, visibleCurrent.length + idx, true))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="effort-slider">
+              {efforts.length === 0 ? (
+                <span className="effort-label">
+                  {highlightedModel ? "This model has no effort levels." : "Select a model to see its effort levels."}
+                </span>
+              ) : (
+                <>
+                  <span className="effort-label">Effort</span>
+                  <button
+                    type="button"
+                    className="effort-step"
+                    tabIndex={-1}
+                    aria-label="Lower effort"
+                    disabled={effortIndex <= 0}
+                    onMouseDown={keepFocus}
+                    onClick={() => dispatch({ type: "step-effort", delta: -1 })}
+                  >
+                    <ChevronLeftIcon size={14} />
+                  </button>
+                  <div
+                    className="effort-stops"
+                    role="slider"
+                    aria-label="Effort"
+                    aria-valuemin={0}
+                    aria-valuemax={efforts.length - 1}
+                    aria-valuenow={Math.max(0, effortIndex)}
+                    aria-valuetext={capitalise(state.effort ?? efforts[0]!)}
+                  >
+                    {efforts.map((effort) => (
+                      <span
+                        key={effort}
+                        className={`effort-stop ${effort === state.effort ? "active" : ""}`}
+                        onMouseDown={keepFocus}
+                        onClick={() => dispatch({ type: "set-effort", effort })}
                       >
-                        <button
-                          type="button"
-                          className="fav-toggle-btn"
-                          onClick={(e) => void toggleFavourite(m.id, e)}
-                          aria-label={isFav ? "Unfavourite" : "Favourite"}
-                        >
-                          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
-                        </button>
-
-                        <div className="model-details">
-                          <div className="model-name-row">
-                            <span className="model-name">{m.name}</span>
-                            {isSelected && <span className="current-badge">Active</span>}
-                            {isItemLocked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
-                          </div>
-                          {m.description && <div className="model-desc">{m.description}</div>}
-                        </div>
-
-                        {shortcutNumber && (
-                          <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
-                            {shortcutLabel}{shortcutNumber}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        {capitalise(effort)}
+                      </span>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="effort-step"
+                    tabIndex={-1}
+                    aria-label="Raise effort"
+                    disabled={effortIndex >= efforts.length - 1}
+                    onMouseDown={keepFocus}
+                    onClick={() => dispatch({ type: "step-effort", delta: 1 })}
+                  >
+                    <ChevronRightIcon size={14} />
+                  </button>
+                </>
               )}
+            </div>
 
-              {/* Legacy models section */}
-              {visibleLegacy.length > 0 && (
-                <div className="models-group legacy-group">
-                  <div className="models-group-title">Legacy Models</div>
-                  {visibleLegacy.map((m, idx) => {
-                    const isSelected = modelFamilyId(m.id) === modelFamilyId(currentModel ?? "");
-                    const isFav = favourites.some(
-                      (id) => modelFamilyId(id) === modelFamilyId(m.id)
-                    );
-                    const isItemLocked = !isOtherProvider && modelSwitchLocked && !isSelected;
-                    const overallIndex = visibleCurrent.length + idx + 1;
-                    const shortcutNumber = overallIndex <= 9 ? overallIndex : null;
-
-                    return (
-                      <div
-                        key={m.id}
-                        className={`model-row legacy-row ${isSelected ? "selected" : ""} ${
-                          isItemLocked ? "locked" : ""
-                        }`}
-                        onClick={() => handleSelectModel(m, isItemLocked)}
-                        role="button"
-                        tabIndex={0}
-                        aria-disabled={isItemLocked}
-                      >
-                        <button
-                          type="button"
-                          className="fav-toggle-btn"
-                          onClick={(e) => void toggleFavourite(m.id, e)}
-                          aria-label={isFav ? "Unfavourite" : "Favourite"}
-                        >
-                          {isFav ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
-                        </button>
-
-                        <div className="model-details">
-                          <div className="model-name-row">
-                            <span className="model-name">{m.name}</span>
-                            {isSelected && <span className="current-badge">Active</span>}
-                            {isItemLocked && <span className="locked-badge"><LockIcon size={10} /> Locked</span>}
-                          </div>
-                          {m.description && <div className="model-desc">{m.description}</div>}
-                        </div>
-
-                        {shortcutNumber && (
-                          <span className="model-shortcut" title={`${shortcutLabel}${shortcutNumber}`}>
-                            {shortcutLabel}{shortcutNumber}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+            <div className="picker-legend">
+              ↑↓ Model · ←→ Effort · Tab Provider · ↩ Select · Esc Close
             </div>
           </div>
         </div>

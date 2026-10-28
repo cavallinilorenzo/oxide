@@ -54,12 +54,6 @@ export function isModelPickerShortcut(e: KeyPress): boolean {
   return e.key === "m" || e.key === "M";
 }
 
-/** ⌘⇧E / Ctrl+Shift+E opens or closes the Effort menu. */
-export function isEffortMenuShortcut(e: KeyPress): boolean {
-  if (!isPrimaryModifier(e) || e.altKey || !e.shiftKey) return false;
-  return e.key === "e" || e.key === "E";
-}
-
 /** The digit 1..9 on the physical digit row, so layouts where digits need Shift still work. */
 function physicalDigit(e: { code: string }): number | null {
   const match = /^Digit([1-9])$/.exec(e.code);
@@ -69,12 +63,6 @@ function physicalDigit(e: { code: string }): number | null {
 /** ⌘1..9 / Ctrl+1..9 (no Alt, no Shift): picks the nth model, or switches to the nth Favourite Model. */
 export function modelDigitShortcut(e: KeyPress & { code: string }): number | null {
   if (!isPrimaryModifier(e) || e.altKey || e.shiftKey) return null;
-  return physicalDigit(e);
-}
-
-/** 1..9 with or without ⌘ / Ctrl (no Alt, no Shift): picks the nth Effort level in the open Effort menu. */
-export function effortDigitShortcut(e: KeyPress & { code: string }): number | null {
-  if (e.altKey || e.shiftKey || (e.metaKey && e.ctrlKey)) return null;
   return physicalDigit(e);
 }
 

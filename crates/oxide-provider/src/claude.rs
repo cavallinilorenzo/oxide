@@ -1140,8 +1140,13 @@ fn native_block(
             let Ok(text) = String::from_utf8(read(attachment)?) else {
                 return Ok(None);
             };
-            json!({"type": "document", "title": attachment.name, "source": {
-                "type": "text", "media_type": "text/plain", "data": text}})
+            let block = json!({"type": "document", "title": attachment.name, "source": {
+                "type": "text", "media_type": "text/plain", "data": text}});
+            // JSON escaping can inflate text well past its size on disk: check what is sent.
+            if block.to_string().len() > *budget {
+                return Ok(None);
+            }
+            block
         }
         _ => return Ok(None),
     };

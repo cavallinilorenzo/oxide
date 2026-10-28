@@ -4,6 +4,10 @@ import { App } from "./App";
 import { highlighter } from "./highlighter";
 import { warmModelCatalogs } from "./modelCatalogCache";
 import "./styles.css";
+import "./workbench.css";
+import "./appearance.css";
+import { applyAppearance } from "./appearance";
+applyAppearance();
 
 // Start the highlight worker now so common grammars are compiled before the
 // first code block needs them.

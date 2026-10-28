@@ -314,6 +314,54 @@ fn deleting_a_clean_board_thread_removes_its_worktree_and_checkpoints_and_keeps_
 }
 
 #[test]
+fn deleting_a_board_thread_preserves_unsaved_buffers_and_stops_editor_processes_after_save() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Editor work")).unwrap();
+    completed_first_turn(&f.core, thread.id);
+    let key = format!("{}:{}", f.project.id, thread.id);
+    f.core.set_editor_dirty(key.clone(), true);
+    assert!(
+        f.core
+            .delete_thread(thread.id, true)
+            .unwrap_err()
+            .to_string()
+            .contains("unsaved editor")
+    );
+    assert!(worktree_of(&thread).exists());
+    f.core.set_editor_dirty(key, false);
+    f.core
+        .configure_language_server(
+            "python",
+            oxide_core::LanguageServerConfig {
+                command: "python".into(),
+                args: vec![
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("fixtures/lsp.py")
+                        .to_string_lossy()
+                        .into_owned(),
+                ],
+                interpreter: None,
+            },
+        )
+        .unwrap();
+    let (server, _messages) = f
+        .core
+        .start_language_server(f.project.id, Some(thread.id), "python")
+        .unwrap();
+    let terminal = f
+        .core
+        .start_block_terminal(f.project.id, Some(thread.id))
+        .unwrap();
+    assert_eq!(
+        f.core.delete_thread(thread.id, false).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(!worktree_of(&thread).exists());
+    assert!(f.core.write_terminal(terminal.id, b"echo gone\n").is_err());
+    assert!(f.core.language_server_message(server.id, "{}").is_err());
+}
+
+#[test]
 fn deleting_a_dirty_board_thread_asks_first_and_declining_keeps_everything() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Dirty work")).unwrap();

@@ -308,6 +308,25 @@ impl Core {
     /// The Provider's own session files are left to the Provider.
     pub fn delete_thread(&self, thread_id: u32, discard_changes: bool) -> Result<DeleteOutcome> {
         let (root, board) = self.thread_checkouts(thread_id)?;
+        if board.is_some() {
+            let project_id: u32 = self
+                .db
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .query_row(
+                    "SELECT project_id FROM threads WHERE id = ?1",
+                    [thread_id],
+                    |row| row.get(0),
+                )?;
+            if self
+                .dirty_editors
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&format!("{project_id}:{thread_id}"))
+            {
+                return Err(Error::Editor("Save or close this Thread's unsaved editor files before deleting its worktree.".into()));
+            }
+        }
         let worktree = board.map(|(_, w)| w).filter(|w| w.exists());
         if let Some(worktree) = &worktree {
             let dirty = self.git.mutate(&root, || {
@@ -328,6 +347,18 @@ impl Core {
             actor.shutdown();
         }
         if let Some(worktree) = worktree {
+            self.language_servers.stop_root(&worktree);
+            let terminals: Vec<_> = self
+                .terminals
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .values()
+                .filter(|terminal| Path::new(&terminal.summary.cwd).starts_with(&worktree))
+                .map(|terminal| terminal.summary.id)
+                .collect();
+            for terminal in terminals {
+                self.close_terminal(terminal)?;
+            }
             self.git.mutate(&root, || {
                 git::run(
                     &root,

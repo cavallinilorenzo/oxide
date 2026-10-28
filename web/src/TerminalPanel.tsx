@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { TerminalIcon, XIcon } from "@primer/octicons-react";
 import { commands } from "./bindings";
 import { takeFrameBatch } from "./terminalOutput";
+import { terminalAppearance } from "./appearance";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
@@ -29,11 +30,10 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
     if (!host) return;
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      ...terminalAppearance(),
       fontSize: 12,
       scrollback: 10_000,
       convertEol: true,
-      theme: { background: "#0a0b0e", foreground: "#c9d1d9", cursor: "#2f81f7", selectionBackground: "#2f81f755" },
     });
     const fit = new FitAddon();
     fitRef.current = fit;
@@ -69,6 +69,8 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
       }
     };
     const observer = new ResizeObserver(resize);
+    const appearance=()=>{const options=terminalAppearance();terminal.options.fontFamily=options.fontFamily;terminal.options.theme=options.theme;resize();};
+    window.addEventListener("oxide-appearance-changed",appearance);
     observer.observe(host);
     const dataSubscription = terminal.onData((data) => {
       if (terminalId !== null) void commands.writeTerminal(terminalId, [...new TextEncoder().encode(data)]);
@@ -95,6 +97,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
     return () => {
       active = false;
       observer.disconnect();
+      window.removeEventListener("oxide-appearance-changed",appearance);
       dataSubscription.dispose();
       if (frame !== null) cancelAnimationFrame(frame);
       if (terminalId !== null) void commands.closeTerminal(terminalId);

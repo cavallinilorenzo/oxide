@@ -2,7 +2,7 @@ use crate::{Error, Result};
 use ignore::WalkBuilder;
 use serde::Serialize;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 /// Largest slice of a file Core hands to the webview; the rest is cut off.
@@ -30,7 +30,7 @@ pub struct FileContent {
 
 /// Resolves `relative` inside `root`, refusing anything that leaves it
 /// (`..`, absolute paths, symlinks pointing outside).
-fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
+pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
     let escape = || Error::InvalidPath(relative.to_string());
     let rel = Path::new(relative);
     if rel
@@ -53,8 +53,91 @@ fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
     }
 }
 
+/// Saves a complete UTF-8 document atomically, refusing stale buffers and links outside the checkout.
+pub fn write_file(root: &Path, relative: &str, expected: &str, content: &str) -> Result<()> {
+    let path = resolve(root, relative)?;
+    let io = |source| Error::Io {
+        path: path.clone(),
+        source,
+    };
+    let metadata = std::fs::metadata(&path).map_err(io)?;
+    if metadata.len() > MAX_FILE_BYTES || content.len() as u64 > MAX_FILE_BYTES {
+        return Err(Error::Editor(
+            "The editor supports complete text files up to 1 MiB.".into(),
+        ));
+    }
+    let current = std::fs::read(&path).map_err(io)?;
+    if current != expected.as_bytes() {
+        return Err(Error::Editor(
+            "This file changed on disk. Reload it or compare your changes before saving.".into(),
+        ));
+    }
+    if metadata.permissions().readonly() {
+        return Err(Error::Editor("This file is read-only on disk.".into()));
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(io)?;
+    temporary
+        .as_file()
+        .set_permissions(metadata.permissions())
+        .map_err(io)?;
+    temporary.write_all(content.as_bytes()).map_err(io)?;
+    temporary.as_file().sync_all().map_err(io)?;
+    // Recheck after preparing the replacement so changes made by a Provider are not silently lost.
+    if std::fs::read(&path).map_err(io)? != current {
+        return Err(Error::Editor(
+            "This file changed on disk while saving. Reload it before saving again.".into(),
+        ));
+    }
+    temporary.persist(&path).map_err(|e| io(e.error))?;
+    Ok(())
+}
+
 /// The children of one directory of the checkout, skipping `.git` and
 /// anything ignored by `.gitignore`; directories first, then by name.
+pub fn create_file(root: &Path, relative: &str) -> Result<()> {
+    let name = Path::new(relative)
+        .file_name()
+        .ok_or_else(|| Error::InvalidPath(relative.into()))?;
+    let parent = Path::new(relative)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let parent = resolve(root, &parent.to_string_lossy())?;
+    if Path::new(relative)
+        .components()
+        .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(Error::InvalidPath(relative.into()));
+    }
+    let path = parent.join(name);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|source| Error::Io { path, source })?;
+    Ok(())
+}
+
+pub fn find_files(root: &Path, query: &str) -> Vec<String> {
+    let query = query.to_lowercase();
+    WalkBuilder::new(root)
+        .hidden(false)
+        .require_git(false)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build()
+        .flatten()
+        .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
+        .filter_map(|entry| {
+            entry
+                .path()
+                .strip_prefix(root)
+                .ok()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        })
+        .filter(|path| path.to_lowercase().contains(&query))
+        .take(100)
+        .collect()
+}
+
 pub fn list_dir(root: &Path, relative: &str) -> Result<Vec<FileEntry>> {
     let dir = resolve(root, relative)?;
     let prefix = relative.trim_matches('/');
@@ -95,7 +178,9 @@ pub fn read_file(root: &Path, relative: &str) -> Result<FileContent> {
     file.take(MAX_FILE_BYTES)
         .read_to_end(&mut bytes)
         .map_err(io)?;
-    if bytes[..bytes.len().min(8192)].contains(&0) {
+    if bytes[..bytes.len().min(8192)].contains(&0)
+        || (size <= MAX_FILE_BYTES && std::str::from_utf8(&bytes).is_err())
+    {
         return Ok(FileContent {
             content: String::new(),
             size,

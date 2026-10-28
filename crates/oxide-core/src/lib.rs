@@ -16,11 +16,15 @@ mod files;
 mod git;
 mod git_diff;
 mod github;
+mod language_install;
+mod language_server;
 mod project_setup;
 mod settings;
 mod slash_catalog;
 mod storage_actor;
 mod terminal;
+mod terminal_completion;
+pub use terminal_completion::{TerminalCompletion, TerminalMatch};
 pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
 mod thread_actor;
@@ -42,6 +46,7 @@ pub use github::{
     PullRequestLabel, PullRequestPhase, PullRequestReviewer, PullRequestState, ReviewDecision,
     ReviewState,
 };
+pub use language_server::{LanguageServerConfig, LanguageServerSummary, LanguageTool};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -125,6 +130,8 @@ pub struct Core {
     processes: Arc<ProcessRegistry>,
     terminals: Mutex<HashMap<u32, Arc<TerminalSession>>>,
     next_terminal_id: AtomicU32,
+    language_servers: language_server::LanguageServers,
+    dirty_editors: Mutex<std::collections::HashSet<String>>,
     git: git::GitState,
     gh: Arc<github::Gh>,
     activity: Arc<activity::Activity>,
@@ -184,6 +191,8 @@ impl Core {
             processes,
             terminals: Mutex::new(HashMap::new()),
             next_terminal_id: AtomicU32::new(1),
+            language_servers: language_server::LanguageServers::default(),
+            dirty_editors: Mutex::new(std::collections::HashSet::new()),
             git: git::GitState::default(),
             gh: Arc::new(github::Gh::default()),
             activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
@@ -214,6 +223,7 @@ impl Core {
     /// Shuts every Provider and terminal down, escalating SIGTERM to SIGKILL, and returns once
     /// their processes are gone. Safe to call more than once; also runs when Core is dropped.
     pub fn shutdown(&self) {
+        self.language_servers.shutdown();
         let actors: Vec<_> = self
             .thread_actors
             .lock()
@@ -1180,7 +1190,6 @@ impl Core {
         self.attachment_store()
             .remove_abandoned(|id| referenced.contains(id));
     }
-
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.interrupt()
@@ -1270,12 +1279,30 @@ impl Core {
         project_id: u32,
         thread_id: Option<u32>,
     ) -> Result<TerminalSummary> {
+        self.start_terminal_mode(project_id, thread_id, false)
+    }
+
+    pub fn start_block_terminal(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<TerminalSummary> {
+        self.start_terminal_mode(project_id, thread_id, true)
+    }
+
+    fn start_terminal_mode(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        blocks: bool,
+    ) -> Result<TerminalSummary> {
         let cwd = self.checkout_path(project_id, thread_id)?;
         let id = next_id(&self.next_terminal_id);
         let session = Arc::new(TerminalSession::start(
             id,
             Path::new(&cwd),
             Arc::clone(&self.processes),
+            blocks,
         )?);
         let summary = session.summary.clone();
         self.terminals
@@ -1305,6 +1332,87 @@ impl Core {
         path: &str,
     ) -> Result<FileContent> {
         files::read_file(Path::new(&self.checkout_path(project_id, thread_id)?), path)
+    }
+
+    pub fn write_file(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        path: &str,
+        expected: &str,
+        content: &str,
+    ) -> Result<()> {
+        let root = PathBuf::from(self.checkout_path(project_id, thread_id)?);
+        self.git
+            .mutate(&root, || files::write_file(&root, path, expected, content))
+    }
+
+    pub fn language_tools(&self) -> Vec<LanguageTool> {
+        language_server::tools(&self.home)
+    }
+
+    pub fn install_language_support(
+        &self,
+        language: &str,
+        progress: impl Fn(&str),
+    ) -> Result<LanguageTool> {
+        self.language_servers
+            .install(&self.home, language, progress)
+    }
+
+    pub fn create_file(&self, project_id: u32, thread_id: Option<u32>, path: &str) -> Result<()> {
+        files::create_file(Path::new(&self.checkout_path(project_id, thread_id)?), path)
+    }
+    pub fn find_files(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        query: &str,
+    ) -> Result<Vec<String>> {
+        Ok(files::find_files(
+            Path::new(&self.checkout_path(project_id, thread_id)?),
+            query,
+        ))
+    }
+    pub fn set_editor_dirty(&self, id: String, dirty: bool) {
+        let mut editors = self.dirty_editors.lock().unwrap_or_else(|e| e.into_inner());
+        if dirty {
+            editors.insert(id);
+        } else {
+            editors.remove(&id);
+        }
+    }
+    pub fn dirty_editor_count(&self) -> u32 {
+        self.dirty_editors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len() as u32
+    }
+
+    pub fn configure_language_server(
+        &self,
+        language: &str,
+        config: LanguageServerConfig,
+    ) -> Result<()> {
+        self.language_servers
+            .configure(&self.home, language, config)
+    }
+
+    pub fn start_language_server(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        language: &str,
+    ) -> Result<(LanguageServerSummary, crossbeam_channel::Receiver<String>)> {
+        let root = PathBuf::from(self.checkout_path(project_id, thread_id)?);
+        self.language_servers
+            .start(&self.home, &root, language, Arc::clone(&self.processes))
+    }
+    pub fn language_server_message(&self, id: u32, message: &str) -> Result<()> {
+        self.language_servers.send(id, message)
+    }
+    pub fn stop_language_server(&self, id: u32) {
+        self.language_servers.stop(id);
     }
 
     /// Branch, ahead/behind and uncommitted-change counts of a Project's main checkout.
@@ -1673,6 +1781,20 @@ impl Core {
 
     pub fn write_terminal(&self, terminal_id: u32, bytes: &[u8]) -> Result<()> {
         self.terminal(terminal_id)?.write(bytes)
+    }
+
+    pub fn run_terminal_block(&self, terminal_id: u32, command: &str, token: &str) -> Result<()> {
+        self.terminal(terminal_id)?.run_block(command, token)
+    }
+    pub fn complete_terminal(
+        &self,
+        terminal_id: u32,
+        line: &str,
+        cursor: usize,
+        cwd: &str,
+    ) -> Result<TerminalCompletion> {
+        let session = self.terminal(terminal_id)?;
+        terminal_completion::complete(&session, line, cursor, cwd)
     }
 
     pub fn resize_terminal(&self, terminal_id: u32, rows: u16, cols: u16) -> Result<()> {

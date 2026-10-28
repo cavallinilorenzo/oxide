@@ -53,7 +53,7 @@ button {
   font: inherit;
   font-size: 14px;
   font-weight: 500;
-  color: #f0f6fc;
+  color: var(--fg-bright);
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);

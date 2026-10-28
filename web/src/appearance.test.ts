@@ -1,0 +1,86 @@
+// @vitest-environment jsdom
+import { beforeEach, expect, it } from "vitest";
+import {
+  activeTheme,
+  DEFAULT_APPEARANCE,
+  getAppearance,
+  parseThemePack,
+  saveAppearance,
+  terminalAppearance,
+} from "./appearance";
+beforeEach(() => {
+  saveAppearance(structuredClone(DEFAULT_APPEARANCE));
+});
+it("applies a selected JSON theme across UI and terminal and persists separate font families", () => {
+  const themeJson = JSON.stringify({
+    name: "Custom",
+    themes: [
+      {
+        name: "Paper",
+        appearance: "light",
+        style: {
+          background: "#fafafa",
+          text: "#202020",
+          "terminal.background": "#eeeeee",
+          "terminal.foreground": "#111111",
+          syntax: { keyword: { color: "#334455", font_style: "italic" } },
+        },
+      },
+    ],
+  });
+  saveAppearance({
+    ...getAppearance(),
+    themeJson,
+    themeName: "Paper",
+    fonts: {
+      ui: "Inter",
+      chat: "Arial",
+      code: "Consolas",
+      terminal: "Cascadia Code",
+    },
+  });
+  expect(document.documentElement.style.getPropertyValue("--bg")).toBe(
+    "#fafafa",
+  );
+  expect(document.documentElement.style.getPropertyValue("--font-code")).toBe(
+    "Consolas",
+  );
+  expect(terminalAppearance().theme.background).toBe("#eeeeee");
+  expect(activeTheme().appearance).toBe("light");
+  expect(
+    JSON.parse(localStorage.getItem("oxide:appearance:v1")!).fonts.chat,
+  ).toBe("Arial");
+});
+it("rejects malformed or unsafe theme values and keeps the previous appearance", () => {
+  const before = getAppearance();
+  expect(() => saveAppearance({ ...before, themeJson: "{broken" })).toThrow();
+  expect(getAppearance()).toEqual(before);
+  expect(() =>
+    parseThemePack(
+      JSON.stringify({
+        name: "Bad",
+        themes: [
+          {
+            name: "Bad",
+            appearance: "dark",
+            style: { background: "url(https://example.com/a)" },
+          },
+        ],
+      }),
+    ),
+  ).toThrow(/hex color/);
+  expect(() =>
+    parseThemePack(
+      JSON.stringify({
+        name: "Bad",
+        themes: [
+          {
+            name: "Bad",
+            appearance: "dark",
+            style: { syntax: { keyword: { color: "#nope" } } },
+          },
+        ],
+      }),
+    ),
+  ).toThrow(/syntax color/);
+});

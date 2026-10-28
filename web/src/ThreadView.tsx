@@ -84,6 +84,7 @@ const STICK_TO_BOTTOM = 48;
 const PAGE_LOAD_DELAY = 80;
 
 interface ThreadViewProps {
+  visible?: boolean;
   onOpenDefaultDiff?: () => void;
   onInitialLoad?: () => void;
   threadId: number | null;
@@ -165,6 +166,7 @@ export function getOfferedPermissionModes(
 }
 
 export function ThreadView({
+  visible = true,
   onOpenDefaultDiff,
   onInitialLoad,
   threadId,
@@ -383,6 +385,7 @@ export function ThreadView({
   // Files dropped on the window arrive as native paths; only drops on the composer attach.
   const dropHandler = useRef<(paths: string[]) => void>(() => {});
   dropHandler.current = (paths) => {
+    if (!visible) return;
     const composer = composerRef.current;
     attachPaths(paths, composer?.isFocused() ? (composer.caret() ?? undefined) : undefined);
   };
@@ -800,6 +803,7 @@ export function ThreadView({
   const modelShortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     modelShortcutRef.current = (e) => {
+      if (!visible) return;
       if (matchesAccelerator(e, shortcuts.modelPicker)) {
         e.preventDefault();
         if (isTurnActive || sending) return;

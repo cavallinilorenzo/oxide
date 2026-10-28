@@ -41,7 +41,8 @@ import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
 import { readablePath } from "./headerLines";
 import { EditorMark } from "./EditorMark";
-import { isNewThreadShortcut, isProjectPaletteShortcut, toggleForKey } from "./shortcuts";
+import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
+import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
 import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
@@ -49,8 +50,6 @@ import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
 
 const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
-const shortcut = isMac ? "\u2318" : "Ctrl+";
-const shortcutShift = isMac ? "\u2318\u21e7" : "Ctrl+Shift+";
 
 const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
@@ -73,7 +72,13 @@ const TOOL_TABS: { name: string; Icon: Icon }[] = [
   { name: "Issues", Icon: IssueOpenedIcon },
 ];
 
+const TOOL_TAB_ACTION: Record<string, ShortcutAction> = {
+  Files: "files", Diff: "diff", "Pull request": "pullRequests", Issues: "issues",
+};
+
 export function App() {
+  const shortcuts = useShortcuts();
+  const keys = (action: ShortcutAction) => formatAccelerator(shortcuts[action]);
   const [showTools, setShowTools] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>("Files");
@@ -364,29 +369,49 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isProjectPaletteShortcut(e)) {
-        e.preventDefault();
-        overlays.current?.openPalette();
-        return;
-      }
-      if (isNewThreadShortcut(e)) {
+      const action = actionForKey(e, shortcuts);
+      // The Model picker belongs to the open Thread, which handles it.
+      if (!action || action === "modelPicker") return;
+      if (action === "newThread") {
         if (selected) {
           e.preventDefault();
           void startNewThread();
         }
         return;
       }
-      const toggle = toggleForKey(e);
-      if (!toggle) return;
       e.preventDefault();
-      if (toggle === "tools") setShowTools(showSettings || !showTools);
-      else if (toggle === "terminal") setShowTerminal(showSettings || !showTerminal);
-      else if (toggle === "board") setShowBoard((v) => !v);
-      setShowSettings(toggle === "settings");
+      if (action === "openProject") {
+        overlays.current?.openPalette();
+      } else if (action === "previousThread" || action === "nextThread") {
+        const next = adjacentThreadId(threads?.map((thread) => thread.id) ?? [], currentThreadId, action === "nextThread" ? 1 : -1);
+        if (next === null || next === currentThreadId) return;
+        setShowSettings(false);
+        setShowBoard(false);
+        setSelectedThreadId(next);
+        if (selected) rememberTerminalContext(selected.id, next);
+      } else if (action === "files" || action === "diff" || action === "pullRequests" || action === "issues") {
+        // Pressing a panel's shortcut again closes the tools panel.
+        const tool = { files: "Files", diff: "Diff", pullRequests: "Pull request", issues: "Issues" }[action];
+        const alreadyShown = showTools && !showSettings && activeTool === tool;
+        setShowSettings(false);
+        setShowTools(!alreadyShown);
+        setActiveTool(tool);
+      } else if (action === "toggleTools") {
+        setShowTools(showSettings || !showTools);
+        setShowSettings(false);
+      } else if (action === "terminal") {
+        setShowTerminal(showSettings || !showTerminal);
+        setShowSettings(false);
+      } else if (action === "toggleBoard") {
+        setShowBoard((v) => !v);
+        setShowSettings(false);
+      } else {
+        setShowSettings(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, startNewThread, showSettings, showTools, showTerminal]);
+  }, [shortcuts, selected, startNewThread, showSettings, showTools, showTerminal, activeTool, currentThreadId, rememberTerminalContext, threads]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -512,10 +537,10 @@ export function App() {
         )}
         {selected && (
           <span role="group" aria-label="View" className="seg">
-            <button aria-pressed={!showBoard && !showSettings} title={`Chat (${shortcut}B)`} onClick={() => { setShowBoard(false); setShowSettings(false); }}>
+            <button aria-pressed={!showBoard && !showSettings} title={`Chat (${keys("toggleBoard")})`} onClick={() => { setShowBoard(false); setShowSettings(false); }}>
               <CommentDiscussionIcon size={14} /> Chat
             </button>
-            <button aria-pressed={showBoard && !showSettings} title={`Thread Board (${shortcut}B)`} onClick={() => { setShowBoard(true); setShowSettings(false); }}>
+            <button aria-pressed={showBoard && !showSettings} title={`Thread Board (${keys("toggleBoard")})`} onClick={() => { setShowBoard(true); setShowSettings(false); }}>
               <ProjectIcon size={14} /> Board
             </button>
           </span>
@@ -523,7 +548,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTools && !showSettings}
-          title={`Tools: Files, Diff, Pull request, Issues (${shortcut}\\)`}
+          title={`Tools: Files, Diff, Pull request, Issues (${keys("toggleTools")})`}
           aria-label="Toggle tools panel"
           onClick={() => { setShowTools(showSettings || !showTools); setShowSettings(false); }}
         >
@@ -532,7 +557,7 @@ export function App() {
         <button
           className="icon-btn"
           aria-pressed={showTerminal && !showSettings}
-          title={`Terminal (${shortcut}J)`}
+          title={`Terminal (${keys("terminal")})`}
           aria-label="Toggle Terminal"
           onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
         >
@@ -681,7 +706,7 @@ export function App() {
                 <RepoIcon size={24} />
                 <p>Open a Project to begin.</p>
                 <button className="btn primary" onClick={() => overlays.current?.openPalette()}>
-                  Open a Project <kbd>{shortcutShift}N</kbd>
+                  Open a Project <kbd>{keys("openProject")}</kbd>
                 </button>
               </div>
             </main>
@@ -713,7 +738,7 @@ export function App() {
                   role="tab"
                   className="tab"
                   aria-label={name}
-                  title={name}
+                  title={`${name} (${keys(TOOL_TAB_ACTION[name])})`}
                   aria-selected={activeTool === name}
                   onClick={() => setActiveTool(name)}
                 >
@@ -721,7 +746,7 @@ export function App() {
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title={`Close panel (${shortcut}\\)`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
+              <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
                 <XIcon size={14} />
               </button>
             </nav>
@@ -813,6 +838,8 @@ function Sidebar({
   onOpenSettings,
   settingsOpen,
 }: SidebarProps) {
+  const shortcuts = useShortcuts();
+  const keys = (action: ShortcutAction) => formatAccelerator(shortcuts[action]);
   const [threadQuery, setThreadQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [closingProjectId, setClosingProjectId] = useState<number | null>(null);
@@ -898,10 +925,10 @@ function Sidebar({
   return (
     <nav className="sidebar" aria-label="Projects">
       <div className="sidebar-actions">
-        <button className="btn grow" onClick={onNewThread} disabled={!selected} title={`New Thread in this Project (${shortcut}N)`}>
-          <PlusIcon size={14} /> New Thread <kbd>{shortcut}N</kbd>
+        <button className="btn grow" onClick={onNewThread} disabled={!selected} title={`New Thread in this Project (${keys("newThread")})`}>
+          <PlusIcon size={14} /> New Thread <kbd>{keys("newThread")}</kbd>
         </button>
-        <button className="btn" onClick={onOpenPalette} title={`Open a Project, or a new Thread in another one (${shortcutShift}N)`} aria-label="Open a Project">
+        <button className="btn" onClick={onOpenPalette} title={`Open a Project, or a new Thread in another one (${keys("openProject")})`} aria-label="Open a Project">
           <RepoIcon size={14} />
         </button>
       </div>
@@ -926,8 +953,8 @@ function Sidebar({
               <p className="sidebar-empty-title">No open Projects</p>
               <p className="sidebar-empty-hint">Open a project to see its Threads here.</p>
             </div>
-            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette} title={`Open a Project (${shortcutShift}N)`}>
-              <RepoIcon size={14} /> Open a Project <kbd>{shortcutShift}N</kbd>
+            <button className="btn primary sidebar-empty-action" onClick={onOpenPalette} title={`Open a Project (${keys("openProject")})`}>
+              <RepoIcon size={14} /> Open a Project <kbd>{keys("openProject")}</kbd>
             </button>
           </div>
         )}
@@ -946,7 +973,7 @@ function Sidebar({
                   <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title={`Thread Board`}>
                     <ProjectIcon size={13} />
                   </button>
-                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${shortcutShift}N)`}>
+                  <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${keys("openProject")})`}>
                     <XIcon size={13} />
                   </button>
                 </div>
@@ -963,7 +990,7 @@ function Sidebar({
           })}
         </ul>
       </div>
-      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title={`Settings (${shortcut},)`}>
+      <button className="sidebar-footer" aria-current={settingsOpen ? "page" : undefined} onClick={onOpenSettings} title={`Settings (${keys("openSettings")})`}>
         <GearIcon size={14} /> Settings
       </button>
     </nav>

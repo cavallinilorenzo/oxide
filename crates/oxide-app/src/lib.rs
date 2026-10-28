@@ -238,12 +238,31 @@ pub struct ClaudeCustomizations {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct Shortcuts {
+    new_thread: String,
+    open_project: String,
+    model_picker: String,
+    pull_requests: String,
+    issues: String,
+    terminal: String,
+    files: String,
+    diff: String,
+    previous_thread: String,
+    next_thread: String,
+    toggle_tools: String,
+    toggle_board: String,
+    open_settings: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct Settings {
     default_provider: Provider,
     providers: Providers,
     confirm_quit: bool,
     editor: String,
     claude_customizations: ClaudeCustomizations,
+    shortcuts: Shortcuts,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { EditorMark } from "./EditorMark";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown, type DropdownOption } from "./Dropdown";
+import { ShortcutsSettings } from "./ShortcutsSettings";
 import {
   commands,
   type Detection,
@@ -320,6 +321,12 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
           );
         })}
       </section>
+
+      <ShortcutsSettings
+        shortcuts={draft.shortcuts}
+        onChange={(shortcuts) => set({ shortcuts })}
+        errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
+      />
 
       {saveError && <p className="error" role="alert">{saveError}</p>}
       <div className="actions">

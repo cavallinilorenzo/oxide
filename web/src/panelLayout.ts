@@ -1,5 +1,8 @@
 export type PanelBounds = { value: number; min: number; max: number };
 
+/** Narrowest the tools panel can get before the merge footer (three buttons + gear) no longer fits. */
+export const TOOLS_MIN = 496;
+
 export function panelBounds(preferred: number | null, fallback: number, min: number, max: number): PanelBounds {
   const upper = Math.max(min, Math.floor(max));
   return { value: Math.round(Math.min(upper, Math.max(min, preferred ?? fallback))), min, max: Math.floor(upper) };
@@ -14,10 +17,10 @@ export function workspaceLayout(
 ) {
   const centreMin = 360;
   const sidebarMin = 208;
-  const toolsMin = toolsVisible ? 288 : 0;
+  const toolsMin = toolsVisible ? TOOLS_MIN : 0;
   const sidebar = panelBounds(preferred.sidebar, width <= 1100 ? 208 : 240, sidebarMin,
     Math.min(400, width - toolsMin - centreMin));
-  const tools = panelBounds(preferred.tools, Math.min(600, Math.max(288, width * 0.32)), 288,
+  const tools = panelBounds(preferred.tools, Math.min(600, Math.max(TOOLS_MIN, width * 0.32)), TOOLS_MIN,
     Math.min(800, width - sidebar.value - centreMin));
   // During drag each panel must also respect the other panel's current size.
   sidebar.max = Math.floor(Math.max(sidebarMin, Math.min(400, width - (toolsVisible ? tools.value : 0) - centreMin)));

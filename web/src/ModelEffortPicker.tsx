@@ -1,4 +1,3 @@
-import { Skeleton } from "./Skeleton";
 import { modelDigitShortcut, shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";

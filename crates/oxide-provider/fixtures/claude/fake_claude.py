@@ -116,6 +116,11 @@ for line in sys.stdin:
         elif prompt_text.startswith("/context"):
             print(json.dumps({"type": "assistant", "message": {"role": "assistant", "model": "<synthetic>", "content": [{"type": "text", "text": "## Context Usage\n\n| Category | Tokens |\n|---|---|\n| Messages | 12 |"}]}}), flush=True)
             print(json.dumps({"type": "result", "subtype": "success", "session_id": "claude-session-1234", "is_error": False}), flush=True)
+        elif "tools_test" in prompt_text:
+            with open(os.path.join(fixtures_dir, "turn_tools.jsonl"), "r") as f:
+                for resp_line in f:
+                    sys.stdout.write(resp_line.strip() + "\n")
+                    sys.stdout.flush()
         elif "interrupt_test" in prompt_text:
             # Keep reading stdin so protocol interrupts can be handled on every platform.
             print(json.dumps({"type": "interrupt_ready"}), flush=True)

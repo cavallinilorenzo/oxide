@@ -54,6 +54,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
             });
             let _ = s.send(ProviderEvent::ItemStarted {
                 parent_item_index: None,
+                category: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
             });
@@ -67,6 +68,7 @@ fn scenario_prompt_streams_events_and_persists_turn_and_items() {
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 parent_item_index: None,
+                category: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
                 content: "Hello world!".into(),
@@ -152,11 +154,13 @@ fn resubscribing_after_simulated_gap_returns_consistent_snapshot() {
             });
             let _ = s.send(ProviderEvent::ItemStarted {
                 parent_item_index: None,
+                category: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
             });
             let _ = s.send(ProviderEvent::ItemCompleted {
                 parent_item_index: None,
+                category: None,
                 item_index: 0,
                 kind: oxide_provider::ItemKind::AgentMessage,
                 content: "First answer".into(),
@@ -233,6 +237,7 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     sender
         .send(ProviderEvent::ItemStarted {
             parent_item_index: None,
+            category: None,
             item_index: 0,
             kind: oxide_provider::ItemKind::AgentMessage,
         })
@@ -306,6 +311,7 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
     sender
         .send(ProviderEvent::ItemCompleted {
             parent_item_index: None,
+            category: None,
             item_index: 0,
             kind: oxide_provider::ItemKind::AgentMessage,
             content: "foobarbaz".into(),
@@ -711,6 +717,27 @@ fn scripted_fake_provider_turn_has_every_item_kind_with_nested_subagent_children
             .any(|i| i.parent_item_index == Some(subagent.item_index)),
         "subagent has a nested child item"
     );
+    // A tool call's category survives storage; Items that are not tool calls have none.
+    let categories: Vec<_> = turn
+        .items
+        .iter()
+        .filter(|i| i.kind == ItemKind::ToolCall)
+        .map(|i| i.category)
+        .collect();
+    assert_eq!(
+        categories,
+        vec![
+            Some(oxide_core::ActivityCategory::Explore),
+            Some(oxide_core::ActivityCategory::Run),
+            Some(oxide_core::ActivityCategory::Explore),
+        ]
+    );
+    assert!(
+        turn.items
+            .iter()
+            .filter(|i| i.kind != ItemKind::ToolCall)
+            .all(|i| i.category.is_none())
+    );
     // The Turn records the Model and Effort it ran with.
     assert_eq!(turn.model.as_deref(), Some("fake-model"));
     assert_eq!(turn.effort.as_deref(), Some("high"));
@@ -847,6 +874,7 @@ fn thread_with_answering_provider(core: &Core, dir: &std::path::Path) -> oxide_c
             kind: oxide_provider::ItemKind::AgentMessage,
             content: format!("answer to {prompt}"),
             parent_item_index: None,
+            category: None,
         });
         let _ = sender.send(ProviderEvent::TurnCompleted {
             turn_index: 0,

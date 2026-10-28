@@ -128,6 +128,7 @@ export function applyThreadEvent(
         kind: event.payload.kind,
         content: existing ? existing.content : "",
         parentItemIndex: event.payload.parent_item_index ?? null,
+        category: event.payload.category ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -140,6 +141,7 @@ export function applyThreadEvent(
         kind: existing ? existing.kind : "agent_message",
         content: (existing ? existing.content : "") + event.payload.delta,
         parentItemIndex: existing ? existing.parentItemIndex : null,
+        category: existing ? (existing.category ?? null) : null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -152,6 +154,7 @@ export function applyThreadEvent(
         kind: event.payload.kind,
         content: event.payload.content,
         parentItemIndex: event.payload.parent_item_index ?? null,
+        category: event.payload.category ?? null,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;

@@ -387,6 +387,59 @@ fn claude_maps_synthetic_assistant_message_to_slash_command_output() {
     provider.shutdown().unwrap();
 }
 
+#[test]
+fn claude_tool_use_blocks_become_categorised_tool_calls_and_file_changes() {
+    use oxide_provider::{ActivityCategory, ItemKind, PermissionMode, ProviderEvent, StartContext};
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let context = StartContext {
+        working_dir: PathBuf::from("."),
+        model: None,
+        effort: None,
+        permission_mode: PermissionMode::AutoEdit,
+    };
+    let rx = provider.start(&context).unwrap();
+    provider.send_prompt("tools_test").unwrap();
+
+    let mut completed = Vec::new();
+    while let Ok(evt) = rx.recv_timeout(Duration::from_secs(5)) {
+        match evt {
+            ProviderEvent::ItemCompleted {
+                kind,
+                content,
+                category,
+                ..
+            } => completed.push((kind, content, category)),
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        completed,
+        vec![
+            (
+                ItemKind::ToolCall,
+                "Read /work/src/main.rs".to_string(),
+                Some(ActivityCategory::Explore)
+            ),
+            (
+                ItemKind::ToolCall,
+                "Bash cargo test".to_string(),
+                Some(ActivityCategory::Run)
+            ),
+            (ItemKind::FileChange, "/work/src/main.rs".to_string(), None),
+            (
+                ItemKind::ToolCall,
+                "Frobnicate".to_string(),
+                Some(ActivityCategory::Other)
+            ),
+        ]
+    );
+    provider.shutdown().unwrap();
+}
+
 fn start_and_read_argv(configure: impl FnOnce(&mut ClaudeCodeProvider)) -> String {
     use oxide_provider::{PermissionMode, ProviderEvent, StartContext};
 

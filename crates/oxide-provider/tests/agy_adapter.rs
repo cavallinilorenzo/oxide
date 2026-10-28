@@ -279,9 +279,28 @@ fn steps_map_to_items() {
         ProviderEvent::ItemStarted {
             item_index: 0,
             kind: ItemKind::ToolCall,
+            category: Some(oxide_provider::ActivityCategory::Explore),
             ..
         }
     )));
+    let categories: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            ProviderEvent::ItemCompleted {
+                kind: ItemKind::ToolCall,
+                category,
+                ..
+            } => Some(*category),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        categories,
+        vec![
+            Some(oxide_provider::ActivityCategory::Explore),
+            Some(oxide_provider::ActivityCategory::Run)
+        ]
+    );
     assert!(
         !events
             .iter()

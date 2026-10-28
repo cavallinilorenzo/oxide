@@ -63,8 +63,8 @@ pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 pub use oxide_provider::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, ProviderCapabilities,
-    TurnStatus, UsageStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
+    ProviderCapabilities, TurnStatus, UsageStatus,
 };
 use settings::SettingsStore;
 pub use settings::{

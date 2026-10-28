@@ -2,9 +2,9 @@
 
 use crate::process;
 use crate::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
-    TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
+    PermissionMode, Provider, ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo,
+    SlashRoute, StartContext, TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -92,6 +92,7 @@ fn emit_compaction(threads: &ThreadsMap, items: &ThreadItemsMap, thread_id: Opti
             item_index: idx,
             kind: ItemKind::SlashCommandOutput,
             parent_item_index: None,
+            category: None,
         },
     );
     dispatch_to_thread(
@@ -102,6 +103,7 @@ fn emit_compaction(threads: &ThreadsMap, items: &ThreadItemsMap, thread_id: Opti
             kind: ItemKind::SlashCommandOutput,
             content: "Conversation compacted.".into(),
             parent_item_index: None,
+            category: None,
         },
     );
 }
@@ -427,6 +429,7 @@ impl CodexAppServer {
                                     item_index: idx,
                                     kind,
                                     parent_item_index: None,
+                                    category: codex_category(kind),
                                 },
                             );
                         }
@@ -535,6 +538,7 @@ impl CodexAppServer {
                                     kind,
                                     content,
                                     parent_item_index: None,
+                                    category: codex_category(kind),
                                 },
                             );
                         }
@@ -1541,4 +1545,9 @@ impl Provider for CodexProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         self.capabilities.lock().unwrap().clone()
     }
+}
+
+/// Codex only surfaces `commandExecution` as a tool call, so every one is a command run.
+fn codex_category(kind: ItemKind) -> Option<ActivityCategory> {
+    (kind == ItemKind::ToolCall).then_some(ActivityCategory::Run)
 }

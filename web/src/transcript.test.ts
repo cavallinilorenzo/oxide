@@ -357,6 +357,26 @@ describe("transcript reducer", () => {
     ]);
   });
 
+  it("carries a tool call's category from its start through completion", () => {
+    let state = initialTranscriptState(null);
+    state = applyThreadEvent(state, startTurn(1, "go"));
+    state = applyThreadEvent(state, {
+      seq: 2,
+      event: { type: "ItemStarted", payload: { item_index: 0, kind: "tool_call", parent_item_index: null, category: "run" } },
+    });
+    expect(state.turns[0].items[0].category).toBe("run");
+    state = applyThreadEvent(state, {
+      seq: 3,
+      event: { type: "ItemDeltaBatch", payload: { item_index: 0, delta: "out" } },
+    });
+    expect(state.turns[0].items[0].category).toBe("run");
+    state = applyThreadEvent(state, {
+      seq: 4,
+      event: { type: "ItemCompleted", payload: { item_index: 0, kind: "tool_call", content: "Run ls", category: "run" } },
+    });
+    expect(state.turns[0].items[0].category).toBe("run");
+  });
+
   it("keeps finalized Turns and Items as the same objects while another Item streams", () => {
     let state = initialTranscriptState(null);
     state = applyThreadEvent(state, startTurn(1, "earlier"));

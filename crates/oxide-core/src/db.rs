@@ -127,6 +127,10 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE threads DROP COLUMN archived;
 ",
+    // The macro category of a tool-call Item; NULL for other Items and for Items stored before.
+    "
+    ALTER TABLE items ADD COLUMN category TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

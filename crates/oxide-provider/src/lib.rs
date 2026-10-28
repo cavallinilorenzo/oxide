@@ -150,6 +150,45 @@ impl std::str::FromStr for ItemKind {
     }
 }
 
+/// The macro kind of work a tool-call Item does, assigned by the Provider adapter so the UI
+/// never string-matches a Provider's tool names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityCategory {
+    Explore,
+    Edit,
+    Run,
+    Delegate,
+    Other,
+}
+
+impl ActivityCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ActivityCategory::Explore => "explore",
+            ActivityCategory::Edit => "edit",
+            ActivityCategory::Run => "run",
+            ActivityCategory::Delegate => "delegate",
+            ActivityCategory::Other => "other",
+        }
+    }
+}
+
+impl std::str::FromStr for ActivityCategory {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "explore" => Ok(ActivityCategory::Explore),
+            "edit" => Ok(ActivityCategory::Edit),
+            "run" => Ok(ActivityCategory::Run),
+            "delegate" => Ok(ActivityCategory::Delegate),
+            "other" => Ok(ActivityCategory::Other),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -351,6 +390,9 @@ pub enum ProviderEvent {
         /// The Subagent Item this Item runs inside, if any.
         #[serde(default)]
         parent_item_index: Option<u32>,
+        /// Set on tool calls; see [`ActivityCategory`].
+        #[serde(default)]
+        category: Option<ActivityCategory>,
     },
     ItemDelta {
         item_index: u32,
@@ -362,6 +404,8 @@ pub enum ProviderEvent {
         content: String,
         #[serde(default)]
         parent_item_index: Option<u32>,
+        #[serde(default)]
+        category: Option<ActivityCategory>,
     },
     ApprovalRequested {
         id: String,
@@ -450,17 +494,26 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         parent_item_index: Option<u32>,
         content: &str,
     ) -> [ProviderEvent; 2] {
+        let category = (kind == ItemKind::ToolCall).then(|| {
+            if content.starts_with("Run ") {
+                ActivityCategory::Run
+            } else {
+                ActivityCategory::Explore
+            }
+        });
         [
             ProviderEvent::ItemStarted {
                 item_index,
                 kind,
                 parent_item_index,
+                category,
             },
             ProviderEvent::ItemCompleted {
                 item_index,
                 kind,
                 content: content.to_string(),
                 parent_item_index,
+                category,
             },
         ]
     }
@@ -491,6 +544,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         item_index: 3,
         kind: ItemKind::Subagent,
         parent_item_index: None,
+        category: None,
     });
     events.extend(item(
         4,
@@ -509,12 +563,14 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         kind: ItemKind::Subagent,
         content: "Explore\nSearch the codebase for TODOs".to_string(),
         parent_item_index: None,
+        category: None,
     });
     events.extend(item(6, ItemKind::FileChange, None, "src/main.rs"));
     events.push(ProviderEvent::ItemStarted {
         item_index: 7,
         kind: ItemKind::AgentMessage,
         parent_item_index: None,
+        category: None,
     });
     events.push(ProviderEvent::ItemDelta {
         item_index: 7,
@@ -525,6 +581,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         kind: ItemKind::AgentMessage,
         content: answer.to_string(),
         parent_item_index: None,
+        category: None,
     });
     events.push(ProviderEvent::TurnCompleted {
         turn_index,

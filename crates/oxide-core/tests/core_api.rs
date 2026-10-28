@@ -85,7 +85,11 @@ fn migration_bumps_user_version_after_backing_up_previous_version() {
 #[test]
 fn threads_archived_before_deletion_existed_reappear_in_the_list() {
     let tmp = tempfile::tempdir().unwrap();
-    let before_drop = &oxide_core::MIGRATIONS[..oxide_core::MIGRATIONS.len() - 1];
+    let drop_at = oxide_core::MIGRATIONS
+        .iter()
+        .position(|m| m.contains("DROP COLUMN archived"))
+        .unwrap();
+    let before_drop = &oxide_core::MIGRATIONS[..drop_at];
     drop(Core::open_with_migrations(tmp.path(), before_drop).unwrap());
     Connection::open(tmp.path().join("oxide.db"))
         .unwrap()

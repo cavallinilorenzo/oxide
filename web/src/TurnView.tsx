@@ -1,91 +1,19 @@
 import { memo, useEffect, useState } from "react";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CommentDiscussionIcon,
-  FileDiffIcon,
-  LightBulbIcon,
-  PersonIcon,
-  ToolsIcon,
-} from "@primer/octicons-react";
+import { PersonIcon } from "@primer/octicons-react";
 import {
   commands,
   type ApprovalDecision,
   type ApprovalSnapshot,
-  type ItemSnapshot,
 } from "./bindings";
-import { useOpenDiff } from "./diffOpen";
 import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
+import { ActivityView } from "./ActivityView";
+import { liveStatus } from "./activity";
 import type { TranscriptTurn } from "./transcript";
-import {
-  formatTime,
-  groupTurnItems,
-  modelEffortLabel,
-  splitHeadline,
-  type Block,
-} from "./transcriptView";
-
-function Collapsible({
-  label,
-  icon,
-  defaultOpen = false,
-  className,
-  children,
-}: {
-  label: React.ReactNode;
-  icon: React.ReactNode;
-  defaultOpen?: boolean;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className={`collapsible ${className ?? ""}`}>
-      <button
-        type="button"
-        className="collapsible-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-        {icon}
-        <span className="collapsible-label">{label}</span>
-      </button>
-      {open && <div className="collapsible-body">{children}</div>}
-    </div>
-  );
-}
-
-function ToolCall({ item }: { item: ItemSnapshot }) {
-  const { headline, detail } = splitHeadline(item.content);
-  if (!detail) {
-    return <div className="tool-call tool-call-plain">{headline}</div>;
-  }
-  return (
-    <Collapsible label={headline} icon={<ToolsIcon size={12} />} className="tool-call">
-      <pre className="tool-detail">{detail}</pre>
-    </Collapsible>
-  );
-}
+import { formatTime, groupTurnItems, modelEffortLabel, type Block } from "./transcriptView";
 
 function BlockView({ block }: { block: Block }) {
-  const openDiff = useOpenDiff();
   switch (block.type) {
-    case "tools":
-      return (
-        <Collapsible
-          label={`${block.items.length} tool call${block.items.length === 1 ? "" : "s"}`}
-          icon={<ToolsIcon size={12} />}
-          className="tool-group"
-        >
-          <div className="rail">
-            {block.items.map((it) => (
-              <ToolCall key={it.id || it.itemIndex} item={it} />
-            ))}
-          </div>
-        </Collapsible>
-      );
     case "message":
       return (
         <div className={block.final ? "agent-message final" : "agent-message"}>
@@ -98,42 +26,8 @@ function BlockView({ block }: { block: Block }) {
           <ItemContent content={block.item.content} />
         </div>
       );
-    case "reasoning":
-      return (
-        <Collapsible label="Reasoning" icon={<LightBulbIcon size={12} />} className="reasoning">
-          <div className="reasoning-text">{block.item.content}</div>
-        </Collapsible>
-      );
-    case "file":
-      return (
-        <button
-          type="button"
-          className="file-change"
-          onClick={() => openDiff(splitHeadline(block.item.content).headline)}
-          aria-label={`Open diff for ${splitHeadline(block.item.content).headline}`}
-        >
-          <FileDiffIcon size={12} />
-          <span>{splitHeadline(block.item.content).headline}</span>
-        </button>
-      );
-    case "subagent": {
-      const { headline, detail } = splitHeadline(block.item.content);
-      return (
-        <Collapsible
-          label={headline}
-          icon={<CommentDiscussionIcon size={12} />}
-          className="subagent"
-          defaultOpen
-        >
-          {detail && <div className="subagent-task">{detail}</div>}
-          <div className="rail">
-            {block.children.map((child, i) => (
-              <BlockView key={i} block={child} />
-            ))}
-          </div>
-        </Collapsible>
-      );
-    }
+    case "activity":
+      return null; // drawn by TurnView, which knows whether the Turn is live
   }
 }
 
@@ -264,6 +158,12 @@ export const TurnView = memo(function TurnView({
   );
   const blocks = groupTurnItems(turn.items);
   const approvals = turn.approvals ?? [];
+  const activityBlock = blocks.find((b) => b.type === "activity");
+  const activity = activityBlock?.type === "activity" ? activityBlock.activity : null;
+  const waitingOnApproval = approvals.some((a) => !a.decision);
+  const live = turn.status === "running" && !waitingOnApproval ? liveStatus(activity) : null;
+  const ended = turn.completedAt ? Date.parse(turn.completedAt) - Date.parse(turn.startedAt) : NaN;
+  const workedMs = turn.status !== "running" && !Number.isNaN(ended) ? ended : null;
   return (
     <section className="turn">
       <div className={justSent ? "user-message just-sent" : "user-message"}>
@@ -287,6 +187,15 @@ export const TurnView = memo(function TurnView({
             <ProviderMark provider={provider} />
             <span>{modelEffortLabel(turn.model ?? null, turn.effort ?? null)}</span>
           </div>
+          {(activity || live || waitingOnApproval) && (
+            <ActivityView
+              activity={activity}
+              live={live}
+              waiting={turn.status === "running" && waitingOnApproval}
+              startedAt={turn.startedAt}
+              workedMs={workedMs}
+            />
+          )}
           {blocks.map((block, i) => (
             <BlockView key={i} block={block} />
           ))}

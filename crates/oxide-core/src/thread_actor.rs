@@ -422,6 +422,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             item_index,
             kind,
             parent_item_index,
+            category,
         } => {
             if kind == ItemKind::Reasoning && !state.capabilities.supports_reasoning {
                 state.dropped_items.insert(item_index);
@@ -432,6 +433,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     item_index,
                     kind,
                     parent_item_index,
+                    category,
                 },
                 raw,
             );
@@ -451,6 +453,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             kind,
             content,
             parent_item_index,
+            category,
         } => {
             if kind == ItemKind::Reasoning && !state.capabilities.supports_reasoning {
                 state.dropped_items.insert(item_index);
@@ -464,6 +467,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     kind,
                     content.clone(),
                     parent_item_index,
+                    category,
                 );
             }
             state.broadcast_with_raw(
@@ -472,6 +476,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     kind,
                     content,
                     parent_item_index,
+                    category,
                 },
                 raw,
             );

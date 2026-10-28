@@ -1,14 +1,15 @@
 import type { ItemSnapshot } from "./bindings";
+import { buildActivity, type Activity } from "./activity";
 
 export type Block =
-  | { type: "tools"; items: ItemSnapshot[] }
+  | { type: "activity"; activity: Activity }
   | { type: "message"; item: ItemSnapshot; final: boolean }
-  | { type: "reasoning"; item: ItemSnapshot }
-  | { type: "file"; item: ItemSnapshot }
-  | { type: "command"; item: ItemSnapshot }
-  | { type: "subagent"; item: ItemSnapshot; children: Block[] };
+  | { type: "command"; item: ItemSnapshot };
 
-/** Arranges a Turn's flat Items into what the Transcript draws, nesting Subagent children. */
+/**
+ * Arranges a Turn's flat Items into what the Transcript draws: one Activity (everything the
+ * Provider did, Subagent children nested) above the agent's messages and Slash command output.
+ */
 export function groupTurnItems(items: ItemSnapshot[]): Block[] {
   const known = new Set(items.map((i) => i.itemIndex));
   const childrenOf = new Map<number, ItemSnapshot[]>();
@@ -23,52 +24,19 @@ export function groupTurnItems(items: ItemSnapshot[]): Block[] {
       top.push(it);
     }
   }
-  return toBlocks(top, childrenOf, true);
-}
 
-function toBlocks(
-  items: ItemSnapshot[],
-  childrenOf: Map<number, ItemSnapshot[]>,
-  markFinal: boolean,
-): Block[] {
   const blocks: Block[] = [];
-  for (const it of items) {
-    switch (it.kind) {
-      case "tool_call": {
-        const last = blocks[blocks.length - 1];
-        if (last?.type === "tools") last.items.push(it);
-        else blocks.push({ type: "tools", items: [it] });
-        break;
-      }
-      case "agent_message":
-        blocks.push({ type: "message", item: it, final: false });
-        break;
-      case "reasoning":
-        if (!it.content.trim()) break; // no empty reasoning UI
-        blocks.push({ type: "reasoning", item: it });
-        break;
-      case "file_change":
-        blocks.push({ type: "file", item: it });
-        break;
-      case "slash_command_output":
-        blocks.push({ type: "command", item: it });
-        break;
-      case "subagent":
-        blocks.push({
-          type: "subagent",
-          item: it,
-          children: toBlocks(childrenOf.get(it.itemIndex) ?? [], childrenOf, false),
-        });
-        break;
-    }
+  const activity = buildActivity(top, childrenOf);
+  if (activity) blocks.push({ type: "activity", activity });
+  for (const it of top) {
+    if (it.kind === "agent_message") blocks.push({ type: "message", item: it, final: false });
+    else if (it.kind === "slash_command_output") blocks.push({ type: "command", item: it });
   }
-  if (markFinal) {
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.type === "message") {
-        b.final = true;
-        break;
-      }
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.type === "message") {
+      b.final = true;
+      break;
     }
   }
   return blocks;

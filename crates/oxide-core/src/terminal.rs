@@ -297,7 +297,9 @@ fn create_shell_init_file(id: u32) -> Result<PathBuf> {
         .create_new(true)
         .open(&path)
         .map_err(|error| Error::Terminal(format!("create terminal shell init file: {error}")))?;
-    file.write_all(b"stty -echo\ntrap ':' INT\n")
+    file.write_all(
+        b"stty -echo\n__oxide_interrupt_foreground() {\n  local pgid\n  for pgid in $(jobs -p); do\n    if [ \"$pgid\" != \"$$\" ]; then kill -TERM -- \"-$pgid\" 2>/dev/null; fi\n  done\n}\ntrap __oxide_interrupt_foreground INT\n",
+    )
         .map_err(|error| Error::Terminal(format!("write terminal shell init file: {error}")))?;
     Ok(path)
 }

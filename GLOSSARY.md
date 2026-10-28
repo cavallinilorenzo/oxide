@@ -39,6 +39,14 @@ _Avoid_: Run, exchange, round
 One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, or the output of a Slash command. Slash command output is its own kind, never an agent message, and stays out of the Continue in new Thread recap.
 _Avoid_: Step, block, event (when meaning the unit)
 
+**Activity**:
+The compressed, expandable record of what the Provider did in one Turn: a one-line summary of macro actions with counts ("Explored 4 files · Edited 2 files"), expanding into Phases and then Items. A view of the Turn's Items, not a new kind of Item; the agent's messages stay outside it. While the Turn runs it carries a live status line; a Turn with no tool-like Items has no Activity.
+_Avoid_: Timeline, log, steps
+
+**Phase**:
+A run of consecutive Items of the same macro kind within an Activity: reasoning, explore, edit, run, delegate or other. A tool call's kind is assigned by its Provider adapter when it emits the Item (unmapped tools are other); Items stored without one fall back on their Item kind. The same kind returning later starts a new Phase.
+_Avoid_: Stage, group
+
 **Slash command**:
 An instruction typed in the composer as `/name` with optional arguments, run by Oxide (`/clear`, `/model`) or by the Thread's Provider instead of being sent as a prompt; a Provider's skills and custom commands are Slash commands too. Each Provider offers its own set, and one it can't run inside Oxide is not offered. A `/word` that names no Slash command is an ordinary prompt. See ADR-0006.
 _Avoid_: Command (alone), action, macro

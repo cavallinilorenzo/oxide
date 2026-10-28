@@ -1,0 +1,17 @@
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_0", "name": "Read", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"file_path\":\"/work/"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "src/main.rs\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":\"cargo "}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "test\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_2", "name": "Edit", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"file_path\":\"/work/src/"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "main.rs\",\"old_string\":\"a\",\"new_string\":\"b\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 2}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 3, "content_block": {"type": "tool_use", "id": "toolu_3", "name": "Frobnicate", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 3, "delta": {"type": "input_json_delta", "partial_json": "{\"widget\":"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 3, "delta": {"type": "input_json_delta", "partial_json": "\"x\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 3}}
+{"type": "result", "subtype": "success", "session_id": "claude-session-1234", "result": "", "is_error": false}

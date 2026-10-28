@@ -54,12 +54,14 @@ fn answering_fake(answer: &'static str) -> FakeProvider {
                 kind: ItemKind::ToolCall,
                 content: "Run cargo test\nTOOL-OUTPUT-NOISE".into(),
                 parent_item_index: None,
+                category: None,
             },
             ProviderEvent::ItemCompleted {
                 item_index: 1,
                 kind: ItemKind::AgentMessage,
                 content: answer.into(),
                 parent_item_index: None,
+                category: None,
             },
             ProviderEvent::TurnCompleted {
                 turn_index: 0,

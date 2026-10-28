@@ -1,4 +1,6 @@
-use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
+use oxide_provider::{
+    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +81,10 @@ pub struct ItemSnapshot {
     pub content: String,
     /// The Subagent Item this Item is nested under.
     pub parent_item_index: Option<u32>,
+    /// What kind of work a tool call is; `None` for other Items and for those stored before
+    /// categories existed.
+    #[serde(default)]
+    pub category: Option<ActivityCategory>,
     pub created_at: String,
 }
 
@@ -175,6 +181,7 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -185,6 +192,7 @@ pub enum ThreadEvent {
         kind: ItemKind,
         content: String,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
     },
     TurnCompleted {
         turn_index: u32,

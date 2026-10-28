@@ -7,7 +7,7 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
+    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
     ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
     TurnStatus,
 };
@@ -677,6 +677,7 @@ struct TurnRun {
 struct OpenItem {
     item_index: u32,
     kind: ItemKind,
+    category: Option<ActivityCategory>,
     content: String,
 }
 
@@ -809,7 +810,8 @@ impl TurnRun {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 if !delta.is_empty() {
-                    let item = self.open(steps, step_index, next_item, ItemKind::AgentMessage);
+                    let item =
+                        self.open(steps, step_index, next_item, ItemKind::AgentMessage, None);
                     item.content.push_str(delta);
                     let _ = self.tx.send(ProviderEvent::ItemDelta {
                         item_index: item.item_index,
@@ -824,7 +826,9 @@ impl TurnRun {
             Some("tool") => {
                 let info = &step["tool_info"];
                 let kind = tool_kind(step, info);
-                self.open(steps, step_index, next_item, kind);
+                let category =
+                    (kind == ItemKind::ToolCall).then(|| tool_category(tool_name(step, info)));
+                self.open(steps, step_index, next_item, kind, category);
                 if done {
                     let content = self.tool_content(kind, step, info);
                     self.complete(steps, step_index, Some(content));
@@ -842,6 +846,7 @@ impl TurnRun {
         step_index: u64,
         next_item: &mut u32,
         kind: ItemKind,
+        category: Option<ActivityCategory>,
     ) -> &'a mut OpenItem {
         steps.entry(step_index).or_insert_with(|| {
             let item_index = *next_item;
@@ -850,10 +855,12 @@ impl TurnRun {
                 item_index,
                 kind,
                 parent_item_index: None,
+                category,
             });
             OpenItem {
                 item_index,
                 kind,
+                category,
                 content: String::new(),
             }
         })
@@ -872,6 +879,7 @@ impl TurnRun {
                 kind: item.kind,
                 content: content.unwrap_or(item.content),
                 parent_item_index: None,
+                category: item.category,
             });
         }
     }
@@ -885,6 +893,7 @@ impl TurnRun {
                 kind: item.kind,
                 content: item.content,
                 parent_item_index: None,
+                category: item.category,
             });
         }
     }
@@ -968,6 +977,18 @@ fn tool_name<'a>(step: &'a Value, info: &'a Value) -> &'a str {
         .as_str()
         .or_else(|| step["tool_name"].as_str())
         .unwrap_or("tool")
+}
+
+/// The macro category of an agy tool call; unmapped tools are `Other` until added here.
+fn tool_category(name: &str) -> ActivityCategory {
+    match name {
+        "view_file" | "view_file_outline" | "view_code_item" | "list_dir" | "find_by_name"
+        | "grep_search" | "codebase_search" | "read_url_content" | "search_web" => {
+            ActivityCategory::Explore
+        }
+        "run_command" | "command_status" | "send_command_input" => ActivityCategory::Run,
+        _ => ActivityCategory::Other,
+    }
 }
 
 fn tool_kind(step: &Value, info: &Value) -> ItemKind {

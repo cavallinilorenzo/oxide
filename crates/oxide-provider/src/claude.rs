@@ -2,9 +2,9 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
-    UsageWindow, UsageWindowKind,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
+    PermissionMode, Provider, ProviderCapabilities, ProviderError, ProviderEvent, StartContext,
+    TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
 };
 use crate::{SlashCommandInfo, SlashRoute};
 use crossbeam_channel::{Receiver, Sender};
@@ -328,6 +328,8 @@ impl ClaudeCodeProvider {
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             let mut accumulated_items: HashMap<u32, (ItemKind, String)> = HashMap::new();
+            // Tool-use blocks stream their input as JSON fragments: (tool name, input so far).
+            let mut tool_blocks: HashMap<u32, (String, String)> = HashMap::new();
             let mut slash_outputs: u32 = 0;
 
             for line_res in reader.lines() {
@@ -389,16 +391,33 @@ impl ClaudeCodeProvider {
                                                 .and_then(|b| b.get("type"))
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("text");
+                                            let tool_name = (btype == "tool_use").then(|| {
+                                                block
+                                                    .and_then(|b| b.get("name"))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("tool")
+                                                    .to_string()
+                                            });
                                             let kind = if btype == "thinking" {
                                                 ItemKind::Reasoning
+                                            } else if let Some(name) = &tool_name {
+                                                tool_item_kind(name)
                                             } else {
                                                 ItemKind::AgentMessage
                                             };
+                                            let category = tool_name
+                                                .as_deref()
+                                                .filter(|_| kind == ItemKind::ToolCall)
+                                                .map(tool_category);
+                                            if let Some(name) = tool_name {
+                                                tool_blocks.insert(index, (name, String::new()));
+                                            }
                                             accumulated_items.insert(index, (kind, String::new()));
                                             let _ = tx.send(ProviderEvent::ItemStarted {
                                                 item_index: index,
                                                 kind,
                                                 parent_item_index: None,
+                                                category,
                                             });
                                         }
                                         "content_block_delta" => {
@@ -407,6 +426,18 @@ impl ClaudeCodeProvider {
                                                 .and_then(|d| d.get("type"))
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("");
+
+                                            if dtype == "input_json_delta"
+                                                && let (Some(block), Some(part)) = (
+                                                    tool_blocks.get_mut(&index),
+                                                    delta
+                                                        .and_then(|d| d.get("partial_json"))
+                                                        .and_then(|v| v.as_str()),
+                                                )
+                                            {
+                                                block.1.push_str(part);
+                                                continue;
+                                            }
 
                                             let (text, is_known) = if dtype == "text_delta" {
                                                 (
@@ -447,14 +478,22 @@ impl ClaudeCodeProvider {
                                             }
                                         }
                                         "content_block_stop" => {
-                                            let (kind, content) = accumulated_items
+                                            let (kind, mut content) = accumulated_items
                                                 .remove(&index)
                                                 .unwrap_or((ItemKind::AgentMessage, String::new()));
+                                            let mut category = None;
+                                            if let Some((name, input)) = tool_blocks.remove(&index)
+                                            {
+                                                content = tool_content(&name, &input, kind);
+                                                category = (kind == ItemKind::ToolCall)
+                                                    .then(|| tool_category(&name));
+                                            }
                                             let _ = tx.send(ProviderEvent::ItemCompleted {
                                                 item_index: index,
                                                 kind,
                                                 content,
                                                 parent_item_index: None,
+                                                category,
                                             });
                                         }
                                         _ => {
@@ -497,12 +536,14 @@ impl ClaudeCodeProvider {
                                     item_index,
                                     kind: ItemKind::SlashCommandOutput,
                                     parent_item_index: None,
+                                    category: None,
                                 });
                                 let _ = tx.send(ProviderEvent::ItemCompleted {
                                     item_index,
                                     kind: ItemKind::SlashCommandOutput,
                                     content,
                                     parent_item_index: None,
+                                    category: None,
                                 });
                             }
                             "rate_limit_event" => {
@@ -610,6 +651,52 @@ impl ClaudeCodeProvider {
 
 /// Synthetic messages carry no content-block index, so they get indices above any real one.
 const SLASH_OUTPUT_INDEX_BASE: u32 = 10_000;
+
+/// Claude Code tools that write files, reported as file changes rather than tool calls.
+const FILE_CHANGE_TOOLS: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
+
+fn tool_item_kind(name: &str) -> ItemKind {
+    if FILE_CHANGE_TOOLS.contains(&name) {
+        ItemKind::FileChange
+    } else {
+        ItemKind::ToolCall
+    }
+}
+
+/// The macro category of a Claude Code tool call; unmapped tools are `Other` until added here.
+fn tool_category(name: &str) -> ActivityCategory {
+    match name {
+        "Read" | "Grep" | "Glob" | "LS" | "NotebookRead" | "WebFetch" | "WebSearch" => {
+            ActivityCategory::Explore
+        }
+        "Bash" | "BashOutput" | "KillShell" => ActivityCategory::Run,
+        "Task" | "Agent" => ActivityCategory::Delegate,
+        _ => ActivityCategory::Other,
+    }
+}
+
+/// A tool call's headline is its name and target; a file change's is just the path.
+fn tool_content(name: &str, input: &str, kind: ItemKind) -> String {
+    let input: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    let target = [
+        "file_path",
+        "notebook_path",
+        "path",
+        "command",
+        "pattern",
+        "url",
+        "query",
+        "description",
+    ]
+    .iter()
+    .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
+    .map(|t| t.lines().next().unwrap_or(t));
+    match (kind, target) {
+        (ItemKind::FileChange, Some(path)) => path.to_string(),
+        (_, Some(target)) => format!("{name} {target}"),
+        _ => name.to_string(),
+    }
+}
 
 /// Maps a stream-json `rate_limit_event` to a `UsageLimits` event. Only the 5-hour and the
 /// all-Models weekly windows are kept; `utilization` is a fraction and may be absent.

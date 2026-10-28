@@ -159,6 +159,8 @@ export const commands = {
 };
 
 /* Types */
+export type ActivityCategory = "explore" | "edit" | "run" | "delegate" | "other";
+
 export type AppError = {
 	message: string,
 };
@@ -529,6 +531,7 @@ export type ItemSnapshot_Deserialize = {
 	kind: ItemKind,
 	content: string,
 	parentItemIndex?: number | null,
+	category?: ActivityCategory | null,
 	createdAt: string,
 };
 
@@ -538,6 +541,7 @@ export type ItemSnapshot_Serialize = {
 	kind: ItemKind,
 	content: string,
 	parentItemIndex: number | null,
+	category: ActivityCategory | null,
 	createdAt: string,
 };
 
@@ -892,6 +896,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
 	parent_item_index?: number | null,
+	category?: ActivityCategory | null,
 } } | { type: "ItemDeltaBatch"; payload: {
 	item_index: number,
 	delta: string,
@@ -900,6 +905,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	kind: ItemKind,
 	content: string,
 	parent_item_index?: number | null,
+	category?: ActivityCategory | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
@@ -933,6 +939,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	item_index: number,
 	kind: ItemKind,
 	parent_item_index: number | null,
+	category: ActivityCategory | null,
 } } | { type: "ItemDeltaBatch"; payload: {
 	item_index: number,
 	delta: string,
@@ -941,6 +948,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	kind: ItemKind,
 	content: string,
 	parent_item_index: number | null,
+	category: ActivityCategory | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,

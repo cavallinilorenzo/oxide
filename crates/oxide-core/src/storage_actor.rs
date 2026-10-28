@@ -8,7 +8,9 @@ use crate::thread::{
     ApprovalSnapshot, ItemSnapshot, ThreadCapabilities, ThreadSnapshot, ThreadStatus,
     ThreadSummary, TurnError, TurnPage, TurnSnapshot, UnknownEventSnapshot,
 };
-use oxide_provider::{ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus};
+use oxide_provider::{
+    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, TurnStatus,
+};
 
 /// What storage recorded when a Turn started.
 pub struct TurnStarted {
@@ -38,6 +40,7 @@ pub enum StorageMsg {
         kind: ItemKind,
         content: String,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
         reply: mpsc::Sender<Result<u32>>,
     },
     WriteApprovalRequested {
@@ -182,6 +185,7 @@ impl StorageHandle {
         kind: ItemKind,
         content: String,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
     ) -> Result<u32> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteItemCompleted {
@@ -190,6 +194,7 @@ impl StorageHandle {
             kind,
             content,
             parent_item_index,
+            category,
             reply: reply_tx,
         });
         reply_rx
@@ -445,12 +450,20 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 kind,
                 content,
                 parent_item_index,
+                category,
                 reply,
             } => {
                 let res = (|| -> Result<u32> {
                     conn.execute(
-                        "INSERT INTO items (turn_id, item_index, kind, content, parent_item_index) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        rusqlite::params![turn_id, item_index, kind.as_str(), content, parent_item_index],
+                        "INSERT INTO items (turn_id, item_index, kind, content, parent_item_index, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        rusqlite::params![
+                            turn_id,
+                            item_index,
+                            kind.as_str(),
+                            content,
+                            parent_item_index,
+                            category.map(ActivityCategory::as_str)
+                        ],
                     )?;
                     let item_id = conn.last_insert_rowid() as u32;
                     Ok(item_id)
@@ -722,7 +735,7 @@ fn turn_page(
 
     let mut turns = Vec::new();
     let mut item_stmt = conn.prepare_cached(
-        "SELECT id, item_index, kind, content, created_at, parent_item_index
+        "SELECT id, item_index, kind, content, created_at, parent_item_index, category
          FROM items WHERE turn_id = ?1 ORDER BY item_index ASC",
     )?;
     let mut approval_stmt = conn.prepare_cached(
@@ -756,6 +769,7 @@ fn turn_page(
                 content: r.get(3)?,
                 created_at: r.get(4)?,
                 parent_item_index: r.get(5)?,
+                category: r.get::<_, Option<String>>(6)?.and_then(|c| c.parse().ok()),
             })
         })?;
         let items: Vec<ItemSnapshot> = item_rows.collect::<std::result::Result<_, _>>()?;

@@ -391,6 +391,16 @@ pub enum ItemKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
+pub enum ActivityCategory {
+    Explore,
+    Edit,
+    Run,
+    Delegate,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Running,
     Completed,
@@ -484,6 +494,7 @@ pub struct ItemSnapshot {
     pub kind: ItemKind,
     pub content: String,
     pub parent_item_index: Option<u32>,
+    pub category: Option<ActivityCategory>,
     pub created_at: String,
 }
 
@@ -575,6 +586,7 @@ pub enum ThreadEvent {
         item_index: u32,
         kind: ItemKind,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
     },
     ItemDeltaBatch {
         item_index: u32,
@@ -585,6 +597,7 @@ pub enum ThreadEvent {
         kind: ItemKind,
         content: String,
         parent_item_index: Option<u32>,
+        category: Option<ActivityCategory>,
     },
     TurnCompleted {
         turn_index: u32,
@@ -2311,6 +2324,7 @@ mod tests {
                     content: "partial".into(),
                     created_at: "a".into(),
                     parent_item_index: None,
+                    category: None,
                 }],
                 error: Some(error.clone()),
                 approvals: vec![],

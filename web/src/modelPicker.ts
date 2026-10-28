@@ -176,6 +176,13 @@ export function favouriteModelList(
   return [...current, ...legacy];
 }
 
+/** The Effort `model` ends up with: the wanted one if it supports it, else its default, else its first level. */
+export function effortFor(model: ModelInfo, wanted: string | null): string | null {
+  return model.supportedEfforts.includes(wanted || "")
+    ? wanted
+    : model.defaultEffort ?? (model.supportedEfforts[0] || null);
+}
+
 /** What choosing `model` means: its Provider, and the current Effort if it supports it, else its default. */
 export function chooseModel(
   model: ModelInfo,
@@ -185,10 +192,7 @@ export function chooseModel(
 ): { provider: string; model: string; effort: string | null } {
   const provider =
     Object.entries(catalogs).find(([, list]) => list.some((m) => m.id === model.id))?.[0] ?? fallbackProvider;
-  const effort = model.supportedEfforts.includes(currentEffort || "")
-    ? currentEffort
-    : model.defaultEffort ?? (model.supportedEfforts[0] || null);
-  return { provider, model: model.id, effort };
+  return { provider, model: model.id, effort: effortFor(model, currentEffort) };
 }
 
 /** Favourite number `index` (1-based) as a Provider, model and Effort, or null when there is no such Favourite. */
@@ -201,4 +205,153 @@ export function resolveFavourite(
 ): { provider: string; model: string; effort: string | null } | null {
   const model = applyModelShortcut(index, favouriteModelList(catalogs, favourites, currentEffort));
   return model ? chooseModel(model, catalogs, currentEffort, fallbackProvider) : null;
+}
+
+// ---- Model picker state: Provider tab, search, highlighted Model and pending Effort ----
+
+export interface PickerContext {
+  /** Tab ids in Tab-key order: "favourites", then one per Provider. */
+  tabs: string[];
+  catalogs: Record<string, ModelInfo[]>;
+  favourites: string[];
+  currentProvider: string;
+  currentModel: string | null;
+  /** The Thread has Turns and its Provider can't switch Model mid-Thread. */
+  locked: boolean;
+}
+
+export interface PickerState {
+  tab: string;
+  search: string;
+  /** Family id of the highlighted Model. */
+  highlighted: string | null;
+  effort: string | null;
+}
+
+export type PickerAction =
+  | { type: "move"; delta: 1 | -1 }
+  | { type: "step-effort"; delta: 1 | -1 }
+  | { type: "cycle-tab"; delta: 1 | -1 }
+  | { type: "set-tab"; tab: string }
+  | { type: "search"; text: string }
+  | { type: "hover"; family: string }
+  | { type: "set-effort"; effort: string }
+  /** Re-aim the highlight after the rows changed underneath it (catalogs or Favourites arriving). */
+  | { type: "sync" };
+
+export interface PickerRow {
+  model: ModelInfo;
+  provider: string;
+  /** Can't be picked: same-Provider Model in a Thread whose Provider can't switch Model mid-Thread. */
+  locked: boolean;
+  isCurrent: boolean;
+}
+
+/** The rows of `tab` for `search`, current Models first then legacy ones. `effort` picks the variant of effort-split Models. */
+export function pickerRows(
+  ctx: PickerContext,
+  tab: string,
+  search: string,
+  effort: string | null
+): { current: PickerRow[]; legacy: PickerRow[] } {
+  const models =
+    tab === "favourites"
+      ? favouriteModelList(ctx.catalogs, ctx.favourites, effort)
+      : collapseEffortVariants(ctx.catalogs[tab] ?? [], effort);
+  const toRow = (model: ModelInfo): PickerRow => {
+    const provider =
+      tab === "favourites"
+        ? Object.entries(ctx.catalogs).find(([, list]) => list.some((m) => m.id === model.id))?.[0] ??
+          ctx.currentProvider
+        : tab;
+    const isCurrent =
+      provider === ctx.currentProvider &&
+      ctx.currentModel !== null &&
+      modelFamilyId(model.id) === modelFamilyId(ctx.currentModel);
+    return { model, provider, isCurrent, locked: provider === ctx.currentProvider && ctx.locked && !isCurrent };
+  };
+  const { current, legacy } = filterModels(models, search);
+  return { current: current.map(toRow), legacy: legacy.map(toRow) };
+}
+
+function flatRows(ctx: PickerContext, state: PickerState): PickerRow[] {
+  const { current, legacy } = pickerRows(ctx, state.tab, state.search, state.effort);
+  return [...current, ...legacy];
+}
+
+function highlightedRow(ctx: PickerContext, state: PickerState): PickerRow | undefined {
+  return flatRows(ctx, state).find((r) => !r.locked && modelFamilyId(r.model.id) === state.highlighted);
+}
+
+/** Highlight `family` (or nothing); the pending Effort stays when that Model supports it, else resets to its default. */
+function highlight(ctx: PickerContext, state: PickerState, family: string | null): PickerState {
+  if (family === null) return { ...state, highlighted: null };
+  const row = flatRows(ctx, state).find((r) => modelFamilyId(r.model.id) === family);
+  return { ...state, highlighted: family, effort: row ? effortFor(row.model, state.effort) : state.effort };
+}
+
+/** The Thread's current Model when the tab has it, else the first selectable row. */
+function startingFamily(ctx: PickerContext, state: PickerState): string | null {
+  const rows = flatRows(ctx, state).filter((r) => !r.locked);
+  const row = rows.find((r) => r.isCurrent) ?? rows[0];
+  return row ? modelFamilyId(row.model.id) : null;
+}
+
+/** A freshly opened picker: pending Effort is the Thread's, highlight starts on its Model. */
+export function openPicker(ctx: PickerContext, tab: string, effort: string | null): PickerState {
+  const state: PickerState = { tab, search: "", highlighted: null, effort };
+  return highlight(ctx, state, startingFamily(ctx, state));
+}
+
+export function pickerReduce(state: PickerState, action: PickerAction, ctx: PickerContext): PickerState {
+  switch (action.type) {
+    case "move": {
+      const rows = flatRows(ctx, state).filter((r) => !r.locked);
+      if (rows.length === 0) return state;
+      const at = rows.findIndex((r) => modelFamilyId(r.model.id) === state.highlighted);
+      const next =
+        at === -1 ? (action.delta === 1 ? 0 : rows.length - 1) : (at + action.delta + rows.length) % rows.length;
+      return highlight(ctx, state, modelFamilyId(rows[next]!.model.id));
+    }
+    case "step-effort": {
+      const efforts = highlightedRow(ctx, state)?.model.supportedEfforts ?? [];
+      if (efforts.length === 0) return state;
+      const at = efforts.indexOf(state.effort ?? "");
+      const next = Math.min(efforts.length - 1, Math.max(0, (at === -1 ? 0 : at) + action.delta));
+      return { ...state, effort: efforts[next]! };
+    }
+    case "set-effort": {
+      const efforts = highlightedRow(ctx, state)?.model.supportedEfforts ?? [];
+      return efforts.includes(action.effort) ? { ...state, effort: action.effort } : state;
+    }
+    case "cycle-tab": {
+      const at = Math.max(0, ctx.tabs.indexOf(state.tab));
+      const tab = ctx.tabs[(at + action.delta + ctx.tabs.length) % ctx.tabs.length]!;
+      return pickerReduce(state, { type: "set-tab", tab }, ctx);
+    }
+    case "set-tab": {
+      const moved = { ...state, tab: action.tab };
+      return highlight(ctx, moved, startingFamily(ctx, moved));
+    }
+    case "search": {
+      const searched = { ...state, search: action.text };
+      const first = flatRows(ctx, searched).find((r) => !r.locked);
+      return highlight(ctx, searched, first ? modelFamilyId(first.model.id) : null);
+    }
+    case "hover": {
+      const row = flatRows(ctx, state).find((r) => modelFamilyId(r.model.id) === action.family);
+      return !row || row.locked || state.highlighted === action.family ? state : highlight(ctx, state, action.family);
+    }
+    case "sync":
+      return highlightedRow(ctx, state) ? state : highlight(ctx, state, startingFamily(ctx, state));
+  }
+}
+
+/** What Enter would apply: the highlighted Model (the variant matching the pending Effort) and that Effort. */
+export function resolvePickerChoice(
+  state: PickerState,
+  ctx: PickerContext
+): { provider: string; model: string; effort: string | null } | null {
+  const row = highlightedRow(ctx, state);
+  return row ? { provider: row.provider, model: row.model.id, effort: effortFor(row.model, state.effort) } : null;
 }

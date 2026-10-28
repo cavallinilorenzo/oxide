@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   isClearCommand,
-  effortDigitShortcut,
-  isEffortMenuShortcut,
   isModelPickerShortcut,
   modelDigitShortcut,
   isNewThreadShortcut,
@@ -109,24 +107,20 @@ describe("isClearCommand", () => {
 const press = (over: Partial<Record<string, unknown>>) =>
   ({ key: "", code: "", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over }) as Parameters<typeof modelDigitShortcut>[0];
 
-describe("isModelPickerShortcut / isEffortMenuShortcut", () => {
-  it("match ⌘⇧M and ⌘⇧E, with Ctrl standing in for ⌘", () => {
+describe("isModelPickerShortcut", () => {
+  it("match ⌘⇧M, with Ctrl standing in for ⌘", () => {
     expect(isModelPickerShortcut(press({ key: "M", metaKey: true, shiftKey: true }))).toBe(true);
     expect(isModelPickerShortcut(press({ key: "m", ctrlKey: true, shiftKey: true }))).toBe(true);
-    expect(isEffortMenuShortcut(press({ key: "E", metaKey: true, shiftKey: true }))).toBe(true);
-    expect(isEffortMenuShortcut(press({ key: "e", ctrlKey: true, shiftKey: true }))).toBe(true);
   });
-  it("reject a missing Shift, Alt, both ⌘ and Ctrl, and the other letter", () => {
+  it("reject a missing Shift, Alt, both ⌘ and Ctrl, and the retired ⌘⇧E", () => {
     expect(isModelPickerShortcut(press({ key: "m", metaKey: true }))).toBe(false);
     expect(isModelPickerShortcut(press({ key: "M", metaKey: true, shiftKey: true, altKey: true }))).toBe(false);
     expect(isModelPickerShortcut(press({ key: "M", metaKey: true, ctrlKey: true, shiftKey: true }))).toBe(false);
     expect(isModelPickerShortcut(press({ key: "E", metaKey: true, shiftKey: true }))).toBe(false);
-    expect(isEffortMenuShortcut(press({ key: "M", metaKey: true, shiftKey: true }))).toBe(false);
   });
   it("do not collide with the existing bindings", () => {
     for (const key of ["n", "b", "j", "\\", ","]) {
       expect(isModelPickerShortcut(press({ key, metaKey: true }))).toBe(false);
-      expect(isEffortMenuShortcut(press({ key, metaKey: true, shiftKey: true }))).toBe(false);
     }
   });
 });
@@ -146,19 +140,5 @@ describe("modelDigitShortcut", () => {
     expect(modelDigitShortcut(press({ code: "Digit1", metaKey: true, ctrlKey: true }))).toBeNull();
     expect(modelDigitShortcut(press({ code: "Digit1", metaKey: true, altKey: true }))).toBeNull();
     expect(modelDigitShortcut(press({ code: "Digit1", metaKey: true, shiftKey: true }))).toBeNull();
-  });
-});
-
-describe("effortDigitShortcut", () => {
-  it("accepts a bare digit or one with ⌘ / Ctrl", () => {
-    expect(effortDigitShortcut(press({ code: "Digit3" }))).toBe(3);
-    expect(effortDigitShortcut(press({ code: "Digit3", metaKey: true }))).toBe(3);
-    expect(effortDigitShortcut(press({ code: "Digit3", ctrlKey: true }))).toBe(3);
-  });
-  it("rejects Alt, Shift, both modifiers and 0", () => {
-    expect(effortDigitShortcut(press({ code: "Digit3", altKey: true }))).toBeNull();
-    expect(effortDigitShortcut(press({ code: "Digit3", shiftKey: true }))).toBeNull();
-    expect(effortDigitShortcut(press({ code: "Digit3", metaKey: true, ctrlKey: true }))).toBeNull();
-    expect(effortDigitShortcut(press({ code: "Digit0" }))).toBeNull();
   });
 });

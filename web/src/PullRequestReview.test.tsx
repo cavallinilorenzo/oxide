@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type PullRequestDetail } from "./bindings";
-import { PullRequestReview } from "./PullRequestBrowser";
+import { CHECKS_REFRESH_MS, PullRequestReview } from "./PullRequestBrowser";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -243,4 +243,24 @@ it("reads the conversation like the web: avatar, name, what they did and when", 
   expect(entries[0].querySelector("header")!.textContent).toContain("bob");
   expect(entries[0].querySelector("header")!.textContent).toContain("requested changes");
   expect(entries[1].querySelector("header")!.textContent).toContain("Author");
+});
+
+it("reloads sooner while checks are still running, and stops once they are done", async () => {
+  vi.useFakeTimers();
+  try {
+    const running = detail({ checks: [{ name: "rust", state: "pending", url: null }] });
+    vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: running });
+    await render();
+    const calls = vi.mocked(commands.pullRequestDetail).mock.calls.length;
+    await act(async () => void vi.advanceTimersByTime(CHECKS_REFRESH_MS));
+    expect(vi.mocked(commands.pullRequestDetail).mock.calls.length).toBeGreaterThan(calls);
+
+    vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail() });
+    await act(async () => void vi.advanceTimersByTime(CHECKS_REFRESH_MS));
+    const settled = vi.mocked(commands.pullRequestDetail).mock.calls.length;
+    await act(async () => void vi.advanceTimersByTime(CHECKS_REFRESH_MS * 3));
+    expect(vi.mocked(commands.pullRequestDetail).mock.calls.length).toBe(settled);
+  } finally {
+    vi.useRealTimers();
+  }
 });

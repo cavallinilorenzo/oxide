@@ -174,8 +174,12 @@ export function App() {
   // A commit or push bumps it too, so the header and the Diff Surface reload.
   const [gitRevision, setGitRevision] = useState(0);
   const onGitChanged = useCallback(() => setGitRevision((n) => n + 1), []);
-  const threadsKey =
-    (threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "") + `#${gitRevision}`;
+  const threadStatuses = threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "";
+  const threadsKey = `${threadStatuses}#${gitRevision}`;
+  // An agent can open a pull request during a Turn, which no change the user makes reports,
+  // so the Pull request tab reloads whenever a Thread changes status.
+  const [turnRevision, setTurnRevision] = useState(0);
+  useEffect(() => setTurnRevision((n) => n + 1), [threadStatuses]);
 
   // Stable: it reaches memoized TurnViews through context.
   const openDiff = useCallback((hint?: string) => {
@@ -725,7 +729,7 @@ export function App() {
               <Suspense fallback={null}>
                 <PullRequestPanel
                   projectId={selected.id}
-                  refreshKey={gitRevision}
+                  refreshKey={gitRevision + turnRevision}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
                 />

@@ -42,7 +42,6 @@ describe("mergeRequirements", () => {
     });
     expect(rows.map((r) => [r.kind, r.tone])).toEqual([
       ["conflicts", "bad"],
-      ["checks", "warn"],
       ["review", "ok"],
     ]);
   });

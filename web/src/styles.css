@@ -94,7 +94,7 @@ button.pending:disabled { color: #f0f6fc; opacity: 1; background: var(--gh-btn);
 .icon-btn:hover:not(:disabled) { background: var(--bg4); color: var(--fg); border-color: transparent; }
 .icon-btn[aria-pressed="true"] { background: var(--bg4); color: var(--fg); }
 .icon-btn.sm { min-width: var(--control-sm); height: var(--control-sm); min-height: var(--control-sm); padding: var(--space-1); }
-button.link { padding: 0; background: none; border: 0; color: var(--acc2); }
+button.link { font-weight: inherit; min-height: 0; padding: 0; background: none; border: 0; color: var(--acc2); }
 button.link:hover { text-decoration: underline; }
 input, textarea, select {
   font: inherit;
@@ -819,7 +819,7 @@ html.macos .header,
 .pr-views .pr-search-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 12px; border: 1px solid var(--gh-border); border-radius: 6px; background: var(--gh-field); color: var(--faint); }
 .pr-views .pr-search-field:focus-within { border-color: var(--gh-blue); box-shadow: inset 0 0 0 1px var(--gh-blue); color: var(--fg); }
 .pr-views .pr-search-field input { flex: 1; min-width: 0; min-height: 0; border: 0; background: none; padding: 0; outline: none; box-shadow: none; }
-.pr-views .pr-chip { border-radius: 99px; padding: 0 var(--space-3); background: none; border-color: var(--line-strong); color: var(--dim); }
+.pr-views .pr-chip { border-radius: 99px; padding: 0 var(--space-3); background: none; border-color: var(--gh-border); color: var(--dim); }
 .pr-views .pr-chip[aria-pressed="true"] { background: #1f6ad526; border-color: var(--acc2); color: var(--acc2); }
 .pr-views .pr-list { gap: 0; }
 .pr-views .pr-list li + li { border-top: 1px solid var(--line); }
@@ -1309,7 +1309,7 @@ html.macos .header,
 .pr-views .pr-create-actions button:first-child { margin-left: 0; }
 
 /* Shortcut chip on a button, as GitHub draws it. */
-.pr-views .kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: #0000002e; font: inherit; font-size: 12px; font-weight: 500; }
+.kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: #0000002e; font: inherit; font-size: 12px; font-weight: 500; }
 
 .pr-views .issue-new .primary { height: 36px; }
 .pr-views .pr-chip { border-color: var(--gh-border); min-height: 32px; font-size: 14px; }

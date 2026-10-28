@@ -623,7 +623,7 @@ html.macos .header,
 .terminal-host .xterm-viewport { background: #0a0b0e !important; }
 
 /* ── Tools panel and its Surfaces ─────────────────────────── */
-.tools { position: relative; width: var(--tools-width, clamp(288px, 32vw, 600px)); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); container-type: inline-size; }
+.tools { position: relative; width: var(--tools-width, clamp(496px, 32vw, 600px)); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); container-type: inline-size; }
 .tools > section, .tools > .pr-views, .tools > .issues-surface { flex: 1; min-height: 0; }
 .surface-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex: none; }
 .surface-note { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); background: var(--bg2); }

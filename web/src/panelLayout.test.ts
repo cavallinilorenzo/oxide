@@ -2,9 +2,9 @@ import { expect, it } from "vitest";
 import { fileTreeLayout, workspaceLayout } from "./panelLayout";
 
 it("reserves a readable Thread with both panels visible at every supported width", () => {
-  for (const width of [900, 1024, 1280, 1920]) {
+  for (const width of [1064, 1280, 1920]) {
     for (const sidebar of [null, 208, 400, 9000]) {
-      for (const tools of [null, 288, 800, 9000]) {
+      for (const tools of [null, 496, 800, 9000]) {
         const layout = workspaceLayout(width, 516, { sidebar, tools, terminal: 9000 }, true);
         expect(width - layout.sidebar.value - layout.tools.value).toBeGreaterThanOrEqual(360);
         for (const panel of Object.values(layout)) {
@@ -19,9 +19,9 @@ it("reserves a readable Thread with both panels visible at every supported width
 
 it("restores preferred wide-window dimensions after a temporary narrow fit", () => {
   const preferred = { sidebar: 400, tools: 800, terminal: 500 };
-  const narrow = workspaceLayout(900, 516, preferred, true);
-  expect(narrow.sidebar.value).toBe(252);
-  expect(narrow.tools.value).toBe(288);
+  const narrow = workspaceLayout(1064, 516, preferred, true);
+  expect(narrow.sidebar.value).toBe(208);
+  expect(narrow.tools.value).toBe(496);
   expect(narrow.terminal.value).toBe(236);
   const wide = workspaceLayout(1920, 1000, preferred, true);
   expect(wide.sidebar.value).toBe(400);
@@ -32,10 +32,10 @@ it("restores preferred wide-window dimensions after a temporary narrow fit", () 
 
 it("does not reserve hidden Tools space in Settings or a focused workspace", () => {
   const preferred = { sidebar: 400, tools: 800, terminal: null };
-  const layout = workspaceLayout(900, 516, preferred, false);
+  const layout = workspaceLayout(1064, 516, preferred, false);
   expect(layout.sidebar.value).toBe(400);
   expect(layout.sidebar.max).toBe(400);
-  expect(workspaceLayout(900, 516, preferred, true).sidebar.value).toBe(252);
+  expect(workspaceLayout(1064, 516, preferred, true).sidebar.value).toBe(208);
 });
 
 it("keeps independent file tree dimensions when orientation changes", () => {

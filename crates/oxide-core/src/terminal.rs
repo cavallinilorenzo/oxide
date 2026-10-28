@@ -108,6 +108,15 @@ impl TerminalSession {
             .master
             .take_writer()
             .map_err(|e| Error::Terminal(format!("write terminal input: {e}")))?;
+        #[cfg(unix)]
+        if blocks {
+            // Start the interactive bash shell without an intermediate /bin/sh
+            // so PS1 survives startup; keep Ctrl+C from terminating bash itself.
+            writer
+                .write_all(b"stty -echo\ntrap ':' INT\n")
+                .and_then(|_| writer.flush())
+                .map_err(|e| Error::Terminal(format!("configure terminal shell: {e}")))?;
+        }
         let subscribers = Arc::new(Mutex::new(Vec::<Sender<Vec<u8>>>::new()));
         let output_subscribers = Arc::clone(&subscribers);
         std::thread::spawn(move || read_output(reader, output_subscribers, blocks));
@@ -237,23 +246,16 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
     }
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(if blocks {
-        "/bin/sh".into()
+        "/bin/bash".into()
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
     });
     #[cfg(not(windows))]
     if blocks {
         let prompt = r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#;
-        command.env("OXIDE_PS1", prompt);
+        command.env("PS1", prompt);
         command.env("PS2", "");
-        // macOS's /bin/sh ignores this dynamic PS1 prompt, so block completion
-        // markers never fire and Ctrl+C can terminate the shell itself. Pass
-        // the prompt through an ordinary variable because the wrapper shell
-        // clears PS1 on startup.
-        command.args([
-            "-c",
-            "stty -echo; exec env \"PS1=$OXIDE_PS1\" PS2='' /bin/bash --noprofile --norc -m -i",
-        ]);
+        command.args(["--noprofile", "--norc", "-m", "-i"]);
     }
     command.cwd(dunce::simplified(cwd));
     command.env("TERM", "xterm-256color");

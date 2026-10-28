@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { ArrowLeftIcon, IssueOpenedIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import { useQuery } from "./queryCache";
@@ -40,7 +41,7 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
             <ArrowLeftIcon size={14} /> Issues
           </button>
         </div>
-        <p className="pr-empty">Loading…</p>
+        <Skeleton kind="form" label="Loading issue templates…" />
       </div>
     );
   }

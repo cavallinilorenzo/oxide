@@ -167,7 +167,7 @@ it("never shows one Project's issues in another", async () => {
   vi.mocked(commands.listIssues).mockImplementation(() => new Promise(() => {}));
   await remount(2);
   expect(host.textContent).not.toContain("Crash on startup");
-  expect(host.textContent).toContain("Loading…");
+  expect(host.querySelector('.skeleton[aria-busy="true"]')).not.toBeNull();
 });
 
 it("keeps the list and notes the failure when a refresh fails; a first failure shows the error", async () => {
@@ -209,4 +209,28 @@ it("lists an issue created or closed here when coming back, without waiting for 
   await act(async () => button("Close as completed").click());
   await act(async () => button("Issues").click());
   expect(host.textContent).toContain("No open issues.");
+});
+
+
+it("shows an accessible skeleton until issues arrive, then removes it even for an empty list", async () => {
+  let release!: (value: Awaited<ReturnType<typeof commands.listIssues>>) => void;
+  vi.mocked(commands.listIssues).mockReturnValue(new Promise((resolve) => { release = resolve; }));
+  await render();
+  const loading = host.querySelector('.skeleton[role="status"]');
+  expect(loading?.getAttribute("aria-busy")).toBe("true");
+  expect(loading?.textContent).toContain("Loading issues");
+  expect(loading?.querySelector("button, input, [tabindex]")).toBeNull();
+  await act(async () => release({ status: "ok", data: [] }));
+  expect(host.querySelector(".skeleton")).toBeNull();
+  expect(host.textContent).toContain("No open issues.");
+});
+
+it("replaces the loading skeleton with an error when GitHub fails", async () => {
+  let release!: (value: Awaited<ReturnType<typeof commands.listIssues>>) => void;
+  vi.mocked(commands.listIssues).mockReturnValue(new Promise((resolve) => { release = resolve; }));
+  await render();
+  expect(host.querySelector(".skeleton")).not.toBeNull();
+  await act(async () => release({ status: "error", error: { message: "GitHub is offline" } }));
+  expect(host.querySelector(".skeleton")).toBeNull();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("GitHub is offline");
 });

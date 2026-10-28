@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
@@ -158,7 +159,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
         </div>
       )}
       {push.dialog}
-      {loaded.state === "loading" && <div className="surface-empty">Loading…</div>}
+      {loaded.state === "loading" && <Skeleton kind="diff" label="Loading changes…" />}
       {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}
       {loaded.state === "ready" && files.length === 0 && (
         <div className="surface-empty">

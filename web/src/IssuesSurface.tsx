@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { CommentIcon, PlusIcon, SearchIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import { invalidateQueries, useQuery } from "./queryCache";
@@ -166,7 +167,7 @@ function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) 
       </div>
       <div className="pr-scroll">
         <RefreshNotice query={list} />
-        {list.state === "loading" && <p className="pr-empty">Loading…</p>}
+        {list.state === "loading" && <Skeleton label="Loading issues…" />}
         {list.state === "error" && (
           <p role="alert" className="pr-empty error">
             {list.message}

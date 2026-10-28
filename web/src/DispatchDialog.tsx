@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { useEffect, useState } from "react";
 import { commands, type PermissionMode, type Settings, type Thread } from "./bindings";
 import {
@@ -89,7 +90,7 @@ export function DispatchDialog({ projectId, issue, onClose, onDispatched }: Disp
       >
         <h2>{issue ? `Start a Thread from #${issue.number}` : "Dispatch a task"}</h2>
         {form === null || settings === null ? (
-          <p className="empty">Loading…</p>
+          <Skeleton kind="form" label="Loading task settings…" />
         ) : (
           <>
             <label>

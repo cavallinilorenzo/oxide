@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import {
@@ -136,7 +137,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
             #{outcome.number} {outcome.kind}
           </p>
         )}
-        {list.state === "loading" && <p className="pr-empty">Loading…</p>}
+        {list.state === "loading" && <Skeleton label="Loading pull requests…" />}
         {list.state === "error" && (
           <p role="alert" className="pr-empty error">
             {list.message}
@@ -272,7 +273,7 @@ export function PullRequestReview({
     return (
       <div className="pr-review" aria-busy>
         {nav}
-        <p className="pr-empty">Loading…</p>
+        <Skeleton kind="detail" label="Loading pull request…" />
       </div>
     );
   }

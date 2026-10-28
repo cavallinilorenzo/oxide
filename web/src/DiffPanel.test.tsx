@@ -65,7 +65,7 @@ it("remembers each scope's own diff", async () => {
   await render("uncommitted");
   vi.mocked(commands.gitDiff).mockImplementation(() => new Promise(() => {}));
   await render("branch");
-  expect(host.textContent).toContain("Loading…");
+  expect(host.querySelector('.skeleton[aria-busy="true"]')).not.toBeNull();
   await render("uncommitted");
   expect(host.textContent).toContain("first.rs");
 });

@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   ChevronDownIcon,
@@ -65,7 +66,7 @@ function FilesTree({ projectId, threadId }: FilesPanelProps) {
   function renderDir(path: string, depth: number) {
     const indent = { paddingLeft: 8 + depth * 16 };
     const listing = listings[path];
-    if (listing === undefined) return <div className="files-note" style={indent}>Loading…</div>;
+    if (listing === undefined) return <Skeleton kind="tree" label="Loading directory…" rows={depth === 0 ? 7 : 3} style={indent} />;
     if ("error" in listing) return <div className="files-note error" style={indent}>{listing.error}</div>;
     if (listing.length === 0) return <div className="files-note" style={indent}>Empty</div>;
     return listing.map((entry) => (
@@ -154,7 +155,7 @@ function FileViewer({ projectId, threadId, path }: { projectId: number; threadId
           <LockIcon size={12} /> read-only
         </span>
       </div>
-      {loaded.state === "loading" && <div className="files-note">Loading…</div>}
+      {loaded.state === "loading" && <Skeleton kind="code" label="Loading file…" />}
       {loaded.state === "error" && <div className="files-note error">{loaded.message}</div>}
       {loaded.state === "ready" && <FileBody file={loaded.file} html={loaded.html} />}
     </div>

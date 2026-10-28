@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -718,7 +719,7 @@ export function App() {
               </button>
             </nav>
             {activeTool === "Diff" && selected && (
-              <Suspense fallback={null}>
+              <Suspense fallback={<Skeleton kind="diff" label="Loading changes…" />}>
                 <DiffPanel
                   projectId={selected.id}
                   threadId={currentThreadId}
@@ -737,7 +738,7 @@ export function App() {
               </Suspense>
             )}
             {activeTool === "Pull request" && selected && (
-              <Suspense fallback={null}>
+              <Suspense fallback={<Skeleton kind="list" label="Loading pull requests…" />}>
                 <PullRequestPanel
                   projectId={selected.id}
                   refreshKey={gitRevision + turnRevision.count}
@@ -747,12 +748,12 @@ export function App() {
               </Suspense>
             )}
             {activeTool === "Files" && selected && (
-              <Suspense fallback={null}>
+              <Suspense fallback={<Skeleton kind="tree" label="Loading files…" />}>
                 <FilesPanel projectId={selected.id} threadId={currentThreadId} />
               </Suspense>
             )}
             {activeTool === "Issues" && selected && (
-              <Suspense fallback={null}>
+              <Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
                 <IssuesSurface
                   projectId={selected.id}
                   onDispatched={(thread) =>

@@ -108,6 +108,10 @@ export async function openReview(engine = "chromium", scenario = "completed") {
   await page.goto(process.env.OXIDE_REVIEW_URL ?? "http://127.0.0.1:1420");
   await page.locator(".thread-title").waitFor();
   if (scenario !== "empty") await page.locator(".agent-message").waitFor();
+  for (const name of ["Toggle tools panel", "Toggle Terminal"]) {
+    const toggle = page.getByRole("button", { name, exact: true });
+    if (await toggle.getAttribute("aria-pressed") !== "true") await toggle.click();
+  }
   await page.locator(".files-row").first().waitFor();
   await page.locator(".terminal-host .xterm").waitFor();
   await waitForLayout(page);

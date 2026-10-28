@@ -2,7 +2,7 @@ import { ArrowLeftIcon, IssueOpenedIcon } from "@primer/octicons-react";
 import { useState } from "react";
 import { commands, type IssueSummary, type PullRequestLabel } from "./bindings";
 import { canSubmitIssue } from "./issueView";
-import { Markdown } from "./PullRequestMarkdown";
+import { MarkdownEditor } from "./MarkdownEditor";
 import { Working } from "./PullRequestMerge";
 import { Avatar } from "./Avatar";
 import { Field, LabelChip, Picker, useCandidates } from "./PullRequestPeople";
@@ -19,7 +19,6 @@ interface IssueCreateProps {
 export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [preview, setPreview] = useState(false);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [labels, setLabels] = useState<PullRequestLabel[]>([]);
   const [busy, setBusy] = useState(false);
@@ -27,6 +26,12 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
   const { candidates, load } = useCandidates(projectId);
 
   const ready = canSubmitIssue(title) && !busy;
+  const submitOnModEnter = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      e.currentTarget.form?.requestSubmit();
+    }
+  };
 
   async function submit() {
     if (!ready) return;
@@ -68,7 +73,9 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
           <h3>New issue</h3>
         </div>
         <div className="pr-create-field">
-          <label htmlFor="issue-title">Title</label>
+          <label htmlFor="issue-title">
+            Add a title <span className="required" aria-hidden>*</span>
+          </label>
           <input
             id="issue-title"
             placeholder="Title"
@@ -78,39 +85,16 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
           />
         </div>
         <div className="pr-create-field">
-          <div className="issue-write-head">
-            <label htmlFor="issue-body">
-              Description <span className="pr-field-optional">optional</span>
-            </label>
-            <div className="pr-seg" role="group" aria-label="Description mode">
-              <button type="button" aria-pressed={!preview} onClick={() => setPreview(false)}>
-                Write
-              </button>
-              <button type="button" aria-pressed={preview} onClick={() => setPreview(true)}>
-                Preview
-              </button>
-            </div>
-          </div>
-          {preview ? (
-            <div className="issue-preview">
-              {body.trim() ? <Markdown source={body} /> : <p className="pr-field-empty">Nothing to preview.</p>}
-            </div>
-          ) : (
-            <textarea
-              id="issue-body"
-              placeholder="Add a description, Markdown is supported"
-              rows={8}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  e.currentTarget.form?.requestSubmit();
-                }
-              }}
-            />
-          )}
-          <span className="pr-create-hint">Markdown supported</span>
+          <label htmlFor="issue-body">Description</label>
+          <MarkdownEditor
+            id="issue-body"
+            label="Description"
+            placeholder="Add a description, Markdown is supported"
+            rows={8}
+            value={body}
+            onChange={setBody}
+            onKeyDown={submitOnModEnter}
+          />
         </div>
         <section className="pr-section issue-create-details" aria-label="Details">
           <Field
@@ -192,7 +176,7 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
               title={`Create (${shortcutLabel}${shortcutLabel === "⌘" ? "↩" : "Enter"})`}
             >
               <Working on={busy} label="Creating…">
-                <IssueOpenedIcon size={14} /> Create issue
+                Create issue <kbd className="kbd">{shortcutLabel}{shortcutLabel === "⌘" ? "↩" : "Enter"}</kbd>
               </Working>
             </button>
           </div>

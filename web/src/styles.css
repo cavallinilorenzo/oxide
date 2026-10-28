@@ -1293,13 +1293,67 @@ html.macos .header,
 .pr-views .issue-title-edit { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .pr-views .issue-title-edit input { flex: 1 1 160px; min-width: 0; }
 .pr-views .issue-body-edit { display: grid; gap: var(--space-2); padding: var(--space-2); }
-.pr-views .issue-body-edit textarea { width: 100%; resize: vertical; line-height: 1.5; }
 .pr-views .issue-no-body { margin: 0; padding: 8px 10px; font-style: italic; }
-.pr-views .issue-write-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.pr-views .issue-preview { min-height: 120px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg2); }
-.pr-views .pr-create-field textarea { width: 100%; resize: vertical; line-height: 1.5; }
 .pr-views .issue-create .pr-scroll { gap: var(--space-4); }
-.pr-views .issue-create textarea { min-height: 180px; padding: var(--space-2); }
 .pr-views .issue-create-details { border-top: 1px solid var(--line); padding-top: var(--space-1); gap: 0; }
 .pr-views .issue-create-details .pr-field { padding: 10px 0; }
 .pr-views .pr-create-actions button:first-child { margin-left: 0; }
+
+/* Issues: fields and buttons as GitHub draws them (Primer dark): a 1px grey border, flat
+   buttons, and a blue border, not an offset ring, on the field being typed in. */
+.issues-ui {
+  --gh-border: #3d444d;
+  --gh-btn: #212830;
+  --gh-btn-hover: #262c36;
+  --gh-btn-active: #2d333b;
+  --gh-blue: #1f6feb;
+  --gh-field: var(--bg2);
+}
+.issues-ui :where(input, textarea) { background: var(--gh-field); border: 1px solid var(--gh-border); border-radius: 6px; padding: 5px 12px; min-height: 32px; font-size: 14px; line-height: 20px; box-shadow: none; transition: none; }
+.issues-ui :where(input, textarea):focus,
+.issues-ui :where(input, textarea):focus-visible { outline: none; border-color: var(--gh-blue); box-shadow: inset 0 0 0 1px var(--gh-blue); }
+.issues-ui :where(input, textarea)::placeholder { color: #9198a1; }
+.issues-ui :where(input, textarea):disabled { opacity: .6; }
+
+.issues-ui :where(button:not(.primary, .link, .icon-btn, .pr-row, .pr-back, .pr-github, .md-tool, .pr-toggle, .pr-chip)) { background: var(--gh-btn); border: 1px solid var(--gh-border); border-radius: 6px; min-height: 32px; padding: 0 12px; font-size: 14px; font-weight: 500; color: #f0f6fc; transition: none; }
+.issues-ui :where(button:not(.primary, .link, .icon-btn, .pr-row, .pr-back, .pr-github, .md-tool, .pr-toggle, .pr-chip)):hover:not(:disabled) { background: var(--gh-btn-hover); border-color: var(--gh-border); }
+.issues-ui :where(button:not(.primary, .link, .icon-btn, .pr-row, .pr-back, .pr-github, .md-tool, .pr-toggle, .pr-chip)):active:not(:disabled) { background: var(--gh-btn-active); }
+.issues-ui :where(button:not(.primary, .link, .icon-btn, .pr-row, .pr-back, .pr-github, .md-tool, .pr-toggle, .pr-chip)):disabled { background: var(--gh-btn); border-color: var(--gh-border); color: #656c76; opacity: .7; }
+.issues-ui button:focus-visible { outline: 2px solid var(--gh-blue); outline-offset: -2px; }
+.issues-ui .primary { min-height: 32px; font-size: 14px; border-radius: 6px; }
+.issues-ui .kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; background: #0000002e; font: inherit; font-size: 12px; font-weight: 500; }
+
+.issues-ui .pr-search-field { height: 32px; border-color: var(--gh-border); background: var(--gh-field); border-radius: 6px; padding: 0 12px; }
+.issues-ui .pr-search-field:focus-within { border-color: var(--gh-blue); box-shadow: inset 0 0 0 1px var(--gh-blue); color: var(--fg); }
+.issues-ui .pr-search-field input { padding: 0; min-height: 0; border: 0; box-shadow: none; background: none; }
+.issues-ui .pr-search-field input:focus { box-shadow: none; }
+.issues-ui .issue-new .primary { height: 36px; }
+.issues-ui .pr-chip { border-color: var(--gh-border); min-height: 32px; font-size: 14px; }
+.issues-ui .pr-seg { border-color: var(--gh-border); border-radius: 6px; }
+.issues-ui .pr-seg > button { background: var(--gh-btn); min-height: 30px; padding: 0 12px; font-size: 14px; font-weight: 500; color: #f0f6fc; border-radius: 0; }
+.issues-ui .pr-seg > button + button { border-left: 1px solid var(--gh-border); }
+.issues-ui .pr-seg > button:hover:not(:disabled) { background: var(--gh-btn-hover); border-color: transparent; }
+.issues-ui .pr-seg > button[aria-pressed="true"] { background: var(--gh-btn-active); }
+
+.issues-ui .pr-create-field > label { font-size: 14px; font-weight: 600; }
+.issues-ui .required { margin-left: 2px; color: var(--red); }
+.issues-ui .pr-create-field { gap: 8px; }
+
+/* The Write / Preview box, as GitHub's comment editor. */
+.issues-ui .md-editor { border: 1px solid var(--gh-border); border-radius: 6px; overflow: hidden; min-width: 0; }
+.issues-ui .md-editor:focus-within { border-color: var(--gh-blue); box-shadow: inset 0 0 0 1px var(--gh-blue); }
+.issues-ui .md-editor-head { display: flex; align-items: stretch; justify-content: space-between; flex-wrap: wrap; background: var(--bg3); border-bottom: 1px solid var(--gh-border); }
+.issues-ui .md-tabs { display: flex; }
+.issues-ui .md-tabs button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 0; background: none; font-size: 14px; color: var(--dim); box-shadow: none; }
+.issues-ui .md-tabs button[aria-selected="true"] { background: var(--gh-field); color: var(--fg-bright); border-right: 1px solid var(--gh-border); margin-bottom: -1px; }
+.issues-ui .md-tabs button[aria-selected="true"]:first-child { border-right: 1px solid var(--gh-border); }
+.issues-ui .md-tabs button:hover:not([aria-selected="true"]) { background: none; color: var(--fg); }
+.issues-ui .md-tools { display: flex; align-items: center; gap: 2px; padding: 0 8px; flex-wrap: wrap; }
+.issues-ui .md-tool { min-width: 28px; height: 28px; min-height: 28px; padding: 0; justify-content: center; background: none; border: 0; color: var(--dim); }
+.issues-ui .md-tool:hover:not(:disabled) { background: var(--gh-btn-hover); color: var(--fg-bright); border: 0; }
+.issues-ui .md-editor textarea { display: block; width: 100%; border: 0; border-radius: 0; box-shadow: none; resize: vertical; min-height: 96px; padding: 10px 12px; background: var(--gh-field); }
+.issues-ui .md-editor textarea:focus { box-shadow: none; }
+.issues-ui .md-preview { min-height: 96px; padding: 10px 12px; background: var(--gh-field); }
+.issues-ui .issue-body-edit { padding: var(--space-2); }
+.issues-ui .pr-compose-box { justify-items: stretch; }
+.issues-ui .pr-compose-box > button[type="submit"] { justify-self: end; }

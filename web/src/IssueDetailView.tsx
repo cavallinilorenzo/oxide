@@ -17,6 +17,7 @@ import { Avatar } from "./Avatar";
 import { DispatchDialog } from "./DispatchDialog";
 import { IssueStateIcon } from "./IssueStateIcon";
 import { canSubmitComment, ISSUE_PHASE_LABEL, issuePhase, titleChanged } from "./issueView";
+import { MarkdownEditor } from "./MarkdownEditor";
 import { Popover } from "./Popover";
 import { Markdown } from "./PullRequestMarkdown";
 import { Working } from "./PullRequestMerge";
@@ -293,12 +294,12 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
                 )
               ) : (
                 <div className="issue-body-edit">
-                  <textarea
-                    aria-label="Description"
+                  <MarkdownEditor
+                    label="Description"
                     rows={8}
                     value={bodyDraft}
                     autoFocus
-                    onChange={(e) => setBodyDraft(e.target.value)}
+                    onChange={setBodyDraft}
                   />
                   <div className="pr-merge-row">
                     <button
@@ -416,12 +417,12 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
           >
             {detail.viewer && <Avatar login={detail.viewer} size={24} />}
             <div className="pr-compose-box">
-              <textarea
-                aria-label="Comment"
+              <MarkdownEditor
+                label="Comment"
                 placeholder="Leave a comment"
                 rows={3}
                 value={comment}
-                onChange={(e) => setComment(e.target.value)}
+                onChange={setComment}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();

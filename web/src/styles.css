@@ -1245,6 +1245,15 @@ section.terminal.terminal-hidden { display: none; }
 .settings .provider-hint, .settings .provider-warning { width: 100%; max-width: none; margin: 0; overflow-wrap: anywhere; }
 .settings .actions { position: sticky; bottom: -24px; display: flex; align-items: center; gap: 8px; padding: 12px 0; background: var(--bg); border-top: 1px solid var(--line); z-index: 1; }
 .settings-save-status { color: var(--green); }
+.shortcut-group { display: flex; flex-direction: column; gap: 4px; }
+.shortcut-group + .shortcut-group { padding-top: 12px; border-top: 1px solid var(--line); }
+.shortcut-group-title { margin-bottom: 4px; color: var(--dim); font-size: 12px; font-weight: 500; }
+.shortcut-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 32px; }
+.shortcut-label { min-width: 0; overflow-wrap: anywhere; }
+.shortcut-key { min-width: 96px; justify-content: center; }
+.shortcut-key[aria-pressed="true"] { border-color: var(--acc); color: var(--dim); }
+.shortcut-error { grid-column: 1 / -1; }
+.shortcut-reset-all { display: flex; }
 .settings .error { margin: 0; }
 @container (max-width: 560px) {
   .settings-fields { grid-template-columns: minmax(0, 1fr); }

@@ -36,7 +36,8 @@ import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
-import { isClearCommand, isModelPickerShortcut, modelDigitShortcut, shortcutLabel, stopsTurn } from "./shortcuts";
+import { formatAccelerator, isClearCommand, matchesAccelerator, modelDigitShortcut, stopsTurn } from "./shortcuts";
+import { useShortcuts } from "./useShortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
@@ -170,6 +171,7 @@ export function ThreadView({
   const [draftProvider, setDraftProvider] = useState<string>("claude");
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
+  const shortcuts = useShortcuts();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
@@ -660,7 +662,7 @@ export function ThreadView({
   const modelShortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     modelShortcutRef.current = (e) => {
-      if (isModelPickerShortcut(e)) {
+      if (matchesAccelerator(e, shortcuts.modelPicker)) {
         e.preventDefault();
         if (isTurnActive || sending) return;
         if (modelPickerOpen) {
@@ -1073,7 +1075,7 @@ export function ThreadView({
               onClick={openModelPicker}
               disabled={isTurnActive || sending}
               aria-label={`Model: ${displayModel}${effortName ? `, Effort: ${effortName}` : ""}`}
-              title={`Model: ${displayModel}${effortName ? `, Effort: ${effortName}` : ""} (${shortcutLabel}⇧M, /model)`}
+              title={`Model: ${displayModel}${effortName ? `, Effort: ${effortName}` : ""} (${formatAccelerator(shortcuts.modelPicker)}, /model)`}
             >
               <ProviderMark provider={currentProvider} size={14} />
               <span className="t">{displayModel}{effortName && ` · ${effortName}`}</span>

@@ -70,6 +70,136 @@ impl Default for Providers {
     }
 }
 
+/// Keyboard shortcuts as accelerators such as `Mod+Shift+M`: `Mod` is ⌘ on macOS and Ctrl
+/// elsewhere, then optional `Alt` and `Shift`, then one key (`N`, `\`, `ArrowUp`, `F5`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shortcuts {
+    pub new_thread: String,
+    pub open_project: String,
+    pub model_picker: String,
+    pub pull_requests: String,
+    pub issues: String,
+    pub terminal: String,
+    pub files: String,
+    pub diff: String,
+    pub previous_thread: String,
+    pub next_thread: String,
+    pub toggle_tools: String,
+    pub toggle_board: String,
+    pub open_settings: String,
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        let s = |accelerator: &str| accelerator.to_string();
+        Self {
+            new_thread: s("Mod+N"),
+            open_project: s("Mod+Shift+N"),
+            model_picker: s("Mod+Shift+M"),
+            pull_requests: s("Mod+Shift+P"),
+            issues: s("Mod+Shift+I"),
+            terminal: s("Mod+Shift+T"),
+            files: s("Mod+Shift+F"),
+            diff: s("Mod+Shift+D"),
+            previous_thread: s("Mod+ArrowUp"),
+            next_thread: s("Mod+ArrowDown"),
+            toggle_tools: s("Mod+\\"),
+            toggle_board: s("Mod+B"),
+            open_settings: s("Mod+,"),
+        }
+    }
+}
+
+impl Shortcuts {
+    /// Every shortcut as `(settings key, accelerator)`.
+    fn slots(&mut self) -> [(&'static str, &mut String); 13] {
+        [
+            ("newThread", &mut self.new_thread),
+            ("openProject", &mut self.open_project),
+            ("modelPicker", &mut self.model_picker),
+            ("pullRequests", &mut self.pull_requests),
+            ("issues", &mut self.issues),
+            ("terminal", &mut self.terminal),
+            ("files", &mut self.files),
+            ("diff", &mut self.diff),
+            ("previousThread", &mut self.previous_thread),
+            ("nextThread", &mut self.next_thread),
+            ("toggleTools", &mut self.toggle_tools),
+            ("toggleBoard", &mut self.toggle_board),
+            ("openSettings", &mut self.open_settings),
+        ]
+    }
+}
+
+/// Why `accelerator` is not a usable shortcut, or `None` if it is.
+fn accelerator_problem(accelerator: &str) -> Option<String> {
+    let mut parts: Vec<&str> = accelerator.split('+').collect();
+    // A literal `+` key is written `Mod++`.
+    let key = if accelerator.ends_with("++") {
+        parts.truncate(parts.len().saturating_sub(2));
+        "+"
+    } else {
+        parts.pop().unwrap_or("")
+    };
+    let (mut primary, mut alt, mut shift) = (false, false, false);
+    for modifier in parts {
+        let seen = match modifier {
+            "Mod" => &mut primary,
+            "Alt" => &mut alt,
+            "Shift" => &mut shift,
+            other => return Some(format!("unknown modifier `{other}`; use Mod, Alt or Shift")),
+        };
+        if std::mem::replace(seen, true) {
+            return Some(format!("`{modifier}` appears twice"));
+        }
+    }
+    if !primary {
+        return Some("a shortcut must include Mod (⌘ on macOS, Ctrl elsewhere)".into());
+    }
+    let named = matches!(key, "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight")
+        || key
+            .strip_prefix('F')
+            .and_then(|n| n.parse::<u8>().ok())
+            .is_some_and(|n| (1..=12).contains(&n));
+    let mut chars = key.chars();
+    let single = matches!(
+        (chars.next(), chars.next()),
+        (Some(c), None) if c.is_ascii_graphic() && !c.is_ascii_lowercase()
+    );
+    (!named && !single).then(|| {
+        format!("`{key}` is not a key; use one capital letter, digit or symbol, an arrow or F1-F12")
+    })
+}
+
+fn shortcuts(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> Shortcuts {
+    let mut obj = obj.unwrap_or_default();
+    let mut shortcuts = Shortcuts::default();
+    for (key, slot) in shortcuts.slots() {
+        let default = slot.clone();
+        *slot = field(&mut obj, "shortcuts", key, default, errors);
+    }
+    unknown_keys(&obj, "shortcuts", errors);
+
+    let mut taken: Vec<(&str, String)> = vec![];
+    for (key, accelerator) in shortcuts.slots() {
+        let problem = accelerator_problem(accelerator).or_else(|| {
+            taken
+                .iter()
+                .find(|(_, other)| other.eq_ignore_ascii_case(accelerator))
+                .map(|(other, _)| format!("`{accelerator}` is already used by `{other}`"))
+        });
+        match problem {
+            Some(message) => errors.push(FieldError {
+                path: join("shortcuts", key),
+                message,
+            }),
+            None => taken.push((key, accelerator.clone())),
+        }
+    }
+    shortcuts
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -82,6 +212,8 @@ pub struct Settings {
     /// Which of the user's own `CLAUDE.md`, skills, plugins, hooks and MCP servers Claude Code
     /// may load. All off by default so a new Thread starts with a clean context window.
     pub claude_customizations: ClaudeCustomizations,
+    /// Keyboard shortcuts, all rebindable in Settings.
+    pub shortcuts: Shortcuts,
 }
 
 impl Default for Settings {
@@ -92,6 +224,7 @@ impl Default for Settings {
             confirm_quit: true,
             editor: String::new(),
             claude_customizations: ClaudeCustomizations::default(),
+            shortcuts: Shortcuts::default(),
         }
     }
 }
@@ -286,6 +419,10 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             &mut errors,
         ),
         editor: field(&mut root, "", "editor", defaults.editor, &mut errors),
+        shortcuts: shortcuts(
+            take_object(&mut root, "shortcuts", &mut errors),
+            &mut errors,
+        ),
         claude_customizations: {
             // Older files held one on/off switch for every category.
             if let Some(Value::Bool(all)) = root.get("claudeCustomizations") {

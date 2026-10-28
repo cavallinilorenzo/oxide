@@ -294,6 +294,59 @@ mod settings {
     }
 
     #[test]
+    fn shortcuts_default_and_can_be_rebound_in_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+        let defaults = core.settings().settings.shortcuts;
+        assert_eq!(defaults.model_picker, "Mod+Shift+M");
+        assert_eq!(defaults.previous_thread, "Mod+ArrowUp");
+
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "shortcuts": { "terminal": "Mod+Alt+T", "toggleTools": "Mod+\\", "issues": "Mod++" } }"#,
+        )
+        .unwrap();
+        let state = next(&rx);
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert_eq!(state.settings.shortcuts.terminal, "Mod+Alt+T");
+        assert_eq!(state.settings.shortcuts.issues, "Mod++");
+        assert_eq!(state.settings.shortcuts.files, defaults.files);
+    }
+
+    #[test]
+    fn bad_and_conflicting_shortcuts_are_reported_per_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "shortcuts": { "files": "N", "diff": "Mod+Shift+P", "terminal": "Mod+Hyper+T",
+                                "issues": "Mod+nope", "bogus": "Mod+K" } }"#,
+        )
+        .unwrap();
+        let bad = next(&rx);
+        let mut paths: Vec<_> = bad.errors.iter().map(|e| e.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "shortcuts.bogus",
+                "shortcuts.diff",
+                "shortcuts.files",
+                "shortcuts.issues",
+                "shortcuts.terminal"
+            ]
+        );
+        assert!(
+            bad.errors
+                .iter()
+                .any(|e| e.path == "shortcuts.diff" && e.message.contains("pullRequests"))
+        );
+    }
+
+    #[test]
     fn invalid_edit_reports_field_errors_and_keeps_last_valid_settings_until_fixed() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("settings.json");

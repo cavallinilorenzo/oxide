@@ -1,4 +1,5 @@
-import { shortcutLabel } from "./shortcuts";
+import { formatAccelerator } from "./shortcuts";
+import { useShortcuts } from "./useShortcuts";
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
@@ -17,6 +18,7 @@ interface TerminalPanelProps {
 }
 
 export function TerminalPanel({ projectId, threadId, contextKey, visible, onClose }: TerminalPanelProps) {
+  const shortcuts = useShortcuts();
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -126,7 +128,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
         {error && <span className="terminal-error">{error}</span>}
         <span className="grow" />
         {onClose && (
-          <button className="icon-btn sm" title={`Close Terminal (${shortcutLabel}J)`} aria-label="Close Terminal" onClick={onClose}>
+          <button className="icon-btn sm" title={`Close Terminal (${formatAccelerator(shortcuts.terminal)})`} aria-label="Close Terminal" onClick={onClose}>
             <XIcon size={14} />
           </button>
         )}

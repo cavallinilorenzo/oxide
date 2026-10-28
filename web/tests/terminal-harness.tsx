@@ -41,15 +41,26 @@ window.nativeOutput = (bytes) => {
 };
 createRoot(document.getElementById("root")!).render(
   <div style={{ height: "100vh", display: "flex" }}>
-    {location.search.includes("appearance")&&<aside className="settings" style={{width:700,flex:"none",overflow:"auto"}}><AppearanceSettings/></aside>}
-    {location.search.includes("loading")?<WorkbenchLoading mode="code"/>:<TerminalWorkbench
-      projectId={1}
-      threadId={null}
-      rootPath={window.terminalRoot}
-      contextKey="native-repro"
-      visible
-      queuedCommand={null}
-      onCommandConsumed={() => {}}
-    />}
+    {location.search.includes("appearance") && (
+      <aside
+        className="settings"
+        style={{ width: 700, flex: "none", overflow: "auto" }}
+      >
+        <AppearanceSettings />
+      </aside>
+    )}
+    {location.search.includes("loading") ? (
+      <WorkbenchLoading mode="code" />
+    ) : (
+      <TerminalWorkbench
+        projectId={1}
+        threadId={null}
+        rootPath={window.terminalRoot}
+        contextKey="native-repro"
+        visible
+        queuedCommand={null}
+        onCommandConsumed={() => {}}
+      />
+    )}
   </div>,
 );

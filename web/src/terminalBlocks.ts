@@ -56,10 +56,20 @@ export type CommandHistory = {
   at: number;
   exitCode: number | null;
 };
-export function historyMatches(command:string,query:string,prefix=false):boolean {
-  const value=command.toLowerCase(), needle=query.toLowerCase();
-  if(prefix)return value.startsWith(needle);
-  let index=-1;for(const char of needle){index=value.indexOf(char,index+1);if(index<0)return false;}return true;
+export function historyMatches(
+  command: string,
+  query: string,
+  prefix = false,
+): boolean {
+  const value = command.toLowerCase(),
+    needle = query.toLowerCase();
+  if (prefix) return value.startsWith(needle);
+  let index = -1;
+  for (const char of needle) {
+    index = value.indexOf(char, index + 1);
+    if (index < 0) return false;
+  }
+  return true;
 }
 export function commandSuggestions(
   input: string,

@@ -45,7 +45,7 @@ export function TerminalInput({
   const [selection, setSelection] = useState(0);
   const [menu, setMenu] = useState<"history" | "completion" | null>(null);
   const [query, setQuery] = useState("");
-  const [prefixSearch,setPrefixSearch]=useState(false);
+  const [prefixSearch, setPrefixSearch] = useState(false);
   const [index, setIndex] = useState(0);
   const [completion, setCompletion] = useState<TerminalCompletion | null>(null);
   const [pending, setPending] = useState(false);
@@ -62,9 +62,7 @@ export function TerminalInput({
         all.findIndex((other) => other.command === entry.command) === i,
     );
   const filtered = past
-    .filter((entry) =>
-      historyMatches(entry.command,query,prefixSearch),
-    )
+    .filter((entry) => historyMatches(entry.command, query, prefixSearch))
     .reverse();
   const suggestion =
     input && !input.includes("\n")
@@ -92,9 +90,8 @@ export function TerminalInput({
     setIndex(
       Math.max(
         0,
-        past.filter((entry) =>
-          historyMatches(entry.command,input,!focus),
-        ).length - 1,
+        past.filter((entry) => historyMatches(entry.command, input, !focus))
+          .length - 1,
       ),
     );
     setMenu("history");
@@ -171,7 +168,15 @@ export function TerminalInput({
     menu === "history" ? filtered.length : (completion?.matches.length ?? 0);
   const navigate = (event: React.KeyboardEvent) => {
     if (event.nativeEvent.isComposing) return;
-    if(event.ctrlKey && event.key.toLowerCase()==="c" && textarea.current?.selectionStart===textarea.current?.selectionEnd){event.preventDefault();change("");return;}
+    if (
+      event.ctrlKey &&
+      event.key.toLowerCase() === "c" &&
+      textarea.current?.selectionStart === textarea.current?.selectionEnd
+    ) {
+      event.preventDefault();
+      change("");
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r") {
       event.preventDefault();
       openHistory(true);

@@ -86,7 +86,8 @@ export function parseThemePack(raw: string): ThemePack {
     typeof pack.name !== "string" ||
     !pack.name.trim() ||
     !Array.isArray(pack.themes) ||
-    !pack.themes.length || pack.themes.length > 64
+    !pack.themes.length ||
+    pack.themes.length > 64
   )
     throw new Error("Provide a name and a nonempty themes array.");
   const names = new Set<string>();
@@ -205,15 +206,19 @@ export function applyAppearance(): void {
     root.style.removeProperty(variable);
   const colors = {
     ...(theme.appearance === "light" ? LIGHT : {}),
-    ...Object.fromEntries(Object.entries(theme.style).filter(([,value])=>value!==null)),
+    ...Object.fromEntries(
+      Object.entries(theme.style).filter(([, value]) => value !== null),
+    ),
   };
   for (const [key, variable] of Object.entries(COLOR_TOKENS)) {
     if (isColor(colors[key])) root.style.setProperty(variable, colors[key]);
   }
   root.style.removeProperty("--gh-btn");
   root.style.removeProperty("--gh-blue");
-  if(theme.appearance==="light"||Object.keys(theme.style).length)root.style.setProperty("--gh-btn", "var(--bg3)");
-  if(isColor(theme.style.accent))root.style.setProperty("--gh-blue", "var(--acc)");
+  if (theme.appearance === "light" || Object.keys(theme.style).length)
+    root.style.setProperty("--gh-btn", "var(--bg3)");
+  if (isColor(theme.style.accent))
+    root.style.setProperty("--gh-blue", "var(--acc)");
   root.style.colorScheme = theme.appearance;
   root.dataset.appearance = theme.appearance;
   root.style.setProperty(
@@ -274,7 +279,7 @@ export function terminalAppearance() {
         ].map((key) => [
           key,
           themeColor(
-            `terminal.ansi.${key.replace(/[A-Z]/g, letter=>`_${letter.toLowerCase()}`)}`,
+            `terminal.ansi.${key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`,
             (
               {
                 black: "#1b1f29",

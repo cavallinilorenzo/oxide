@@ -242,6 +242,59 @@ fn provider_detection_honours_pathext_order_and_explicit_paths() {
 
 #[cfg(windows)]
 #[test]
+fn background_provider_commands_do_not_allocate_a_console() {
+    use std::os::windows::process::CommandExt;
+
+    const CHILD_ENV: &str = "OXIDE_TEST_DETACHED_PROVIDER_PROBE";
+    let Some(python) = std::env::var_os(CHILD_ENV) else {
+        // Isolate detaching from the console so parallel tests keep their own stdio.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "background_provider_commands_do_not_allocate_a_console",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, support::python())
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+
+    // Reproduce a desktop process with no inherited console, even under a CLI test runner.
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn FreeConsole() -> i32;
+    }
+    unsafe { FreeConsole() };
+
+    let mut command = std::process::Command::new(python);
+    command.args([
+        "-c",
+        "import ctypes; assert not ctypes.windll.kernel32.GetConsoleWindow(), 'background Provider command opened a Windows console'; print('captured stdout')",
+    ]);
+
+    let output = oxide_provider::process::output_in_own_group(&mut command).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "captured stdout"
+    );
+}
+
+#[cfg(windows)]
+#[test]
 fn provider_detection_resolves_native_executables() {
     // Python is a native CLI with a version probe, so this also catches accidental shell use.
     let mut provider = oxide_provider::claude::ClaudeCodeProvider::with_command("python");

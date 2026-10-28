@@ -119,12 +119,7 @@ const key = (k: string, init: KeyboardEventInit = {}) => press({ key: k, code: k
 const dialog = () => container.querySelector('[role="dialog"]');
 const highlighted = () => container.querySelector('[role="option"][aria-selected="true"] .model-name')?.textContent ?? null;
 const slider = () => container.querySelector('[role="slider"]')?.getAttribute("aria-valuetext") ?? null;
-const activeTab = () => container.querySelector('.rail-tab[aria-current="true"]')?.textContent ?? null;
-const type = (text: string) => act(async () => {
-  const input = container.querySelector(".model-search-input") as HTMLInputElement;
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-});
+const activeTab = () => container.querySelector('.provider-tab[aria-current="true"]')?.textContent ?? null;
 const open = async (opts: Parameters<typeof setup>[0] = { threadId: 7 }) => {
   const calls = setup(opts);
   await render(7);
@@ -221,24 +216,23 @@ it("Esc closes the picker without applying anything", async () => {
 
 it("clicking a Model row applies it, and a slider stop picks the Effort", async () => {
   const calls = await open();
-  await act(async () => (Array.from(container.querySelectorAll(".effort-stop")).find((b) => b.textContent === "Low") as HTMLElement).click());
+  await act(async () => (Array.from(container.querySelectorAll(".effort-stop")).find((b) => b.textContent === "low") as HTMLElement).click());
   expect(slider()).toBe("Low");
   await act(async () => (Array.from(container.querySelectorAll('[role="option"]')).find((o) => o.textContent?.includes("Sonnet")) as HTMLElement).click());
   await flush();
   expect(setCalls(calls)).toEqual([{ threadId: 7, model: "sonnet", effort: "low" }]);
 });
 
-it("Tab and Shift+Tab cycle the tabs and keep the search text", async () => {
+it("Tab and Shift+Tab cycle the Provider tabs", async () => {
   await open();
   expect(activeTab()).toContain("Claude");
-  await type("g");
   await key("Tab");
   expect(activeTab()).toContain("Codex");
   expect(highlighted()).toBe("GPT");
-  expect((container.querySelector(".model-search-input") as HTMLInputElement).value).toBe("g");
-  await key("Tab", { shiftKey: true });
-  await key("Tab", { shiftKey: true });
-  expect(activeTab()).toContain("Favourites");
+  await key("Tab");
+  expect(activeTab()).toContain("Antigravity");
+  await key("Tab");
+  expect(activeTab()).toContain("Claude");
   await key("Tab", { shiftKey: true });
   expect(activeTab()).toContain("Antigravity");
 });
@@ -248,16 +242,6 @@ it("says so when the highlighted Model is from another Provider and the Thread h
   expect(container.textContent).not.toContain("starts a new Thread");
   await key("Tab");
   expect(container.textContent).toContain("starts a new Thread");
-});
-
-it("Enter does nothing when the search matches nothing", async () => {
-  const calls = await open();
-  await type("zzz");
-  expect(container.textContent).toContain("No models found.");
-  await key("Enter");
-  await flush();
-  expect(setCalls(calls)).toEqual([]);
-  expect(dialog()).not.toBeNull();
 });
 
 it("starts a new Thread with the chosen Effort for another Provider's Model once the Thread has Turns", async () => {

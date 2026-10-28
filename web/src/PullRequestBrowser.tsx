@@ -204,6 +204,9 @@ export function PullRequestReview({
   const busy = pending !== null;
   // Set once the pull request was merged or closed: a short confirmation, then the list.
   const [done, setDone] = useState<"merged" | "closed" | null>(null);
+  // Once finished, the pull request is gone from the open list: later reloads must not touch the view.
+  const doneRef = useRef(done);
+  doneRef.current = done;
   const backRef = useRef(onBack);
   useEffect(() => {
     backRef.current = onBack;
@@ -227,9 +230,12 @@ export function PullRequestReview({
         commands.pullRequestDetail(projectId, number),
         commands.gitStatus(projectId),
       ]);
-      if (!active) return;
-      if (detail.status === "error") return setLoaded({ state: "error", message: detail.error.message });
-      if (git.status === "error") return setLoaded({ state: "error", message: git.error.message });
+      if (!active || doneRef.current !== null) return;
+      // A failed background refresh keeps what is on screen; only the first load shows the error.
+      const fail = (message: string) =>
+        setLoaded((current) => (current.state === "ready" ? current : { state: "error", message }));
+      if (detail.status === "error") return fail(detail.error.message);
+      if (git.status === "error") return fail(git.error.message);
       setLoaded({ state: "ready", detail: detail.data, git: git.data });
       setMethod((current) => defaultMergeMethod(detail.data.mergeMethods, current, detail.data.defaultMergeMethod));
       // Only the repository's own preference seeds it: later reloads keep what the user chose.
@@ -314,7 +320,11 @@ export function PullRequestReview({
 
   async function merge() {
     if (method === null) return;
-    if (await act("merge", () => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
+    const ok = await act("merge", () => commands.mergePullRequest(projectId, number, method, deleteBranch, false));
+    // `gh` can merge on GitHub and still fail afterwards (deleting the local branch): ask GitHub.
+    const wasMerged = ok || (await commands.pullRequestDetail(projectId, number).then((r) => r.status === "ok" && r.data.phase === "merged"));
+    if (wasMerged) {
+      setError(null);
       setMerged(true);
       setDone("merged");
       onChanged();

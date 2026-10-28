@@ -17,7 +17,6 @@ it("intercepts an unavailable permission mode before a Thread exists", async () 
     calls.push(command);
     if (command === "get_settings") return { settings: { defaultProvider: "agy", providers: {} }, errors: [] };
     if (command === "get_provider_capabilities") return { supportedPermissionModes: ["auto-edit", "full-access"] };
-    if (command === "provider_capabilities") return { imageAttachments: false };
     if (command === "git_status") return { branch: "main" };
     if (command === "get_model_catalog" || command === "list_slash_commands") return [];
     return null;
@@ -41,7 +40,6 @@ it("loads capabilities before applying a permission command in a new Thread", as
       requests++;
       return requests < 3 ? new Promise(() => {}) : { supportedPermissionModes: ["ask", "auto-edit", "full-access"] };
     }
-    if (command === "provider_capabilities") return { imageAttachments: false };
     if (command === "git_status") return { branch: "main" };
     if (command === "get_model_catalog" || command === "list_slash_commands") return [];
     return null;
@@ -100,7 +98,6 @@ it("reports a failed cache reload without sending the command to the provider", 
     calls.push(command);
     if (command === "get_settings") return { settings: { defaultProvider: "agy", providers: {} }, errors: [] };
     if (command === "get_provider_capabilities") return { supportedPermissionModes: ["auto-edit"] };
-    if (command === "provider_capabilities") return { imageAttachments: false };
     if (command === "git_status") return { branch: "main" };
     if (command === "get_model_catalog") return [];
     if (command === "list_slash_commands") throw "provider unavailable";

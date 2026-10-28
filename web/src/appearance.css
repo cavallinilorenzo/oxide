@@ -66,24 +66,3 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.composer-wrap {
-  position: relative;
-}
-.chat-image-drop {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-  background: var(--bg2);
-  color: var(--acc2);
-  border: 1px dashed var(--acc2);
-  border-radius: var(--radius-surface);
-  display: grid;
-  place-items: center;
-  font-size: 15px;
-}
-.image-upload-skeleton {
-  width: 160px;
-  height: 72px;
-  overflow: hidden;
-}

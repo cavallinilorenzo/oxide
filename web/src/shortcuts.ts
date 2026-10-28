@@ -22,6 +22,7 @@ export type ShortcutAction =
   | "diff"
   | "previousThread"
   | "nextThread"
+  | "closeThread"
   | "toggleTools"
   | "toggleBoard"
   | "openSettings";
@@ -41,6 +42,7 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   diff: "Mod+Shift+D",
   previousThread: "Mod+ArrowUp",
   nextThread: "Mod+ArrowDown",
+  closeThread: "Mod+Shift+W",
   toggleTools: "Mod+\\",
   toggleBoard: "Mod+B",
   openSettings: "Mod+,",
@@ -51,6 +53,7 @@ export const SHORTCUT_ACTIONS: { action: ShortcutAction; label: string; group: s
   { action: "newThread", label: "New Thread", group: "Threads" },
   { action: "previousThread", label: "Previous Thread", group: "Threads" },
   { action: "nextThread", label: "Next Thread", group: "Threads" },
+  { action: "closeThread", label: "Close Thread", group: "Threads" },
   { action: "openProject", label: "Open a Project", group: "Threads" },
   { action: "modelPicker", label: "Model picker", group: "Threads" },
   { action: "files", label: "Files", group: "Panels" },

@@ -99,11 +99,13 @@ for line in sys.stdin:
         prompt_text = ""
         if isinstance(data.get("message"), dict):
             prompt_text = data["message"].get("content", "")
+            if isinstance(prompt_text, list):
+                prompt_text = "".join(
+                    b.get("text", "") for b in prompt_text if b.get("type") == "text"
+                )
         elif "prompt" in data:
             prompt_text = data["prompt"]
 
-        if isinstance(prompt_text, list):
-            prompt_text = "\n".join(block.get("text", "") for block in prompt_text if block.get("type") == "text")
         if "approval_test" in prompt_text:
             # Emit approval request
             appr = {

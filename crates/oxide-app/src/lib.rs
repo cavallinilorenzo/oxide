@@ -249,6 +249,7 @@ pub struct Shortcuts {
     diff: String,
     previous_thread: String,
     next_thread: String,
+    close_thread: String,
     toggle_tools: String,
     toggle_board: String,
     open_settings: String,
@@ -349,7 +350,8 @@ pub struct ProviderCapabilities {
     pub supported_permission_modes: Vec<PermissionMode>,
     pub interactive_approvals: bool,
     pub supports_reasoning: bool,
-    pub image_attachments: bool,
+    /// Attachment kinds the Provider takes as native content; the rest reach it as file paths.
+    pub native_attachment_kinds: Vec<AttachmentKind>,
     pub mid_thread_model_switch: bool,
     pub reports_usage_limits: bool,
 }
@@ -531,6 +533,65 @@ pub struct ApprovalSnapshot {
     pub decided_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    Image,
+    Pdf,
+    Text,
+    Other,
+}
+
+/// A file the user put inside a prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    /// The original file name.
+    pub name: String,
+    #[serde(rename = "attachmentKind")]
+    pub kind: AttachmentKind,
+    pub media_type: String,
+    pub size_bytes: u32,
+    pub path: String,
+}
+
+/// One piece of a prompt in the Transcript: text, or an Attachment at its place.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PromptSegment {
+    Text {
+        text: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Attachment {
+        id: String,
+        name: String,
+        #[serde(rename = "attachmentKind")]
+        kind: AttachmentKind,
+        media_type: String,
+        size_bytes: u32,
+        path: String,
+    },
+}
+
+/// One piece of the prompt being sent: text, or a stored Attachment by id.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PromptInput {
+    Text { text: String },
+    Attachment { id: String },
+}
+
+/// What happened to one file offered as an Attachment: it was stored, or here is why not.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachOutcome {
+    pub path: String,
+    pub attachment: Option<Attachment>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
@@ -539,7 +600,7 @@ pub struct TurnSnapshot {
     pub prompt: String,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub attachments: Vec<String>,
+    pub segments: Vec<PromptSegment>,
     pub status: TurnStatus,
     pub started_at: String,
     pub completed_at: Option<String>,
@@ -568,7 +629,6 @@ pub struct UnknownEventSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCapabilities {
     pub reasoning_text: bool,
-    pub image_attachments: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -599,7 +659,7 @@ pub enum ThreadEvent {
         prompt: String,
         model: Option<String>,
         effort: Option<String>,
-        attachments: Vec<String>,
+        segments: Vec<PromptSegment>,
     },
     ItemStarted {
         item_index: u32,
@@ -2068,50 +2128,96 @@ fn list_threads(core: State<'_, Arc<Core>>, project_id: u32) -> Result<Vec<Threa
 async fn send_prompt(
     core: State<'_, Arc<Core>>,
     thread_id: u32,
-    prompt: String,
-    attachments: Vec<String>,
+    segments: Vec<PromptInput>,
 ) -> Result<(), AppError> {
-    let paths: Vec<std::path::PathBuf> = attachments.into_iter().map(Into::into).collect();
+    let input: Vec<oxide_core::PromptInput> = convert(&segments);
     git_blocking(&core, move |core| {
-        core.send_prompt_with_attachments(thread_id, &prompt, &paths)
+        core.send_prompt_segments(thread_id, &input)
     })
     .await
 }
 
-/// Stores a pasted or picked image under `~/.oxide/attachments/`; returns its path.
+/// Copies each file (drag & drop, the file dialog) into Attachment storage. A file that can't
+/// be accepted comes back with its reason; the others are stored regardless.
 #[tauri::command]
 #[specta::specta]
-fn save_attachment(
+async fn attach_paths(
     core: State<'_, Arc<Core>>,
-    bytes: Vec<u8>,
-    extension: String,
-) -> Result<String, AppError> {
-    let path = core.save_attachment(&bytes, &extension)?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// Bytes of a stored attachment, for rendering it in the Transcript.
-#[tauri::command]
-#[specta::specta]
-fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, AppError> {
-    Ok(core.read_attachment(std::path::Path::new(&path))?)
-}
-#[tauri::command]
-#[specta::specta]
-async fn import_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<String, AppError> {
-    let core = Arc::clone(core.inner());
-    tauri::async_runtime::spawn_blocking(move || {
-        Ok(core
-            .import_attachment(std::path::Path::new(&path))?
-            .to_string_lossy()
-            .into_owned())
+    paths: Vec<String>,
+) -> Result<Vec<AttachOutcome>, AppError> {
+    git_blocking(&core, move |core| {
+        Ok(paths
+            .into_iter()
+            .map(|path| match core.attach_path(std::path::Path::new(&path)) {
+                Ok(attachment) => AttachOutcome {
+                    path,
+                    attachment: Some(convert(&attachment)),
+                    error: None,
+                },
+                Err(error) => AttachOutcome {
+                    path,
+                    attachment: None,
+                    error: Some(error.to_string()),
+                },
+            })
+            .collect())
     })
     .await
-    .map_err(|error| AppError {
-        message: error.to_string(),
-    })?
 }
 
+/// Forgets an Attachment the user took out of a prompt before sending it.
+#[tauri::command]
+#[specta::specta]
+fn discard_attachment(core: State<'_, Arc<Core>>, id: String) {
+    core.discard_attachment(&id);
+}
+
+/// Stores pasted bytes. The bytes travel as the raw request body rather than JSON, and the
+/// file name (percent-encoded; may be empty) in the `x-oxide-name` header. Not a specta
+/// command: the typed bindings can't express a raw body, so the web side calls it by hand.
+#[tauri::command]
+async fn attach_bytes(
+    core: State<'_, Arc<Core>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Attachment, AppError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError {
+            message: "Pasted data must be sent as raw bytes.".into(),
+        });
+    };
+    let name = request
+        .headers()
+        .get("x-oxide-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .filter(|n| !n.is_empty());
+    let bytes = bytes.clone();
+    git_blocking(&core, move |core| {
+        core.attach_bytes(name.as_deref(), &bytes)
+    })
+    .await
+    .map(|attachment| convert(&attachment))
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
+        {
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SlashRoute {
@@ -2146,13 +2252,6 @@ async fn list_slash_commands(
     })
     .await
     .map(|commands| commands.iter().map(convert).collect())
-}
-
-/// What a Provider supports, so the composer can offer image attachments before a Thread exists.
-#[tauri::command]
-#[specta::specta]
-fn provider_capabilities(core: State<'_, Arc<Core>>, provider: String) -> ThreadCapabilities {
-    convert(&core.provider_capabilities(&provider))
 }
 
 #[tauri::command]
@@ -2412,10 +2511,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         set_thread_model_and_effort,
         list_threads,
         send_prompt,
-        save_attachment,
-        read_attachment,
-        import_attachment,
-        provider_capabilities,
+        attach_paths,
+        discard_attachment,
         list_slash_commands,
         interrupt_thread,
         list_turns,
@@ -2505,7 +2602,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler({
+            let typed = builder.invoke_handler();
+            let raw: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
+                Box::new(tauri::generate_handler![attach_bytes]);
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                if invoke.message.command() == "attach_bytes" {
+                    raw(invoke)
+                } else {
+                    typed(invoke)
+                }
+            }
+        })
         .menu(build_menu)
         .on_menu_event(|app, event| {
             if event.id() == "new-thread" {
@@ -2626,7 +2734,7 @@ mod tests {
                 prompt: "hi".into(),
                 model: None,
                 effort: None,
-                attachments: vec![],
+                segments: vec![oxide_core::PromptSegment::text("hi")],
                 status: oxide_core::TurnStatus::Error,
                 started_at: "a".into(),
                 completed_at: Some("b".into()),

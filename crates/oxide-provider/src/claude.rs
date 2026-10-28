@@ -2,9 +2,10 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, Detection, ItemKind, ModelInfo,
-    PermissionMode, Provider, ProviderCapabilities, ProviderError, ProviderEvent, StartContext,
-    TurnStatus, UsageStatus, UsageWindow, UsageWindowKind,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, Detection,
+    ItemKind, ModelInfo, PermissionMode, PromptSegment, Provider, ProviderCapabilities,
+    ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus, UsageWindow,
+    UsageWindowKind, attachment_marker, attachment_path_reference, render_prompt,
 };
 use crate::{SlashCommandInfo, SlashRoute};
 use crossbeam_channel::{Receiver, Sender};
@@ -12,13 +13,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
+
+/// Claude Code's documented cap on a piped stream-json input message is 10 MB. Native
+/// Attachments stop short of it; the rest travel as path references.
+const MAX_INPUT_MESSAGE_BYTES: usize = 9_000_000;
+
+/// Image types Claude's `image` block accepts.
+const NATIVE_IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 /// Pinned version range for Claude Code tested with Oxide.
 /// Range: >= 0.2.0, < 3.0.0
@@ -73,6 +81,7 @@ pub struct ClaudeCodeProvider {
     registry: Option<Arc<ProcessRegistry>>,
     customizations: ClaudeCustomizations,
     safe_mode_supported: OnceLock<bool>,
+    attachments_dir: Option<PathBuf>,
 }
 
 impl Default for ClaudeCodeProvider {
@@ -82,24 +91,6 @@ impl Default for ClaudeCodeProvider {
 }
 
 impl ClaudeCodeProvider {
-    fn send_content(
-        &mut self,
-        prompt: &str,
-        content: serde_json::Value,
-    ) -> Result<(), ProviderError> {
-        let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
-        *self.active_turn.lock().unwrap() = Some(ActiveTurn {
-            index: turn_index,
-            interrupted: false,
-        });
-        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
-            let _ = sender.send(ProviderEvent::TurnStarted {
-                turn_index,
-                prompt: prompt.to_string(),
-            });
-        }
-        self.write_to_stdin(&json!({"type":"user","message":{"role":"user","content":content}}))
-    }
     pub fn new() -> Self {
         Self::with_command(DEFAULT_CLAUDE_COMMAND)
     }
@@ -116,7 +107,11 @@ impl ClaudeCodeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: true,
+                native_attachment_kinds: vec![
+                    AttachmentKind::Image,
+                    AttachmentKind::Pdf,
+                    AttachmentKind::Text,
+                ],
                 mid_thread_model_switch: true,
                 reports_usage_limits: true,
             })),
@@ -128,6 +123,7 @@ impl ClaudeCodeProvider {
             registry: None,
             customizations: ClaudeCustomizations::default(),
             safe_mode_supported: OnceLock::new(),
+            attachments_dir: None,
         }
     }
 
@@ -307,6 +303,9 @@ impl ClaudeCodeProvider {
             }
         }
 
+        if let Some(dir) = &self.attachments_dir {
+            cmd.arg("--add-dir").arg(dir);
+        }
         if let Some(sid) = resume_session_id {
             cmd.arg("--resume").arg(sid);
         }
@@ -924,40 +923,37 @@ impl Provider for ClaudeCodeProvider {
         self.spawn_process(context, Some(session_id))
     }
 
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
-        self.send_content(prompt, json!(prompt))
-    }
-    fn send_prompt_with_images(
+    fn send_prompt_with_segments(
         &mut self,
-        prompt: &str,
-        images: &[std::path::PathBuf],
+        segments: &[PromptSegment],
     ) -> Result<(), ProviderError> {
-        use base64::Engine;
-        let mut content = vec![json!({"type":"text","text":prompt})];
-        for image in images {
-            let media_type = match image
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase()
-                .as_str()
-            {
-                "png" => "image/png",
-                "jpg" | "jpeg" => "image/jpeg",
-                "webp" => "image/webp",
-                "gif" => "image/gif",
-                _ => {
-                    return Err(ProviderError::CommandFailed(
-                        "Claude image inputs support PNG, JPEG, WebP and GIF.".into(),
-                    ));
-                }
-            };
-            let bytes = std::fs::read(image).map_err(|error| {
-                ProviderError::CommandFailed(format!("Read attached image: {error}"))
-            })?;
-            content.push(json!({"type":"image","source":{"type":"base64","media_type":media_type,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}}));
+        let content = build_content(segments)?;
+        let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
+        *self.active_turn.lock().unwrap() = Some(ActiveTurn {
+            index: turn_index,
+            interrupted: false,
+        });
+
+        // Emit TurnStarted event
+        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
+            let _ = sender.send(ProviderEvent::TurnStarted {
+                turn_index,
+                prompt: render_prompt(segments),
+            });
         }
-        self.send_content(prompt, json!(content))
+
+        let payload = json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": content
+            }
+        });
+        self.write_to_stdin(&payload)
+    }
+
+    fn allow_attachments_dir(&mut self, dir: &Path) {
+        self.attachments_dir = Some(dir.to_path_buf());
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {
@@ -1072,4 +1068,88 @@ impl Provider for ClaudeCodeProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         self.capabilities.lock().unwrap().clone()
     }
+}
+
+/// The `content` of a user message: a plain string for text alone, else an array interleaving
+/// text blocks with `image` and `document` blocks at the Attachments' places.
+fn build_content(segments: &[PromptSegment]) -> Result<serde_json::Value, ProviderError> {
+    if let [PromptSegment::Text { text }] = segments {
+        return Ok(json!(text));
+    }
+    let mut blocks: Vec<serde_json::Value> = Vec::new();
+    let mut budget = MAX_INPUT_MESSAGE_BYTES;
+    let push_text = |blocks: &mut Vec<serde_json::Value>, text: &str| {
+        if text.is_empty() {
+            return;
+        }
+        if let Some(last) = blocks.last_mut()
+            && last["type"] == "text"
+        {
+            let joined = format!("{}{text}", last["text"].as_str().unwrap_or_default());
+            last["text"] = json!(joined);
+            return;
+        }
+        blocks.push(json!({"type": "text", "text": text}));
+    };
+    for segment in segments {
+        match segment {
+            PromptSegment::Text { text } => push_text(&mut blocks, text),
+            PromptSegment::Attachment(attachment) => match native_block(attachment, &mut budget)? {
+                Some(block) => {
+                    push_text(&mut blocks, &attachment_marker(attachment));
+                    blocks.push(block);
+                }
+                None => push_text(&mut blocks, &attachment_path_reference(attachment)),
+            },
+        }
+    }
+    Ok(json!(blocks))
+}
+
+/// The native block for an Attachment, or `None` when it travels as a path reference: its kind
+/// has no block, or it would push the message past the stdin cap.
+fn native_block(
+    attachment: &Attachment,
+    budget: &mut usize,
+) -> Result<Option<serde_json::Value>, ProviderError> {
+    use base64::Engine as _;
+    let encoded_len = attachment.size_bytes.div_ceil(3) as usize * 4;
+    let fits = encoded_len + 1_000 <= *budget;
+    let read = |attachment: &Attachment| {
+        std::fs::read(&attachment.path).map_err(|e| {
+            ProviderError::CommandFailed(format!(
+                "Failed to read attachment {}: {e}",
+                attachment.name
+            ))
+        })
+    };
+    let block = match attachment.kind {
+        AttachmentKind::Image
+            if fits && NATIVE_IMAGE_TYPES.contains(&attachment.media_type.as_str()) =>
+        {
+            let data = base64::engine::general_purpose::STANDARD.encode(read(attachment)?);
+            json!({"type": "image", "source": {
+                "type": "base64", "media_type": attachment.media_type, "data": data}})
+        }
+        AttachmentKind::Pdf if fits => {
+            let data = base64::engine::general_purpose::STANDARD.encode(read(attachment)?);
+            json!({"type": "document", "title": attachment.name, "source": {
+                "type": "base64", "media_type": "application/pdf", "data": data}})
+        }
+        AttachmentKind::Text if attachment.size_bytes as usize + 1_000 <= *budget => {
+            let Ok(text) = String::from_utf8(read(attachment)?) else {
+                return Ok(None);
+            };
+            let block = json!({"type": "document", "title": attachment.name, "source": {
+                "type": "text", "media_type": "text/plain", "data": text}});
+            // JSON escaping can inflate text well past its size on disk: check what is sent.
+            if block.to_string().len() > *budget {
+                return Ok(None);
+            }
+            block
+        }
+        _ => return Ok(None),
+    };
+    *budget = budget.saturating_sub(block.to_string().len());
+    Ok(Some(block))
 }

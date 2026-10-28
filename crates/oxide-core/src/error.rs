@@ -23,6 +23,8 @@ pub enum Error {
     Editor(String),
     #[error("provider error: {0}")]
     Provider(String),
+    #[error("{0}")]
+    Attachment(#[from] crate::attachments::AttachmentError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

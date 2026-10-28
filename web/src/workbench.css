@@ -27,7 +27,7 @@
   flex: 1;
   min-height: 0;
   position: relative;
-  background: #0f1117;
+  background: var(--bg);
 }
 .editor-explorer {
   min-width: 0;

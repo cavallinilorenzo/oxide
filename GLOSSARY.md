@@ -21,7 +21,7 @@ _Avoid_: Project switcher, quick open
 ## Threads
 
 **Thread**:
-One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in the sidebar until the user deletes it. A finished Thread is deleted, not archived: deleting removes its Transcript, Approvals, attachments and Checkpoints for good, and a Board Thread's worktree with them (its branch stays). The Provider's own session files are left to the Provider. See ADR-0005.
+One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in the sidebar until the user deletes it. A finished Thread is deleted, not archived: deleting removes its Transcript, Approvals, Attachments and Checkpoints for good, and a Board Thread's worktree with them (its branch stays). The Provider's own session files are left to the Provider. See ADR-0005.
 _Avoid_: Agent, session, chat, Archived Thread
 
 **Thread status**:
@@ -34,6 +34,10 @@ What a Thread offers instead of its composer when resuming its Provider session 
 **Turn**:
 One user prompt in a Thread and everything the Provider does in response, until it completes, is interrupted, or fails.
 _Avoid_: Run, exchange, round
+
+**Attachment**:
+A file the user puts inside a prompt, at a position in its text, stored under the Oxide home until its Thread is deleted. Shown the same way for every Provider (extension icon and file name, no previews); how it reaches the agent is up to the Provider adapter: natively where the Provider takes that kind (Claude Code: images, PDFs, text; Codex: images), otherwise as a file path at the same spot in the prompt, always preceded by a `[Attachment: name]` marker. A prompt is a sequence of segments, text or Attachment, and the Transcript records them that way. Up to 10 per prompt, 25 MB each.
+_Avoid_: Upload, file input, image (when meaning any Attachment)
 
 **Item**:
 One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, or the output of a Slash command. Slash command output is its own kind, never an agent message, and stays out of the Continue in new Thread recap.

@@ -1,10 +1,7 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { PersonIcon } from "@primer/octicons-react";
-import {
-  commands,
-  type ApprovalDecision,
-  type ApprovalSnapshot,
-} from "./bindings";
+import type { ApprovalDecision, ApprovalSnapshot } from "./bindings";
+import { AttachmentChip } from "./AttachmentChip";
 import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
 import { ActivityView } from "./ActivityView";
@@ -29,25 +26,6 @@ function BlockView({ block }: { block: Block }) {
     case "activity":
       return null; // drawn by TurnView, which knows whether the Turn is live
   }
-}
-
-function AttachmentImage({ path }: { path: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let revoked: string | null = null;
-    let active = true;
-    void commands.readAttachment(path).then((res) => {
-      if (!active || res.status !== "ok") return;
-      revoked = URL.createObjectURL(new Blob([new Uint8Array(res.data)]));
-      setUrl(revoked);
-    });
-    return () => {
-      active = false;
-      if (revoked) URL.revokeObjectURL(revoked);
-    };
-  }, [path]);
-  if (!url) return null;
-  return <img className="attachment" src={url} alt="Attached" />;
 }
 
 export const ApprovalView = memo(function ApprovalView({
@@ -171,14 +149,13 @@ export const TurnView = memo(function TurnView({
           <PersonIcon size={12} /> You · {formatTime(turn.startedAt)}
         </div>
         <div className="user-bubble">
-          {turn.attachments.length > 0 && (
-            <div className="attachments">
-              {turn.attachments.map((p) => (
-                <AttachmentImage key={p} path={p} />
-              ))}
-            </div>
+          {turn.segments.map((segment, i) =>
+            segment.kind === "text" ? (
+              <span key={i}>{segment.text}</span>
+            ) : (
+              <AttachmentChip key={i} name={segment.name} kind={segment.attachmentKind} sizeBytes={segment.sizeBytes} />
+            ),
           )}
-          {turn.prompt}
         </div>
       </div>
       {(blocks.length > 0 || approvals.length > 0 || turn.status === "running") && (

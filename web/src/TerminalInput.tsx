@@ -15,6 +15,7 @@ import {
 } from "@primer/octicons-react";
 import { commands, type TerminalCompletion } from "./bindings";
 import type { CommandHistory } from "./terminalBlocks";
+import { historyMatches } from "./terminalBlocks";
 
 export interface TerminalInputHandle {
   focus: () => void;
@@ -44,6 +45,7 @@ export function TerminalInput({
   const [selection, setSelection] = useState(0);
   const [menu, setMenu] = useState<"history" | "completion" | null>(null);
   const [query, setQuery] = useState("");
+  const [prefixSearch,setPrefixSearch]=useState(false);
   const [index, setIndex] = useState(0);
   const [completion, setCompletion] = useState<TerminalCompletion | null>(null);
   const [pending, setPending] = useState(false);
@@ -61,7 +63,7 @@ export function TerminalInput({
     );
   const filtered = past
     .filter((entry) =>
-      entry.command.toLowerCase().includes(query.toLowerCase()),
+      historyMatches(entry.command,query,prefixSearch),
     )
     .reverse();
   const suggestion =
@@ -85,12 +87,13 @@ export function TerminalInput({
     });
   };
   const openHistory = (focus = false) => {
+    setPrefixSearch(!focus);
     setQuery(input);
     setIndex(
       Math.max(
         0,
         past.filter((entry) =>
-          entry.command.toLowerCase().includes(input.toLowerCase()),
+          historyMatches(entry.command,input,!focus),
         ).length - 1,
       ),
     );
@@ -238,6 +241,7 @@ export function TerminalInput({
                   value={query}
                   onChange={(event) => {
                     setQuery(event.target.value);
+                    setPrefixSearch(false);
                     setIndex(0);
                   }}
                   onKeyDown={navigate}

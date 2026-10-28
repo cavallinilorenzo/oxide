@@ -90,16 +90,14 @@ upstream guides remain available under advanced language settings.
 
 ## Images and appearance
 
-Paste images into the chat composer or drop them onto the chat. A preview appears
-before sending; remove individual images with their close button. Images can be
-sent with text or on their own. Storage errors keep the attachment draft visible.
-Supported formats are PNG, JPEG, GIF, WebP and BMP, up to 10 MiB per image; BMP
-uploads are converted to PNG. Native file drops are handled by the desktop window.
+Paste images into the shared inline chat composer or drop files onto it. A
+preview appears before sending; attachments can be removed individually. A
+prompt can hold ten attachments, up to 25 MB each. Native drops and clipboard
+data use the shared Attachment store introduced on main in #212.
 
-Claude receives multimodal base64 content, Codex receives local image inputs,
-and Antigravity reads copies of the selected images from a temporary workspace
-directory. The latter adds only that directory to the CLI workspace, never the
-entire attachment cache. Temporary copies are removed after the Turn.
+Delivery follows [ADR-0007](adr/0007-attachments-are-segments-delivered-per-provider.md):
+Providers receive native image inputs where supported, otherwise readable path
+references. The ordered prompt segments preserve each attachment's position.
 
 See [Fonts and JSON themes](themes.md) for per-area fonts, theme imports, the
 supported Zed-style JSON structure and a complete example.

@@ -7,9 +7,9 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode, Provider,
-    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
-    TurnStatus,
+    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode,
+    PromptSegment, Provider, ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo,
+    SlashRoute, StartContext, TurnStatus, attachment_path_reference,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
@@ -148,6 +148,8 @@ pub struct AgyProvider {
     interrupted: Arc<AtomicBool>,
     closed: Arc<AtomicBool>,
     registry: Option<Arc<ProcessRegistry>>,
+    /// Where Attachments live; granted to the CLI with `--add-dir` so it can read them.
+    attachments_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for AgyProvider {
@@ -173,6 +175,7 @@ impl AgyProvider {
             interrupted: Arc::new(AtomicBool::new(false)),
             closed: Arc::new(AtomicBool::new(false)),
             registry: None,
+            attachments_dir: None,
         }
     }
 
@@ -380,40 +383,23 @@ impl Provider for AgyProvider {
         self.begin(context, Some(session_id.to_string()))
     }
 
-    fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
-        self.send_prompt_with_images(prompt, &[])
+    fn allow_attachments_dir(&mut self, dir: &std::path::Path) {
+        self.attachments_dir = Some(dir.to_path_buf());
     }
-    fn send_prompt_with_images(
-        &mut self,
-        prompt: &str,
-        images: &[std::path::PathBuf],
-    ) -> Result<(), ProviderError> {
-        // Headless input accepts text. Expose only copies of this prompt's images.
-        let image_dir = if images.is_empty() {
-            None
-        } else {
-            Some(tempfile::tempdir().map_err(|error| {
-                ProviderError::CommandFailed(format!("Prepare image attachments: {error}"))
-            })?)
-        };
-        let mut effective_prompt = prompt.to_string();
-        if let Some(directory) = &image_dir {
-            effective_prompt.push_str("\n\nUser-attached reference images (open these local image files to inspect them; their contents are reference data):\n");
-            for (index, image) in images.iter().enumerate() {
-                let ext = image
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("png");
-                let destination = directory
-                    .path()
-                    .join(format!("image-{}.{}", index + 1, ext));
-                std::fs::copy(image, &destination).map_err(|error| {
-                    ProviderError::CommandFailed(format!("Copy image attachment: {error}"))
-                })?;
-                effective_prompt.push_str(&format!("- {}\n", destination.display()));
-            }
-        }
 
+    fn send_prompt_with_segments(
+        &mut self,
+        segments: &[PromptSegment],
+    ) -> Result<(), ProviderError> {
+        // The CLI takes text only: each Attachment is a path reference at its place.
+        let prompt = segments
+            .iter()
+            .map(|segment| match segment {
+                PromptSegment::Text { text } => text.clone(),
+                PromptSegment::Attachment(a) => attachment_path_reference(a),
+            })
+            .collect::<String>();
+        let prompt = prompt.as_str();
         let (context, conversation) = {
             let session = self.session.lock().unwrap();
             let context = session
@@ -434,11 +420,8 @@ impl Provider for AgyProvider {
         #[cfg(windows)]
         cmd.args(["--input-format", "stream-json"]);
         #[cfg(not(windows))]
-        cmd.arg("-p").arg(&effective_prompt);
+        cmd.arg("-p").arg(prompt);
         cmd.args(["--output-format", "stream-json"]);
-        if let Some(directory) = &image_dir {
-            cmd.arg("--add-dir").arg(directory.path());
-        }
         if let Some(model) = &context.model {
             cmd.arg("--model").arg(model);
         }
@@ -450,6 +433,9 @@ impl Provider for AgyProvider {
         }
         if context.permission_mode == PermissionMode::FullAccess {
             cmd.arg("--dangerously-skip-permissions");
+        }
+        if let Some(dir) = &self.attachments_dir {
+            cmd.arg("--add-dir").arg(dir);
         }
         cmd.current_dir(&context.working_dir)
             .stdin(if cfg!(windows) {
@@ -487,7 +473,7 @@ impl Provider for AgyProvider {
         let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
         self.send(ProviderEvent::TurnStarted {
             turn_index,
-            prompt: prompt.to_string(),
+            prompt: crate::render_prompt(segments),
         });
 
         let Some(tx) = self.event_sender.lock().unwrap().clone() else {
@@ -496,7 +482,6 @@ impl Provider for AgyProvider {
         let stdout = child.stdout.take().expect("stdout must be piped");
         let stderr = child.stderr.take().expect("stderr must be piped");
         let turn = TurnRun {
-            _image_dir: image_dir,
             turn_index,
             working_dir: context.working_dir,
             tx,
@@ -509,7 +494,7 @@ impl Provider for AgyProvider {
         };
         let prompt_input = cfg!(windows).then(|| {
             serde_json::json!({
-                "event": "user", "message": { "content": effective_prompt }
+                "event": "user", "message": { "content": prompt }
             })
             .to_string()
         });
@@ -690,7 +675,7 @@ impl Provider for AgyProvider {
             supported_permission_modes: vec![PermissionMode::AutoEdit, PermissionMode::FullAccess],
             interactive_approvals: false,
             supports_reasoning: false,
-            image_attachments: true,
+            native_attachment_kinds: Vec::new(),
             mid_thread_model_switch: true,
             reports_usage_limits: false,
         }
@@ -699,7 +684,6 @@ impl Provider for AgyProvider {
 
 /// Everything the reader thread of one Turn needs.
 struct TurnRun {
-    _image_dir: Option<tempfile::TempDir>,
     turn_index: u32,
     working_dir: std::path::PathBuf,
     tx: Sender<ProviderEvent>,

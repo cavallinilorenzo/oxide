@@ -1132,8 +1132,10 @@ pub fn checkout_pull_request(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
     Ok(())
 }
 
-const ISSUE_FIELDS: &str = "number,title,state,author,url,createdAt,comments";
-const ISSUE_DETAIL_FIELDS: &str = "number,title,body,state,author,url,createdAt,comments";
+const ISSUE_FIELDS: &str =
+    "number,title,state,stateReason,author,url,createdAt,comments,labels,assignees";
+const ISSUE_DETAIL_FIELDS: &str =
+    "number,title,body,state,stateReason,author,url,createdAt,comments,labels,assignees";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1148,11 +1150,16 @@ pub struct IssueComment {
 pub struct IssueSummary {
     pub number: u32,
     pub title: String,
+    /// `OPEN` or `CLOSED`.
     pub state: String,
+    /// Why a closed issue was closed: `COMPLETED` or `NOT_PLANNED`; empty while open.
+    pub state_reason: String,
     pub author: String,
     pub url: String,
     pub comments_count: u32,
     pub created_at: String,
+    pub labels: Vec<PullRequestLabel>,
+    pub assignees: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1162,10 +1169,15 @@ pub struct IssueDetail {
     pub title: String,
     pub body: String,
     pub state: String,
+    pub state_reason: String,
     pub author: String,
     pub url: String,
     pub created_at: String,
     pub comments: Vec<IssueComment>,
+    pub labels: Vec<PullRequestLabel>,
+    pub assignees: Vec<String>,
+    /// The signed-in GitHub user.
+    pub viewer: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1175,16 +1187,48 @@ pub struct IssuesState {
     pub guidance: Option<String>,
 }
 
+/// Why an issue is closed, as the web's close menu offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueCloseReason {
+    Completed,
+    NotPlanned,
+}
+
+/// Changes to an issue's text, assignees and labels; `None` leaves the text alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueEdit {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
+}
+
 fn issue_summary_from(v: &serde_json::Value) -> IssueSummary {
     IssueSummary {
         number: v["number"].as_u64().unwrap_or(0) as u32,
         title: text(&v["title"]),
         state: text(&v["state"]),
+        state_reason: text(&v["stateReason"]),
         author: text(&v["author"]["login"]),
         url: text(&v["url"]),
         comments_count: v["comments"].as_array().map(|c| c.len()).unwrap_or(0) as u32,
         created_at: text(&v["createdAt"]),
+        labels: labels_from(&v["labels"]),
+        assignees: logins_from(&v["assignees"]),
     }
+}
+
+fn logins_from(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|a| text(&a["login"]))
+        .collect()
 }
 
 /// The user's repositories whose name or description contains `query`.
@@ -1238,14 +1282,32 @@ pub fn issues_state(gh: &Gh, cwd: &Path) -> Result<IssuesState> {
     })
 }
 
-pub fn list_issues(gh: &Gh, cwd: &Path, search: &str) -> Result<Vec<IssueSummary>> {
+/// Issues of the repository, open or closed, optionally only those the user opened and
+/// narrowed by a search query.
+pub fn list_issues(
+    gh: &Gh,
+    cwd: &Path,
+    closed: bool,
+    mine: bool,
+    search: &str,
+) -> Result<Vec<IssueSummary>> {
     gh.require_ready(cwd)?;
     let search = search.trim();
-    let mut args = vec!["issue", "list", "--limit", "100", "--json", ISSUE_FIELDS];
-    if search.is_empty() {
-        args.extend(["--state", "open"]);
-    } else {
-        args.extend(["--state", "all", "--search", search]);
+    let mut args = vec![
+        "issue",
+        "list",
+        "--limit",
+        MAX_LISTED,
+        "--json",
+        ISSUE_FIELDS,
+        "--state",
+        if closed { "closed" } else { "open" },
+    ];
+    if mine {
+        args.extend(["--author", "@me"]);
+    }
+    if !search.is_empty() {
+        args.extend(["--search", search]);
     }
     let list = parse(&gh.run(cwd, &args)?)?;
     Ok(list
@@ -1257,13 +1319,24 @@ pub fn list_issues(gh: &Gh, cwd: &Path, search: &str) -> Result<Vec<IssueSummary
 pub fn issue_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<IssueDetail> {
     gh.require_ready(cwd)?;
     let n = number.to_string();
-    let v = parse(&gh.run(cwd, &["issue", "view", &n, "--json", ISSUE_DETAIL_FIELDS])?)?;
+    let (view, viewer) = std::thread::scope(|scope| {
+        let viewer = scope.spawn(|| viewer_login(gh, cwd));
+        let view = gh.run(cwd, &["issue", "view", &n, "--json", ISSUE_DETAIL_FIELDS]);
+        (
+            view,
+            viewer
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        )
+    });
+    let v = parse(&view?)?;
     let list = |key: &str| v[key].as_array().cloned().unwrap_or_default();
     Ok(IssueDetail {
         number: v["number"].as_u64().unwrap_or(0) as u32,
         title: text(&v["title"]),
         body: text(&v["body"]),
         state: text(&v["state"]),
+        state_reason: text(&v["stateReason"]),
         author: text(&v["author"]["login"]),
         url: text(&v["url"]),
         created_at: text(&v["createdAt"]),
@@ -1275,16 +1348,35 @@ pub fn issue_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<IssueDetail> {
                 created_at: text(&c["createdAt"]),
             })
             .collect(),
+        labels: labels_from(&v["labels"]),
+        assignees: logins_from(&v["assignees"]),
+        viewer: viewer.unwrap_or_default(),
     })
 }
 
-pub fn create_issue(gh: &Gh, cwd: &Path, title: &str, body: &str) -> Result<IssueSummary> {
+pub fn create_issue(
+    gh: &Gh,
+    cwd: &Path,
+    title: &str,
+    body: &str,
+    assignees: &[String],
+    labels: &[String],
+) -> Result<IssueSummary> {
     gh.require_ready(cwd)?;
     let title = title.trim();
     if title.is_empty() {
         return Err(Error::Github("Write an issue title.".into()));
     }
-    let output = gh.run(cwd, &["issue", "create", "--title", title, "--body", body])?;
+    let assignees = assignees.join(",");
+    let labels = labels.join(",");
+    let mut args = vec!["issue", "create", "--title", title, "--body", body];
+    if !assignees.is_empty() {
+        args.extend(["--assignee", &assignees]);
+    }
+    if !labels.is_empty() {
+        args.extend(["--label", &labels]);
+    }
+    let output = gh.run(cwd, &args)?;
     let url = output.trim();
     let number = url
         .rsplit('/')
@@ -1296,10 +1388,13 @@ pub fn create_issue(gh: &Gh, cwd: &Path, title: &str, body: &str) -> Result<Issu
         number: detail.number,
         title: detail.title,
         state: detail.state,
+        state_reason: detail.state_reason,
         author: detail.author,
         url: detail.url,
         comments_count: 0,
         created_at: detail.created_at,
+        labels: detail.labels,
+        assignees: detail.assignees,
     })
 }
 
@@ -1316,9 +1411,73 @@ pub fn comment_issue(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Result<()>
     Ok(())
 }
 
-pub fn close_issue(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+/// Closes an issue with a reason, and a comment when there is one to leave.
+pub fn close_issue(
+    gh: &Gh,
+    cwd: &Path,
+    number: u32,
+    reason: IssueCloseReason,
+    comment: &str,
+) -> Result<()> {
     gh.require_ready(cwd)?;
-    gh.run(cwd, &["issue", "close", &number.to_string()])?;
+    let n = number.to_string();
+    let comment = comment.trim();
+    let mut args = vec![
+        "issue",
+        "close",
+        &n,
+        "--reason",
+        match reason {
+            IssueCloseReason::Completed => "completed",
+            IssueCloseReason::NotPlanned => "not planned",
+        },
+    ];
+    if !comment.is_empty() {
+        args.extend(["--comment", comment]);
+    }
+    gh.run(cwd, &args)?;
+    Ok(())
+}
+
+pub fn reopen_issue(gh: &Gh, cwd: &Path, number: u32) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run(cwd, &["issue", "reopen", &number.to_string()])?;
+    Ok(())
+}
+
+/// Applies the changes to title, description, assignees and labels in one `gh` call.
+pub fn edit_issue(gh: &Gh, cwd: &Path, number: u32, edit: &IssueEdit) -> Result<()> {
+    gh.require_ready(cwd)?;
+    let n = number.to_string();
+    let title = edit.title.as_deref().map(str::trim);
+    if title == Some("") {
+        return Err(Error::Github("Write an issue title.".into()));
+    }
+    let mut flags: Vec<(&str, String)> = Vec::new();
+    if let Some(title) = title {
+        flags.push(("--title", title.to_string()));
+    }
+    if let Some(body) = &edit.body {
+        flags.push(("--body", body.clone()));
+    }
+    for (flag, names) in [
+        ("--add-assignee", &edit.add_assignees),
+        ("--remove-assignee", &edit.remove_assignees),
+        ("--add-label", &edit.add_labels),
+        ("--remove-label", &edit.remove_labels),
+    ] {
+        if !names.is_empty() {
+            flags.push((flag, names.join(",")));
+        }
+    }
+    if flags.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["issue", "edit", &n];
+    for (flag, value) in &flags {
+        args.extend([*flag, value.as_str()]);
+    }
+    gh.run(cwd, &args)?;
     Ok(())
 }
 

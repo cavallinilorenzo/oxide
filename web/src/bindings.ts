@@ -139,11 +139,15 @@ export const commands = {
 	editPullRequest: (projectId: number, number: number, edit: PullRequestEdit) => typedError<null, AppError>(__TAURI_INVOKE("edit_pull_request", { projectId, number, edit })),
 	/**  Availability of GitHub CLI for issues, and guidance if missing/logged out. */
 	issuesState: (projectId: number) => typedError<IssuesState_Serialize, AppError>(__TAURI_INVOKE("issues_state", { projectId })),
-	listIssues: (projectId: number, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, search })),
+	listIssues: (projectId: number, closed: boolean, mine: boolean, search: string) => typedError<IssueSummary[], AppError>(__TAURI_INVOKE("list_issues", { projectId, closed, mine, search })),
 	issueDetail: (projectId: number, number: number) => typedError<IssueDetail, AppError>(__TAURI_INVOKE("issue_detail", { projectId, number })),
-	createIssue: (projectId: number, title: string, body: string) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body })),
+	createIssue: (projectId: number, title: string, body: string, assignees: string[], labels: string[]) => typedError<IssueSummary, AppError>(__TAURI_INVOKE("create_issue", { projectId, title, body, assignees, labels })),
 	commentIssue: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_issue", { projectId, number, body })),
-	closeIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("close_issue", { projectId, number })),
+	/**  Closes an issue with a reason, leaving `comment` first when it is not empty. */
+	closeIssue: (projectId: number, number: number, reason: IssueCloseReason, comment: string) => typedError<null, AppError>(__TAURI_INVOKE("close_issue", { projectId, number, reason, comment })),
+	reopenIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("reopen_issue", { projectId, number })),
+	/**  Changes an issue's title, description, assignees and labels. */
+	editIssue: (projectId: number, number: number, edit: IssueEdit_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("edit_issue", { projectId, number, edit })),
 	openIssue: (projectId: number, number: number) => typedError<null, AppError>(__TAURI_INVOKE("open_issue", { projectId, number })),
 	/**  The Project and Thread to reopen on launch. */
 	lastSelection: () => typedError<Selection_Serialize | null, AppError>(__TAURI_INVOKE("last_selection")),
@@ -440,6 +444,8 @@ export type GithubRepository = {
 	isPrivate: boolean,
 };
 
+export type IssueCloseReason = "completed" | "notPlanned";
+
 export type IssueComment = {
 	author: string,
 	body: string,
@@ -451,20 +457,47 @@ export type IssueDetail = {
 	title: string,
 	body: string,
 	state: string,
+	stateReason: string,
 	author: string,
 	url: string,
 	createdAt: string,
 	comments: IssueComment[],
+	labels: PullRequestLabel[],
+	assignees: string[],
+	viewer: string,
+};
+
+export type IssueEdit = IssueEdit_Serialize | IssueEdit_Deserialize;
+
+export type IssueEdit_Deserialize = {
+	title?: string | null,
+	body?: string | null,
+	addAssignees: string[],
+	removeAssignees: string[],
+	addLabels: string[],
+	removeLabels: string[],
+};
+
+export type IssueEdit_Serialize = {
+	title: string | null,
+	body: string | null,
+	addAssignees: string[],
+	removeAssignees: string[],
+	addLabels: string[],
+	removeLabels: string[],
 };
 
 export type IssueSummary = {
 	number: number,
 	title: string,
 	state: string,
+	stateReason: string,
 	author: string,
 	url: string,
 	commentsCount: number,
 	createdAt: string,
+	labels: PullRequestLabel[],
+	assignees: string[],
 };
 
 export type IssuesState = IssuesState_Serialize | IssuesState_Deserialize;

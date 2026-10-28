@@ -367,6 +367,19 @@ export function App() {
     setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
   }, []);
 
+  // An empty Thread (no Turn yet) closes at once; any other one asks first.
+  const closeThread = useCallback(async (threadId: number) => {
+    const turns = await commands.listTurns(threadId, 0, 1);
+    if (turns.status === "ok" && turns.data.turnCount === 0) {
+      const result = await performThreadDelete(threadId, false, commands.deleteThread);
+      if (result.status === "deleted") {
+        onThreadDeleted(threadId);
+        return;
+      }
+    }
+    deleteThread(threadId);
+  }, [deleteThread, onThreadDeleted]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const action = actionForKey(e, shortcuts);
@@ -380,7 +393,9 @@ export function App() {
         return;
       }
       e.preventDefault();
-      if (action === "openProject") {
+      if (action === "closeThread") {
+        if (currentThreadId !== null && !showSettings && !showBoard) void closeThread(currentThreadId);
+      } else if (action === "openProject") {
         overlays.current?.openPalette();
       } else if (action === "previousThread" || action === "nextThread") {
         const next = adjacentThreadId(threads?.map((thread) => thread.id) ?? [], currentThreadId, action === "nextThread" ? 1 : -1);
@@ -411,7 +426,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, showSettings, showTools, showTerminal, activeTool, currentThreadId, rememberTerminalContext, threads]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, showTerminal, activeTool, currentThreadId, rememberTerminalContext, threads]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {

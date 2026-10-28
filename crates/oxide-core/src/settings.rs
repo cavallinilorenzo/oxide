@@ -85,6 +85,7 @@ pub struct Shortcuts {
     pub diff: String,
     pub previous_thread: String,
     pub next_thread: String,
+    pub close_thread: String,
     pub toggle_tools: String,
     pub toggle_board: String,
     pub open_settings: String,
@@ -104,6 +105,7 @@ impl Default for Shortcuts {
             diff: s("Mod+Shift+D"),
             previous_thread: s("Mod+ArrowUp"),
             next_thread: s("Mod+ArrowDown"),
+            close_thread: s("Mod+W"),
             toggle_tools: s("Mod+\\"),
             toggle_board: s("Mod+B"),
             open_settings: s("Mod+,"),
@@ -113,7 +115,7 @@ impl Default for Shortcuts {
 
 impl Shortcuts {
     /// Every shortcut as `(settings key, accelerator)`.
-    fn slots(&mut self) -> [(&'static str, &mut String); 13] {
+    fn slots(&mut self) -> [(&'static str, &mut String); 14] {
         [
             ("newThread", &mut self.new_thread),
             ("openProject", &mut self.open_project),
@@ -125,6 +127,7 @@ impl Shortcuts {
             ("diff", &mut self.diff),
             ("previousThread", &mut self.previous_thread),
             ("nextThread", &mut self.next_thread),
+            ("closeThread", &mut self.close_thread),
             ("toggleTools", &mut self.toggle_tools),
             ("toggleBoard", &mut self.toggle_board),
             ("openSettings", &mut self.open_settings),

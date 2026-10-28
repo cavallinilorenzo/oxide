@@ -658,6 +658,8 @@ export type PullRequestCheck_Deserialize = {
 	state: CheckState,
 	/**  Where GitHub shows the run, to find out why it failed. */
 	url?: string | null,
+	/**  Whether branch protection requires it: only these hold the merge up. */
+	required: boolean,
 };
 
 export type PullRequestCheck_Serialize = {
@@ -665,6 +667,8 @@ export type PullRequestCheck_Serialize = {
 	state: CheckState,
 	/**  Where GitHub shows the run, to find out why it failed. */
 	url: string | null,
+	/**  Whether branch protection requires it: only these hold the merge up. */
+	required: boolean,
 };
 
 export type PullRequestComment = PullRequestComment_Serialize | PullRequestComment_Deserialize;

@@ -27,7 +27,7 @@ function detail(overrides: Partial<PullRequestDetail> = {}): PullRequestDetail {
     body: "Bumps react-virtual.\n\nUpdates from 3.14.21 to 3.14.22",
     checks: [
       { name: "web", state: "failure", url: "https://github.com/me/oxide/actions/runs/1" },
-      { name: "rust", state: "success", url: null },
+      { name: "rust", state: "success", url: null, required: false },
     ],
     comments: [
       { author: "bob", body: "Rename this", createdAt: "2026-10-27T10:00:00Z", review: "changesRequested" },
@@ -113,7 +113,7 @@ it("lists conflicts and offers no merge while the branch conflicts", async () =>
 it("offers no merge while GitHub's branch policy blocks it, e.g. required checks still running", async () => {
   vi.mocked(commands.pullRequestDetail).mockResolvedValue({
     status: "ok",
-    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null }] }),
+    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null, required: false }] }),
   });
   await render();
   expect(button(/Squash and merge/).disabled).toBe(true);
@@ -123,7 +123,7 @@ it("turns on auto-merge while the checks run, and only then offers it", async ()
   const merge = vi.spyOn(commands, "mergePullRequest").mockResolvedValue({ status: "ok", data: null });
   vi.mocked(commands.pullRequestDetail).mockResolvedValue({
     status: "ok",
-    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null }] }),
+    data: detail({ mergeState: "blocked", checks: [{ name: "web", state: "pending", url: null, required: false }] }),
   });
   await render();
   await click(button(/Merge when ready/));
@@ -248,7 +248,7 @@ it("reads the conversation like the web: avatar, name, what they did and when", 
 it("reloads sooner while checks are still running, and stops once they are done", async () => {
   vi.useFakeTimers();
   try {
-    const running = detail({ checks: [{ name: "rust", state: "pending", url: null }] });
+    const running = detail({ checks: [{ name: "rust", state: "pending", url: null, required: false }] });
     vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: running });
     await render();
     const calls = vi.mocked(commands.pullRequestDetail).mock.calls.length;

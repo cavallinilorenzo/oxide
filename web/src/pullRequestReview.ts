@@ -41,9 +41,16 @@ export interface CheckCounts {
   passing: number;
 }
 
+/** The checks that decide the merge: the required ones when branch protection names any, else all.
+ *  GitHub's merge box counts only those, so a matrix job or an optional check never holds it up. */
+export function decidingChecks(checks: PullRequestCheck[]): PullRequestCheck[] {
+  const required = checks.filter((c) => c.required);
+  return required.length > 0 ? required : checks;
+}
+
 export function countChecks(checks: PullRequestCheck[]): CheckCounts {
   const counts = { failing: 0, pending: 0, passing: 0 };
-  for (const c of dedupeChecks(checks)) {
+  for (const c of dedupeChecks(decidingChecks(checks))) {
     if (c.state === "failure") counts.failing++;
     else if (c.state === "pending") counts.pending++;
     else counts.passing++;

@@ -37,15 +37,15 @@ describe("summarizeChecks", () => {
 
   it("counts failing and pending checks first, as they need attention", () => {
     const checks = [
-      { name: "a", state: "success" as const, url: null },
-      { name: "b", state: "failure" as const, url: null },
-      { name: "c", state: "pending" as const, url: null },
-      { name: "d", state: "success" as const, url: null },
+      { name: "a", state: "success" as const, url: null, required: false },
+      { name: "b", state: "failure" as const, url: null, required: false },
+      { name: "c", state: "pending" as const, url: null, required: false },
+      { name: "d", state: "success" as const, url: null, required: false },
     ];
     expect(summarizeChecks(checks)).toBe("1 failing, 1 running, 2 passing");
   });
 
   it("omits the empty kinds", () => {
-    expect(summarizeChecks([{ name: "a", state: "success", url: null }])).toBe("1 passing");
+    expect(summarizeChecks([{ name: "a", state: "success", url: null, required: false }])).toBe("1 passing");
   });
 });

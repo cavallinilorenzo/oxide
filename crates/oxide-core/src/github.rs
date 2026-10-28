@@ -123,6 +123,9 @@ pub struct PullRequestCheck {
     pub state: CheckState,
     /// Where GitHub shows the run, to find out why it failed.
     pub url: Option<String>,
+    /// Whether branch protection requires it to pass before merging. GitHub's merge box counts
+    /// only these, so a matrix job or an optional check does not hold the merge up.
+    pub required: bool,
 }
 
 /// Whether the pull request can be merged as it is, as GitHub's merge box decides.
@@ -618,6 +621,7 @@ fn check_from(v: &serde_json::Value) -> PullRequestCheck {
             .or_else(|| v["targetUrl"].as_str())
             .filter(|url| url.starts_with("https://"))
             .map(str::to_string),
+        required: false,
     }
 }
 
@@ -891,7 +895,8 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
          additions,deletions,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup"
     );
     // Independent round trips to GitHub: run them side by side.
-    let (view, settings, patch, default_method, viewer) = std::thread::scope(|scope| {
+    let (view, settings, patch, default_method, viewer, required) = std::thread::scope(|scope| {
+        let required = scope.spawn(|| required_check_names(gh, cwd, number));
         let settings = scope.spawn(|| merge_settings(gh, cwd));
         let patch = scope.spawn(|| gh.run(cwd, &["pr", "diff", &n, "--color=never"]));
         let default_method = scope.spawn(|| viewer_default_merge_method(gh, cwd));
@@ -908,6 +913,7 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
             join(patch),
             join(default_method),
             join(viewer),
+            join(required),
         )
     });
     let v = parse(&view?)?;
@@ -919,7 +925,14 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     Ok(PullRequestDetail {
         phase: phase_from(&v),
         body: text(&v["body"]),
-        checks: list("statusCheckRollup").iter().map(check_from).collect(),
+        checks: list("statusCheckRollup")
+            .iter()
+            .map(|v| {
+                let mut check = check_from(v);
+                check.required = required.contains(&check.name);
+                check
+            })
+            .collect(),
         comments: conversation_from(&v),
         merge_state: merge_state_from(&v),
         review_decision: match v["reviewDecision"].as_str() {
@@ -946,6 +959,38 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
         },
         pull_request,
     })
+}
+
+/// The names of the checks branch protection requires of this pull request, from the latest
+/// commit's rollup. Empty when GitHub does not say, so every check then counts.
+fn required_check_names(gh: &Gh, cwd: &Path, number: u32) -> Vec<String> {
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){\
+        pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{\
+        __typename ... on CheckRun{name isRequired(pullRequestNumber:$number)} \
+        ... on StatusContext{context isRequired(pullRequestNumber:$number)}}}}}}}}}}";
+    let jq = ".data.repository.pullRequest.commits.nodes[].commit.statusCheckRollup.contexts.nodes[] \
+        | select(.isRequired) | .name // .context";
+    let number = format!("number={number}");
+    let query = format!("query={query}");
+    gh.run(
+        cwd,
+        &[
+            "api",
+            "graphql",
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &number,
+            "-f",
+            &query,
+            "--jq",
+            jq,
+        ],
+    )
+    .map(|out| out.lines().map(str::to_string).collect())
+    .unwrap_or_default()
 }
 
 /// The method the web merge box preselects for the signed-in user, if GitHub says.

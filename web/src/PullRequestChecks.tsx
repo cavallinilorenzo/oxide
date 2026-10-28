@@ -9,6 +9,8 @@ const CHECK_WORD = { success: "Passed", failure: "Failed", pending: "Running" } 
 export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen: (url: string) => void }) {
   const { failing, pending, passing } = countChecks(checks);
   const all = dedupeChecks(checks);
+  // Once branch protection names required checks, the others are shown but do not count.
+  const hasRequired = checks.some((c) => c.required);
   if (all.length === 0) return null;
   const attention = all.filter((c) => c.state !== "success");
   const passed = all.filter((c) => c.state === "success");
@@ -34,7 +36,7 @@ export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen:
       {attention.length > 0 && (
         <ul className="pr-checks">
           {attention.map((c) => (
-            <CheckRow key={c.name} check={c} onOpen={onOpen} />
+            <CheckRow key={c.name} check={c} optional={hasRequired && !c.required} onOpen={onOpen} />
           ))}
         </ul>
       )}
@@ -42,7 +44,7 @@ export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen:
         (inline ? (
           <ul className="pr-checks">
             {passed.map((c) => (
-              <CheckRow key={c.name} check={c} onOpen={onOpen} />
+              <CheckRow key={c.name} check={c} optional={hasRequired && !c.required} onOpen={onOpen} />
             ))}
           </ul>
         ) : (
@@ -54,7 +56,7 @@ export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen:
             </summary>
             <ul className="pr-checks">
               {passed.map((c) => (
-                <CheckRow key={c.name} check={c} onOpen={onOpen} />
+                <CheckRow key={c.name} check={c} optional={hasRequired && !c.required} onOpen={onOpen} />
               ))}
             </ul>
           </details>
@@ -63,7 +65,7 @@ export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen:
   );
 }
 
-function CheckRow({ check, onOpen }: { check: PullRequestCheck; onOpen: (url: string) => void }) {
+function CheckRow({ check, optional, onOpen }: { check: PullRequestCheck; optional: boolean; onOpen: (url: string) => void }) {
   const icon =
     check.state === "success" ? (
       <CheckCircleFillIcon size={14} />
@@ -76,6 +78,7 @@ function CheckRow({ check, onOpen }: { check: PullRequestCheck; onOpen: (url: st
     <>
       {icon}
       <span className="pr-check-name">{check.name}</span>
+      {optional && <span className="pr-check-optional">Not required</span>}
       <span className="pr-check-state">{CHECK_WORD[check.state]}</span>
       {check.url && <LinkExternalIcon size={12} className="pr-check-open" />}
     </>

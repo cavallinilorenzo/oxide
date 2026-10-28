@@ -1003,6 +1003,8 @@ pub struct PullRequestCheck {
     pub state: CheckState,
     /// Where GitHub shows the run, to find out why it failed.
     pub url: Option<String>,
+    /// Whether branch protection requires it: only these hold the merge up.
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]

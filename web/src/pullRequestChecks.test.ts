@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PullRequestCheck } from "./bindings";
-import { avatarUrl, dedupeChecks, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
+import { avatarUrl, countChecks, dedupeChecks, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
 
-const check = (name: string, state: PullRequestCheck["state"]): PullRequestCheck => ({ name, state, url: null });
+const check = (name: string, state: PullRequestCheck["state"]): PullRequestCheck => ({ name, state, url: null, required: false });
 const open = { phase: "open", mergeState: "clean", reviewDecision: null } as const;
 
 describe("dedupeChecks", () => {
@@ -68,5 +68,23 @@ describe("relativeTime", () => {
     expect(relativeTime("2026-10-26T09:00:00Z", now)).toBe("3h");
     expect(relativeTime("2026-10-24T12:00:00Z", now)).toBe("2d");
     expect(relativeTime("garbage", now)).toBe("");
+  });
+});
+
+describe("countChecks", () => {
+  const required = (name: string, state: PullRequestCheck["state"]): PullRequestCheck => ({ ...check(name, state), required: true });
+
+  it("counts only the required checks once branch protection names some, as GitHub's merge box does", () => {
+    const checks = [required("rust", "pending"), required("web", "success"), check("rust (macos-latest)", "pending"), check("supply-chain", "pending")];
+    expect(countChecks(checks)).toEqual({ failing: 0, pending: 1, passing: 1 });
+  });
+
+  it("counts every check when none is marked required", () => {
+    expect(countChecks([check("a", "pending"), check("b", "success")])).toEqual({ failing: 0, pending: 1, passing: 1 });
+  });
+
+  it("does not hold the merge up for an optional check that is running", () => {
+    const checks = [required("rust", "success"), check("supply-chain", "pending")];
+    expect(readiness({ ...open, checks })).toEqual({ tone: "ok", label: "Ready to merge" });
   });
 });

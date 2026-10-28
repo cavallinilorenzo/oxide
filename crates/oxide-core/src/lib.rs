@@ -7,6 +7,7 @@ mod checkpoint;
 mod clock;
 mod continuation;
 mod db;
+mod detection_cache;
 mod discovery;
 pub mod editor;
 mod error;
@@ -128,6 +129,7 @@ pub struct Core {
     usage: Arc<usage::UsageHub>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
     slash_catalogs: Mutex<HashMap<String, Vec<oxide_provider::SlashCommandInfo>>>,
+    detections: detection_cache::DetectionCache,
 }
 
 impl Core {
@@ -185,6 +187,7 @@ impl Core {
             board,
             usage,
             model_catalogs: Mutex::new(HashMap::new()),
+            detections: detection_cache::DetectionCache::default(),
             slash_catalogs: Mutex::new(
                 fs::read(home.join("cache/slash-commands/catalogs.json"))
                     .ok()
@@ -716,6 +719,11 @@ impl Core {
     }
 
     pub fn detect_provider(&self, provider: &str) -> oxide_provider::Detection {
+        self.detections
+            .get_or_detect(provider, || self.detect_provider_uncached(provider))
+    }
+
+    fn detect_provider_uncached(&self, provider: &str) -> oxide_provider::Detection {
         let det = match provider {
             "claude" => oxide_provider::claude::ClaudeCodeProvider::new()
                 .detect()

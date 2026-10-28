@@ -35,7 +35,12 @@ export class LruCache<K, V> {
     }
   }
 
-  private delete(key: K): void {
+  /** The keys currently held, least recently used first. */
+  keys(): K[] {
+    return [...this.entries.keys()];
+  }
+
+  delete(key: K): void {
     const old = this.entries.get(key);
     if (old === undefined) return;
     this.entries.delete(key);

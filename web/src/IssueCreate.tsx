@@ -1,5 +1,6 @@
 import { ArrowLeftIcon, IssueOpenedIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
+import { useQuery } from "./queryCache";
 import { commands, type IssueSummary, type PullRequestLabel } from "./bindings";
 import { IssueTemplateChooser } from "./IssueTemplateChooser";
 import { IssueTemplateFields } from "./IssueTemplateFields";
@@ -10,7 +11,6 @@ import {
   parseIssueTemplates,
   type FormAnswers,
   type IssueTemplate,
-  type IssueTemplates,
 } from "./issueTemplates";
 import { canSubmitIssue } from "./issueView";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -25,28 +25,14 @@ interface IssueCreateProps {
   onCreated: (issue: IssueSummary) => void;
 }
 
-type Templates = { state: "loading" } | { state: "ready"; templates: IssueTemplates };
-
 /** A new issue as the web offers it: first the repository's templates to choose from (when it
  *  has any), then the form of the chosen one, or a blank one. */
 export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) {
-  const [loaded, setLoaded] = useState<Templates>({ state: "loading" });
+  const query = useQuery(`p${projectId}:issues:templates`, () => commands.issueTemplates(projectId));
   // `undefined` while choosing, `null` for a blank issue.
   const [chosen, setChosen] = useState<IssueTemplate | null | undefined>(undefined);
 
-  useEffect(() => {
-    let active = true;
-    void commands.issueTemplates(projectId).then((result) => {
-      if (!active) return;
-      // Templates are a convenience: if they cannot be read, a blank issue still works.
-      setLoaded({ state: "ready", templates: parseIssueTemplates(result.status === "ok" ? result.data : []) });
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId]);
-
-  if (loaded.state === "loading") {
+  if (query.state === "loading") {
     return (
       <div className="pr-review issue-create">
         <div className="pr-nav">
@@ -58,7 +44,8 @@ export function IssueCreate({ projectId, onBack, onCreated }: IssueCreateProps) 
       </div>
     );
   }
-  const { templates } = loaded;
+  // Templates are a convenience: if they cannot be read, a blank issue still works.
+  const templates = parseIssueTemplates(query.state === "ready" ? query.data : []);
   const choosing = templates.templates.length > 0 || templates.config.contactLinks.length > 0;
   if (choosing && chosen === undefined) {
     return <IssueTemplateChooser templates={templates} onBack={onBack} onChoose={setChosen} />;

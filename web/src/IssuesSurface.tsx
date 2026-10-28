@@ -1,6 +1,8 @@
 import { CommentIcon, PlusIcon, SearchIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
-import { commands, type IssuesState_Serialize, type IssueSummary, type Thread } from "./bindings";
+import { invalidateQueries, useQuery } from "./queryCache";
+import { RefreshNotice } from "./RefreshNotice";
+import { commands, type Thread } from "./bindings";
 import { Avatar } from "./Avatar";
 import { IssueCreate } from "./IssueCreate";
 import { IssueDetailView } from "./IssueDetailView";
@@ -20,12 +22,6 @@ export interface IssuesSurfaceProps {
   onDispatched?: (thread: Thread) => void;
 }
 
-type Availability =
-  | { state: "loading" }
-  | { state: "error"; message: string }
-  | { state: "guidance"; guidance: string }
-  | { state: "ready"; issuesState: IssuesState_Serialize };
-
 /** How long typing pauses before the search runs: every search is a `gh` call. */
 const SEARCH_DELAY_MS = 350;
 
@@ -39,48 +35,28 @@ export function IssuesSurface(props: IssuesSurfaceProps) {
 function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
   const tick = useAutoRefresh();
   const reload = refreshKey + tick;
-  const [availability, setAvailability] = useState<Availability>({ state: "loading" });
+  const availability = useQuery(`p${projectId}:issues:state`, () => commands.issuesState(projectId), reload);
   const [opened, setOpened] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   // Bumped after the list changed under it (a new issue, a closed one), beyond the timer.
   const [listRevision, setListRevision] = useState(0);
 
-  useEffect(() => {
-    let active = true;
-    void commands.issuesState(projectId).then((result) => {
-      if (!active) return;
-      if (result.status === "error") {
-        setAvailability({ state: "error", message: result.error.message });
-      } else if (result.data.availability !== "ready") {
-        setAvailability({
-          state: "guidance",
-          guidance: result.data.guidance ?? "The GitHub CLI is not ready.",
-        });
-      } else {
-        setAvailability({ state: "ready", issuesState: result.data });
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, reload]);
-
   const changed = () => {
+    invalidateQueries(`p${projectId}:issues:list:`);
     setListRevision((n) => n + 1);
     onChanged?.();
   };
 
   let content: React.ReactNode;
-  if (availability.state === "loading") {
-    content = <p className="pr-empty">Loading…</p>;
-  } else if (availability.state === "error") {
+  // The list starts loading together with the check; only a real setup problem replaces it.
+  if (availability.state === "error") {
     content = (
       <p role="alert" className="pr-empty error">
         {availability.message}
       </p>
     );
-  } else if (availability.state === "guidance") {
-    content = <p className="pr-empty">{availability.guidance}</p>;
+  } else if (availability.state === "ready" && availability.data.availability !== "ready") {
+    content = <p className="pr-empty">{availability.data.guidance ?? "The GitHub CLI is not ready."}</p>;
   } else if (creating) {
     content = (
       <IssueCreate
@@ -127,8 +103,6 @@ function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: Iss
   );
 }
 
-type List = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; issues: IssueSummary[] };
-
 interface IssueListProps {
   projectId: number;
   refreshKey: number;
@@ -141,27 +115,16 @@ function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) 
   const [search, setSearch] = useState("");
   const [closed, setClosed] = useState(false);
   const [mine, setMine] = useState(false);
-  const [list, setList] = useState<List>({ state: "loading" });
+  const list = useQuery(
+    `p${projectId}:issues:list:${closed}:${mine}:${search}`,
+    () => commands.listIssues(projectId, closed, mine, search),
+    refreshKey,
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(query.trim()), SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
   }, [query]);
-
-  useEffect(() => {
-    let active = true;
-    void commands.listIssues(projectId, closed, mine, search).then((result) => {
-      if (!active) return;
-      setList(
-        result.status === "ok"
-          ? { state: "ready", issues: result.data }
-          : { state: "error", message: result.error.message },
-      );
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, closed, mine, search, refreshKey]);
 
   const filtered = search !== "" || mine;
   return (
@@ -202,20 +165,21 @@ function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) 
         </button>
       </div>
       <div className="pr-scroll">
+        <RefreshNotice query={list} />
         {list.state === "loading" && <p className="pr-empty">Loading…</p>}
         {list.state === "error" && (
           <p role="alert" className="pr-empty error">
             {list.message}
           </p>
         )}
-        {list.state === "ready" && list.issues.length === 0 && (
+        {list.state === "ready" && list.data.length === 0 && (
           <p className="pr-empty">
             {filtered ? "No issues match." : closed ? "No closed issues." : "No open issues."}
           </p>
         )}
-        {list.state === "ready" && list.issues.length > 0 && (
+        {list.state === "ready" && list.data.length > 0 && (
           <ul className="pr-list" aria-label={closed ? "Closed issues" : "Open issues"}>
-            {list.issues.map((issue) => (
+            {list.data.map((issue) => (
               <li key={issue.number}>
                 <button className="pr-row" onClick={() => onOpen(issue.number)}>
                   <IssueStateIcon phase={issuePhase(issue)} />

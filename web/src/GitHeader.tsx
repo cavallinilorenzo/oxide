@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "./queryCache";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -222,14 +223,10 @@ interface BranchMenuProps {
 }
 
 function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProps) {
-  const [branches, setBranches] = useState<GitBranch[] | null>(null);
+  const result = useQuery(`p${projectId}:branches`, () => commands.listBranches(projectId));
+  const branches: GitBranch[] | null =
+    result.state === "ready" ? result.data : result.state === "error" ? [] : null;
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    void commands.listBranches(projectId).then((result) => {
-      setBranches(result.status === "ok" ? result.data : []);
-    });
-  }, [projectId]);
 
   function choose(run: () => Promise<void>) {
     onClose();

@@ -24,6 +24,8 @@ import {
   type PullRequestEdit,
 } from "./bindings";
 import { Avatar } from "./Avatar";
+import { invalidateQueries, updateQueries, useQuery, type QueryResult } from "./queryCache";
+import { RefreshNotice } from "./RefreshNotice";
 import { Checks } from "./PullRequestChecks";
 import { Markdown } from "./PullRequestMarkdown";
 import { MergeFooter, MergeStatus, type Pending, Working } from "./PullRequestMerge";
@@ -40,7 +42,6 @@ interface PullRequestBrowserProps {
   onReviewFiles: (number: number) => void;
 }
 
-type List = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; prs: PullRequest[] };
 
 export function PullRequestStateIcon({ draft, size = 16 }: { draft: boolean; size?: number }) {
   return draft ? (
@@ -67,7 +68,11 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
   // Sent on submit, not per keystroke: every search is a `gh` call.
   const [search, setSearch] = useState("");
   const [manual, setManual] = useState(0);
-  const [list, setList] = useState<List>({ state: "loading" });
+  const list = useQuery(
+    `p${projectId}:prs:list:${mine}:${search}`,
+    () => commands.listPullRequests(projectId, mine, search),
+    refreshKey + manual,
+  );
   const [opened, setOpened] = useState<number | null>(null);
   // A quiet line on the list after a pull request was merged or closed; it fades on its own.
   const [outcome, setOutcome] = useState<{ kind: "merged" | "closed"; number: number } | null>(null);
@@ -77,21 +82,6 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
     const timer = setTimeout(() => setOutcome(null), 4000);
     return () => clearTimeout(timer);
   }, [outcome]);
-
-  useEffect(() => {
-    let active = true;
-    void commands.listPullRequests(projectId, mine, search).then((result) => {
-      if (!active) return;
-      setList(
-        result.status === "ok"
-          ? { state: "ready", prs: result.data }
-          : { state: "error", message: result.error.message },
-      );
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, mine, search, refreshKey, manual]);
 
   if (opened !== null) {
     return (
@@ -140,6 +130,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
         </button>
       </form>
       <div className="pr-scroll">
+        <RefreshNotice query={list} />
         {outcome && (
           <p className="pr-outcome" role="status">
             #{outcome.number} {outcome.kind}
@@ -151,12 +142,12 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
             {list.message}
           </p>
         )}
-        {list.state === "ready" && list.prs.length === 0 && (
+        {list.state === "ready" && list.data.length === 0 && (
           <p className="pr-empty">{search || mine ? "No pull requests match." : "No open pull requests."}</p>
         )}
-        {list.state === "ready" && list.prs.length > 0 && (
+        {list.state === "ready" && list.data.length > 0 && (
           <ul className="pr-list" aria-label="Open pull requests">
-            {list.prs.map((pr) => (
+            {list.data.map((pr) => (
               <li key={pr.number}>
                 <button className="pr-row" onClick={() => setOpened(pr.number)}>
                   <PullRequestStateIcon draft={pr.draft} />
@@ -214,36 +205,34 @@ export function PullRequestReview({
   onChanged,
   onReviewFiles,
 }: PullRequestReviewProps) {
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [reload, setReload] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const busy = pending !== null;
-  const [comment, setComment] = useState("");
-  const [method, setMethod] = useState<MergeMethod | null>(null);
-  const [deleteBranch, setDeleteBranch] = useState(false);
-  const [merged, setMerged] = useState(false);
-  const [autoMerge, setAutoMerge] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
+  const query = useQuery(
+    `p${projectId}:prs:detail:${number}`,
+    async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus }>> => {
       const [detail, git] = await Promise.all([
         commands.pullRequestDetail(projectId, number),
         commands.gitStatus(projectId),
       ]);
-      if (!active) return;
-      if (detail.status === "error") return setLoaded({ state: "error", message: detail.error.message });
-      if (git.status === "error") return setLoaded({ state: "error", message: git.error.message });
-      setLoaded({ state: "ready", detail: detail.data, git: git.data });
-      setMethod((current) => defaultMergeMethod(detail.data.mergeMethods, current, detail.data.defaultMergeMethod));
-      // Only the repository's own preference seeds it: later reloads keep what the user chose.
-      setDeleteBranch((current) => (current ? current : detail.data.deleteBranchOnMerge));
-    })();
-    return () => {
-      active = false;
-    };
-  }, [projectId, number, refreshKey, reload]);
+      if (detail.status === "error") return detail;
+      if (git.status === "error") return git;
+      return { status: "ok", data: { detail: detail.data, git: git.data } };
+    },
+    refreshKey + reload,
+  );
+  const loaded: Loaded = query.state === "ready" ? { state: "ready", ...query.data } : query;
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const busy = pending !== null;
+  const [comment, setComment] = useState("");
+  const [methodChoice, setMethod] = useState<MergeMethod | null>(null);
+  const [deleteChoice, setDeleteBranch] = useState<boolean | null>(null);
+  const [merged, setMerged] = useState(false);
+  const [autoMerge, setAutoMerge] = useState(false);
+
+  const seed = loaded.state === "ready" ? loaded.detail : null;
+  // What the user picked wins; until then the repository's own preference applies.
+  const method = seed ? defaultMergeMethod(seed.mergeMethods, methodChoice, seed.defaultMergeMethod) : methodChoice;
+  const deleteBranch = deleteChoice ?? seed?.deleteBranchOnMerge ?? false;
 
   // Checks start and finish within minutes, so follow them closer than the general refresh does.
   const checksRunning = loaded.state === "ready" && loaded.detail.checks.some((c) => c.state === "pending");
@@ -317,8 +306,13 @@ export function PullRequestReview({
     const result = await run();
     setPending(null);
     if (result.status === "error") setError(result.error.message);
+    else invalidateQueries(`p${projectId}:prs:list:`);
     return result.status === "ok";
   }
+
+  /** A merged or closed pull request must not linger on the cached lists. */
+  const dropFromLists = () =>
+    updateQueries<PullRequest[]>(`p${projectId}:prs:list:`, (prs) => prs.filter((p) => p.number !== number));
 
   async function sendComment() {
     if (await act("comment", () => commands.commentPullRequest(projectId, number, comment))) {
@@ -331,6 +325,7 @@ export function PullRequestReview({
     if (method === null) return;
     if (await act("merge", () => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
       setMerged(true);
+      dropFromLists();
       onChanged();
       onBack("merged");
     }
@@ -343,6 +338,7 @@ export function PullRequestReview({
 
   async function closePullRequest() {
     if (await act("close", () => commands.closePullRequest(projectId, number))) {
+      dropFromLists();
       onChanged();
       onBack("closed");
     }
@@ -365,6 +361,7 @@ export function PullRequestReview({
   return (
     <div className="pr-review">
       {nav}
+      <RefreshNotice query={query} />
       <div className="pr-scroll">
         <header className="pr-hero">
           <h3 className="pr-title">

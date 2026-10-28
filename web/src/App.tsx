@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
@@ -173,7 +174,15 @@ export function App() {
   // Changes whenever a Thread's status does, so Git views refresh after a Turn.
   // A commit or push bumps it too, so the header and the Diff Surface reload.
   const [gitRevision, setGitRevision] = useState(0);
-  const onGitChanged = useCallback(() => setGitRevision((n) => n + 1), []);
+  const onGitChanged = useCallback(() => {
+    setGitRevision((n) => n + 1);
+    // The user's own commit, push, pull or checkout: what Git views remember is now wrong.
+    if (selectedId !== null) {
+      invalidateQueries(`p${selectedId}:diff:`, { drop: true });
+      invalidateQueries(`p${selectedId}:branches`);
+      invalidateQueries(`p${selectedId}:prs:`);
+    }
+  }, [selectedId]);
   const threadStatuses = threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "";
   const threadsKey = `${threadStatuses}#${gitRevision}`;
   // An agent can open a pull request during a Turn, which no change the user makes reports,

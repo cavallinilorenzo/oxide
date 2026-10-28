@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import { clearQueryCache } from "./queryCache";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type PullRequestDetail } from "./bindings";
@@ -50,6 +51,7 @@ function detail(overrides: Partial<PullRequestDetail> = {}): PullRequestDetail {
 }
 
 beforeEach(() => {
+  clearQueryCache();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);

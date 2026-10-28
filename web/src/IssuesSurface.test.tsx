@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type IssueDetail, type IssueSummary } from "./bindings";
 import { IssuesSurface } from "./IssuesSurface";
+import { clearQueryCache } from "./queryCache";
 import { REFRESH_INTERVAL_MS } from "./useAutoRefresh";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -33,6 +34,7 @@ const detail = (over: Partial<IssueDetail> = {}): IssueDetail => ({
 });
 
 beforeEach(() => {
+  clearQueryCache();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -127,4 +129,84 @@ it("offers to reopen a closed issue", async () => {
   expect(host.textContent).toContain("Closed as not planned");
   await act(async () => button("Reopen issue").click());
   expect(commands.reopenIssue).toHaveBeenCalledWith(1, 7);
+});
+
+const remount = async (projectId = 1) => {
+  await act(() => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<IssuesSurface projectId={projectId} />));
+};
+
+it("shows the previous list at once on remount and swaps in the refreshed one", async () => {
+  await render();
+  let resolve!: (r: Awaited<ReturnType<typeof commands.listIssues>>) => void;
+  vi.mocked(commands.listIssues).mockImplementation(() => new Promise((r) => (resolve = r)));
+  const calls = listCalls();
+  await remount();
+  expect(host.textContent).not.toContain("Loading…");
+  expect(host.textContent).toContain("Crash on startup");
+  expect(listCalls()).toBe(calls + 1);
+  await act(async () => resolve({ status: "ok", data: [summary({ number: 8, title: "Fresh one" })] }));
+  expect(host.textContent).toContain("Fresh one");
+  expect(host.textContent).not.toContain("Crash on startup");
+});
+
+it("remembers each filter's own result", async () => {
+  await render();
+  vi.mocked(commands.listIssues).mockResolvedValue({ status: "ok", data: [summary({ title: "Old closed" })] });
+  await act(async () => button("Closed").click());
+  expect(host.textContent).toContain("Old closed");
+  vi.mocked(commands.listIssues).mockImplementation(() => new Promise(() => {}));
+  await act(async () => button("Open").click());
+  expect(host.textContent).toContain("Crash on startup");
+  expect(host.textContent).not.toContain("Loading…");
+});
+
+it("never shows one Project's issues in another", async () => {
+  await render();
+  vi.mocked(commands.listIssues).mockImplementation(() => new Promise(() => {}));
+  await remount(2);
+  expect(host.textContent).not.toContain("Crash on startup");
+  expect(host.textContent).toContain("Loading…");
+});
+
+it("keeps the list and notes the failure when a refresh fails; a first failure shows the error", async () => {
+  await render();
+  vi.mocked(commands.listIssues).mockResolvedValue({ status: "error", error: { message: "network down" } });
+  await remount();
+  expect(host.textContent).toContain("Crash on startup");
+  expect(host.textContent).toContain("network down");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+
+  clearQueryCache();
+  await remount();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("network down");
+});
+
+it("still shows the guidance when gh is not ready, even with a cached list", async () => {
+  await render();
+  vi.mocked(commands.issuesState).mockResolvedValue({
+    status: "ok",
+    data: { availability: "notAuthenticated", guidance: "Run gh auth login." },
+  } as never);
+  await remount();
+  expect(host.textContent).toContain("Run gh auth login.");
+  expect(host.textContent).not.toContain("Crash on startup");
+});
+
+it("lists issues without waiting for the readiness check", async () => {
+  vi.mocked(commands.issuesState).mockImplementation(() => new Promise(() => {}));
+  await render();
+  expect(commands.listIssues).toHaveBeenCalled();
+  expect(host.textContent).toContain("Crash on startup");
+});
+
+it("lists an issue created or closed here when coming back, without waiting for the timer", async () => {
+  vi.spyOn(commands, "closeIssue").mockResolvedValue({ status: "ok", data: null });
+  await render();
+  await act(async () => (host.querySelector(".pr-row") as HTMLButtonElement).click());
+  vi.mocked(commands.listIssues).mockResolvedValue({ status: "ok", data: [] });
+  await act(async () => button("Close as completed").click());
+  await act(async () => button("Issues").click());
+  expect(host.textContent).toContain("No open issues.");
 });

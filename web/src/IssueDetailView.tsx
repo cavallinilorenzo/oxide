@@ -6,7 +6,9 @@ import {
   PencilIcon,
   PlayIcon,
 } from "@primer/octicons-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery } from "./queryCache";
+import { RefreshNotice } from "./RefreshNotice";
 import {
   commands,
   type IssueCloseReason,
@@ -67,8 +69,9 @@ const PILL = { open: "open", completed: "merged", notPlanned: "draft" } as const
 /** One issue, with what the web page lets you do: read and edit it, assign and label it,
  *  discuss it, close it with a reason or reopen it, and start a Thread from it. */
 export function IssueDetailView({ projectId, number, refreshKey, onBack, onChanged, onDispatched }: IssueDetailViewProps) {
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [reload, setReload] = useState(0);
+  const query = useQuery(`p${projectId}:issues:detail:${number}`, () => commands.issueDetail(projectId, number), refreshKey + reload);
+  const loaded: Loaded = query.state === "ready" ? { state: "ready", issue: query.data } : query;
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [comment, setComment] = useState("");
@@ -80,21 +83,6 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
   const reasonTrigger = useRef<HTMLButtonElement>(null);
   const { candidates, load } = useCandidates(projectId);
   const busy = pending !== null;
-
-  useEffect(() => {
-    let active = true;
-    void commands.issueDetail(projectId, number).then((result) => {
-      if (!active) return;
-      setLoaded(
-        result.status === "ok"
-          ? { state: "ready", issue: result.data }
-          : { state: "error", message: result.error.message },
-      );
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, number, refreshKey, reload]);
 
   async function openLink(url: string) {
     const result = await commands.openLink(url);
@@ -184,6 +172,7 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
 
   return (
     <div className="pr-review">
+      <RefreshNotice query={query} />
       {starting && onDispatched && (
         <DispatchDialog
           projectId={projectId}

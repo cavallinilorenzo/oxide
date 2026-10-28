@@ -762,6 +762,7 @@ html.macos .header,
 .pr-check-failure { color: var(--red); }
 .pr-check-pending { color: var(--yellow); }
 .pr-check-state { color: var(--faint); font-size: 12px; }
+.pr-check-optional { color: var(--faint); font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
 .pr-comment, .issue-comment { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; background: var(--bg2); }
 .pr-comment header, .issue-comment header { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
 

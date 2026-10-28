@@ -88,6 +88,10 @@ if args[:2] == ["api", "user"]:
     sys.exit(0)
 
 if args[:2] == ["api", "graphql"]:
+    if any("isRequired" in a for a in args):
+        # The names of the checks branch protection requires, one per line through --jq.
+        print("\n".join(state.get("required_checks", [])))
+        sys.exit(0)
     # viewerDefaultMergeMethod, printed through --jq; empty when the test sets none.
     print(state.get("default_merge", ""))
     sys.exit(0)

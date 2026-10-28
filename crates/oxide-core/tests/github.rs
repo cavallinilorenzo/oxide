@@ -1373,3 +1373,26 @@ fn closes_is_not_repeated_when_the_body_already_has_it() {
         "Fixes it.\n\ncloses #51"
     );
 }
+
+#[test]
+fn checks_know_whether_branch_protection_requires_them() {
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["required_checks"] = serde_json::json!(["rust", "web"]);
+    install_gh(&f, state);
+    let detail = f.core.pull_request_detail(f.project.id, 5).unwrap();
+    let required: Vec<(&str, bool)> = detail
+        .checks
+        .iter()
+        .map(|c| (c.name.as_str(), c.required))
+        .collect();
+    assert_eq!(
+        required,
+        [
+            ("rust", true),
+            ("web", true),
+            ("e2e", false),
+            ("ci/legacy", false)
+        ]
+    );
+}

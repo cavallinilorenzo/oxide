@@ -201,6 +201,9 @@ interface PullRequestReviewProps {
   onReviewFiles: (number: number) => void;
 }
 
+/** How often an open pull request reloads while some of its checks are still running. */
+export const CHECKS_REFRESH_MS = 10_000;
+
 type Result = { status: "ok" } | { status: "error"; error: { message: string } };
 
 export function PullRequestReview({
@@ -241,6 +244,16 @@ export function PullRequestReview({
       active = false;
     };
   }, [projectId, number, refreshKey, reload]);
+
+  // Checks start and finish within minutes, so follow them closer than the general refresh does.
+  const checksRunning = loaded.state === "ready" && loaded.detail.checks.some((c) => c.state === "pending");
+  useEffect(() => {
+    if (!checksRunning) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") setReload((n) => n + 1);
+    }, CHECKS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [checksRunning]);
 
   async function openLink(url: string) {
     const result = await commands.openLink(url);

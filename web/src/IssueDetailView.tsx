@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import {
   ArrowLeftIcon,
   ChevronDownIcon,
@@ -112,7 +113,7 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
     return (
       <div className="pr-review" aria-busy>
         {nav}
-        <p className="pr-empty">Loading…</p>
+        <Skeleton kind="detail" label="Loading issue…" />
       </div>
     );
   }

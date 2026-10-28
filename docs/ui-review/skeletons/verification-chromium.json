@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "issues-loading",
+    "issue-detail-loading",
+    "issue-form-loading",
+    "diff-loading",
+    "diff-loading-compact",
+    "directory-loading",
+    "file-loading",
+    "board-loading",
+    "branches-loading",
+    "transcript-loading"
+  ],
+  "poses": [
+    "0.45",
+    "0.9"
+  ],
+  "reducedMotion": true,
+  "hiddenWindowPause": true,
+  "loadingDismissed": true,
+  "errors": []
+}

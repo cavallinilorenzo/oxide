@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -153,6 +154,7 @@ export function ThreadView({
   onOpenThread,
   onThreadContinued,
 }: ThreadViewProps) {
+  const [settledThreadId, setSettledThreadId] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
   const [pages, setPages] = useState<TranscriptPages>(new Map());
   const [input, setInput] = useState(draft ?? "");
@@ -339,7 +341,7 @@ export function ThreadView({
           onThreadTitleChange?.(threadId, initial.thread.title);
         }
       }
-    })().finally(() => { if (active) onInitialLoad?.(); });
+    })().finally(() => { if (active) { setSettledThreadId(threadId); onInitialLoad?.(); } });
 
     return () => {
       active = false;
@@ -891,7 +893,9 @@ export function ThreadView({
         </details>
       )}
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
-        {turnCount === 0 && !outgoingTurn ? (
+        {threadId !== null && transcript.thread?.id !== threadId && settledThreadId !== threadId ? (
+          <Skeleton kind="conversation" label="Loading Transcript…" />
+        ) : turnCount === 0 && !outgoingTurn ? (
           <div className="empty-thread">
             <p>Type a prompt below and watch the agent's answer stream in.</p>
           </div>
@@ -918,7 +922,7 @@ export function ThreadView({
                       isWorking={isTurnActive}
                     />
                   ) : (
-                    <div className="turn-placeholder" aria-busy />
+                    <div className="turn-placeholder"><Skeleton kind="conversation" label="Loading earlier Turn…" /></div>
                   )}
                 </div>
               );

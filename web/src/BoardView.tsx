@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { GitBranchIcon } from "@primer/octicons-react";
 import { Channel } from "@tauri-apps/api/core";
@@ -98,7 +99,7 @@ export function BoardView({ projectId, onOpenThread, onDeleteThread, onDispatche
       )}
       {error && <p className="error">{error}</p>}
       {cards === null ? (
-        <p className="empty">Loading…</p>
+        error ? null : <Skeleton kind="board" label="Loading Thread Board…" />
       ) : (
         <div className="board-columns">
           {render("Needs input", columns.needsInput)}

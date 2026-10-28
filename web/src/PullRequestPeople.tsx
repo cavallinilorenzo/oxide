@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import {
   CheckCircleFillIcon,
   CheckIcon,
@@ -316,7 +317,7 @@ export function Picker({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {candidates.state === "loading" && <p className="pr-field-empty">Loading from GitHub…</p>}
+      {candidates.state === "loading" && <Skeleton kind="picker" label="Loading from GitHub…" />}
       {candidates.state === "error" && (
         <p role="alert" className="pr-error">
           {candidates.message}

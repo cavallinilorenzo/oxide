@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "./queryCache";
 import {
@@ -257,7 +258,7 @@ function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProp
         }}
       />
       <ul role="listbox" aria-label="Branches">
-        {branches === null && <li className="empty">Loading…</li>}
+        {branches === null && <li role="presentation"><Skeleton kind="picker" label="Loading branches…" /></li>}
         {shown.map((b) => (
           <li key={`${b.remote}:${b.name}`} role="option" aria-selected={b.current}>
             <button disabled={b.current} onClick={() => choose(() => onCheckout(b.name))}>

@@ -1,3 +1,4 @@
+import { Skeleton } from "./Skeleton";
 import { effortDigitShortcut, modelDigitShortcut, shortcutLabel } from "./shortcuts";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
@@ -327,9 +328,9 @@ export function ModelEffortPicker({
         }}
       >
         {efforts.length === 0 ? (
-          <span className="effort-label">
-            {loading ? "Loading..." : !activeModelInfo ? "Select a model to see its effort levels." : "This model has no effort levels."}
-          </span>
+          <div className="effort-label">
+            {loading ? <Skeleton kind="picker" label="Loading effort levels…" rows={3} /> : !activeModelInfo ? "Select a model to see its effort levels." : "This model has no effort levels."}
+          </div>
         ) : (
           <div className="effort-select-row">
             <span className="effort-label">Reasoning effort</span>
@@ -452,7 +453,7 @@ export function ModelEffortPicker({
             )}
 
             <div className="models-list-scroll">
-              {loading && flatVisible.length === 0 && <div className="models-loading">Loading catalog...</div>}
+              {loading && flatVisible.length === 0 && <Skeleton kind="picker" label="Loading model catalog…" />}
 
               {!loading && flatVisible.length === 0 && (
                 <div className="models-empty">No models found.</div>

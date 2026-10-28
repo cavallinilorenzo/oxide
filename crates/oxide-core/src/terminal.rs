@@ -136,7 +136,12 @@ impl TerminalSession {
                 match command {
                     SessionCommand::Write(input, reply) => {
                         #[cfg(unix)]
-                        let result = write_terminal_input(&mut writer, master.as_ref(), &input);
+                        let result = write_terminal_input(
+                            &mut writer,
+                            master.as_ref(),
+                            &input,
+                            pid as i32,
+                        );
                         #[cfg(windows)]
                         let result = writer.write_all(&input).and_then(|_| writer.flush());
                         let _ = reply.send(result);
@@ -236,6 +241,7 @@ fn write_terminal_input(
     writer: &mut dyn Write,
     master: &dyn MasterPty,
     input: &[u8],
+    shell_pid: i32,
 ) -> std::io::Result<()> {
     let mut start = 0;
     for (index, byte) in input.iter().enumerate() {
@@ -244,7 +250,12 @@ fn write_terminal_input(
         }
         writer.write_all(&input[start..index])?;
         let signaled = master.process_group_leader().is_some_and(|process_group| {
-            process_group > 0 && unsafe { libc::kill(-process_group, libc::SIGINT) } == 0
+            process_group > 0
+                && if process_group == shell_pid {
+                    interrupt_session_processes(shell_pid)
+                } else {
+                    unsafe { libc::kill(-process_group, libc::SIGINT) } == 0
+                }
         });
         if !signaled {
             writer.write_all(&input[index..index + 1])?;
@@ -253,6 +264,23 @@ fn write_terminal_input(
     }
     writer.write_all(&input[start..])?;
     writer.flush()
+}
+
+#[cfg(unix)]
+fn interrupt_session_processes(session_id: i32) -> bool {
+    let Ok(output) = Command::new("ps").args(["-A", "-o", "pid="]).output() else {
+        return false;
+    };
+    let mut interrupted = false;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Ok(pid) = line.trim().parse::<i32>() else {
+            continue;
+        };
+        if pid != session_id && unsafe { libc::getsid(pid) } == session_id {
+            interrupted |= unsafe { libc::kill(pid, libc::SIGTERM) } == 0;
+        }
+    }
+    interrupted
 }
 
 #[cfg(unix)]
@@ -327,9 +355,7 @@ fn create_shell_init_file(id: u32) -> Result<PathBuf> {
         .create_new(true)
         .open(&path)
         .map_err(|error| Error::Terminal(format!("create terminal shell init file: {error}")))?;
-    file.write_all(
-        b"stty isig -echo\n__oxide_interrupt_foreground() {\n  local pid\n  for pid in $(/usr/bin/pgrep -P \"$$\"); do\n    kill -TERM \"$pid\" 2>/dev/null\n  done\n}\ntrap __oxide_interrupt_foreground INT\n",
-    )
+    file.write_all(b"stty isig -echo\ntrap ':' INT\n")
         .map_err(|error| Error::Terminal(format!("write terminal shell init file: {error}")))?;
     Ok(path)
 }

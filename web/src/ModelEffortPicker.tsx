@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { LockIcon, StarFillIcon, StarIcon, XIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo } from "./bindings";
 import { ProviderMark } from "./ProviderMark";
-import { catalogCache } from "./modelCatalogCache";
+import { catalogCache, detectProviders, installedCache, loadCatalog } from "./modelCatalogCache";
 import { effortBlurb, effortLook } from "./effortStyle";
 import {
   modelFamilyId,
@@ -63,9 +63,11 @@ export function ModelEffortPicker({
   const [catalogs, setCatalogs] = useState<Record<string, ModelInfo[]>>(() =>
     Object.fromEntries(catalogCache)
   );
-  const [loading, setLoading] = useState(true);
-  const [unavailable, setUnavailable] = useState<string[]>(PROVIDERS.map((p) => p.id));
-  const [detecting, setDetecting] = useState(true);
+  const [loading, setLoading] = useState(() => installedCache.size < PROVIDERS.length);
+  const [unavailable, setUnavailable] = useState<string[]>(() =>
+    PROVIDERS.filter((p) => installedCache.size < PROVIDERS.length || !installedCache.get(p.id)).map((p) => p.id)
+  );
+  const [detecting, setDetecting] = useState(() => installedCache.size < PROVIDERS.length);
   const listRef = useRef<HTMLDivElement>(null);
 
   const modelSwitchLocked = turnCount > 0 && !midThreadModelSwitch;
@@ -108,12 +110,9 @@ export function ModelEffortPicker({
     let active = true;
 
     async function load() {
-      const detected = await Promise.all(PROVIDERS.map(async ({ id }) => {
-        try {
-          const result = await commands.detectProvider(id);
-          return { id, installed: result.status === "ok" && result.data.installed };
-        } catch { return { id, installed: false }; }
-      }));
+      // Already known from launch (or a previous open): no waiting, no re-detection.
+      await detectProviders();
+      const detected = PROVIDERS.map(({ id }) => ({ id, installed: installedCache.get(id) ?? false }));
       if (!active) return;
       setUnavailable(detected.filter((p) => !p.installed).map((p) => p.id));
       setDetecting(false);
@@ -127,31 +126,19 @@ export function ModelEffortPicker({
         ...(currentProvider === "fake" ? ["fake"] : []),
       ];
 
-      const apply = (p: string, list: ModelInfo[]) => {
-        catalogCache.set(p, list);
-        if (active) setCatalogs((prev) => ({ ...prev, [p]: list }));
-      };
-
       // Each Provider lands as soon as it answers; the slow ones (spawning a CLI)
       // never hold up the others. Cached lists show instantly, then refresh quietly.
       let pending = providersToFetch.length;
       if (pending === 0) setLoading(false);
-      if (!providersToFetch.every((p) => catalogCache.has(p))) setLoading(true);
+      else setLoading(!providersToFetch.every((p) => catalogCache.has(p)));
+      setCatalogs(Object.fromEntries(catalogCache));
       await Promise.all(
         providersToFetch.map(async (p) => {
-          try {
-            if (!catalogCache.has(p)) {
-              const cached = await commands.getModelCatalog(p, false);
-              if (cached.status === "ok") apply(p, cached.data);
-            }
-            const fresh = await commands.getModelCatalog(p, true);
-            if (fresh.status === "ok" && fresh.data.length > 0) apply(p, fresh.data);
-          } catch {
-            // A failed refresh leaves the cached catalog available.
-          } finally {
-            pending -= 1;
-            if (active && pending === 0) setLoading(false);
-          }
+          await loadCatalog(p, (list) => {
+            if (active) setCatalogs((prev) => ({ ...prev, [p]: list }));
+          });
+          pending -= 1;
+          if (active && pending === 0) setLoading(false);
         })
       );
     }

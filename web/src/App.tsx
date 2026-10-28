@@ -178,8 +178,10 @@ export function App() {
   const threadsKey = `${threadStatuses}#${gitRevision}`;
   // An agent can open a pull request during a Turn, which no change the user makes reports,
   // so the Pull request tab reloads whenever a Thread changes status.
-  const [turnRevision, setTurnRevision] = useState(0);
-  useEffect(() => setTurnRevision((n) => n + 1), [threadStatuses]);
+  const [turnRevision, setTurnRevision] = useState({ statuses: threadStatuses, count: 0 });
+  if (turnRevision.statuses !== threadStatuses) {
+    setTurnRevision({ statuses: threadStatuses, count: turnRevision.count + 1 });
+  }
 
   // Stable: it reaches memoized TurnViews through context.
   const openDiff = useCallback((hint?: string) => {
@@ -729,7 +731,7 @@ export function App() {
               <Suspense fallback={null}>
                 <PullRequestPanel
                   projectId={selected.id}
-                  refreshKey={gitRevision + turnRevision}
+                  refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
                 />

@@ -136,12 +136,8 @@ impl TerminalSession {
                 match command {
                     SessionCommand::Write(input, reply) => {
                         #[cfg(unix)]
-                        let result = write_terminal_input(
-                            &mut writer,
-                            master.as_ref(),
-                            &input,
-                            pid as i32,
-                        );
+                        let result =
+                            write_terminal_input(&mut writer, master.as_ref(), &input, pid as i32);
                         #[cfg(windows)]
                         let result = writer.write_all(&input).and_then(|_| writer.flush());
                         let _ = reply.send(result);
@@ -254,7 +250,7 @@ fn write_terminal_input(
                 && if process_group == shell_pid {
                     interrupt_session_processes(shell_pid)
                 } else {
-                    unsafe { libc::kill(-process_group, libc::SIGINT) } == 0
+                    (unsafe { libc::kill(-process_group, libc::SIGINT) }) == 0
                 }
         });
         if !signaled {

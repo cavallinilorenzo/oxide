@@ -1470,3 +1470,5 @@ section.terminal.terminal-hidden { display: none; }
 .pr-views .issue-body-edit { padding: var(--space-2); }
 .pr-views .pr-compose-box { justify-items: stretch; }
 .pr-views .pr-compose-box > button[type="submit"] { justify-self: end; }
+
+.modal-actions button.danger { background: var(--red); border-color: var(--red); color: #fff; }

@@ -42,7 +42,7 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   diff: "Mod+Shift+D",
   previousThread: "Mod+ArrowUp",
   nextThread: "Mod+ArrowDown",
-  closeThread: "Mod+W",
+  closeThread: "Mod+Shift+W",
   toggleTools: "Mod+\\",
   toggleBoard: "Mod+B",
   openSettings: "Mod+,",

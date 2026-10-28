@@ -105,7 +105,7 @@ impl Default for Shortcuts {
             diff: s("Mod+Shift+D"),
             previous_thread: s("Mod+ArrowUp"),
             next_thread: s("Mod+ArrowDown"),
-            close_thread: s("Mod+W"),
+            close_thread: s("Mod+Shift+W"),
             toggle_tools: s("Mod+\\"),
             toggle_board: s("Mod+B"),
             open_settings: s("Mod+,"),

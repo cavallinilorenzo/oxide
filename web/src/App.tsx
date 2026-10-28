@@ -293,8 +293,20 @@ export function App() {
     return created.status === "ok" ? created.data : null;
   }, []);
 
+  // Only one empty Thread (no Turn yet) at a time: asking for another reopens it.
   const startNewThread = useCallback(async () => {
     if (!selected) return;
+    const counts = await Promise.all((threads ?? []).map((t) => commands.listTurns(t.id, 0, 1)));
+    const empty = threads?.find((_, i) => {
+      const r = counts[i];
+      return r.status === "ok" && r.data.turnCount === 0;
+    });
+    if (empty) {
+      setShowBoard(false);
+      setSelectedThreadId(empty.id);
+      rememberTerminalContext(selected.id, empty.id);
+      return;
+    }
     const created = await createThreadIn(selected.id);
     if (created) {
       setShowBoard(false);
@@ -302,7 +314,7 @@ export function App() {
       setSelectedThreadId(created.id);
       rememberTerminalContext(selected.id, created.id);
     }
-  }, [selected, createThreadIn, rememberTerminalContext]);
+  }, [selected, threads, createThreadIn, rememberTerminalContext]);
 
   // The native menu follows the same creation path as the sidebar and shortcut.
   useEffect(() => {
@@ -1106,8 +1118,8 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
         <p>{pending.discardChanges ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept." : "Its conversation is removed permanently."}</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button autoFocus onClick={() => setPending(null)} disabled={deleting}>Cancel</button>
-          <button onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "Deleting…" : "Delete Thread"}</button>
+          <button onClick={() => setPending(null)} disabled={deleting}>Cancel</button>
+          <button autoFocus className="danger" onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "Deleting…" : "Delete Thread"}</button>
         </div>
       </div>
     </div>}

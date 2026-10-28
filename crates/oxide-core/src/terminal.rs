@@ -109,6 +109,8 @@ impl TerminalSession {
             .take_writer()
             .map_err(|e| Error::Terminal(format!("write terminal input: {e}")))?;
         #[cfg(unix)]
+        let mut writer = writer;
+        #[cfg(unix)]
         if blocks {
             // Start the interactive bash shell without an intermediate /bin/sh
             // so PS1 survives startup; keep Ctrl+C from terminating bash itself.

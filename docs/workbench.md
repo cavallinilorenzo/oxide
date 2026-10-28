@@ -13,10 +13,17 @@ on Windows and a POSIX shell on macOS/Linux. Each block keeps command output and
 exit status together. `cd` and shell variables carry over between commands.
 
 - Enter runs a command; Shift+Enter adds another line.
-- Tab accepts a suggestion from command history or the common-command list.
-- Up/Down browse history. Ctrl+R opens searchable history.
+- Right accepts the inline suggestion from your latest matching command.
+- Tab requests shell completion, independently of history. Windows uses
+  PowerShell's `TabExpansion2` in the live session, including its current directory,
+  aliases and registered completers. POSIX completion covers files and PATH commands.
+- Up opens the history picker; Up/Down navigate it, Enter inserts a command, and
+  Escape dismisses it. Ctrl+R focuses its search field.
 - Interact with a running program directly in its output terminal; Ctrl+C
   interrupts it. A shell that exits can be restarted from the toolbar.
+- Cursor-addressed and alternate-screen applications use the central viewport.
+  Output redraws do not resize the PTY. On Windows a command finishes at the next
+  PowerShell prompt, so Ctrl+C leaves the shell usable.
 - Block actions collapse output, copy output and put a command back in the
   composer. Reuse does not immediately execute the command.
 
@@ -81,6 +88,22 @@ Official clangd Linux binaries target x86_64. Other architectures can configure
 a server installed through their own package manager. Manual setup commands and
 upstream guides remain available under advanced language settings.
 
+## Images and appearance
+
+Paste images into the chat composer or drop them onto the chat. A preview appears
+before sending; remove individual images with their close button. Images can be
+sent with text or on their own. Storage errors keep the attachment draft visible.
+Supported formats are PNG, JPEG, GIF, WebP and BMP, up to 10 MiB per image; BMP
+uploads are converted to PNG. Native file drops are handled by the desktop window.
+
+Claude receives multimodal base64 content, Codex receives local image inputs,
+and Antigravity reads copies of the selected images from a temporary workspace
+directory. The latter adds only that directory to the CLI workspace, never the
+entire attachment cache. Temporary copies are removed after the Turn.
+
+See [Fonts and JSON themes](themes.md) for per-area fonts, theme imports, the
+supported Zed-style JSON structure and a complete example.
+
 ## Validation
 
 Offline workbench integration tests use a local LSP fixture and real shell PTYs:
@@ -95,3 +118,17 @@ application homes; ordinary CI skips these network-dependent tests:
 ```sh
 cargo test -p oxide-core --test language_install_live -- --ignored --nocapture
 ```
+
+The browser regression uses the real Core PTY through a test-only JSON-lines
+bridge. With Node.js, Python, Playwright/Chromium and the web dev server available:
+
+```sh
+cargo build -p oxide-core --example terminal_harness
+node web/scripts/terminal-regression.cjs --appearance
+```
+
+Set `OXIDE_PLAYWRIGHT_PATH` to an existing Playwright module installation when it
+is not on Node's module path. `OXIDE_TEST_URL` overrides the default dev server
+(`http://127.0.0.1:1420`). The test checks stable full-screen geometry, real shell
+completion, Right-arrow history completion, the Up history picker and applying
+a JSON theme. It does not submit Provider/model prompts.

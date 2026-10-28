@@ -102,6 +102,8 @@ for line in sys.stdin:
         elif "prompt" in data:
             prompt_text = data["prompt"]
 
+        if isinstance(prompt_text, list):
+            prompt_text = "\n".join(block.get("text", "") for block in prompt_text if block.get("type") == "text")
         if "approval_test" in prompt_text:
             # Emit approval request
             appr = {

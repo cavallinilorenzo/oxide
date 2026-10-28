@@ -22,6 +22,8 @@ mod settings;
 mod slash_catalog;
 mod storage_actor;
 mod terminal;
+mod terminal_completion;
+pub use terminal_completion::{TerminalCompletion, TerminalMatch};
 pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
 mod thread_actor;
@@ -1163,6 +1165,9 @@ impl Core {
 
     /// Stores an image under `<home>/attachments/` and returns its path.
     pub fn save_attachment(&self, bytes: &[u8], extension: &str) -> Result<PathBuf> {
+        if bytes.len() > 10 * 1024 * 1024 {
+            return Err(Error::Editor("Images must be 10 MiB or smaller.".into()));
+        }
         const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
         let ext = extension.to_ascii_lowercase();
         let dir = self.attachments_dir();
@@ -1187,6 +1192,37 @@ impl Core {
             source,
         })?;
         Ok(path)
+    }
+    /// Imports an explicitly dropped local image; never exposes general file reads to the webview.
+    pub fn import_attachment(&self, path: &Path) -> Result<PathBuf> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let file = fs::File::open(path).map_err(|source| Error::Io {
+            path: path.into(),
+            source,
+        })?;
+        file.take(10 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|source| Error::Io {
+                path: path.into(),
+                source,
+            })?;
+        let ext = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            "png"
+        } else if bytes.starts_with(b"\xff\xd8\xff") {
+            "jpg"
+        } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+            "gif"
+        } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+            "webp"
+        } else if bytes.starts_with(b"BM") {
+            "bmp"
+        } else {
+            return Err(Error::Editor(
+                "Drop a PNG, JPEG, WebP, GIF or BMP image.".into(),
+            ));
+        };
+        self.save_attachment(&bytes, ext)
     }
 
     pub fn interrupt_thread(&self, thread_id: u32) -> Result<()> {
@@ -1784,6 +1820,16 @@ impl Core {
 
     pub fn run_terminal_block(&self, terminal_id: u32, command: &str, token: &str) -> Result<()> {
         self.terminal(terminal_id)?.run_block(command, token)
+    }
+    pub fn complete_terminal(
+        &self,
+        terminal_id: u32,
+        line: &str,
+        cursor: usize,
+        cwd: &str,
+    ) -> Result<TerminalCompletion> {
+        let session = self.terminal(terminal_id)?;
+        terminal_completion::complete(&session, line, cursor, cwd)
     }
 
     pub fn resize_terminal(&self, terminal_id: u32, rows: u16, cols: u16) -> Result<()> {

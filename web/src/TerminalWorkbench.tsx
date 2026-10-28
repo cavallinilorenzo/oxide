@@ -6,41 +6,24 @@ import {
   useState,
 } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
 import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CopyIcon,
   HistoryIcon,
-  PlayIcon,
-  SearchIcon,
-  SquareFillIcon,
   SyncIcon,
   TerminalIcon,
   XIcon,
+  SquareFillIcon,
 } from "@primer/octicons-react";
-import { commands } from "./bindings";
 import {
-  BlockParser,
-  commandSuggestions,
-  type CommandHistory,
-} from "./terminalBlocks";
+  TerminalCommandBlock,
+  type TerminalBlock as Block,
+} from "./TerminalCommandBlock";
+import { TerminalInput, type TerminalInputHandle } from "./TerminalInput";
+import { terminalPath } from "./terminalPaths";
+import { commands } from "./bindings";
+import { BlockParser, type CommandHistory } from "./terminalBlocks";
 import { takeFrameBatch } from "./terminalOutput";
 import "@xterm/xterm/css/xterm.css";
 
-interface Block {
-  token: string;
-  command: string;
-  output: string;
-  cwd: string;
-  at: number;
-  exitCode: number | null;
-  started: boolean;
-  ended: boolean;
-  truncated: boolean;
-}
 interface Props {
   projectId: number;
   threadId: number | null;
@@ -81,20 +64,19 @@ export function TerminalWorkbench({
   onCommandConsumed,
 }: Props) {
   const [blocks, setBlocks] = useState<Block[]>([]);
-  const [input, setInput] = useState("");
   const [history, setHistory] = useState<CommandHistory[]>(() =>
     loadHistory(contextKey),
   );
-  const [search, setSearch] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
   const [generation, setGeneration] = useState(0);
-  const [cwd, setCwd] = useState(rootPath);
+  const [cwd, setCwd] = useState(terminalPath(rootPath));
+  const [fullscreen, setFullscreen] = useState<string | null>(null);
+  const launched = useRef(new Set<string>());
   const [running, setRunning] = useState(false);
   const activeBlock = useRef<string | null>(null);
-  const historyCursor = useRef<number | null>(null);
-  const composer = useRef<HTMLTextAreaElement>(null);
+  const composer = useRef<TerminalInputHandle>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -157,6 +139,8 @@ export function TerminalWorkbench({
                 return {
                   ...b,
                   output: output.slice(-OUTPUT_LIMIT),
+                  outputOffset:
+                    b.outputOffset + Math.max(0, output.length - OUTPUT_LIMIT),
                   truncated: b.truncated || output.length > OUTPUT_LIMIT,
                 };
               }),
@@ -170,7 +154,7 @@ export function TerminalWorkbench({
                   : b,
               ),
             );
-            if (event.cwd) setCwd(event.cwd);
+            if (event.cwd) setCwd(terminalPath(event.cwd));
             setHistory((old) =>
               old.map((h, index) =>
                 index === old.length - 1
@@ -256,11 +240,13 @@ export function TerminalWorkbench({
     )
       return;
     const token = crypto.randomUUID();
+    setFullscreen(null);
     const block: Block = {
       token,
       command,
       cwd,
       output: "",
+      outputOffset: 0,
       at: Date.now(),
       exitCode: null,
       started: false,
@@ -269,28 +255,36 @@ export function TerminalWorkbench({
     };
     activeBlock.current = token;
     setRunning(true);
-    setInput("");
+    composer.current?.clear();
     setError(null);
     following.current = true;
     setBlocks((old) => [...old.slice(-23), block]);
     setHistory((old) =>
       [...old, { command, at: block.at, exitCode: null }].slice(-300),
     );
-    historyCursor.current = null;
-    void commands
-      .runTerminalBlock(sessionId, command, token)
-      .then((result) => {
-        if (result.status === "error") throw new Error(result.error.message);
-      })
-      .catch((e: Error) => {
-        setError(e.message);
-        setRunning(false);
-        activeBlock.current = null;
-        setBlocks((old) =>
-          old.map((b) => (b.token === token ? { ...b, ended: true } : b)),
-        );
-      });
   }
+  function launch(block: Block, rows: number, cols: number) {
+    if (sessionId === null || launched.current.has(block.token)) return;
+    launched.current.add(block.token);
+    void (async () => {
+      const resized = await commands.resizeTerminal(sessionId, rows, cols);
+      if (resized.status === "error") throw new Error(resized.error.message);
+      const result = await commands.runTerminalBlock(
+        sessionId,
+        block.command,
+        block.token,
+      );
+      if (result.status === "error") throw new Error(result.error.message);
+    })().catch((error: Error) => {
+      setError(error.message);
+      setRunning(false);
+      activeBlock.current = null;
+      setBlocks((old) =>
+        old.map((b) => (b.token === block.token ? { ...b, ended: true } : b)),
+      );
+    });
+  }
+
   useLayoutEffect(() => {
     runRef.current = run;
   });
@@ -304,20 +298,24 @@ export function TerminalWorkbench({
     if (!visible) return;
     if (!running) composer.current?.focus();
     const key = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r") {
+      if (
+        !running &&
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "r"
+      ) {
         event.preventDefault();
-        setSearch("");
+        composer.current?.history();
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [visible, running]);
-  const suggestions = commandSuggestions(input, history);
   return (
     <main
       className="terminal-workbench"
       aria-label="Terminal workbench"
       hidden={!visible}
+      data-fullscreen={running && fullscreen !== null ? "true" : undefined}
     >
       <header className="workbench-terminal-header">
         <TerminalIcon size={16} />
@@ -326,7 +324,11 @@ export function TerminalWorkbench({
           {cwd}
         </span>
         <span className="grow" />
-        <button className="btn sm" onClick={() => setSearch("")}>
+        <button
+          className="btn sm"
+          disabled={running}
+          onClick={() => composer.current?.history()}
+        >
           <HistoryIcon size={14} /> History
         </button>
         <button
@@ -351,33 +353,25 @@ export function TerminalWorkbench({
             !!el && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        {blocks.length === 0 && (
-          <div className="terminal-workbench-welcome">
-            <TerminalIcon size={32} />
-            <h1>A terminal with room to work.</h1>
-            <p>
-              Run a command below. Each command keeps its output, exit status
-              and working directory together.
-            </p>
-            <div>
-              <kbd>Ctrl+R</kbd> Search history <span>·</span> <kbd>Tab</kbd>{" "}
-              Accept suggestion <span>·</span> <kbd>Shift+Enter</kbd> New line
-            </div>
-          </div>
-        )}
         {blocks.map((block) => (
-          <CommandBlock
+          <TerminalCommandBlock
             key={block.token}
             block={block}
             active={!block.ended}
             visible={visible}
             onInput={(data) => void write(data)}
+            onReady={(rows, cols) => launch(block, rows, cols)}
+            onScreen={(screen) =>
+              setFullscreen((old) =>
+                screen ? block.token : old === block.token ? null : old,
+              )
+            }
             onResize={(rows, cols) => {
               if (sessionId !== null && !block.ended)
                 void commands.resizeTerminal(sessionId, rows, cols);
             }}
             onReuse={() => {
-              setInput(block.command);
+              composer.current?.setCommand(block.command);
               composer.current?.focus();
             }}
           />
@@ -410,365 +404,27 @@ export function TerminalWorkbench({
           </button>
         </div>
       )}
-      <form
-        className="terminal-command-composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          run(input);
-        }}
-      >
-        {!running && suggestions.length > 0 && (
-          <div
-            className="terminal-suggestions"
-            aria-label="Command suggestions"
+      {running ? (
+        !fullscreen && (
+          <button
+            className="terminal-interrupt"
+            onClick={() => void write("\x03")}
+            aria-label="Interrupt command"
           >
-            {suggestions.map((suggestion, i) => (
-              <button
-                type="button"
-                key={suggestion}
-                onClick={() => {
-                  setInput(suggestion);
-                  composer.current?.focus();
-                }}
-              >
-                <span>{suggestion}</span>
-                {i === 0 && <kbd>Tab</kbd>}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="terminal-command-entry">
-          <ChevronRightIcon size={16} />
-          <textarea
-            ref={composer}
-            aria-label="Terminal command"
-            value={input}
-            rows={Math.min(5, input.split("\n").length)}
-            disabled={running || closed || sessionId === null}
-            placeholder={
-              running
-                ? "Command running — interact with its terminal above"
-                : "Type a command…"
-            }
-            spellCheck={false}
-            onChange={(e) => {
-              setInput(e.target.value);
-              historyCursor.current = null;
-            }}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                run(input);
-              }
-              if (e.key === "Tab" && suggestions[0]) {
-                e.preventDefault();
-                setInput(suggestions[0]);
-              }
-              if (
-                e.key === "ArrowUp" &&
-                !input.includes("\n") &&
-                history.length
-              ) {
-                e.preventDefault();
-                const at = Math.max(
-                  0,
-                  (historyCursor.current ?? history.length) - 1,
-                );
-                historyCursor.current = at;
-                setInput(history[at]!.command);
-              }
-              if (e.key === "ArrowDown" && historyCursor.current !== null) {
-                e.preventDefault();
-                const at = Math.min(history.length, historyCursor.current + 1);
-                historyCursor.current = at;
-                setInput(history[at]?.command ?? "");
-              }
-            }}
-          />
-          {running ? (
-            <button
-              type="button"
-              className="icon-btn"
-              title="Interrupt (Ctrl+C in the terminal)"
-              aria-label="Interrupt command"
-              onClick={() => void write("\x03")}
-            >
-              <SquareFillIcon size={14} />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="icon-btn"
-              disabled={!input.trim() || closed || sessionId === null}
-              aria-label="Run command"
-            >
-              <PlayIcon size={16} />
-            </button>
-          )}
-        </div>
-        <div className="terminal-command-hint">
-          <span>
-            {running
-              ? "Interactive input is available in the running block."
-              : "Enter to run · Shift+Enter for multiple lines"}
-          </span>
-          <span>
-            {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
-          </span>
-        </div>
-      </form>
-      {search !== null && (
-        <div className="modal-backdrop" onClick={() => setSearch(null)}>
-          <div
-            className="modal terminal-history"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Command history"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setSearch(null);
-            }}
-          >
-            <header>
-              <SearchIcon size={16} />
-              <input
-                autoFocus
-                aria-label="Search command history"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search your command history…"
-              />
-              <button
-                className="icon-btn sm"
-                aria-label="Close history"
-                onClick={() => setSearch(null)}
-              >
-                <XIcon size={14} />
-              </button>
-            </header>
-            <div>
-              {[...history]
-                .reverse()
-                .filter((h) =>
-                  h.command.toLowerCase().includes(search.toLowerCase()),
-                )
-                .map((h, i) => (
-                  <button
-                    key={`${h.at}:${i}`}
-                    onClick={() => {
-                      setInput(h.command);
-                      setSearch(null);
-                      composer.current?.focus();
-                    }}
-                  >
-                    <code>{h.command}</code>
-                    <span className="dim">
-                      {h.exitCode === null ? "" : `exit ${h.exitCode}`}
-                    </span>
-                  </button>
-                ))}
-              {history.length === 0 && (
-                <p className="dim">
-                  Commands you run here will appear in your history.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+            <SquareFillIcon size={12} /> Interrupt <kbd>Ctrl+C</kbd>
+          </button>
+        )
+      ) : (
+        <TerminalInput
+          ref={composer}
+          history={history}
+          sessionId={sessionId}
+          cwd={cwd}
+          disabled={closed || sessionId === null}
+          visible={visible}
+          onRun={run}
+        />
       )}
     </main>
-  );
-}
-
-function CommandBlock({
-  block,
-  active,
-  visible,
-  onInput,
-  onResize,
-  onReuse,
-}: {
-  block: Block;
-  active: boolean;
-  visible: boolean;
-  onInput: (data: string) => void;
-  onResize: (rows: number, cols: number) => void;
-  onReuse: () => void;
-}) {
-  const host = useRef<HTMLDivElement>(null);
-  const terminal = useRef<Terminal | null>(null);
-  const fit = useRef<FitAddon | null>(null);
-  const written = useRef("");
-  const callbacks = useRef({ onInput, onResize, active });
-  const [expanded, setExpanded] = useState(true);
-  const [rows, setRows] = useState(4);
-  useLayoutEffect(() => {
-    callbacks.current = { onInput, onResize, active };
-  });
-  useEffect(() => {
-    if (!host.current) return;
-    const term = new Terminal({
-      fontSize: 13,
-      fontFamily: "Cascadia Code, Consolas, monospace",
-      cursorBlink: active,
-      cursorInactiveStyle: "none",
-      scrollback: 3000,
-      convertEol: true,
-      theme: {
-        background: "#0b0d12",
-        foreground: "#d7dbe4",
-        cursor: "#58a6ff",
-        selectionBackground: "#264f78",
-      },
-    });
-    const addon = new FitAddon();
-    term.loadAddon(addon);
-    term.open(host.current);
-    terminal.current = term;
-    fit.current = addon;
-    const resize = () => {
-      if (!host.current?.clientWidth || !host.current.clientHeight) return;
-      addon.fit();
-      if (callbacks.current.active)
-        callbacks.current.onResize(term.rows, term.cols);
-    };
-    const observer = new ResizeObserver(resize);
-    observer.observe(host.current);
-    const input = term.onData((data) => {
-      if (callbacks.current.active) callbacks.current.onInput(data);
-    });
-    const parsed = term.onWriteParsed(() => {
-      if (term.buffer.active.type === "normal")
-        setRows(
-          Math.min(
-            20,
-            Math.max(
-              2,
-              term.buffer.active.baseY + term.buffer.active.cursorY + 1,
-            ),
-          ),
-        );
-      else setRows(24);
-    });
-    return () => {
-      observer.disconnect();
-      input.dispose();
-      parsed.dispose();
-      term.dispose();
-      terminal.current = null;
-      fit.current = null;
-    };
-    // One emulator per command block; live callbacks come through the ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    const term = terminal.current;
-    if (!term) return;
-    if (!block.output.startsWith(written.current)) {
-      term.reset();
-      written.current = "";
-    }
-    const delta = block.output.slice(written.current.length);
-    if (delta) term.write(delta);
-    written.current = block.output;
-  }, [block.output]);
-  useEffect(() => {
-    if (!visible || !expanded) return;
-    const frame = requestAnimationFrame(() => {
-      fit.current?.fit();
-      const t = terminal.current;
-      if (active && t) {
-        callbacks.current.onResize(t.rows, t.cols);
-        t.focus();
-      } else t?.blur();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [visible, expanded, active, rows]);
-  return (
-    <section
-      className={`terminal-command-block${active ? " running" : ""}`}
-      aria-label={`Command: ${block.command}`}
-    >
-      <header>
-        <button
-          className="icon-btn sm"
-          aria-label={expanded ? "Collapse output" : "Expand output"}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? (
-            <ChevronDownIcon size={14} />
-          ) : (
-            <ChevronRightIcon size={14} />
-          )}
-        </button>
-        <code>{block.command}</code>
-        <span className="grow" />
-        <span
-          className={`block-exit${block.exitCode && block.exitCode !== 0 ? " error" : ""}`}
-        >
-          {active ? (
-            <>
-              <SyncIcon className="spin" size={12} /> Running
-            </>
-          ) : block.exitCode === 0 ? (
-            <>
-              <CheckIcon size={12} /> Done
-            </>
-          ) : block.exitCode === null ? (
-            "Shell exited"
-          ) : (
-            `Exit ${block.exitCode}`
-          )}
-        </span>
-        <button
-          className="icon-btn sm"
-          aria-label="Reuse command"
-          title="Reuse command"
-          onClick={onReuse}
-        >
-          <HistoryIcon size={13} />
-        </button>
-        <button
-          className="icon-btn sm"
-          aria-label="Copy command output"
-          onClick={() => {
-            const t = terminal.current;
-            if (!t) return;
-            const lines = Array.from(
-              { length: t.buffer.active.length },
-              (_, n) =>
-                t.buffer.active.getLine(n)?.translateToString(true) ?? "",
-            );
-            void navigator.clipboard.writeText(lines.join("\n").trimEnd());
-          }}
-        >
-          <CopyIcon size={13} />
-        </button>
-      </header>
-      <div className="terminal-block-meta">
-        <span title={block.cwd}>{block.cwd}</span>
-        <time dateTime={new Date(block.at).toISOString()}>
-          {new Date(block.at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </time>
-      </div>
-      {block.truncated && (
-        <p className="terminal-truncated">
-          Showing the last 256 KiB of output.
-        </p>
-      )}
-      <div
-        className="terminal-block-output"
-        hidden={!expanded}
-        style={{ height: `${active ? Math.max(rows, 12) : rows}lh` }}
-        ref={host}
-      />
-    </section>
   );
 }

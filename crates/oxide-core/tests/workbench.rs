@@ -169,3 +169,64 @@ fn language_server_transports_unsaved_diagnostics_and_completion() {
     core.stop_language_server(server.id);
     assert!(core.language_server_message(server.id, "{}").is_err());
 }
+
+#[test]
+fn shell_completion_uses_the_live_directory_and_never_runs_the_typed_command() {
+    let (temporary, core, id) = fixture();
+    std::fs::write(
+        temporary
+            .path()
+            .join("project/subdir/completion-example.txt"),
+        "fixture",
+    )
+    .unwrap();
+    let terminal = core.start_block_terminal(id, None).unwrap();
+    assert!(!terminal.cwd.starts_with("\\\\?\\"));
+    let rx = core.subscribe_terminal(terminal.id).unwrap();
+    core.run_terminal_block(terminal.id, "cd subdir", "change")
+        .unwrap();
+    until(&core, terminal.id, &rx, "change;end;0;");
+    let line = "cat comp";
+    let result = core
+        .complete_terminal(
+            terminal.id,
+            line,
+            line.len(),
+            &temporary.path().join("project/subdir").to_string_lossy(),
+        )
+        .unwrap();
+    assert_eq!(result.replacement_index, 4);
+    assert!(
+        result
+            .matches
+            .iter()
+            .any(|item| item.text.contains("completion-example.txt")),
+        "{result:?}"
+    );
+    let absent = core
+        .complete_terminal(terminal.id, "cat no-such-file-oxide-123", 25, &terminal.cwd)
+        .unwrap();
+    assert!(absent.matches.is_empty());
+    core.close_terminal(terminal.id).unwrap();
+}
+
+#[test]
+fn interrupting_a_program_keeps_the_shell_usable() {
+    let (_temporary, core, id) = fixture();
+    let terminal = core.start_block_terminal(id, None).unwrap();
+    let rx = core.subscribe_terminal(terminal.id).unwrap();
+    core.run_terminal_block(
+        terminal.id,
+        "python -c \"import time; print('WAITING_FOR_INTERRUPT',flush=True); time.sleep(30)\"",
+        "wait",
+    )
+    .unwrap();
+    until(&core, terminal.id, &rx, "WAITING_FOR_INTERRUPT");
+    core.write_terminal(terminal.id, b"\x03").unwrap();
+    until(&core, terminal.id, &rx, "wait;end;");
+    core.run_terminal_block(terminal.id, "echo STILL_USABLE", "after")
+        .unwrap();
+    let output = until(&core, terminal.id, &rx, "after;end;0;");
+    assert!(output.contains("STILL_USABLE"));
+    core.close_terminal(terminal.id).unwrap();
+}

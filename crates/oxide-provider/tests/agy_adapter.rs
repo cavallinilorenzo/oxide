@@ -109,14 +109,14 @@ fn agy_provider_passes_shared_contract_suite() {
 }
 
 #[test]
-fn agy_offers_only_the_modes_it_can_honour_and_no_attachments() {
+fn agy_offers_supported_modes_and_file_backed_image_attachments() {
     let caps = AgyProvider::new().capabilities();
     assert_eq!(
         caps.supported_permission_modes,
         vec![PermissionMode::AutoEdit, PermissionMode::FullAccess]
     );
     assert!(!caps.interactive_approvals);
-    assert!(!caps.image_attachments);
+    assert!(caps.image_attachments);
 }
 
 #[test]

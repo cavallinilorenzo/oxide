@@ -4,6 +4,7 @@ import JsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 import CssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker.js?worker";
+import { editorAppearance } from "./editorAppearance";
 
 self.MonacoEnvironment = {
   getWorker(_id, label) {
@@ -15,25 +16,12 @@ self.MonacoEnvironment = {
     return new EditorWorker();
   },
 };
-monaco.editor.defineTheme("oxide", {
-  base: "vs-dark",
-  inherit: true,
-  rules: [],
-  colors: {
-    "editor.background": "#0f1117",
-    "editor.foreground": "#d7dbe4",
-    "editor.lineHighlightBackground": "#151922",
-    "editorLineNumber.foreground": "#687386",
-    "editorLineNumber.activeForeground": "#c9d1d9",
-    "editor.selectionBackground": "#264f78",
-    "editorCursor.foreground": "#58a6ff",
-    "editorIndentGuide.background1": "#252c39",
-    "editorWidget.background": "#161b22",
-    "editorWidget.border": "#30363d",
-    "editorSuggestWidget.background": "#161b22",
-    "editorSuggestWidget.selectedBackground": "#263247",
-  },
-});
+const applyEditorAppearance = () => {
+  monaco.editor.defineTheme("oxide", editorAppearance());
+  monaco.editor.setTheme("oxide");
+};
+applyEditorAppearance();
+window.addEventListener("oxide-appearance-changed", applyEditorAppearance);
 export { monaco };
 
 export function editorLanguage(path: string): string {

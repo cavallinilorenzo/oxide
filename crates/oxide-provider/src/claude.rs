@@ -82,6 +82,24 @@ impl Default for ClaudeCodeProvider {
 }
 
 impl ClaudeCodeProvider {
+    fn send_content(
+        &mut self,
+        prompt: &str,
+        content: serde_json::Value,
+    ) -> Result<(), ProviderError> {
+        let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
+        *self.active_turn.lock().unwrap() = Some(ActiveTurn {
+            index: turn_index,
+            interrupted: false,
+        });
+        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
+            let _ = sender.send(ProviderEvent::TurnStarted {
+                turn_index,
+                prompt: prompt.to_string(),
+            });
+        }
+        self.write_to_stdin(&json!({"type":"user","message":{"role":"user","content":content}}))
+    }
     pub fn new() -> Self {
         Self::with_command(DEFAULT_CLAUDE_COMMAND)
     }
@@ -98,7 +116,7 @@ impl ClaudeCodeProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: false,
+                image_attachments: true,
                 mid_thread_model_switch: true,
                 reports_usage_limits: true,
             })),
@@ -907,28 +925,39 @@ impl Provider for ClaudeCodeProvider {
     }
 
     fn send_prompt(&mut self, prompt: &str) -> Result<(), ProviderError> {
-        let turn_index = self.turn_counter.fetch_add(1, Ordering::SeqCst);
-        *self.active_turn.lock().unwrap() = Some(ActiveTurn {
-            index: turn_index,
-            interrupted: false,
-        });
-
-        // Emit TurnStarted event
-        if let Some(ref sender) = *self.event_sender.lock().unwrap() {
-            let _ = sender.send(ProviderEvent::TurnStarted {
-                turn_index,
-                prompt: prompt.to_string(),
-            });
+        self.send_content(prompt, json!(prompt))
+    }
+    fn send_prompt_with_images(
+        &mut self,
+        prompt: &str,
+        images: &[std::path::PathBuf],
+    ) -> Result<(), ProviderError> {
+        use base64::Engine;
+        let mut content = vec![json!({"type":"text","text":prompt})];
+        for image in images {
+            let media_type = match image
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "webp" => "image/webp",
+                "gif" => "image/gif",
+                _ => {
+                    return Err(ProviderError::CommandFailed(
+                        "Claude image inputs support PNG, JPEG, WebP and GIF.".into(),
+                    ));
+                }
+            };
+            let bytes = std::fs::read(image).map_err(|error| {
+                ProviderError::CommandFailed(format!("Read attached image: {error}"))
+            })?;
+            content.push(json!({"type":"image","source":{"type":"base64","media_type":media_type,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}}));
         }
-
-        let payload = json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": prompt
-            }
-        });
-        self.write_to_stdin(&payload)
+        self.send_content(prompt, json!(content))
     }
 
     fn interrupt(&mut self) -> Result<(), ProviderError> {

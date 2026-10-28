@@ -1,0 +1,31 @@
+{
+  "name": "Oxide Night",
+  "author": "Oxide",
+  "themes": [{
+    "name": "Oxide Night",
+    "appearance": "dark",
+    "style": {
+      "background": "#12151b",
+      "surface.background": "#191e27",
+      "elevated_surface.background": "#222a36",
+      "element.background": "#2b3544",
+      "border": "#343e50",
+      "text": "#e0e6f0",
+      "text.bright": "#f5f8ff",
+      "text.muted": "#aab6c8",
+      "text.disabled": "#899bb2",
+      "text.accent": "#8cbdff",
+      "terminal.background": "#12151b",
+      "terminal.foreground": "#e0e6f0",
+      "terminal.ansi.bright_blue": "#a9d2ff",
+      "editor.background": "#12151b",
+      "editor.selection.background": "#314968",
+      "syntax": {
+        "comment": { "color": "#9daabe", "font_style": "italic" },
+        "keyword": { "color": "#c7a7ff", "font_weight": 600 },
+        "string": { "color": "#a9d6a0" },
+        "number": { "color": "#f5c586" }
+      }
+    }
+  }]
+}

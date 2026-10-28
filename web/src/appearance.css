@@ -1,0 +1,89 @@
+:root {
+  --mono: var(--font-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+.markdown-body,
+.message-content,
+.user-bubble,
+.composer-input {
+  font-family: var(--font-chat, inherit);
+}
+.markdown-body code,
+.markdown-body pre {
+  font-family: var(--font-code, monospace);
+}
+.terminal-workbench,
+.terminal {
+  --mono: var(--font-terminal, monospace);
+}
+.terminal-block-output,
+.terminal,
+.terminal-workbench {
+  background: var(--terminal-background, var(--bg));
+}
+.appearance-fonts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.appearance-font-preview {
+  display: block;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appearance-theme-controls,
+.appearance-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.appearance-theme-controls > label {
+  min-width: 200px;
+}
+.appearance-json-label {
+  display: grid;
+  gap: 8px;
+}
+.appearance-json {
+  width: 100%;
+  resize: vertical;
+  min-height: 160px;
+  tab-size: 2;
+  font: 12px/1.6 var(--mono);
+  white-space: pre;
+}
+:root[data-appearance="light"] .icon-btn {
+  color: var(--dim);
+}
+@container (max-width: 500px) {
+  .appearance-fonts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.composer-wrap {
+  position: relative;
+}
+.chat-image-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  background: var(--bg2);
+  color: var(--acc2);
+  border: 1px dashed var(--acc2);
+  border-radius: var(--radius-surface);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+.image-upload-skeleton {
+  width: 160px;
+  height: 72px;
+  overflow: hidden;
+}

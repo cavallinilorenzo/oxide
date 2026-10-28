@@ -6,6 +6,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+base64 = "0.22.1"
+tempfile = "3.27.0"
 crossbeam-channel = "0.5.17"
 libc = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -727,3 +727,193 @@
       color 140ms ease-out;
   }
 }
+
+.terminal-block-scroll {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
+}
+.terminal-block-scroll::before {
+  content: "";
+  flex: 1 0 0;
+}
+.terminal-command-block {
+  flex: none;
+}
+.terminal-output-clip {
+  overflow: hidden;
+}
+.terminal-block-output {
+  margin: 0;
+  min-height: 0;
+  line-height: normal;
+}
+.terminal-block-output > .xterm {
+  padding: 0;
+}
+.terminal-workbench[data-fullscreen="true"] .terminal-block-scroll {
+  padding: 0;
+  overflow: hidden;
+}
+.terminal-workbench[data-fullscreen="true"] .terminal-block-scroll::before,
+.terminal-workbench[data-fullscreen="true"]
+  .terminal-command-block:not(.fullscreen),
+.terminal-command-block.fullscreen > header {
+  display: none;
+}
+.terminal-command-block.fullscreen {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.terminal-input-editor {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.terminal-input-editor textarea {
+  position: relative;
+  width: 100%;
+  padding: 4px 0;
+  font: 13px/20px var(--mono);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: 0;
+  resize: none;
+  min-height: 28px;
+}
+.terminal-ghost {
+  position: absolute;
+  inset: 0;
+  padding: 4px 0;
+  font: 13px/20px var(--mono);
+  white-space: pre;
+  color: var(--faint);
+  pointer-events: none;
+  overflow: hidden;
+}
+.terminal-ghost > span {
+  visibility: hidden;
+}
+.terminal-command-composer {
+  position: relative;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  margin: 0 20px 8px;
+}
+.terminal-command-composer:focus-within {
+  border-color: var(--line-strong);
+}
+.terminal-prompt-path {
+  margin: 10px 12px 0;
+  font: 12px var(--mono);
+  color: var(--acc2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.terminal-command-entry {
+  padding-top: 4px;
+}
+.terminal-command-hint {
+  align-items: center;
+}
+.terminal-command-hint button {
+  font-size: 11px;
+}
+.terminal-interrupt {
+  align-self: flex-end;
+  margin: 8px 20px;
+  font-size: 12px;
+  min-height: 28px;
+}
+.terminal-input-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(760px, 100%);
+  z-index: 30;
+  background: var(--bg2);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.terminal-input-menu > header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.terminal-input-menu header input {
+  background: transparent;
+  border: 0;
+  flex: 1;
+  min-width: 0;
+}
+.terminal-input-menu > [role="listbox"] {
+  max-height: min(320px, 45vh);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.terminal-input-menu [role="option"] {
+  width: 100%;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+}
+.terminal-input-menu [role="option"][aria-selected="true"] {
+  background: var(--bg4);
+}
+.terminal-input-menu [role="option"] code {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.terminal-input-menu [role="option"] > span {
+  max-width: 40%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--dim);
+}
+.terminal-input-menu footer {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+}
+.editor-loading-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--bg);
+  pointer-events: none;
+}
+.workbench-loading {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.workbench-loading > .skeleton {
+  width: 100%;
+}
+.code-loading-layout { padding: 0; }
+.code-loading-layout > aside { width: 200px; flex: none; border-right: 1px solid var(--line); background: var(--bg2); }
+.code-loading-layout > div { flex: 1; min-width: 0; }
+@container (max-width: 440px) { .code-loading-layout > aside { display: none; } }

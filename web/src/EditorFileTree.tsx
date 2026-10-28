@@ -6,6 +6,7 @@ import {
   FileIcon,
 } from "@primer/octicons-react";
 import { commands, type FileEntry } from "./bindings";
+import { Skeleton } from "./Skeleton";
 
 export function EditorFileTree({
   projectId,
@@ -61,7 +62,7 @@ export function EditorFileTree({
   }
   function render(path: string, depth: number) {
     const entries = directories[path];
-    if (!entries) return <p className="files-note">Loading…</p>;
+    if (!entries) return <Skeleton kind="tree" rows={5} label="Loading files…"/>;
     return entries.map((entry) => (
       <div
         key={entry.path}

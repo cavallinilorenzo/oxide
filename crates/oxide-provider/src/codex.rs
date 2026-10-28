@@ -1003,7 +1003,7 @@ impl CodexProvider {
                 ],
                 interactive_approvals: true,
                 supports_reasoning: true,
-                image_attachments: false,
+                image_attachments: true,
                 mid_thread_model_switch: true,
                 reports_usage_limits: true,
             })),

@@ -1,4 +1,5 @@
 import { Skeleton } from "./Skeleton";
+import { WorkbenchLoading } from "./WorkbenchLoading";
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -753,7 +754,7 @@ export function App() {
             </main>
           )}
           </div>
-          {workbenches.map((context) => <Suspense key={context.key} fallback={context.key === workbenchContext?.key && workMode !== "chat" ? <div className="workbench-loading" role="status">Opening {workMode}…</div> : null}>
+          {workbenches.map((context) => <Suspense key={context.key} fallback={context.key === workbenchContext?.key && workMode !== "chat" ? <WorkbenchLoading mode={workMode}/> : null}>
             {openedModes[context.key]?.code && <CodeWorkbench {...context} contextKey={context.key} visible={workMode === "code" && !showSettings && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} />}
             {openedModes[context.key]?.terminal && <TerminalWorkbench {...context} contextKey={context.key} visible={workMode === "terminal" && !showSettings && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} />}
           </Suspense>)}

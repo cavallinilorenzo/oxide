@@ -680,6 +680,51 @@ pub struct Terminal {
     pub pid: u32,
     pub cwd: String,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCompletion {
+    pub replacement_index: u32,
+    pub replacement_length: u32,
+    pub matches: Vec<TerminalMatch>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalMatch {
+    pub text: String,
+    pub label: String,
+    pub detail: String,
+}
+#[tauri::command]
+#[specta::specta]
+async fn complete_terminal(
+    core: State<'_, Arc<Core>>,
+    terminal_id: u32,
+    line: String,
+    cursor: u32,
+    cwd: String,
+) -> Result<TerminalCompletion, AppError> {
+    let core = Arc::clone(core.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = core.complete_terminal(terminal_id, &line, cursor as usize, &cwd)?;
+        Ok(TerminalCompletion {
+            replacement_index: result.replacement_index as u32,
+            replacement_length: result.replacement_length as u32,
+            matches: result
+                .matches
+                .into_iter()
+                .map(|item| TerminalMatch {
+                    text: item.text,
+                    label: item.label,
+                    detail: item.detail,
+                })
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|error| AppError {
+        message: error.to_string(),
+    })?
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -2051,6 +2096,21 @@ fn save_attachment(
 fn read_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<Vec<u8>, AppError> {
     Ok(core.read_attachment(std::path::Path::new(&path))?)
 }
+#[tauri::command]
+#[specta::specta]
+async fn import_attachment(core: State<'_, Arc<Core>>, path: String) -> Result<String, AppError> {
+    let core = Arc::clone(core.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(core
+            .import_attachment(std::path::Path::new(&path))?
+            .to_string_lossy()
+            .into_owned())
+    })
+    .await
+    .map_err(|error| AppError {
+        message: error.to_string(),
+    })?
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -2354,6 +2414,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         send_prompt,
         save_attachment,
         read_attachment,
+        import_attachment,
         provider_capabilities,
         list_slash_commands,
         interrupt_thread,
@@ -2371,6 +2432,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         find_files,
         set_editor_dirty,
         run_terminal_block,
+        complete_terminal,
         configure_language_server,
         start_language_server,
         language_server_message,

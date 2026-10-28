@@ -1,5 +1,7 @@
 ﻿import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
 import { useEffect, useRef, useState } from "react";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { Skeleton } from "./Skeleton";
 import { listen } from "@tauri-apps/api/event";
 import { EditorMark } from "./EditorMark";
 import { ProviderMark } from "./ProviderMark";
@@ -90,7 +92,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   }, []);
 
   if (!state || !draft)
-    return <main className="settings" aria-label="Settings" />;
+    return <main className="settings" aria-label="Settings"><Skeleton kind="form" label="Loading settings…"/></main>;
 
   const errorsFor = (path: string) =>
     state.errors.filter((e) => e.path === path);
@@ -158,6 +160,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
       )}
 
+      <AppearanceSettings/>
       <section className="settings-section" aria-labelledby="settings-general">
         <header className="settings-section-header">
           <h2 id="settings-general">General</h2>

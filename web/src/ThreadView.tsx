@@ -1,3 +1,4 @@
+import { useImageAttachments } from "./useImageAttachments";
 import { Skeleton } from "./Skeleton";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
@@ -83,14 +84,6 @@ interface ThreadViewProps {
 }
 
 
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/bmp": "bmp",
-};
-
 interface Outgoing {
   threadId: number | null;
   prompt: string;
@@ -100,10 +93,7 @@ interface Outgoing {
   startedAt: string;
 }
 
-interface PendingImage {
-  path: string;
-  previewUrl: string;
-}
+
 
 /** Octicon names: lock = Ask, shield = Auto-edit, open lock = Full access. */
 export type PermissionIcon = "lock" | "shield-check" | "unlock";
@@ -163,7 +153,6 @@ export function ThreadView({
   const [sending, setSending] = useState(false);
   // The prompt just sent, shown before Core confirms the Turn so sending feels instant.
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const permissionControlRef = useRef<HTMLButtonElement>(null);
@@ -372,33 +361,7 @@ export function ThreadView({
 
   const imagesOffered = (threadId ? transcript.capabilities : newThreadCaps)?.imageAttachments ?? false;
 
-  const addImage = async (file: File) => {
-    const ext = IMAGE_EXTENSIONS[file.type];
-    if (!ext) return;
-    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    const saved = await commands.saveAttachment(bytes, ext);
-    if (saved.status !== "ok") {
-      console.error("Failed to store image:", saved.error);
-      return;
-    }
-    setPendingImages((prev) => [...prev, { path: saved.data, previewUrl: URL.createObjectURL(file) }]);
-  };
-
-  const removeImage = (path: string) => {
-    setPendingImages((prev) => {
-      const gone = prev.find((i) => i.path === path);
-      if (gone) URL.revokeObjectURL(gone.previewUrl);
-      return prev.filter((i) => i.path !== path);
-    });
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    if (!imagesOffered) return;
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type in IMAGE_EXTENSIONS);
-    if (files.length === 0) return;
-    e.preventDefault();
-    files.forEach((f) => void addImage(f));
-  };
+  const {images:pendingImages,addImage,removeImage,clearSent:clearSentImages,handlePaste,dropRef,dropping:imagesDropping,loading:addingImages,error:attachmentError}=useImageAttachments({enabled:imagesOffered,visible,busy:sending,context:`${projectId}:${threadId ?? "draft"}`});
 
   const turnCount = transcript.turnOffset + transcript.turns.length;
   // Until the real Turn arrives, the sent prompt stands in for it.
@@ -726,7 +689,8 @@ export function ThreadView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const prompt = input.trim();
+    if (addingImages > 0) return;
+    const prompt = input.trim() || (pendingImages.length ? "Please inspect the attached images." : "");
     if (!prompt || sending || turnIsRunning(transcript.status)) return;
     setCommandError(null);
 
@@ -841,11 +805,10 @@ export function ThreadView({
       }
 
       const attachments = pendingImages.map((i) => i.path);
-      pendingImages.forEach((i) => URL.revokeObjectURL(i.previewUrl));
-      setPendingImages([]);
 
       const sent = await commands.sendPrompt(targetThreadId, prompt, attachments);
-      if (sent.status !== "ok") setOutgoing(null);
+      if (sent.status === "ok") clearSentImages(attachments);
+      else { setOutgoing(null); setCommandError(sent.error.message); }
     } catch (err) {
       setOutgoing(null);
       throw err;
@@ -974,7 +937,10 @@ export function ThreadView({
         </div>
       )}
 
-      <div className="composer-wrap">
+      <div className="composer-wrap" ref={dropRef}>
+      {imagesDropping && <div className="chat-image-drop" role="status">Drop images to attach</div>}
+      {attachmentError && <div className="provider-hint missing" role="alert">{attachmentError}</div>}
+      {addingImages > 0 && <div className="image-upload-skeleton"><Skeleton kind="list" rows={1} label="Adding image…"/></div>}
       {commandError && <div className="provider-hint missing" role="alert">{commandError}</div>}
       {thread?.sessionLost ? (
         <div className="composer composer-lost">
@@ -993,7 +959,7 @@ export function ThreadView({
           <div className="pending-images">
             {pendingImages.map((img) => (
               <div className="pending-image" key={img.path}>
-                <img src={img.previewUrl} alt="Pending attachment" />
+                <img src={img.previewUrl} alt={img.name} title={img.name} />
                 <button
                   type="button"
                   aria-label="Remove image"
@@ -1128,7 +1094,7 @@ export function ThreadView({
               <SquareFillIcon size={12} />
             </button>
           ) : (
-            <button type="submit" className="send" disabled={!input.trim() || sending} aria-label="Send" title="Send (↩)">
+            <button type="submit" className="send" disabled={(!input.trim() && pendingImages.length === 0) || sending || addingImages > 0} aria-label="Send" title="Send (↩)">
               <ArrowUpIcon size={16} />
             </button>
           )}

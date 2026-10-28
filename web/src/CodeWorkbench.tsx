@@ -24,6 +24,8 @@ import { EditorLanguages } from "./editorLanguages";
 import { EditorFileTree } from "./EditorFileTree";
 import { LanguageTools } from "./LanguageTools";
 import { LanguageSupportNotice } from "./LanguageSupport";
+import { Skeleton } from "./Skeleton";
+import { getAppearance } from "./appearance";
 import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
@@ -241,7 +243,7 @@ export function CodeWorkbench({
       theme: "oxide",
       automaticLayout: true,
       fontSize: 13,
-      fontFamily: "Cascadia Code, SFMono-Regular, Consolas, monospace",
+      fontFamily: getAppearance().fonts.code,
       fontLigatures: true,
       minimap: { enabled: false },
       padding: { top: 16, bottom: 16 },
@@ -257,6 +259,8 @@ export function CodeWorkbench({
       stickyScroll: { enabled: true },
     });
     editor.current = instance;
+    const appearance=()=>instance.updateOptions({fontFamily:getAppearance().fonts.code});
+    window.addEventListener("oxide-appearance-changed",appearance);
     const bridge = new EditorLanguages(
       projectId,
       threadId,
@@ -322,6 +326,7 @@ export function CodeWorkbench({
     }
     return () => {
       unregister();
+      window.removeEventListener("oxide-appearance-changed",appearance);
       window.removeEventListener("oxide-language-tools-changed", reconnect);
       cursorChange.dispose();
       markers.dispose();
@@ -621,9 +626,7 @@ export function CodeWorkbench({
             </div>
           )}
           {loading && (
-            <span className="editor-loading" role="status">
-              <SyncIcon size={14} className="spin" /> Opening file…
-            </span>
+            <div className="editor-loading-skeleton"><Skeleton kind="code" label="Opening file…"/></div>
           )}
         </div>
         {showProblems && (

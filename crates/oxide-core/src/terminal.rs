@@ -49,14 +49,14 @@ impl TerminalSession {
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(command);
             format!(
-                "$global:LASTEXITCODE=0; $oxideOk=$true; [Console]::Write(([char]27)+']633;Oxide;{token};start'+[char]7); try {{ . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')))); $oxideOk=$? }} catch {{ Write-Error $_; $oxideOk=$false }} finally {{ $oxideExit=if($oxideOk){{$global:LASTEXITCODE}}else{{if($global:LASTEXITCODE){{$global:LASTEXITCODE}}else{{1}}}}; [Console]::Write(([char]27)+\"]633;Oxide;{token};end;$oxideExit;$($pwd.ProviderPath)\"+[char]7) }}\r"
+                "[Console]::Clear(); $global:oxideCommandToken='{token}'; $global:oxideExitCode=$null; $global:LASTEXITCODE=0; $oxideOk=$true; [Console]::Write(([char]27)+']633;Oxide;{token};start'+[char]7); try {{ . ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')))); $oxideOk=$? }} catch {{ Write-Error $_; $oxideOk=$false }} finally {{ $global:oxideExitCode=if($oxideOk){{$global:LASTEXITCODE}}else{{if($global:LASTEXITCODE){{$global:LASTEXITCODE}}else{{1}}}} }}\r"
             )
         };
         #[cfg(not(windows))]
         let script = {
             let quoted = format!("'{}'", command.replace('\'', "'\"'\"'"));
             format!(
-                "printf '\\033]633;Oxide;{token};start\\007'; eval {quoted}; _oxide_exit=$?; printf '\\033]633;Oxide;{token};end;%s;%s\\007' \"$_oxide_exit\" \"$PWD\"\n"
+                "_oxide_token='{token}'; _oxide_exit=; printf '\\033]633;Oxide;{token};start\\007'; eval {quoted}; _oxide_exit=$?\n"
             )
         };
         self.write(script.as_bytes())
@@ -152,7 +152,7 @@ impl TerminalSession {
             summary: TerminalSummary {
                 id,
                 pid,
-                cwd: cwd.to_string_lossy().into_owned(),
+                cwd: dunce::simplified(cwd).to_string_lossy().into_owned(),
             },
             commands,
             subscribers,
@@ -232,9 +232,8 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
     let mut command = CommandBuilder::new("powershell.exe");
     #[cfg(windows)]
     if blocks {
-        // -Command - requires redirected stdin and cannot run inside ConPTY.
-        // A console reader keeps one persistent scope and still lets child programs own the PTY.
-        command.args(["-NoLogo", "-NoProfile", "-Command", "while ($true) { $oxideLine=[Console]::ReadLine(); if ($null -eq $oxideLine) { break }; try { . ([ScriptBlock]::Create($oxideLine)) } catch { Write-Error $_ } }"]);
+        // Use PowerShell's real REPL: Ctrl+C cancels a pipeline without killing the shell.
+        command.args(["-NoLogo", "-NoExit", "-Command", r#"function global:prompt { if ($null -ne $global:oxideCommandToken) { $oxideCode=if($null -ne $global:oxideExitCode){$global:oxideExitCode}else{if($global:LASTEXITCODE){$global:LASTEXITCODE}else{1}}; [Console]::Write(([char]27)+"]633;Oxide;$($global:oxideCommandToken);end;$oxideCode;$($pwd.ProviderPath)"+[char]7); $global:oxideCommandToken=$null }; ' ' }"#]);
     }
     #[cfg(not(windows))]
     let mut command = CommandBuilder::new(if blocks {
@@ -244,9 +243,11 @@ fn shell_command(cwd: &Path, blocks: bool) -> portable_pty::CommandBuilder {
     });
     #[cfg(not(windows))]
     if blocks {
-        command.args(["-c", "stty -echo; export PS1='' PS2=''; exec /bin/sh -i"]);
+        command.env("PS1", r#"$(_oxide_prompt_status=$?; if [ -n "${_oxide_token-}" ]; then printf '\033]633;Oxide;%s;end;%s;%s\007' "$_oxide_token" "${_oxide_exit:-$_oxide_prompt_status}" "$PWD"; fi)"#);
+        command.env("PS2", "");
+        command.args(["-c", "stty -echo; exec /bin/sh -i"]);
     }
-    command.cwd(cwd);
+    command.cwd(dunce::simplified(cwd));
     command.env("TERM", "xterm-256color");
     command
 }

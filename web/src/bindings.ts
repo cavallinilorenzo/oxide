@@ -59,6 +59,7 @@ export const commands = {
 	saveAttachment: (bytes: number[], extension: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { bytes, extension })),
 	/**  Bytes of a stored attachment, for rendering it in the Transcript. */
 	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
+	importAttachment: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { path })),
 	/**  What a Provider supports, so the composer can offer image attachments before a Thread exists. */
 	providerCapabilities: (provider: string) => __TAURI_INVOKE<ThreadCapabilities>("provider_capabilities", { provider }),
 	/**  The Slash command catalog the `/` menu offers for a Provider in a Project. */
@@ -84,6 +85,7 @@ export const commands = {
 	findFiles: (projectId: number, threadId: number | null, query: string) => typedError<string[], AppError>(__TAURI_INVOKE("find_files", { projectId, threadId, query })),
 	setEditorDirty: (id: string, dirty: boolean) => __TAURI_INVOKE<void>("set_editor_dirty", { id, dirty }),
 	runTerminalBlock: (terminalId: number, command: string, token: string) => typedError<null, AppError>(__TAURI_INVOKE("run_terminal_block", { terminalId, command, token })),
+	completeTerminal: (terminalId: number, line: string, cursor: number, cwd: string) => typedError<TerminalCompletion, AppError>(__TAURI_INVOKE("complete_terminal", { terminalId, line, cursor, cwd })),
 	configureLanguageServer: (language: string, config: LanguageServerConfig_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("configure_language_server", { language, config })),
 	startLanguageServer: (projectId: number, threadId: number | null, language: string, onMessage: Channel<string>) => typedError<LanguageServer, AppError>(__TAURI_INVOKE("start_language_server", { projectId, threadId, language, onMessage })),
 	languageServerMessage: (id: number, message: string) => typedError<null, AppError>(__TAURI_INVOKE("language_server_message", { id, message })),
@@ -948,6 +950,18 @@ export type Terminal = {
 	id: number,
 	pid: number,
 	cwd: string,
+};
+
+export type TerminalCompletion = {
+	replacementIndex: number,
+	replacementLength: number,
+	matches: TerminalMatch[],
+};
+
+export type TerminalMatch = {
+	text: string,
+	label: string,
+	detail: string,
 };
 
 export type Thread = Thread_Serialize | Thread_Deserialize;

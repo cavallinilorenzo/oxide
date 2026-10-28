@@ -7,7 +7,6 @@ import {
   ChevronDownIcon,
   FileDirectoryIcon,
   GitBranchIcon,
-  LightBulbIcon,
   LockIcon,
   PaperclipIcon,
   RepoIcon,
@@ -37,7 +36,7 @@ import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
-import { isClearCommand, isEffortMenuShortcut, isModelPickerShortcut, modelDigitShortcut, shortcutLabel, stopsTurn } from "./shortcuts";
+import { isClearCommand, isModelPickerShortcut, modelDigitShortcut, shortcutLabel, stopsTurn } from "./shortcuts";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
@@ -164,7 +163,6 @@ export function ThreadView({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [newThreadCaps, setNewThreadCaps] = useState<ThreadCapabilities | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const effortPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const permissionControlRef = useRef<HTMLButtonElement>(null);
   const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
@@ -173,7 +171,6 @@ export function ThreadView({
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [modelPickerMode, setModelPickerMode] = useState<"model" | "effort">("model");
   const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
@@ -585,6 +582,7 @@ export function ThreadView({
     threadId ? transcript.thread?.effort ?? null : draftEffort
   );
   const displayModel = currentModel ? readableModel(currentModel, catalogModels) : currentProvider;
+  const effortName = currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : null;
 
   useEffect(() => {
     let active = true;
@@ -643,8 +641,14 @@ export function ThreadView({
   };
 
   const closeModelPicker = useCallback(() => setModelPickerOpen(false), []);
-  /** Where focus was when a shortcut opened the picker, so closing it by keyboard hands focus back. */
+  /** Where focus was when the picker opened, so closing it hands focus back. */
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const openModelPicker = () => {
+    if (!modelPickerOpen && document.activeElement instanceof HTMLElement) {
+      restoreFocusRef.current = document.activeElement;
+    }
+    setModelPickerOpen(true);
+  };
   useEffect(() => {
     if (modelPickerOpen) return;
     const target = restoreFocusRef.current;
@@ -656,19 +660,14 @@ export function ThreadView({
   const modelShortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     modelShortcutRef.current = (e) => {
-      const toggle = isModelPickerShortcut(e) ? "model" : isEffortMenuShortcut(e) ? "effort" : null;
-      if (toggle) {
+      if (isModelPickerShortcut(e)) {
         e.preventDefault();
         if (isTurnActive || sending) return;
-        if (modelPickerOpen && modelPickerMode === toggle) {
+        if (modelPickerOpen) {
           setModelPickerOpen(false);
           return;
         }
-        if (!modelPickerOpen && document.activeElement instanceof HTMLElement) {
-          restoreFocusRef.current = document.activeElement;
-        }
-        setModelPickerMode(toggle);
-        setModelPickerOpen(true);
+        openModelPicker();
         return;
       }
       const index = modelDigitShortcut(e);
@@ -783,8 +782,7 @@ export function ThreadView({
       if (slash.arg) {
         void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
       } else {
-        setModelPickerMode("model");
-        setModelPickerOpen(true);
+        openModelPicker();
       }
       handleInputChange("");
       return;
@@ -793,8 +791,7 @@ export function ThreadView({
       if (slash.arg) {
         void handleSelectModelAndEffort(currentProvider, currentModel, slash.arg);
       } else {
-        setModelPickerMode("effort");
-        setModelPickerOpen(true);
+        openModelPicker();
       }
       handleInputChange("");
       return;
@@ -1073,38 +1070,14 @@ export function ThreadView({
             <button
               type="button"
               className="cbtn"
-              onClick={() => {
-                setModelPickerMode("model");
-                setModelPickerOpen(true);
-              }}
+              onClick={openModelPicker}
               disabled={isTurnActive || sending}
-              aria-label={`Model: ${displayModel}`}
-              title={`Model: ${displayModel} (${shortcutLabel}⇧M, /model)`}
+              aria-label={`Model: ${displayModel}${effortName ? `, Effort: ${effortName}` : ""}`}
+              title={`Model: ${displayModel}${effortName ? `, Effort: ${effortName}` : ""} (${shortcutLabel}⇧M, /model)`}
             >
               <ProviderMark provider={currentProvider} size={14} />
-              <span className="t">{displayModel}</span>
+              <span className="t">{displayModel}{effortName && ` · ${effortName}`}</span>
               <ChevronDownIcon size={12} />
-            </button>
-            <button
-              type="button"
-              className="cbtn compact"
-              ref={effortPickerTriggerRef}
-              onClick={() => {
-                if (modelPickerOpen && modelPickerMode === "effort") {
-                  setModelPickerOpen(false);
-                } else {
-                  setModelPickerMode("effort");
-                  setModelPickerOpen(true);
-                }
-              }}
-              disabled={isTurnActive || sending}
-              aria-label="Effort"
-              aria-expanded={modelPickerOpen && modelPickerMode === "effort"}
-              title={`Effort: ${currentEffort || "Default"} (${shortcutLabel}⇧E, /effort)`}
-            >
-              <LightBulbIcon size={14} />
-              <span className="t">{currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : "Default"}</span>
-              <ChevronDownIcon size={12} className="cv" />
             </button>
             <Dropdown
               triggerRef={permissionControlRef}
@@ -1184,8 +1157,6 @@ export function ThreadView({
           turnCount={turnCount}
           midThreadModelSwitch={providerCaps?.midThreadModelSwitch ?? true}
           onSelectModelAndEffort={handleSelectModelAndEffort}
-          initialMode={modelPickerMode}
-          anchorElement={modelPickerMode === "effort" ? effortPickerTriggerRef.current : null}
         />
       )}
     </div>

@@ -11,7 +11,7 @@ document.body.append(container);
 const root = createRoot(container);
 afterEach(async () => { await act(async () => root.render(null)); clearMocks(); });
 
-it("shows only the selected Codex model's reasoning levels", async () => {
+it("shows the highlighted Codex model's reasoning levels on the Effort slider", async () => {
   const catalog = [
     { id: "gpt-6.1-terra", name: "Terra", description: null, supportedEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low", isLegacy: false },
     { id: "gpt-6-luna", name: "Luna", description: null, supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium", isLegacy: false },
@@ -23,11 +23,12 @@ it("shows only the selected Codex model's reasoning levels", async () => {
   });
   const render = (model: string) => root.render(<ModelEffortPicker open onClose={() => {}}
     currentProvider="codex" currentModel={model} currentEffort="medium" turnCount={0}
-    midThreadModelSwitch onSelectModelAndEffort={() => {}} initialMode="effort" />);
+    midThreadModelSwitch onSelectModelAndEffort={() => {}} />);
   await act(async () => render("gpt-6-luna"));
-  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low1", "Medium2", "High3", "Xhigh4", "Max5"]);
-  await act(async () => render("gpt-6.1-terra"));
-  expect(Array.from(container.querySelectorAll('[role="option"]')).map((el) => el.textContent)).toEqual(["Low1", "Medium2", "High3", "Xhigh4", "Max5", "Ultra6"]);
+  const stops = () => Array.from(container.querySelectorAll(".effort-stop")).map((el) => el.textContent);
+  expect(stops()).toEqual(["Low", "Medium", "High", "Xhigh", "Max"]);
+  await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })); });
+  expect(stops()).toEqual(["Low", "Medium", "High", "Xhigh", "Max", "Ultra"]);
 });
 
 it("returns to Favourites when the model picker is reopened", async () => {

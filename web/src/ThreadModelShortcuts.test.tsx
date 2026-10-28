@@ -17,7 +17,7 @@ const model = (id: string, name: string, efforts: string[], def: string | null) 
 const catalogs: Record<string, unknown[]> = {
   claude: [model("opus", "Opus", ["low", "high"], "high"), model("sonnet", "Sonnet", ["low", "medium", "high"], "medium"), model("haiku", "Haiku", [], null)],
   codex: [model("gpt", "GPT", ["medium"], "medium")],
-  antigravity: [],
+  antigravity: [model("gem-low", "Gem (Low)", ["low", "high"], "high"), model("gem-high", "Gem (High)", ["low", "high"], "high")],
 };
 
 type Call = { command: string; args: Record<string, unknown> };
@@ -114,43 +114,215 @@ it("remembers a Favourite switch in a new-Thread draft without touching the draf
   expect(localStorage.length).toBeGreaterThan(0);
 });
 
-it("⌘⇧M toggles the Model picker and ⌘⇧E the Effort menu, switching between them", async () => {
+const M = { key: "M", code: "KeyM", metaKey: true, shiftKey: true };
+const key = (k: string, init: KeyboardEventInit = {}) => press({ key: k, code: k, ...init });
+const dialog = () => container.querySelector('[role="dialog"]');
+const highlighted = () => container.querySelector('[role="option"][aria-selected="true"] .model-name')?.textContent ?? null;
+const slider = () => container.querySelector('[role="slider"]')?.getAttribute("aria-valuetext") ?? null;
+const activeTab = () => container.querySelector('.rail-tab[aria-current="true"]')?.textContent ?? null;
+const type = (text: string) => act(async () => {
+  const input = container.querySelector(".model-search-input") as HTMLInputElement;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+const open = async (opts: Parameters<typeof setup>[0] = { threadId: 7 }) => {
+  const calls = setup(opts);
+  await render(7);
+  await press(M);
+  await flush();
+  return calls;
+};
+
+it("⌘⇧M toggles the Model picker and ⌘⇧E does nothing", async () => {
   setup({ threadId: 7 });
   await render(7);
-  const m = { key: "M", code: "KeyM", metaKey: true, shiftKey: true };
-  const e = { key: "E", code: "KeyE", ctrlKey: true, shiftKey: true };
-  await press(m);
-  expect(container.querySelector('[aria-label="Model Selector"]')).not.toBeNull();
-  await press(m);
-  expect(container.querySelector('[aria-label="Model Selector"]')).toBeNull();
-  await press(e);
-  expect(container.querySelector(".effort-menu")).not.toBeNull();
-  await press(m);
-  expect(container.querySelector('[aria-label="Model Selector"]')).not.toBeNull();
-  await press(e);
-  expect(container.querySelector(".effort-menu")).not.toBeNull();
-  await press(e);
-  expect(container.querySelector(".effort-menu")).toBeNull();
+  await press({ key: "E", code: "KeyE", ctrlKey: true, shiftKey: true });
+  expect(dialog()).toBeNull();
+  await press(M);
+  expect(dialog()).not.toBeNull();
+  await press({ key: "E", code: "KeyE", metaKey: true, shiftKey: true });
+  expect(dialog()).not.toBeNull();
+  await press(M);
+  expect(dialog()).toBeNull();
 });
 
-it("picks the nth Effort level with a bare digit while the Effort menu is open", async () => {
-  const calls = setup({ threadId: 7, effort: "high" });
+it("shows Model and Effort in one composer control that opens the picker", async () => {
+  setup({ threadId: 7 });
   await render(7);
-  await press({ key: "E", code: "KeyE", metaKey: true, shiftKey: true });
-  await flush();
-  expect(Array.from(container.querySelectorAll(".effort-option")).map((o) => o.textContent)).toEqual(["Low1", "High2"]);
-  await press({ key: "1", code: "Digit1" });
+  const control = container.querySelector('[aria-label^="Model"]') as HTMLButtonElement;
+  expect(control.getAttribute("aria-label")).toBe("Model: Opus, Effort: High");
+  expect(control.textContent).toContain("Opus · High");
+  expect(container.querySelector('[aria-label="Effort"]')).toBeNull();
+  await act(async () => control.click());
+  expect(dialog()).not.toBeNull();
+});
+
+it("starts on the current Model and Effort, and ↑/↓ wrap around", async () => {
+  await open();
+  expect(highlighted()).toBe("Opus");
+  expect(slider()).toBe("High");
+  await key("ArrowDown");
+  expect(highlighted()).toBe("Sonnet");
+  await key("ArrowDown");
+  await key("ArrowDown");
+  expect(highlighted()).toBe("Opus");
+  await key("ArrowUp");
+  expect(highlighted()).toBe("Haiku");
+});
+
+it("←/→ step the Effort and stop at the ends; Enter applies only the Effort on the current Model", async () => {
+  const calls = await open();
+  await key("ArrowRight");
+  expect(slider()).toBe("High");
+  await key("ArrowLeft");
+  await key("ArrowLeft");
+  expect(slider()).toBe("Low");
+  await key("Enter");
   await flush();
   expect(setCalls(calls)).toEqual([{ threadId: 7, model: "opus", effort: "low" }]);
-  expect(container.querySelector(".effort-menu")).toBeNull();
+  expect(dialog()).toBeNull();
 });
 
-it("returns focus to the composer after closing a shortcut-opened picker", async () => {
+it("carries the Effort to a Model that supports it and falls back to the default otherwise", async () => {
+  await open();
+  await key("ArrowLeft");
+  expect(slider()).toBe("Low");
+  await key("ArrowDown");
+  expect(highlighted()).toBe("Sonnet");
+  expect(slider()).toBe("Low");
+  await key("ArrowDown");
+  expect(highlighted()).toBe("Haiku");
+  expect(slider()).toBeNull();
+  expect(container.textContent).toContain("This model has no effort levels.");
+  await key("ArrowRight");
+  await key("ArrowLeft");
+  await key("ArrowUp");
+  expect(slider()).toBe("Medium");
+});
+
+it("Enter applies the highlighted Model with its Effort in one call", async () => {
+  const calls = await open();
+  await key("ArrowDown");
+  await key("ArrowRight");
+  await key("Enter");
+  await flush();
+  expect(setCalls(calls)).toEqual([{ threadId: 7, model: "sonnet", effort: "high" }]);
+});
+
+it("Esc closes the picker without applying anything", async () => {
+  const calls = await open();
+  await key("ArrowDown");
+  await key("ArrowLeft");
+  await key("Escape");
+  await flush();
+  expect(dialog()).toBeNull();
+  expect(setCalls(calls)).toEqual([]);
+});
+
+it("clicking a Model row applies it, and a slider stop picks the Effort", async () => {
+  const calls = await open();
+  await act(async () => (Array.from(container.querySelectorAll(".effort-stop")).find((b) => b.textContent === "Low") as HTMLElement).click());
+  expect(slider()).toBe("Low");
+  await act(async () => (Array.from(container.querySelectorAll('[role="option"]')).find((o) => o.textContent?.includes("Sonnet")) as HTMLElement).click());
+  await flush();
+  expect(setCalls(calls)).toEqual([{ threadId: 7, model: "sonnet", effort: "low" }]);
+});
+
+it("Tab and Shift+Tab cycle the tabs and keep the search text", async () => {
+  await open();
+  expect(activeTab()).toContain("Claude");
+  await type("g");
+  await key("Tab");
+  expect(activeTab()).toContain("Codex");
+  expect(highlighted()).toBe("GPT");
+  expect((container.querySelector(".model-search-input") as HTMLInputElement).value).toBe("g");
+  await key("Tab", { shiftKey: true });
+  await key("Tab", { shiftKey: true });
+  expect(activeTab()).toContain("Favourites");
+  await key("Tab", { shiftKey: true });
+  expect(activeTab()).toContain("Antigravity");
+});
+
+it("says so when the highlighted Model is from another Provider and the Thread has Turns", async () => {
+  await open({ threadId: 7, turnCount: 2 });
+  expect(container.textContent).not.toContain("starts a new Thread");
+  await key("Tab");
+  expect(container.textContent).toContain("starts a new Thread");
+});
+
+it("Enter does nothing when the search matches nothing", async () => {
+  const calls = await open();
+  await type("zzz");
+  expect(container.textContent).toContain("No models found.");
+  await key("Enter");
+  await flush();
+  expect(setCalls(calls)).toEqual([]);
+  expect(dialog()).not.toBeNull();
+});
+
+it("starts a new Thread with the chosen Effort for another Provider's Model once the Thread has Turns", async () => {
+  const calls = await open({ threadId: 7, turnCount: 2 });
+  await key("Tab");
+  await key("Enter");
+  await flush();
+  expect(setCalls(calls)).toEqual([]);
+  expect(calls.find((c) => c.command === "create_thread")?.args).toMatchObject({ provider: "codex", model: "gpt", effort: "medium" });
+});
+
+it("skips locked Models with ↑/↓ but still changes the Effort of the current Model", async () => {
+  const calls = await open({ threadId: 7, turnCount: 2, midThread: false });
+  await key("ArrowDown");
+  await key("ArrowUp");
+  expect(highlighted()).toBe("Opus");
+  await key("ArrowLeft");
+  await key("Enter");
+  await flush();
+  expect(setCalls(calls)).toEqual([{ threadId: 7, model: "opus", effort: "low" }]);
+});
+
+it("resolves an effort-split Antigravity Model to the variant matching the Effort", async () => {
+  const calls = await open();
+  await key("Tab");
+  await key("Tab");
+  expect(activeTab()).toContain("Antigravity");
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(highlighted()).toBe("Gem");
+  await key("ArrowLeft");
+  await key("Enter");
+  await flush();
+  expect(setCalls(calls)).toEqual([{ threadId: 7, model: "gem-low", effort: "low" }]);
+});
+
+it("⌘n inside the picker applies the nth visible Model with its Effort", async () => {
+  const calls = await open();
+  await key("2", { code: "Digit2", metaKey: true });
+  await flush();
+  expect(setCalls(calls)).toEqual([{ threadId: 7, model: "sonnet", effort: "high" }]);
+  expect(dialog()).toBeNull();
+});
+
+it("/effort with no argument opens the picker", async () => {
   setup({ threadId: 7 });
   await render(7);
   const box = container.querySelector("textarea") as HTMLTextAreaElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "/effort");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => { box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
+  await flush();
+  expect(dialog()).not.toBeNull();
+  expect(highlighted()).toBe("Opus");
+});
+
+it("returns focus to the composer after closing the picker, leaving the draft alone", async () => {
+  setup({ threadId: 7 });
+  await render(7, "keep me");
+  const box = container.querySelector("textarea") as HTMLTextAreaElement;
   box.focus();
-  await press({ key: "E", code: "KeyE", metaKey: true, shiftKey: true });
-  await press({ key: "E", code: "KeyE", metaKey: true, shiftKey: true });
+  await press(M);
+  await key("ArrowLeft");
+  await key("Escape");
   expect(document.activeElement).toBe(box);
+  expect(box.value).toBe("keep me");
 });

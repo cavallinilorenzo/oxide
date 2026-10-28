@@ -147,7 +147,6 @@ it("preselects the merge method GitHub's own merge box would, not the first allo
 });
 
 it("keeps the merge button coloured while merging, then confirms and returns to the list", async () => {
-  vi.useFakeTimers();
   let finish!: () => void;
   vi.spyOn(commands, "mergePullRequest").mockReturnValue(
     new Promise((resolve) => (finish = () => resolve({ status: "ok", data: null }))),
@@ -158,26 +157,18 @@ it("keeps the merge button coloured while merging, then confirms and returns to 
   expect(merging.disabled).toBe(true);
   expect(merging.classList.contains("pending")).toBe(true);
   await act(async () => finish());
-  expect(host.querySelector(".pr-outcome.merged")!.textContent).toContain("Merged");
-  expect(onBack).not.toHaveBeenCalled();
-  await act(async () => void vi.advanceTimersByTime(1500));
-  expect(onBack).toHaveBeenCalledTimes(1);
-  vi.useRealTimers();
+  expect(onBack).toHaveBeenCalledWith("merged");
 });
 
 it("closes a pull request without merging it, then returns to the list", async () => {
-  vi.useFakeTimers();
   const close = vi.spyOn(commands, "closePullRequest").mockResolvedValue({ status: "ok", data: null });
   const merge = vi.spyOn(commands, "mergePullRequest");
   await render();
   await click(button(/^\s*Close /));
   expect(close).toHaveBeenCalledWith(1, 174);
   expect(merge).not.toHaveBeenCalled();
-  expect(host.querySelector(".pr-outcome.closed")!.textContent).toContain("Closed");
   expect(onChanged).toHaveBeenCalledTimes(1);
-  await act(async () => void vi.advanceTimersByTime(1500));
-  expect(onBack).toHaveBeenCalledTimes(1);
-  vi.useRealTimers();
+  expect(onBack).toHaveBeenCalledWith("closed");
 });
 
 it("stays on the pull request and shows the error when closing fails", async () => {

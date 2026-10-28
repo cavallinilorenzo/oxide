@@ -13,7 +13,7 @@ import {
   MarkGithubIcon,
   SearchIcon,
 } from "@primer/octicons-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   commands,
   type GitStatus,
@@ -26,7 +26,7 @@ import {
 import { Avatar } from "./Avatar";
 import { Checks } from "./PullRequestChecks";
 import { Markdown } from "./PullRequestMarkdown";
-import { MergeFooter, MergeStatus, Outcome, type Pending, Working } from "./PullRequestMerge";
+import { MergeFooter, MergeStatus, type Pending, Working } from "./PullRequestMerge";
 import { NO_EDIT, PullRequestPeople, ReviewStateIcon } from "./PullRequestPeople";
 import { defaultMergeMethod, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
 
@@ -69,6 +69,14 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
   const [manual, setManual] = useState(0);
   const [list, setList] = useState<List>({ state: "loading" });
   const [opened, setOpened] = useState<number | null>(null);
+  // A quiet line on the list after a pull request was merged or closed; it fades on its own.
+  const [outcome, setOutcome] = useState<{ kind: "merged" | "closed"; number: number } | null>(null);
+
+  useEffect(() => {
+    if (outcome === null) return;
+    const timer = setTimeout(() => setOutcome(null), 4000);
+    return () => clearTimeout(timer);
+  }, [outcome]);
 
   useEffect(() => {
     let active = true;
@@ -91,7 +99,8 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
         projectId={projectId}
         number={opened}
         refreshKey={refreshKey}
-        onBack={() => {
+        onBack={(done) => {
+          if (done) setOutcome({ kind: done, number: opened });
           setOpened(null);
           setManual((n) => n + 1);
         }}
@@ -131,6 +140,11 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
         </button>
       </form>
       <div className="pr-scroll">
+        {outcome && (
+          <p className="pr-outcome" role="status">
+            #{outcome.number} {outcome.kind}
+          </p>
+        )}
         {list.state === "loading" && <p className="pr-empty">Loading…</p>}
         {list.state === "error" && (
           <p role="alert" className="pr-empty error">
@@ -182,7 +196,7 @@ interface PullRequestReviewProps {
   projectId: number;
   number: number;
   refreshKey: number;
-  onBack: () => void;
+  onBack: (done?: "merged" | "closed") => void;
   onChanged: () => void;
   onReviewFiles: (number: number) => void;
 }
@@ -202,18 +216,6 @@ export function PullRequestReview({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const busy = pending !== null;
-  // Set once the pull request was merged or closed: a short confirmation, then the list.
-  const [done, setDone] = useState<"merged" | "closed" | null>(null);
-  const backRef = useRef(onBack);
-  useEffect(() => {
-    backRef.current = onBack;
-  });
-  // The confirmation is shown for a moment, then the list of pull requests comes back.
-  useEffect(() => {
-    if (done === null) return;
-    const timer = setTimeout(() => backRef.current(), 1400);
-    return () => clearTimeout(timer);
-  }, [done]);
   const [comment, setComment] = useState("");
   const [method, setMethod] = useState<MergeMethod | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
@@ -248,7 +250,7 @@ export function PullRequestReview({
   const loadedPr = loaded.state === "ready" ? loaded.detail.pullRequest : null;
   const nav = (
     <div className="pr-nav">
-      <button className="pr-back" onClick={onBack}>
+      <button className="pr-back" onClick={() => onBack()}>
         <ArrowLeftIcon size={14} /> Pull requests
       </button>
       <span className="grow" />
@@ -316,8 +318,8 @@ export function PullRequestReview({
     if (method === null) return;
     if (await act("merge", () => commands.mergePullRequest(projectId, number, method, deleteBranch, false))) {
       setMerged(true);
-      setDone("merged");
       onChanged();
+      onBack("merged");
     }
   }
 
@@ -328,8 +330,8 @@ export function PullRequestReview({
 
   async function closePullRequest() {
     if (await act("close", () => commands.closePullRequest(projectId, number))) {
-      setDone("closed");
       onChanged();
+      onBack("closed");
     }
   }
 
@@ -349,7 +351,6 @@ export function PullRequestReview({
 
   return (
     <div className="pr-review">
-      {done && <Outcome kind={done} />}
       {nav}
       <div className="pr-scroll">
         <header className="pr-hero">

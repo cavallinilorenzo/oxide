@@ -35,3 +35,10 @@ test("unknown backends cannot accidentally produce a CPU build", () => {
   assert.throws(() => dictationBuild("cuda", {}), /Expected backend: cpu or vulkan/);
   assert.throws(() => dictationBuild(undefined, {}), /Expected backend: cpu or vulkan/);
 });
+
+test("Vulkan builds a separate locked worker without sharing the host native cache", () => {
+  const build = dictationBuild("vulkan", { CARGO_TARGET_DIR: "short-root" });
+  assert.deepEqual(build.worker.args, ["build", "--locked", "--manifest-path", "crates/oxide-vulkan-worker/Cargo.toml"]);
+  assert.notEqual(build.worker.env.CARGO_TARGET_DIR, build.env.CARGO_TARGET_DIR);
+  assert.equal(dictationBuild("cpu", {}).worker, undefined);
+});

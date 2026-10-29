@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyFileSync } from "node:fs";
 import { assertBuildSpace } from "./checks/build-space.mjs";
 
 export function dictationBuild(backend, inherited = process.env) {
@@ -25,6 +26,10 @@ export function dictationBuild(backend, inherited = process.env) {
     env,
     args: ["build", "--locked", "-p", "oxide-app",
       ...(backend === "vulkan" ? ["--features", "dictation-vulkan"] : [])],
+    ...(backend === "vulkan" ? { worker: {
+      args: ["build", "--locked", "--manifest-path", "crates/oxide-vulkan-worker/Cargo.toml"],
+      env: { ...env, CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", "vw")) },
+    } } : {}),
   };
 }
 
@@ -40,6 +45,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     assertBuildSpace(process.cwd());
     const result = spawnSync("cargo", build.args, { env: build.env, stdio: "inherit" });
     if (result.error) throw result.error;
+    if (result.status === 0 && build.worker) {
+      assertBuildSpace(process.cwd());
+      const worker = spawnSync("cargo", build.worker.args, { env: build.worker.env, stdio: "inherit" });
+      if (worker.error) throw worker.error;
+      if (worker.status !== 0) process.exit(worker.status ?? 1);
+      copyFileSync(join(build.worker.env.CARGO_TARGET_DIR, "debug", "oxide-vulkan-worker.exe"),
+        join(build.env.CARGO_TARGET_DIR, "debug", "oxide-vulkan-worker.exe"));
+    }
     assertBuildSpace(process.cwd());
     process.exitCode = result.status ?? 1;
   } catch (error) {

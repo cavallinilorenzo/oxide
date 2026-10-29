@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionRequest {
     pub model_path: PathBuf,
     pub language: Option<String>,
@@ -18,8 +18,10 @@ pub struct TranscriptionOutcome {
     pub execution: ExecutionDetails,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
 pub enum BackendError {
+    #[error("Transcription cancelled")]
+    Cancelled,
     #[error("Backend unavailable: {0:?}")]
     Unavailable(CapabilityState),
     #[error("Initialization failed: {0}")]
@@ -34,6 +36,7 @@ pub enum BackendError {
 }
 
 pub trait WhisperBackendRuntime: Send + Sync {
+    fn cancel(&self) {}
     fn backend_id(&self) -> BackendId;
     fn probe(&self) -> BackendProbe;
     fn transcribe(
@@ -46,6 +49,15 @@ pub trait WhisperBackendRuntime: Send + Sync {
 pub fn run_whisper_inference(
     request: &TranscriptionRequest,
     use_gpu: bool,
+) -> Result<(String, bool, Option<String>), BackendError> {
+    run_whisper_on_device(request, use_gpu, 0)
+}
+
+/// Called by an isolated native worker after resolving a stable adapter identity.
+pub fn run_whisper_on_device(
+    request: &TranscriptionRequest,
+    use_gpu: bool,
+    gpu_device: i32,
 ) -> Result<(String, bool, Option<String>), BackendError> {
     if !request.model_path.is_file() {
         return Err(BackendError::InitializationFailed(format!(
@@ -67,6 +79,7 @@ pub fn run_whisper_inference(
 
     let mut context_params = WhisperContextParameters::default();
     context_params.use_gpu(use_gpu);
+    context_params.gpu_device(gpu_device);
 
     let path_str = request
         .model_path
@@ -185,12 +198,7 @@ pub fn probe_backends() -> Vec<BackendProbe> {
 
     // 3. Vulkan
     if manifest.included_backends.contains(&BackendId::Vulkan) {
-        probes.push(BackendProbe {
-            backend: BackendId::Vulkan,
-            state: CapabilityState::Available,
-            adapter: Some("Vulkan Adapter".into()),
-            memory_pool: None,
-        });
+        probes.push(super::vulkan::VulkanRuntime::default().probe());
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Vulkan,

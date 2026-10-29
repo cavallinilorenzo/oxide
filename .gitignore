@@ -1,5 +1,6 @@
 .DS_Store
 /target
+/crates/oxide-vulkan-worker/target
 node_modules
 dist
 /crates/oxide-app/gen

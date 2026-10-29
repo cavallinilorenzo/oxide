@@ -2,6 +2,7 @@
 pub mod metal;
 pub mod runtime;
 pub mod types;
+pub mod vulkan;
 
 use crate::{Error, Result};
 use cpal::{
@@ -111,7 +112,9 @@ pub fn gpu_compiled() -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        cfg!(feature = "dictation-vulkan")
+        BuildManifest::current()
+            .included_backends
+            .contains(&BackendId::Vulkan)
     }
 }
 
@@ -192,6 +195,10 @@ pub struct Dictation {
 }
 
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
+    #[cfg(windows)]
+    if vulkan::worker_path().is_file() {
+        return Arc::new(vulkan::VulkanRuntime::default());
+    }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         let metal = MetalRuntime;
@@ -310,6 +317,7 @@ impl Dictation {
     }
 
     pub fn cancel(&self) {
+        self.runtime.cancel();
         if let Some(recording) = self.recording.lock().unwrap().take() {
             let _ = recording.stop.send(());
         }
@@ -412,6 +420,7 @@ impl Dictation {
                             *self.last_execution.lock().unwrap() = Some(outcome.execution);
                             Ok(outcome.text)
                         }
+                        Err(BackendError::Cancelled) => return Err(err("Transcription cancelled")),
                         Err(gpu_err) => {
                             // Check memory budget before retrying on CPU
                             let available_gb = match &self.memory_checker {

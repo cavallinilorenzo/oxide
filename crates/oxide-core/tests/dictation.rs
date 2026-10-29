@@ -376,7 +376,8 @@ fn explicit_gpu_mode_with_metal_runtime_reports_actionable_error_on_failure() {
 fn build_manifest_pins_whisper_and_backends() {
     let manifest = BuildManifest::current();
     assert_eq!(manifest.whisper_rs_version, "0.16.0");
-    assert!(manifest.whisper_cpp_pinned.contains("0.16.0"));
+    assert!(manifest.whisper_cpp_pinned.contains("1.8.3"));
+    assert!(manifest.whisper_cpp_pinned.contains("0.15.0"));
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         assert!(manifest.included_backends.contains(&BackendId::Metal));

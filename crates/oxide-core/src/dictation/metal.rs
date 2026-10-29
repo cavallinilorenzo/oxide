@@ -9,7 +9,6 @@ use super::runtime::{
 use super::types::{BackendId, BackendProbe, CapabilityState, ExecutionDetails, MemoryPool};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetalDeviceInfo {
@@ -149,51 +148,16 @@ impl WhisperBackendRuntime for MetalRuntime {
         let device_info = query_metal_device()
             .map_err(|_| BackendError::Unavailable(CapabilityState::NoCompatibleDevice))?;
 
-        let mut context_params = WhisperContextParameters::default();
-        context_params.use_gpu(true);
-
-        let path_str = request
-            .model_path
-            .to_str()
-            .ok_or_else(|| BackendError::InitializationFailed("Invalid model path".into()))?;
-
-        if !request.model_path.is_file() {
-            return Err(BackendError::InitializationFailed(format!(
-                "Model file not found at: {}",
-                request.model_path.display()
-            )));
-        }
-
-        let context = WhisperContext::new_with_params(path_str, context_params).map_err(|e| {
-            BackendError::InitializationFailed(format!("Metal initialization failed: {e}"))
-        })?;
-
-        let mut state = context.create_state().map_err(|e| {
-            BackendError::InitializationFailed(format!("Metal state creation failed: {e}"))
-        })?;
-
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(request.language.as_deref());
-        params.set_translate(false);
-        params.set_no_context(true);
-        params.set_suppress_blank(true);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_print_special(false);
-        params.set_n_threads(request.threads.clamp(1, 8) as i32);
-
-        let resampled = super::resample(&request.samples, request.sample_rate);
-        state
-            .full(params, &resampled)
-            .map_err(|e| BackendError::InferenceFailed(format!("Metal inference failed: {e}")))?;
-
-        let text = state
-            .as_iter()
-            .map(|s| s.to_string())
-            .collect::<String>()
-            .trim()
-            .to_string();
+        let (text, offloaded, _) =
+            super::runtime::run_whisper_inference(request, true).map_err(|e| match e {
+                BackendError::InitializationFailed(msg) => BackendError::InitializationFailed(
+                    format!("Metal initialization failed: {msg}"),
+                ),
+                BackendError::InferenceFailed(msg) => {
+                    BackendError::InferenceFailed(format!("Metal inference failed: {msg}"))
+                }
+                other => other,
+            })?;
 
         let budget_desc = match device_info.max_working_set_bytes {
             Some(bytes) => format!(", max working set {:.1} GB", bytes as f64 / 1_073_741_824.0),
@@ -205,7 +169,7 @@ impl WhisperBackendRuntime for MetalRuntime {
             execution: ExecutionDetails {
                 backend: BackendId::Metal,
                 adapter: Some(device_info.name.clone()),
-                offloaded: true,
+                offloaded,
                 offload_evidence: Some(format!(
                     "Metal acceleration verified on {} (unified memory{})",
                     device_info.name, budget_desc

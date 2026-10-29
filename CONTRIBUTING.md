@@ -34,9 +34,9 @@ Oxide first if Windows reports that its release executable is in use. For a
 debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
 `CARGO_INCREMENTAL=1` opts back into incremental compilation.
 
-The local check runner (`node tools/checks/run.mjs pr`) checks the build-artifact
+The local build (`pnpm --dir web build:app`) checks the build-artifact
 budget before and after each Rust compilation or Tauri bundle. It stops further
-checks above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
+builds above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
 This is a checkpoint between commands, not a filesystem quota: one command can
 exceed the budget before returning.
 

@@ -9,6 +9,7 @@
 //   node tools/ci/cli.mjs release-notes <tag> [<previous-tag>]
 //   node tools/ci/cli.mjs dependabot                    env DEPENDENCIES_JSON
 //   node tools/ci/cli.mjs update-manifest <dir> <tag> [<owner/repo>]
+//   node tools/ci/cli.mjs update-feed <latest.json> <tag>  prints the URLs the feed points at
 //   node tools/ci/cli.mjs bump <version>                writes the three manifests and Cargo.lock
 //
 // Untrusted values (titles, file lists) arrive through files and environment
@@ -18,7 +19,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, dependabotDecision, evaluateGate, lanesFor,
+  bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, checkUpdateFeed, dependabotDecision, evaluateGate, lanesFor,
   previousReleaseTag, releaseNotes, updateManifest,
 } from "./policy.mjs";
 
@@ -96,6 +97,11 @@ const commands = {
     const feed = updateManifest(names, signatures, { repository, tag, date: new Date().toISOString() });
     writeFileSync(join(directory, "latest.json"), `${JSON.stringify(feed, null, 2)}\n`);
     console.log(`Wrote ${join(directory, "latest.json")} for ${Object.keys(feed.platforms).join(", ")}.`);
+  },
+  "update-feed"([file, tag]) {
+    const result = checkUpdateFeed(JSON.parse(readFileSync(file, "utf8")), tag);
+    report(result);
+    for (const url of result.urls) console.log(url);
   },
   bump([version]) {
     const current = Object.fromEntries(Object.entries(MANIFESTS).map(([key, path]) => [key, read(path)]));

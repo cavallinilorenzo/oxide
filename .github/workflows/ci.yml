@@ -231,10 +231,26 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node tools/ci/cli.mjs pr-title
 
+  bundle:
+    name: bundle (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.bundle == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macos, platform: macos-aarch64 }
+          - { label: windows, platform: windows-x64 }
+    # Unsigned release-profile bundles: a debug `cargo test` never runs `tauri build`.
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: ${{ matrix.platform }}
+      release: false
+
   gate:
     name: gate
     if: always()
-    needs: [changes, web, rust-fmt, rust, supply-chain, automation, pr-title]
+    needs: [changes, web, rust-fmt, rust, supply-chain, automation, pr-title, bundle]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

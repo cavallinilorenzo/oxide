@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, commandLine, dependabotDecision, evaluateGate, lanesFor,
+  bumpVersion, checkPrTitle, checkUpdateFeed, checkReleaseVersion, checkTauriAlignment, commandLine, dependabotDecision, evaluateGate, lanesFor,
   localPlan, previousReleaseTag, releaseNotes, updateManifest,
 } from "./policy.mjs";
 
@@ -351,6 +351,38 @@ describe("dependabotDecision", () => {
   test("an empty or unreadable list needs review", () => {
     assert.equal(dependabotDecision([]).decision, "manual");
     assert.equal(dependabotDecision(undefined).decision, "manual");
+  });
+});
+
+describe("checkUpdateFeed", () => {
+  const feed = (overrides = {}) => ({
+    version: "1.2.3",
+    platforms: { "darwin-aarch64": { signature: "sig", url: "https://example.test/a" }, "windows-x86_64": { signature: "sig", url: "https://example.test/b" } },
+    ...overrides,
+  });
+
+  test("a feed for the published version with signed platforms passes and lists the URLs to resolve", () => {
+    const result = checkUpdateFeed(feed(), "v1.2.3");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.urls, ["https://example.test/a", "https://example.test/b"]);
+  });
+
+  test("a feed that still serves another version fails", () => {
+    const result = checkUpdateFeed(feed({ version: "1.2.2" }), "v1.2.3");
+    assert.equal(result.ok, false);
+    assert.match(result.message, /1\.2\.2.*1\.2\.3/);
+  });
+
+  test("an empty signature or a missing URL fails and names the platform", () => {
+    const empty = checkUpdateFeed(feed({ platforms: { "darwin-aarch64": { signature: " ", url: "https://example.test/a" } } }), "v1.2.3");
+    assert.match(empty.message, /signature for darwin-aarch64/);
+    const noUrl = checkUpdateFeed(feed({ platforms: { "windows-x86_64": { signature: "sig" } } }), "v1.2.3");
+    assert.match(noUrl.message, /URL for windows-x86_64/);
+  });
+
+  test("a feed without platforms or that is not an object fails", () => {
+    assert.equal(checkUpdateFeed(feed({ platforms: {} }), "v1.2.3").ok, false);
+    assert.equal(checkUpdateFeed(undefined, "v1.2.3").ok, false);
   });
 });
 

@@ -1,0 +1,73 @@
+name: Verify release
+
+# Runs when a Release Manager publishes the draft. The updater feed is the one
+# thing that, once broken, affects every installed app, so check what users will
+# actually download. A failure opens a needs-triage issue.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify published release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      PRERELEASE: ${{ github.event.release.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Download the assets and check the checksums
+        run: |
+          mkdir assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          cd assets
+          sha256sum --check SHA256SUMS.txt
+
+      - name: Verify the attestations
+        working-directory: assets
+        run: |
+          while read -r _ file; do
+            file="${file#\*}"
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
+          done < SHA256SUMS.txt
+          gh attestation verify SHA256SUMS.txt --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify the update feed
+        if: env.PRERELEASE != 'true'
+        run: |
+          # The stable feed is releases/latest; give GitHub a moment to move it.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL -o feed.json "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json" \
+              && node tools/ci/cli.mjs update-feed feed.json "$TAG" > feed.log 2>&1; then
+              break
+            fi
+            if [ "$attempt" = 6 ]; then cat feed.log 2>/dev/null; exit 1; fi
+            sleep 20
+          done
+          grep '^https://' feed.log | while read -r url; do
+            curl -fsSL -r 0-0 -o /dev/null "$url" || { echo "::error::The update feed points at $url, which does not resolve."; exit 1; }
+          done
+
+      - name: Open an issue
+        if: failure()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --label needs-triage \
+            --title "Release $TAG failed post-publish verification" \
+            --body "Verification of the published release **$TAG** failed: checksums, attestations or the update feed. Installed apps may be affected. See $RUN_URL. Roll forward with a patch release if the assets are bad (published releases are immutable)."

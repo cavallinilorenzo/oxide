@@ -6,6 +6,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Settings_Deserialize as Settings } from "./bindings";
 import { SettingsView } from "./SettingsView";
 import { DEFAULT_SHORTCUTS } from "./shortcuts";
+import { getAppearance } from "./appearance";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const container = document.createElement("div");
@@ -50,7 +51,10 @@ it("offers supported defaults with descriptions, warns about Full access and sav
     act(() => options[options.length - 1].click());
     expect(container.querySelector(`[aria-label="${provider} Full access warning"]`)?.textContent).toContain("modify or delete files and run commands without asking");
   }
+  const terminalSize = container.querySelector<HTMLSelectElement>('select[aria-label="Terminal size"]')!;
+  await act(async () => { terminalSize.value = "18"; terminalSize.dispatchEvent(new Event("change", { bubbles: true })); });
   await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Save")!.click());
+  expect(getAppearance().typography?.terminal.size).toBe(18);
   expect(container.querySelector('[role="status"]')?.textContent).toBe("Settings saved.");
   expect(saved?.providers).toEqual({
     claude: { model: null, effort: null, permissionMode: "full-access" },

@@ -108,6 +108,15 @@ const repository = path.resolve(__dirname, "../..");
       .getByRole("button", { name: "Run command", exact: true })
       .click();
     await input.waitFor({ state: "visible" });
+    const layout = await page.locator(".terminal-command-block").last().evaluate((block) => {
+      const command = block.querySelector("header code");
+      const output = block.querySelector(".terminal-block-output");
+      return { border: getComputedStyle(block).borderTopWidth, commandX: command.getBoundingClientRect().x, outputX: output.getBoundingClientRect().x };
+    });
+    assert.notEqual(layout.border, "0px", "Commands need a visible separator");
+    assert.ok(Math.abs(layout.commandX - layout.outputX) < 2, "Command and output must share a text edge");
+    await page.locator(".terminal-command-block").last().locator(".block-duration").waitFor();
+    await page.screenshot({ path: path.join(output, "native-blocks.png") });
     await input.fill("echo");
     await input.press("ArrowRight");
     assert.equal(await input.inputValue(), "echo WORKBENCH_READY");
@@ -128,7 +137,8 @@ const repository = path.resolve(__dirname, "../..");
       await input.press("Escape");
       await page
         .getByLabel("Code editor font", { exact: true })
-        .fill("Consolas");
+        .selectOption("Consolas");
+      await page.getByRole("button", { name: "Edit JSON", exact: true }).click();
       await page
         .getByLabel("Theme JSON", { exact: true })
         .fill(

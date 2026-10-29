@@ -111,7 +111,8 @@ pub(crate) fn run(cwd: &Path, args: &[&str]) -> Result<String> {
 }
 
 pub(crate) fn run_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
-    let mut command = Command::new("git");
+    let mut command =
+        Command::new(crate::desktop_tools::resolve("git").unwrap_or_else(|| "git".into()));
     let output = oxide_provider::process::hide_console(&mut command)
         .args(args)
         .current_dir(cwd)

@@ -81,6 +81,9 @@ export const commands = {
 	startBlockTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_block_terminal", { projectId, threadId, onOutput })),
 	writeFile: (projectId: number, threadId: number | null, path: string, expected: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("write_file", { projectId, threadId, path, expected, content })),
 	languageTools: () => __TAURI_INVOKE<LanguageTool_Serialize[]>("language_tools"),
+	systemFonts: () => typedError<string[], AppError>(__TAURI_INVOKE("system_fonts")),
+	developerTools: () => typedError<DeveloperTool_Serialize[], AppError>(__TAURI_INVOKE("developer_tools")),
+	installDeveloperTool: (tool: string) => typedError<null, AppError>(__TAURI_INVOKE("install_developer_tool", { tool })),
 	installLanguageSupport: (language: string, onProgress: Channel<string>) => typedError<LanguageTool_Serialize, AppError>(__TAURI_INVOKE("install_language_support", { language, onProgress })),
 	createFile: (projectId: number, threadId: number | null, path: string) => typedError<null, AppError>(__TAURI_INVOKE("create_file", { projectId, threadId, path })),
 	findFiles: (projectId: number, threadId: number | null, query: string) => typedError<string[], AppError>(__TAURI_INVOKE("find_files", { projectId, threadId, query })),
@@ -171,6 +174,9 @@ export const commands = {
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
 	/**  The user confirmed quitting: interrupt every Thread and exit. */
 	confirmQuit: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("confirm_quit", { dontAskAgain })),
+	appUpdateStatus: () => __TAURI_INVOKE<UpdateStatus_Serialize>("app_update_status"),
+	checkAppUpdate: () => typedError<UpdateStatus_Serialize, AppError>(__TAURI_INVOKE("check_app_update")),
+	installAppUpdate: (onProgress: Channel<UpdateStatus_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("install_app_update", { onProgress })),
 };
 
 /* Types */
@@ -336,6 +342,26 @@ export type Detection_Serialize = {
 	version: string | null,
 	authenticated: boolean,
 	warning: string | null,
+};
+
+export type DeveloperTool = DeveloperTool_Serialize | DeveloperTool_Deserialize;
+
+export type DeveloperTool_Deserialize = {
+	id: string,
+	name: string,
+	installed: boolean,
+	path?: string | null,
+	canInstall: boolean,
+	documentation: string,
+};
+
+export type DeveloperTool_Serialize = {
+	id: string,
+	name: string,
+	installed: boolean,
+	path: string | null,
+	canInstall: boolean,
+	documentation: string,
 };
 
 export type Diff = Diff_Serialize | Diff_Deserialize;
@@ -1227,6 +1253,28 @@ export type UnknownEventSnapshot = {
 	id: number,
 	raw: string,
 	createdAt: string,
+};
+
+export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing";
+
+export type UpdateStatus = UpdateStatus_Serialize | UpdateStatus_Deserialize;
+
+export type UpdateStatus_Deserialize = {
+	currentVersion: string,
+	version?: string | null,
+	notes?: string | null,
+	phase: UpdatePhase,
+	downloaded: number | null,
+	total?: number | null,
+};
+
+export type UpdateStatus_Serialize = {
+	currentVersion: string,
+	version: string | null,
+	notes: string | null,
+	phase: UpdatePhase,
+	downloaded: number | null,
+	total: number | null,
 };
 
 export type UsageLimitWindow = UsageLimitWindow_Serialize | UsageLimitWindow_Deserialize;

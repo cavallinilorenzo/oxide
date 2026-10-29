@@ -1312,6 +1312,9 @@ fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
         .unwrap();
     let branch = thread.branch.clone().unwrap();
     // Move the branch into the main checkout, where pull requests are created from.
+    // Dispatch starts the actor asynchronously. Stop it before removing its cwd,
+    // otherwise checkpoint Git processes can still hold the worktree on Windows.
+    f.core.shutdown();
     remove_worktree(&f.work, &thread.worktree_path.unwrap());
     git(&f.work, &["checkout", "-q", &branch]);
     commit_file(&f.work, "b.txt", "b\n", "Add b");
@@ -1350,6 +1353,7 @@ fn closes_is_not_repeated_when_the_body_already_has_it() {
             issue_title: None,
         })
         .unwrap();
+    f.core.shutdown();
     git(
         &f.work,
         &[

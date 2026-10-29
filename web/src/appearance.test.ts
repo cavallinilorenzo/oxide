@@ -84,3 +84,17 @@ it("rejects malformed or unsafe theme values and keeps the previous appearance",
     ),
   ).toThrow(/syntax color/);
 });
+
+it("applies size and weight to each area and preserves legacy appearance settings", () => {
+  const old = { ...getAppearance(), typography: undefined };
+  saveAppearance(old);
+  expect(terminalAppearance()).toMatchObject({ fontSize: 13, fontWeight: 400 });
+  const typography = structuredClone(DEFAULT_APPEARANCE.typography!);
+  typography.terminal = { size: 18, weight: 700 };
+  typography.chat = { size: 16, weight: 500 };
+  saveAppearance({ ...old, typography });
+  expect(terminalAppearance()).toMatchObject({ fontSize: 18, fontWeight: 700 });
+  expect(document.documentElement.style.getPropertyValue("--font-chat-size")).toBe("16px");
+  expect(() => saveAppearance({ ...old, typography: { ...typography, ui: { size: 200, weight: 400 } } })).toThrow(/Font sizes/);
+  expect(terminalAppearance().fontSize).toBe(18);
+});

@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
-import { DownloadIcon, UploadIcon } from "@primer/octicons-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { commands } from "./bindings";
+import { CodeIcon, DownloadIcon, UploadIcon } from "@primer/octicons-react";
 import {
   DEFAULT_APPEARANCE,
   getAppearance,
@@ -9,10 +10,25 @@ import {
 } from "./appearance";
 import { Dropdown } from "./Dropdown";
 
-export function AppearanceSettings() {
+export function AppearanceSettings({ onDraftChange }: { onDraftChange?: (value: Appearance) => void } = {}) {
   const [draft, setDraft] = useState(getAppearance);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [editingJson, setEditingJson] = useState(false);
+  const jsonId = useId();
+  const [fonts, setFonts] = useState<string[]>([]);
+  const [fontError, setFontError] = useState<string | null>(null);
+  const [fontRevision, setFontRevision] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void commands.systemFonts().then((result) => {
+      if (!active) return;
+      if (result.status === "error") throw new Error(result.error.message);
+      setFonts(result.data);
+      setFontError(null);
+    }).catch((error) => { if (active) setFontError(String(error)); });
+    return () => { active = false; };
+  }, [fontRevision]);
   const importer = useRef<HTMLInputElement>(null);
   const variants = useMemo(() => {
     try {
@@ -22,7 +38,9 @@ export function AppearanceSettings() {
     }
   }, [draft.themeJson]);
   const edit = (patch: Partial<Appearance>) => {
-    setDraft((value) => ({ ...value, ...patch }));
+    const next = { ...draft, ...patch };
+    setDraft(next);
+    onDraftChange?.(next);
     setSaved(false);
     setError(null);
   };
@@ -43,10 +61,13 @@ export function AppearanceSettings() {
     >
       <header className="settings-section-header">
         <h2 id="settings-appearance">Appearance</h2>
-        <p>Choose a font for each workspace and define your own JSON themes.</p>
+        <p>Make each area comfortable to read. Preview your choices before applying.</p>
       </header>
       <div className="settings-card">
-        <div className="settings-fields appearance-fonts">
+        <h3>Typography</h3>
+        <p className="settings-note">{fonts.length ? `${fonts.length} installed fonts available.` : fontError ? "Installed fonts are unavailable." : "Loading installed fonts…"} Monospace fonts work best for code and commands.</p>
+        {fontError && <p className="error" role="alert">Could not read installed fonts. <button className="btn sm" onClick={() => setFontRevision((v) => v + 1)}>Retry</button></p>}
+        <div className="appearance-fonts">
           {(
             [
               ["ui", "Interface"],
@@ -54,49 +75,44 @@ export function AppearanceSettings() {
               ["code", "Code editor"],
               ["terminal", "Terminal"],
             ] as const
-          ).map(([key, label]) => (
-            <label className="settings-field" key={key}>
-              {label} font
-              <input
+          ).map(([key, label]) => {
+            const style = draft.typography?.[key] ?? DEFAULT_APPEARANCE.typography![key];
+            const setStyle = (patch: Partial<typeof style>) => edit({ typography: { ...DEFAULT_APPEARANCE.typography!, ...draft.typography, [key]: { ...style, ...patch } } });
+            return <div className="appearance-font-row" key={key}>
+              <strong>{label}</strong>
+              <label className="settings-field">Font family
+              <select
                 aria-label={`${label} font`}
                 value={draft.fonts[key]}
-                list={`appearance-font-${key}`}
                 onChange={(event) =>
                   edit({ fonts: { ...draft.fonts, [key]: event.target.value } })
                 }
-              />
-              <datalist id={`appearance-font-${key}`}>
-                {[
-                  "Segoe UI",
-                  "Inter",
-                  "Arial",
-                  "Cascadia Code",
-                  "Consolas",
-                  "JetBrains Mono",
-                  "Fira Code",
-                  "SFMono-Regular",
-                  "Menlo",
-                  "monospace",
-                  "system-ui",
-                ].map((font) => (
-                  <option key={font} value={font} />
-                ))}
-              </datalist>
+              >
+                {!fonts.includes(draft.fonts[key]) && <option value={draft.fonts[key]}>{draft.fonts[key] === DEFAULT_APPEARANCE.fonts[key] ? "System default" : `Saved: ${draft.fonts[key]}`}</option>}
+                {fonts.map((font) => <option key={font} value={font}>{font}</option>)}
+              </select></label>
+              <label className="settings-field">Weight
+                <select aria-label={`${label} weight`} value={style.weight} onChange={(e) => setStyle({ weight: Number(e.target.value) })}>
+                  {[[400, "Regular"], [500, "Medium"], [600, "Semibold"], [700, "Bold"]].map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                </select>
+              </label>
+              <label className="settings-field">Size
+                <select aria-label={`${label} size`} value={style.size} onChange={(e) => setStyle({ size: Number(e.target.value) })}>
+                  {Array.from({ length: 23 }, (_, i) => i + 10).map((size) => <option key={size} value={size}>{size} px</option>)}
+                </select>
+              </label>
               <span
                 className={`appearance-font-preview ${key}`}
-                style={{ fontFamily: draft.fonts[key] }}
+                style={{ fontFamily: draft.fonts[key], fontSize: style.size, fontWeight: style.weight }}
               >
                 {key === "code" || key === "terminal"
                   ? "const answer = 42;  ~/project"
                   : "The quick brown fox — Oxide"}
               </span>
-            </label>
-          ))}
+            </div>;
+          })}
         </div>
-        <p className="settings-note">
-          Use fonts installed on your system. Comma-separated fallback families
-          are supported. Choose a monospace family for Code and Terminal.
-        </p>
+        <h3>Theme</h3>
         <div className="appearance-theme-controls">
           <label className="settings-field">
             Theme
@@ -165,6 +181,8 @@ export function AppearanceSettings() {
             }}
           />
         </div>
+        <div className="appearance-advanced"><div className="appearance-advanced-header"><div><strong>Custom theme</strong><p className="settings-note">Edit the theme’s color and syntax tokens.</p></div><button type="button" className="btn appearance-json-toggle" aria-expanded={editingJson} aria-controls={jsonId} onClick={() => setEditingJson((value) => !value)}><CodeIcon size={16} />{editingJson ? "Close JSON editor" : "Edit JSON"}</button></div>
+        <div id={jsonId} hidden={!editingJson}>
         <label className="appearance-json-label">
           Theme JSON
           <textarea
@@ -181,18 +199,19 @@ export function AppearanceSettings() {
           and style tokens. See <code>docs/themes.md</code> for the supported
           tokens and examples.
         </p>
+        </div></div>
         {error && (
           <p role="alert" className="error">
             {error}
           </p>
         )}
         <div className="appearance-actions">
-          <button className="btn primary" onClick={() => apply()}>
+          {!onDraftChange && <button className="btn primary" onClick={() => apply()}>
             Apply appearance
-          </button>
+          </button>}
           <button
             className="btn"
-            onClick={() => apply(structuredClone(DEFAULT_APPEARANCE))}
+            onClick={() => onDraftChange ? edit(structuredClone(DEFAULT_APPEARANCE)) : apply(structuredClone(DEFAULT_APPEARANCE))}
           >
             Restore defaults
           </button>

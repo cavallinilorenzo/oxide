@@ -10,6 +10,7 @@ export interface ThemePack {
 }
 export interface Appearance {
   fonts: { ui: string; chat: string; code: string; terminal: string };
+  typography?: Record<"ui" | "chat" | "code" | "terminal", { size: number; weight: number }>;
   themeJson: string;
   themeName: string;
 }
@@ -18,6 +19,7 @@ const SYSTEM =
 const MONO = '"Cascadia Code", "SFMono-Regular", Consolas, Menlo, monospace';
 export const DEFAULT_APPEARANCE: Appearance = {
   fonts: { ui: SYSTEM, chat: SYSTEM, code: MONO, terminal: MONO },
+  typography: { ui: { size: 13, weight: 400 }, chat: { size: 14, weight: 400 }, code: { size: 13, weight: 400 }, terminal: { size: 13, weight: 400 } },
   themeJson: JSON.stringify(
     {
       name: "Oxide",
@@ -165,7 +167,11 @@ function load(): Appearance {
     return structuredClone(DEFAULT_APPEARANCE);
   }
 }
-function validateAppearance(value: Appearance) {
+export function validateAppearance(value: Appearance) {
+  if (value.typography && Object.keys(DEFAULT_APPEARANCE.fonts).some((key) => {
+    const style = value.typography?.[key as keyof Appearance["fonts"]];
+    return !style || !Number.isInteger(style.size) || style.size < 10 || style.size > 32 || ![400, 500, 600, 700].includes(style.weight);
+  })) throw new Error("Font sizes must be 10–32 px and weights must be Regular, Medium, Semibold or Bold.");
   if (
     !value.fonts ||
     Object.keys(DEFAULT_APPEARANCE.fonts).some(
@@ -227,6 +233,14 @@ export function applyAppearance(): void {
   );
   for (const [key, family] of Object.entries(current.fonts))
     root.style.setProperty(`--font-${key}`, family);
+  for (const key of Object.keys(current.fonts) as (keyof Appearance["fonts"])[]) {
+    const style = fontStyle(key);
+    root.style.setProperty(`--font-${key}-size`, `${style.size}px`);
+    root.style.setProperty(`--font-${key}-weight`, String(style.weight));
+  }
+}
+export function fontStyle(key: keyof Appearance["fonts"]) {
+  return current.typography?.[key] ?? DEFAULT_APPEARANCE.typography![key];
 }
 export function saveAppearance(value: Appearance) {
   validateAppearance(value);
@@ -242,6 +256,8 @@ export function terminalAppearance() {
   const light = activeTheme().appearance === "light";
   return {
     fontFamily: current.fonts.terminal,
+    fontSize: fontStyle("terminal").size,
+    fontWeight: fontStyle("terminal").weight,
     theme: {
       background: themeColor(
         "terminal.background",

@@ -316,6 +316,13 @@ impl Gh {
                     .map(|p| std::env::split_paths(&p).collect())
                     .unwrap_or_default();
                 dirs.extend(FALLBACK_DIRS.iter().map(PathBuf::from));
+                for tool in ["git", "gh"] {
+                    if let Some(binary) = crate::desktop_tools::resolve(tool)
+                        && let Some(parent) = binary.parent()
+                    {
+                        dirs.push(parent.to_path_buf());
+                    }
+                }
                 dirs
             }
         };

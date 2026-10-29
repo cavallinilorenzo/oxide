@@ -8,6 +8,7 @@ mod checkpoint;
 mod clock;
 mod continuation;
 mod db;
+pub mod desktop_tools;
 mod detection_cache;
 mod discovery;
 pub mod editor;
@@ -265,6 +266,11 @@ impl Core {
     pub fn quit_confirmation(&self) -> Option<u32> {
         let active = self.activity.active_count();
         (active > 0 && self.settings().settings.confirm_quit).then_some(active)
+    }
+
+    /// Working Threads and pending approvals, independent of quit preferences.
+    pub fn active_thread_count(&self) -> u32 {
+        self.activity.active_count()
     }
 
     /// Turns the quit-confirmation Setting off ("don't ask again").

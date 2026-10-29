@@ -2,6 +2,8 @@
 //! The webview talks only to the TypeScript bindings generated from here.
 
 mod system;
+mod updates;
+use updates::{app_update_status, check_app_update, install_app_update};
 
 use std::sync::Arc;
 
@@ -967,6 +969,51 @@ pub struct LanguageServer {
 #[specta::specta]
 fn language_tools(core: State<'_, Arc<Core>>) -> Vec<LanguageTool> {
     convert(&core.language_tools())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeveloperTool {
+    id: String,
+    name: String,
+    installed: bool,
+    path: Option<String>,
+    can_install: bool,
+    documentation: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn system_fonts() -> Result<Vec<String>, AppError> {
+    tauri::async_runtime::spawn_blocking(oxide_core::desktop_tools::system_fonts)
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })?
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn developer_tools() -> Result<Vec<DeveloperTool>, AppError> {
+    tauri::async_runtime::spawn_blocking(|| convert(&oxide_core::desktop_tools::developer_tools()))
+        .await
+        .map_err(|e| AppError {
+            message: e.to_string(),
+        })
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn install_developer_tool(tool: String) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        oxide_core::desktop_tools::install_developer_tool(&tool)
+    })
+    .await
+    .map_err(|e| AppError {
+        message: e.to_string(),
+    })?
+    .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -2534,6 +2581,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         start_block_terminal,
         write_file,
         language_tools,
+        system_fonts,
+        developer_tools,
+        install_developer_tool,
         install_language_support,
         create_file,
         find_files,
@@ -2587,7 +2637,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         open_issue,
         last_selection,
         remember_selection,
-        confirm_quit
+        confirm_quit,
+        app_update_status,
+        check_app_update,
+        install_app_update
     ])
 }
 
@@ -2610,6 +2663,8 @@ pub fn run() {
     export_bindings();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Arc::new(updates::Updates::default()))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler({

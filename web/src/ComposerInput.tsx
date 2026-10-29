@@ -80,7 +80,9 @@ function renderInto(root: HTMLElement, value: ComposerSegment[]) {
   let endsWithBreak = false;
   for (const segment of value) {
     if (isChip(segment)) {
-      fragment.append(chipHost(segment));
+      // A caret next to a non-editable element isn't drawn; a zero-width text node on each side
+      // gives it somewhere to sit. They are ignored when the editor is read back.
+      fragment.append(document.createTextNode("​"), chipHost(segment), document.createTextNode("​"));
       endsWithBreak = false;
       continue;
     }
@@ -399,12 +401,12 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
     if (node === el) {
       neighbour = el.childNodes[direction < 0 ? offset - 1 : offset] ?? null;
     } else if (node.nodeType === Node.TEXT_NODE) {
-      const length = node.textContent?.length ?? 0;
-      if (direction < 0 && offset === 0) neighbour = node.previousSibling;
-      if (direction > 0 && offset === length) neighbour = node.nextSibling;
+      const text = node.textContent ?? "";
+      if (direction < 0 && text.slice(0, offset).replace(ZERO_WIDTH, "") === "") neighbour = node.previousSibling;
+      if (direction > 0 && text.slice(offset).replace(ZERO_WIDTH, "") === "") neighbour = node.nextSibling;
     }
-    // Skip empty text left behind by earlier edits.
-    while (neighbour?.nodeType === Node.TEXT_NODE && !neighbour.textContent) {
+    // Skip empty text left behind by earlier edits, and the zero-width spacers around chips.
+    while (neighbour?.nodeType === Node.TEXT_NODE && !(neighbour.textContent ?? "").replace(ZERO_WIDTH, "")) {
       neighbour = direction < 0 ? neighbour.previousSibling : neighbour.nextSibling;
     }
     if (!neighbour || !isChipHost(neighbour)) return false;

@@ -406,6 +406,7 @@ fn auto_mode_recovers_from_metal_failure_with_fallback_evidence() {
             enabled: true,
             language: "auto".into(),
             device: Device::Auto,
+            model: ModelId::Small,
         };
 
         // Model file is missing in home, so Metal fails initialization and Auto attempts CPU
@@ -440,6 +441,7 @@ fn explicit_gpu_mode_with_metal_runtime_reports_actionable_error_on_failure() {
             enabled: true,
             language: "auto".into(),
             device: Device::Gpu,
+            model: ModelId::Small,
         };
 
         let err = dictation.stop(home.path(), &settings).unwrap_err();

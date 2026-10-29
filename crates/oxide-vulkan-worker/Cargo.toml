@@ -1,0 +1,17 @@
+[package]
+name = "oxide-vulkan-worker"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+oxide-core = { path = "../oxide-core" }
+whisper-rs = { version = "=0.16.0", features = ["vulkan"] }
+whisper-rs-sys = "=0.15.0"
+ash = "=0.38.0"
+serde_json = "1"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = false

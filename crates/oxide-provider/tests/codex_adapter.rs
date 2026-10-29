@@ -491,10 +491,18 @@ mod native_commands {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/codex/fake_codex.py");
         #[cfg(windows)]
         {
+            let python = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|dir| dir.join("python.exe"))
+                .find(|candidate| candidate.is_file())
+                .expect("Python is installed on the Windows test runner");
             let wrapper = dir.join("fake-codex.cmd");
             std::fs::write(
                 &wrapper,
-                format!("@echo off\r\npython \"{}\" %*\r\n", script.display()),
+                format!(
+                    "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+                    python.display(),
+                    script.display()
+                ),
             )
             .unwrap();
             wrapper

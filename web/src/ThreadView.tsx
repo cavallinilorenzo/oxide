@@ -407,12 +407,14 @@ export function ThreadView({
     attachPaths(Array.isArray(picked) ? picked : [picked], at);
   };
 
-  // Files dropped on the window arrive as native paths; only drops on the composer attach.
-  const dropHandler = useRef<(paths: string[]) => void>(() => {});
-  dropHandler.current = (paths) => {
+  // Files dropped on the window arrive as native paths. A drop anywhere on the visible Thread
+  // attaches them (the reported position can't be trusted to the pixel across platforms); the
+  // caret is only used when the pointer is over the composer.
+  const dropHandler = useRef<(paths: string[], overComposer: boolean) => void>(() => {});
+  dropHandler.current = (paths, overComposer) => {
     if (!visible) return;
     const composer = composerRef.current;
-    attachPaths(paths, composer?.isFocused() ? (composer.caret() ?? undefined) : undefined);
+    attachPaths(paths, overComposer && composer?.isFocused() ? (composer.caret() ?? undefined) : undefined);
   };
   useEffect(() => {
     let cancelled = false;
@@ -420,9 +422,9 @@ export function ThreadView({
     const overComposer = (position: { x: number; y: number }) => {
       const rect = composerFormRef.current?.getBoundingClientRect();
       if (!rect) return false;
-      const x = position.x / window.devicePixelRatio;
-      const y = position.y / window.devicePixelRatio;
-      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      const inside = (x: number, y: number) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      // Physical pixels per the API; also accepted as logical, in case a platform reports so.
+      return inside(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio) || inside(position.x, position.y);
     };
     try {
       void getCurrentWebview()
@@ -431,14 +433,14 @@ export function ThreadView({
           if (drag.type === "leave") setDropActive(false);
           else if (drag.type === "drop") {
             setDropActive(false);
-            if (overComposer(drag.position) && drag.paths.length > 0) dropHandler.current(drag.paths);
-          } else setDropActive(overComposer(drag.position));
+            if (drag.paths.length > 0) dropHandler.current(drag.paths, overComposer(drag.position));
+          } else setDropActive(true);
         })
         .then((stop) => {
           if (cancelled) stop();
           else unlisten = stop;
         })
-        .catch(() => {});
+        .catch((error) => console.error("Drag & drop is unavailable:", error));
     } catch {
       // No webview (tests, a plain browser): drag & drop is simply unavailable.
     }

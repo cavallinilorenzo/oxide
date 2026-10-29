@@ -78,6 +78,8 @@ pub struct BuildManifest {
 
 impl BuildManifest {
     pub fn current() -> Self {
+        // Only the Windows CPU build without Vulkan never pushes a backend.
+        #[allow(unused_mut)]
         let mut included_backends = vec![BackendId::Cpu];
         #[cfg(target_os = "macos")]
         included_backends.push(BackendId::Metal);

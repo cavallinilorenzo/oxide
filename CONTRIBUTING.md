@@ -26,7 +26,7 @@ These are the checks CI runs on every PR. Get them green locally before pushing.
 | `supply-chain` | `node .github/scripts/tauri-alignment.mjs`, `cargo deny --locked check bans licenses sources` ([cargo-deny](https://github.com/EmbarkStudios/cargo-deny)). On PRs, GitHub's dependency review also rejects newly added dependencies with high or critical advisories. |
 | `repo-config` | `actionlint`, `zizmor .`, `node --test .github/scripts/*.test.mjs`, and schema validation with [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) (`uvx check-jsonschema==0.38.2 …`; the exact invocations are in the `repo-config` job of [ci.yml](.github/workflows/ci.yml)) |
 
-PRs into `main` also run the `bundle` job of the [Release workflow](.github/workflows/release.yml), which builds the real app bundle. Run the same build locally with `web/node_modules/.bin/tauri build` from the repo root.
+PRs into `main` also run the `bundle` job of the [Release workflow](.github/workflows/release.yml), which builds the real app bundle. Run a local app build with `pnpm --dir web build:app` from the repo root; it preserves final outputs and cleans its compiler cache automatically.
 
 `cargo deny check advisories` runs daily in the [Advisories workflow](.github/workflows/advisories.yml), not on PRs, so a new advisory against an untouched crate doesn't block unrelated work.
 
@@ -45,11 +45,24 @@ debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
 
 The local check runner (`node tools/checks/run.mjs pr`) checks the build-artifact
 budget before and after each Rust compilation or Tauri bundle. It stops further
-checks above 12 GiB and asks for cleanup; it never deletes files or closes the app.
-`OXIDE_BUILD_BUDGET_GIB` sets a different positive budget, and `CARGO_TARGET_DIR`
-is respected. This is a checkpoint between commands, not a filesystem quota:
-one command can exceed the budget before returning, and direct Cargo invocations
-bypass the runner.
+checks above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
+This is a checkpoint between commands, not a filesystem quota: one command can
+exceed the budget before returning.
+
+Both the check runner and `pnpm --dir web build:app` use a temporary target
+directory for Rust compilation. Extra Tauri build flags can follow `build:app`.
+All checks in one run share it; it is automatically deleted when the run finishes, including
+test failures and budget errors. An explicit `CARGO_TARGET_DIR` is used as the
+parent of this scratch directory, leaving existing outputs intact. The runner
+never stops an app or cleans another build's files. Separate runs rebuild their
+dependencies and can take longer, in exchange for leaving no compiler cache.
+
+Successful Tauri builds retain the final app binary and bundles under
+`target/check-artifacts/run-<id>/` (or the configured Cargo target), and print the
+exact location. If saving an output fails, the scratch directory is retained
+with an error instead of losing the only copy. A forced process kill or power
+loss can also leave scratch files; `cargo clean` removes those leftovers.
+Direct Cargo/Tauri invocations bypass this automatic cleanup.
 
 ### Regenerating the TypeScript bindings
 

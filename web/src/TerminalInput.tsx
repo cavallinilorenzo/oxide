@@ -7,7 +7,6 @@ import {
   type Ref,
 } from "react";
 import {
-  ChevronRightIcon,
   HistoryIcon,
   PlayIcon,
   SearchIcon,
@@ -22,6 +21,7 @@ export interface TerminalInputHandle {
   setCommand: (command: string) => void;
   clear: () => void;
   history: () => void;
+  insert: (text: string) => void;
 }
 interface Props {
   ref: Ref<TerminalInputHandle>;
@@ -102,6 +102,15 @@ export function TerminalInput({
     setCommand: fill,
     clear: () => change(""),
     history: () => openHistory(true),
+    insert: (text) => {
+      const start = textarea.current?.selectionStart ?? input.length;
+      const end = textarea.current?.selectionEnd ?? start;
+      change(input.slice(0, start) + text + input.slice(end));
+      requestAnimationFrame(() => {
+        textarea.current?.focus();
+        textarea.current?.setSelectionRange(start + text.length, start + text.length);
+      });
+    },
   }));
   useEffect(() => {
     if (visible && !disabled) textarea.current?.focus();
@@ -324,7 +333,7 @@ export function TerminalInput({
         {cwd}
       </div>
       <div className="terminal-command-entry">
-        <ChevronRightIcon size={16} />
+        <span className="terminal-prompt-symbol" aria-hidden="true">{ /Windows/i.test(navigator.userAgent) ? "PS>" : "$" }</span>
         <div className="terminal-input-editor">
           {suggestion && selection === input.length && (
             <div className="terminal-ghost" aria-hidden="true">
@@ -342,7 +351,7 @@ export function TerminalInput({
             disabled={disabled}
             spellCheck={false}
             placeholder={
-              sessionId === null ? "Starting shell…" : "Type a command…"
+              sessionId === null ? "Starting shell…" : ""
             }
             onSelect={(event) =>
               setSelection(event.currentTarget.selectionStart)

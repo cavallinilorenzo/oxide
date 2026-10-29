@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AttachmentChip } from "./AttachmentChip";
+import { attachmentPreview } from "./attachmentPreview";
 import {
   insertAt,
   isChip,
@@ -66,6 +67,13 @@ function chipHost(chip: ComposerChip): HTMLElement {
   host.innerHTML = renderToStaticMarkup(
     <AttachmentChip name={chip.name} kind={chip.attachmentKind} sizeBytes={chip.sizeBytes} busy={chip.id === null} removable />,
   );
+  if (chip.id && chip.attachmentKind === "image") {
+    const image = host.querySelector("img");
+    if (image) {
+      image.onerror = () => { image.hidden = true; };
+      void attachmentPreview(chip.id).then((src) => { if (src) image.src = src; });
+    }
+  }
   return host;
 }
 

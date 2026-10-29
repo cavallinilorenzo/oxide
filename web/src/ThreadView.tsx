@@ -1,4 +1,5 @@
 import { Skeleton } from "./Skeleton";
+import { LruCache } from "./lru";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -217,6 +218,30 @@ export function ThreadView({
   /** Where the view was last pinned to the bottom; null before the first pin. */
   const pinnedAtRef = useRef<number | null>(null);
   const requestedPagesRef = useRef(new Set<number>());
+  const savedViews = useRef(new LruCache<number, { transcript: TranscriptState; pages: TranscriptPages; top: number; following: boolean }>(16 * 1024 * 1024,
+    (view) => JSON.stringify([view.transcript, [...view.pages]]).length * 2));
+  const latestView = useRef({ transcript, pages });
+  useLayoutEffect(() => {
+    const views = savedViews.current;
+    const scroller = scrollRef.current;
+    const cached = threadId === null ? undefined : views.get(threadId);
+    setTranscript(cached?.transcript ?? initialTranscriptState(null));
+    setPages(cached?.pages ?? new Map());
+    setSettledThreadId(null);
+    setCommandError(null);
+    setIsEditingTitle(false);
+    setModelPickerOpen(false);
+    followRef.current = cached?.following ?? true;
+    pinnedAtRef.current = null;
+    if (scroller) scroller.scrollTop = cached?.top ?? 0;
+    return () => {
+      const view = latestView.current;
+      if (threadId !== null && view.transcript.thread?.id === threadId) views.set(threadId, {
+        ...view, top: scroller?.scrollTop ?? 0, following: followRef.current,
+      });
+    };
+  }, [threadId]);
+  useLayoutEffect(() => { latestView.current = { transcript, pages }; });
 
   useEffect(() => {
     if (draft !== undefined && draft !== encodeDraft(valueRef.current)) {
@@ -467,7 +492,6 @@ export function ThreadView({
   // Subscribe to the thread when threadId changes
   useEffect(() => {
     let active = true;
-    followRef.current = true;
     pinnedAtRef.current = null;
     requestedPagesRef.current = new Set();
 
@@ -517,13 +541,15 @@ export function ThreadView({
         const initial = early.reduce(applyThreadEvent, initialTranscriptState(res.data));
         snapshotApplied = true;
         setTranscript(initial);
-        setPages(new Map());
+        const cached = savedViews.current.get(threadId);
+        setPages(cached?.transcript.turnOffset === initial.turnOffset ? cached.pages : new Map());
         onStatusChange(threadId, initial.status);
         if (initial.thread?.title) {
           onThreadTitleChange?.(threadId, initial.thread.title);
         }
-      }
-    })().finally(() => { if (active) { setSettledThreadId(threadId); onInitialLoad?.(); } });
+      } else if (active && res.status === "error") setCommandError(res.error.message);
+    })().catch((error: unknown) => { if (active) setCommandError(errorMessage(error)); })
+      .finally(() => { if (active) { setSettledThreadId(threadId); onInitialLoad?.(); } });
 
     return () => {
       active = false;
@@ -561,6 +587,7 @@ export function ThreadView({
   };
   const virtualizer = useVirtualizer({
     count: turnCount,
+    getItemKey: (index) => `${threadId}:${index}`,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 160,
     overscan: 6,
@@ -865,7 +892,7 @@ export function ThreadView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasContent(value) || isBusy(value) || sending || turnIsRunning(transcript.status)) return;
+    if (!hasContent(value) || isBusy(value) || sending || turnIsRunning(transcript.status) || (threadId !== null && settledThreadId !== threadId)) return;
     setCommandError(null);
 
     const typed = typedText(value);
@@ -1251,7 +1278,7 @@ export function ThreadView({
               <SquareFillIcon size={12} />
             </button>
           ) : (
-            <button type="submit" className="send" disabled={!hasContent(value) || isBusy(value) || sending} aria-label="Send" title="Send (↩)">
+            <button type="submit" className="send" disabled={!hasContent(value) || isBusy(value) || sending || (threadId !== null && settledThreadId !== threadId)} aria-label="Send" title="Send (↩)">
               <ArrowUpIcon size={16} />
             </button>
           )}

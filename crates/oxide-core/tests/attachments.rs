@@ -55,6 +55,23 @@ fn message(error: oxide_core::Error) -> String {
 }
 
 #[test]
+fn previews_resolve_only_stored_images_by_id() {
+    let (_dir, core, _) = core_with_thread();
+    let image = core
+        .attach_bytes(Some("screen.png"), b"\x89PNG\r\n\x1a\n")
+        .unwrap();
+    assert_eq!(
+        core.attachment_preview(&image.id).unwrap().as_deref(),
+        Some("data:image/png;base64,iVBORw0KGgo=")
+    );
+    let text = core.attach_bytes(Some("notes.txt"), b"hello").unwrap();
+    assert_eq!(core.attachment_preview(&text.id).unwrap(), None);
+    assert!(core.attachment_preview("../../outside").is_err());
+    core.discard_attachment(&image.id);
+    assert!(core.attachment_preview(&image.id).is_err());
+}
+
+#[test]
 fn a_file_is_stored_under_its_original_name_and_same_names_stay_apart() {
     let (dir, core, _) = core_with_thread();
     let source = dir.path().join("screenshot.png");

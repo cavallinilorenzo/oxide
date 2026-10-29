@@ -152,5 +152,6 @@ it("draws Attachments as chips between the words of the prompt, the same for eve
   expect(chips.map((c) => c.getAttribute("aria-label"))).toEqual(["Attachment, a.png, image", "Attachment, spec.pdf, PDF"]);
   expect(chips[0].getAttribute("title")).toBe("a.png · 2.0 KB");
   expect(Array.from(bubble.childNodes).map((n) => n.textContent)).toEqual(["Compare ", "a.png", " with ", "spec.pdf"]);
-  expect(bubble.querySelector("img, button")).toBeNull();
+  expect(bubble.querySelector("img.attachment-thumbnail")).not.toBeNull();
+  expect(bubble.querySelector("button")).toBeNull();
 });

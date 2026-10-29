@@ -2,16 +2,17 @@ import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
-import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon, UnfoldIcon } from "@primer/octicons-react";
+import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon } from "@primer/octicons-react";
 import { commands, type Diff, type DiffFile } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, type PanelScope } from "./diffScope";
-import { hunkContext, numberHunk, splitPath, startsCollapsed } from "./diffView";
+import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 
 interface DiffPanelProps {
   projectId: number;
+  onOpenFile: (file: DiffFile) => void;
   /** The selected Thread: the Turn scope diffs its latest Turn. */
   threadId: number | null;
   /** Board Threads work in their own worktree, so nothing else edits it. */
@@ -51,7 +52,7 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -112,7 +113,6 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
   // The file shown on the right: the user's pick, a hint from the chat, else the first.
   // A pick holds until the chat points at another file.
   const [pick, setPick] = useState<{ path: string; focus: string | null } | null>(null);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const picked = pick && pick.focus === focus ? files.find((f) => f.path === pick.path) : undefined;
   const current = picked ?? focused ?? files[0] ?? null;
   const setPicked = (path: string) => setPick({ path, focus });
@@ -172,7 +172,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
         </div>
       )}
       {files.length > 0 && (
-        <div className="diff-split">
+        <div className="diff-split diff-navigation">
           <ul className="diff-files" role="listbox" aria-label="Changed files">
             {files.map((file) => {
               const { dir, name } = splitPath(file.path);
@@ -182,7 +182,9 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
                   role="option"
                   aria-selected={file.path === current?.path}
                   className="diff-file-row"
-                  onClick={() => setPicked(file.path)}
+                  tabIndex={0}
+                  onClick={() => { setPicked(file.path); onOpenFile(file); }}
+                  onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setPicked(file.path); onOpenFile(file); } }}
                   title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
                 >
                   {canCommit && (
@@ -208,16 +210,6 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
               );
             })}
           </ul>
-          <div className="diff-body">
-            {current && (
-              <FileDiff
-                key={current.path}
-                file={current}
-                collapsed={startsCollapsed(current) && !expanded.has(current.path)}
-                onExpand={() => setExpanded((prev) => new Set(prev).add(current.path))}
-              />
-            )}
-          </div>
         </div>
       )}
       {canCommit ? (
@@ -271,60 +263,5 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
         )
       )}
     </section>
-  );
-}
-
-function FileDiff({ file, collapsed, onExpand }: { file: DiffFile; collapsed: boolean; onExpand: () => void }) {
-  return (
-    <div className="diff-file" aria-label={`Changes to ${file.path}`}>
-      <div className="diff-file-title">
-        <span className={`diff-status diff-status-${file.status}`} title={file.status}>
-          {STATUS_LABEL[file.status]}
-        </span>
-        <span className="diff-path mono">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</span>
-        <span className="diff-counts">
-          <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
-        </span>
-      </div>
-      {file.binary && <div className="surface-empty">Binary or too large to show.</div>}
-      {!file.binary && collapsed && (
-        <div className="surface-empty">
-          <span>
-            {file.added + file.removed} changed lines, collapsed{/\.lock$|lock\.(json|yaml)$/.test(file.path) ? " (lockfile)" : ""}.
-          </span>
-          <button className="btn sm" onClick={onExpand}>
-            <UnfoldIcon size={14} /> Show diff
-          </button>
-        </div>
-      )}
-      {!file.binary &&
-        !collapsed &&
-        file.hunks.map((hunk, i) => (
-          <table key={i} className="diff-hunk">
-            <colgroup>
-              <col className="diff-ln-col" />
-              <col className="diff-ln-col" />
-              <col />
-            </colgroup>
-            <tbody>
-              <tr className="diff-hunk-header">
-                <td colSpan={3}>
-                  <span className="mono">{hunk.header.match(/^@@[^@]*@@/)?.[0] ?? hunk.header}</span> {hunkContext(hunk.header)}
-                </td>
-              </tr>
-              {numberHunk(hunk).map((line, j) => (
-                <tr key={j} className={`diff-line diff-${line.kind}`}>
-                  <td className="diff-ln">{line.old ?? ""}</td>
-                  <td className="diff-ln">{line.new ?? ""}</td>
-                  <td className="diff-code">
-                    <span className="diff-sign">{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}</span>
-                    {line.text}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ))}
-    </div>
   );
 }

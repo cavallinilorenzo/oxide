@@ -46,6 +46,7 @@ function setup(opts: {
       case "send_prompt": return opts.sendPrompt ? opts.sendPrompt() : null;
       case "attach_paths": return opts.attachPaths ? opts.attachPaths((args as { paths: string[] }).paths) : [];
       case "attach_bytes": return stored("image.png");
+      case "attachment_preview": return "data:image/png;base64,iVBORw0KGgo=";
       case "plugin:dialog|open": return opts.dialog ?? null;
       default: return null;
     }
@@ -96,6 +97,7 @@ it("pastes a screenshot as a chip at the caret and sends it in place", async () 
 
   expect(calls.some((c) => c.command === "attach_bytes")).toBe(true);
   expect(chips()).toHaveLength(1);
+  expect(chips()[0].querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
   expect(chips()[0].getAttribute("aria-label")).toBe("Attachment, image.png, image");
   expect(editor().textContent).toContain("Ciao prova ");
   expect(editor().textContent).toContain(" 123!!!");
@@ -299,5 +301,5 @@ it("shows the Attachments of the Turn being sent as chips, in place, before Core
   const bubble = container.querySelector(".transcript-outgoing .user-bubble")!;
   expect(chips(bubble).map((c) => c.getAttribute("aria-label"))).toEqual(["Attachment, c.png, image"]);
   expect(Array.from(bubble.childNodes).map((n) => n.textContent)).toEqual(["and ", "c.png", " more"]);
-  expect(bubble.querySelector("img")).toBeNull();
+  expect(bubble.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
 });

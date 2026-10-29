@@ -60,6 +60,7 @@ export const commands = {
 	 *  be accepted comes back with its reason; the others are stored regardless.
 	 */
 	attachPaths: (paths: string[]) => typedError<AttachOutcome_Serialize[], AppError>(__TAURI_INVOKE("attach_paths", { paths })),
+	attachmentPreview: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("attachment_preview", { id })),
 	/**  Forgets an Attachment the user took out of a prompt before sending it. */
 	discardAttachment: (id: string) => __TAURI_INVOKE<void>("discard_attachment", { id }),
 	/**  The Slash command catalog the `/` menu offers for a Provider in a Project. */

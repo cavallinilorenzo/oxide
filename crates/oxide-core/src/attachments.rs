@@ -55,6 +55,37 @@ pub struct AttachmentStore {
 }
 
 impl AttachmentStore {
+    /// Preview only a stored image, addressed by id; never accept a frontend file path.
+    pub fn preview(&self, id: &str) -> Result<Option<String>> {
+        use base64::Engine;
+        let attachment = self.describe(id)?;
+        if attachment.kind != AttachmentKind::Image {
+            return Ok(None);
+        }
+        let mut bytes = Vec::new();
+        let unreadable = |error: std::io::Error| AttachmentError::Unreadable {
+            name: attachment.name.clone(),
+            reason: reason_of(&error),
+        };
+        fs::File::open(&attachment.path)
+            .map_err(unreadable)?
+            .take(MAX_ATTACHMENT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(unreadable)?;
+        if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+            return Err(AttachmentError::TooLarge {
+                name: attachment.name,
+                size: human_size(bytes.len() as u64),
+            }
+            .into());
+        }
+        Ok(Some(format!(
+            "data:{};base64,{}",
+            attachment.media_type,
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )))
+    }
+
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
     }

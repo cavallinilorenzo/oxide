@@ -29,8 +29,11 @@ import { getAppearance } from "./appearance";
 import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
+import { patchDocument, type CodeOpenRequest } from "./codeOpen";
 
 interface Document {
+  readOnly?: boolean;
+  sourcePath?: string;
   path: string;
   model: monaco.editor.ITextModel;
   saved: string;
@@ -44,6 +47,7 @@ interface Problem {
   marker: monaco.editor.IMarker;
 }
 interface Props {
+  openRequest?: CodeOpenRequest | null;
   projectId: number;
   threadId: number | null;
   rootPath: string;
@@ -61,6 +65,7 @@ export function CodeWorkbench({
   visible,
   onChanged,
   onRunCommand,
+  openRequest,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -81,6 +86,8 @@ export function CodeWorkbench({
   const [problems, setProblems] = useState<Problem[]>([]);
   const [showProblems, setShowProblems] = useState(false);
   const dirtyState = useRef(false);
+  const requestedFile = useRef(openRequest);
+  useLayoutEffect(() => { requestedFile.current = openRequest; }, [openRequest]);
 
   const publish = useCallback(() => {
     const docs = [...records.current.values()];
@@ -93,7 +100,7 @@ export function CodeWorkbench({
     try {
       localStorage.setItem(
         `oxide:code-tabs:${contextKey}`,
-        JSON.stringify(docs.map((d) => d.path)),
+        JSON.stringify(docs.filter((d) => !d.readOnly).map((d) => d.path)),
       );
     } catch {
       /* Editing works without UI persistence. */
@@ -108,6 +115,7 @@ export function CodeWorkbench({
     );
     if (previous) previous.view = instance.saveViewState();
     instance.setModel(doc.model);
+    instance.updateOptions({ readOnly: doc.readOnly ?? false });
     if (doc.view) instance.restoreViewState(doc.view);
     if (selection) {
       instance.setSelection(selection);
@@ -174,7 +182,7 @@ export function CodeWorkbench({
 
   const saveDocument = useCallback(
     async (doc: Document): Promise<boolean> => {
-      if (!doc.dirty) return true;
+      if (doc.readOnly || !doc.dirty) return true;
       if (doc.saving) return false;
       const content = doc.model.getValue();
       doc.saving = true;
@@ -319,7 +327,11 @@ export function CodeWorkbench({
       if (Array.isArray(restored))
         void (async () => {
           for (const path of restored.slice(0, 12))
-            if (typeof path === "string") await actions.current.openFile(path);
+            if (typeof path === "string") await actions.current.openFile(path, undefined, false);
+          if (!requestedFile.current && !instance.getModel()) {
+            const last = [...ownedRecords.values()].at(-1);
+            if (last) select(last);
+          }
         })();
     } catch {
       /* Ignore an old or unavailable tab list. */
@@ -342,7 +354,28 @@ export function CodeWorkbench({
       ownedRecords.clear();
       void commands.setEditorDirty(contextKey, false).catch(() => {});
     };
-  }, [projectId, threadId, rootPath, contextKey, publish]);
+  }, [projectId, threadId, rootPath, contextKey, publish, select]);
+
+  useEffect(() => {
+    if (!openRequest || !editor.current) return;
+    if (!openRequest.diff) {
+      void actions.current.openFile(openRequest.path, undefined, false).then(() => {
+        const doc = records.current.get(openRequest.path);
+        if (doc && requestedFile.current?.id === openRequest.id) select(doc);
+      });
+      return;
+    }
+    const path = `Changes: ${openRequest.path}`;
+    const content = patchDocument(openRequest.diff);
+    let doc = records.current.get(path);
+    if (doc) { doc.model.setValue(content); doc.saved = content; }
+    else {
+      doc = { path, model: monaco.editor.createModel(content, "diff"), saved: content, dirty: false, view: null, saving: false, readOnly: true, sourcePath: openRequest.diff.status === "deleted" ? undefined : openRequest.path };
+      records.current.set(path, doc);
+    }
+    publish();
+    select(doc);
+  }, [openRequest, publish, select]);
 
   useEffect(() => {
     if (!visible) return;
@@ -411,7 +444,7 @@ export function CodeWorkbench({
 
   async function reload() {
     const doc = records.current.get(active ?? "");
-    if (!doc) return;
+    if (!doc || doc.readOnly) return;
     const result = await commands.readFile(projectId, threadId, doc.path);
     if (result.status === "error") {
       setError(result.error.message);
@@ -523,7 +556,7 @@ export function CodeWorkbench({
                 onClick={() => select(records.current.get(doc.path)!)}
               >
                 <FileIcon size={13} />
-                <span>{doc.path.split("/").pop()}</span>
+                <span>{doc.readOnly ? "Changes: " : ""}{doc.path.split("/").pop()}</span>
                 {doc.dirty && (
                   <span className="editor-dirty" aria-label="Unsaved changes" />
                 )}
@@ -552,9 +585,12 @@ export function CodeWorkbench({
         {current && (
           <div className="editor-breadcrumb">
             <span title={current.path}>{current.path}</span>
+            {current.readOnly && <span className="chip">Git patch · read-only</span>}
             <span className="grow" />
+            {current.sourcePath && <button className="btn sm" onClick={() => void openFile(current.sourcePath!)}>Open working file</button>}
             <button
               className="btn sm"
+              disabled={current.readOnly}
               onClick={() =>
                 void editor.current
                   ?.getAction("editor.action.formatDocument")

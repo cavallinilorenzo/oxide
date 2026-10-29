@@ -36,7 +36,7 @@ One user prompt in a Thread and everything the Provider does in response, until 
 _Avoid_: Run, exchange, round
 
 **Attachment**:
-A file the user puts inside a prompt, at a position in its text, stored under the Oxide home until its Thread is deleted. Shown the same way for every Provider (extension icon and file name, no previews); how it reaches the agent is up to the Provider adapter: natively where the Provider takes that kind (Claude Code: images, PDFs, text; Codex: images), otherwise as a file path at the same spot in the prompt, always preceded by a `[Attachment: name]` marker. A prompt is a sequence of segments, text or Attachment, and the Transcript records them that way. Up to 10 per prompt, 25 MB each.
+A file the user puts inside a prompt, at a position in its text, stored under the Oxide home until its Thread is deleted. Shown the same way for every Provider (image preview or extension icon, and file name); how it reaches the agent is up to the Provider adapter: natively where the Provider takes that kind (Claude Code: images, PDFs, text; Codex: images), otherwise as a file path at the same spot in the prompt, always preceded by a `[Attachment: name]` marker. A prompt is a sequence of segments, text or Attachment, and the Transcript records them that way. Up to 10 per prompt, 25 MB each.
 _Avoid_: Upload, file input, image (when meaning any Attachment)
 
 **Item**:

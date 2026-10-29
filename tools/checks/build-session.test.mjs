@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { withBuildSession } from "../../tools/checks/build-session.mjs";
+import { withBuildSession } from "./build-session.mjs";
 
 const silent = () => {};
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), "oxide-build-session-"));
+  // Canonical, like the session's own paths: macOS temp folders sit behind a symlink.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "oxide-build-session-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "target"));
   writeFileSync(join(root, "target", "running-app.exe"), "keep existing output");

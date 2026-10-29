@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertBuildSpace, buildBytes, compilesRust } from "../../tools/checks/build-space.mjs";
+import { assertBuildSpace, buildBytes, compilesRust } from "./build-space.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "oxide-build-space-"));
@@ -48,6 +48,6 @@ test("directory links do not include unrelated artifacts or create traversal loo
 });
 
 test("the budget applies to compilers, not formatting or frontend-only checks", () => {
-  for (const command of [["cargo", "test", "--workspace"], ["cargo", "clippy"], ["web/node_modules/.bin/tauri", "build"]]) assert.equal(compilesRust(command), true);
+  for (const command of [["cargo", "test", "--workspace"], ["cargo", "nextest", "run"], ["cargo", "clippy"], ["web/node_modules/.bin/tauri", "build"], ["web/node_modules/.bin/tauri.cmd", "build"]]) assert.equal(compilesRust(command), true);
   for (const command of [["cargo", "fmt"], ["cargo", "deny"], ["pnpm", "--dir", "web", "test"]]) assert.equal(compilesRust(command), false);
 });

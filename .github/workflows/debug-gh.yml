@@ -1,0 +1,24 @@
+name: debug-gh
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  debug:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          where python || true
+          python --version || true
+          where python3 || true
+          mkdir -p $RUNNER_TEMP/gh && cp crates/oxide-core/fixtures/gh/* $RUNNER_TEMP/gh/
+          echo '{"auth":"ok","default_branch":"main","prs":{}}' > $RUNNER_TEMP/gh/state.json
+          cd $RUNNER_TEMP/gh
+          for i in 1 2 3; do cmd //c "gh.cmd auth status"; echo "exit=$?"; done
+          cmd //c "gh.cmd pr ready 5"; echo "exit=$?"

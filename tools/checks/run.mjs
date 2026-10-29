@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { plan, validateCatalogue } from "./catalogue.mjs";
+import { assertBuildSpace, compilesRust } from "./build-space.mjs";
+import { withBuildSession } from "./build-session.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const catalogue =JSON.parse(readFileSync(new URL("./catalogue.json", import.meta.url), "utf8"));
@@ -40,13 +42,32 @@ if (result.run.length === 0) {
 }
 
 const failures = [];
-for (const { check } of result.run) {
-  console.log(`\n> ${check.id}: ${check.command.join(" ")}`);
-  // Windows resolves pnpm/tauri shims only through the shell.
-  const run = spawnSync(check.command[0], check.command.slice(1), { stdio: "inherit", cwd: repoRoot, shell: process.platform === "win32" });
-  if (run.status !== 0) failures.push(check);
+let completed = 0;
+const runChecks = (session) => {
+  for (const { check } of result.run) {
+    if (compilesRust(check.command)) assertBuildSpace(repoRoot);
+    console.log(`\n> ${check.id}: ${check.command.join(" ")}`);
+    // All checks share one scratch target, including Tauri and generated bindings.
+    const run = spawnSync(check.command[0], check.command.slice(1), {
+      stdio: "inherit", cwd: repoRoot, shell: process.platform === "win32", env: session?.env ?? process.env,
+    });
+    completed++;
+    if (run.status !== 0) failures.push(check);
+    else session?.preserve(check.command);
+    if (compilesRust(check.command)) assertBuildSpace(repoRoot);
+  }
+};
+let lifecycleFailed = false;
+try {
+  if (result.run.some(({ check }) => compilesRust(check.command))) {
+    assertBuildSpace(repoRoot);
+    withBuildSession(repoRoot, process.env, runChecks);
+  } else runChecks();
+} catch (error) {
+  lifecycleFailed = true;
+  console.error(error.message);
 }
 
-console.log(`\n${result.run.length - failures.length} passed, ${failures.length} failed, ${result.skipped.length} skipped`);
+console.log(`\n${completed - failures.length} passed, ${failures.length} failed, ${result.skipped.length} skipped, ${result.run.length - completed} not run`);
 for (const check of failures) console.log(`FAILED ${check.id} — rerun with: node tools/checks/run.mjs ${check.id}`);
-process.exit(failures.length > 0 ? 1 : 0);
+process.exitCode = lifecycleFailed || failures.length > 0 ? 1 : 0;

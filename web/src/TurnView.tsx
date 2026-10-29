@@ -153,7 +153,7 @@ export const TurnView = memo(function TurnView({
             segment.kind === "text" ? (
               <span key={i}>{segment.text}</span>
             ) : (
-              <AttachmentChip key={i} name={segment.name} kind={segment.attachmentKind} sizeBytes={segment.sizeBytes} />
+              <AttachmentChip key={i} id={segment.id} name={segment.name} kind={segment.attachmentKind} sizeBytes={segment.sizeBytes} />
             ),
           )}
         </div>

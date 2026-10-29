@@ -20,16 +20,21 @@ export function editorAppearance(): editor.IStandaloneThemeData {
   return {
     base: theme.appearance === "light" ? "vs" : "vs-dark",
     inherit: true,
-    rules: Object.entries(syntax ?? {}).map(([token, rule]) => ({
-      token,
-      ...(isColor(rule.color) ? { foreground: foreground(rule.color) } : {}),
-      fontStyle: [
-        rule.font_style === "italic" ? "italic" : "",
-        (rule.font_weight ?? 400) >= 600 ? "bold" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    })),
+    rules: [
+      { token: "diff.added", foreground: foreground(color("version_control.added", "--green", "#4cc38a")) },
+      { token: "diff.removed", foreground: foreground(color("version_control.deleted", "--red", "#f06a6a")) },
+      { token: "diff.header", foreground: foreground(color("text.accent", "--acc2", "#58a6ff")) },
+      ...Object.entries(syntax ?? {}).map(([token, rule]) => ({
+        token,
+        ...(isColor(rule.color) ? { foreground: foreground(rule.color) } : {}),
+        fontStyle: [
+          rule.font_style === "italic" ? "italic" : "",
+          (rule.font_weight ?? 400) >= 600 ? "bold" : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      })),
+    ],
     colors: {
       "editor.background": color("editor.background", "--bg", "#0f1115"),
       "editor.foreground": color("editor.foreground", "--fg", "#d7dbe4"),

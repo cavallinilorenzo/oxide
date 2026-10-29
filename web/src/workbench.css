@@ -731,11 +731,11 @@
 .terminal-block-scroll {
   display: flex;
   flex-direction: column;
+  flex: 0 1 auto;
   padding-bottom: 8px;
 }
 .terminal-block-scroll::before {
-  content: "";
-  flex: 1 0 0;
+  content: none;
 }
 .terminal-command-block {
   flex: none;
@@ -752,6 +752,7 @@
   padding: 0;
 }
 .terminal-workbench[data-fullscreen="true"] .terminal-block-scroll {
+  flex: 1;
   padding: 0;
   overflow: hidden;
 }
@@ -799,7 +800,7 @@
 .terminal-command-composer {
   position: relative;
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: 0;
   border-radius: 0;
   background: transparent;
   margin: 0 20px 8px;
@@ -815,6 +816,17 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.terminal-prompt-symbol { padding: 4px 0; font: 13px/20px var(--mono); color: var(--acc2); }
+.terminal-command-block { border: 0; margin-top: 8px; }
+.terminal-command-block > header { align-items: center; }
+.terminal-command-block > header > .icon-btn,
+.terminal-command-block > header > .block-exit:not(.error) { opacity: 0; }
+.terminal-command-block:hover > header > .icon-btn,
+.terminal-command-block:focus-within > header > .icon-btn,
+.terminal-command-block:hover > header > .block-exit,
+.terminal-command-block.running > header > .block-exit { opacity: 1; }
+.terminal-command-hint { opacity: 0; }
+.terminal-command-composer:focus-within .terminal-command-hint { opacity: 1; }
 .terminal-command-entry {
   padding-top: 4px;
 }

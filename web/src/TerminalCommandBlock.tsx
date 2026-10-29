@@ -23,6 +23,7 @@ export interface TerminalBlock {
   truncated: boolean;
 }
 interface Props {
+  onPasteReady?: (paste: ((text: string) => void) | null) => void;
   block: TerminalBlock;
   active: boolean;
   visible: boolean;
@@ -35,7 +36,7 @@ interface Props {
 
 /** The PTY has a stable viewport. Output can change its clipping, never its live geometry. */
 export function TerminalCommandBlock(props: Props) {
-  const { block, active, visible, onScreen } = props;
+  const { block, active, visible, onScreen, onPasteReady } = props;
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const callbacks = useRef(props);
@@ -56,7 +57,7 @@ export function TerminalCommandBlock(props: Props) {
     const term = new Terminal({
       fontSize: 13,
       ...terminalAppearance(),
-      cursorBlink: false,
+      cursorBlink: true,
       cursorInactiveStyle: "none",
       scrollback: 5000,
       convertEol: false,
@@ -162,6 +163,12 @@ export function TerminalCommandBlock(props: Props) {
       terminal.current = null;
     };
   }, []);
+  useEffect(() => {
+    if (!active || !onPasteReady) return;
+    const insert = (text: string) => { terminal.current?.paste(text); terminal.current?.focus(); };
+    onPasteReady(insert);
+    return () => onPasteReady(null);
+  }, [active, onPasteReady]);
   useEffect(() => {
     const term = terminal.current;
     if (!term) return;

@@ -6,6 +6,7 @@ import { warmModelCatalogs } from "./modelCatalogCache";
 import "./styles.css";
 import "./workbench.css";
 import "./appearance.css";
+import "./interactions.css";
 import { applyAppearance } from "./appearance";
 applyAppearance();
 

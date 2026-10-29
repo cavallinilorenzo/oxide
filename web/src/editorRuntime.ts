@@ -6,6 +6,14 @@ import HtmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker.js?worker";
 import { editorAppearance } from "./editorAppearance";
 
+monaco.languages.register({ id: "diff" });
+monaco.languages.setMonarchTokensProvider("diff", { tokenizer: { root: [
+  [/^@@.*$/, "diff.header"],
+  [/^(---|\+\+\+).*$/, "diff.header"],
+  [/^\+.*$/, "diff.added"],
+  [/^-.*$/, "diff.removed"],
+] } });
+
 self.MonacoEnvironment = {
   getWorker(_id, label) {
     if (label === "json") return new JsonWorker();

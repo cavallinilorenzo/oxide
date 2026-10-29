@@ -8,6 +8,7 @@ import { TerminalIcon, XIcon } from "@primer/octicons-react";
 import { commands } from "./bindings";
 import { takeFrameBatch } from "./terminalOutput";
 import { terminalAppearance } from "./appearance";
+import { useTerminalTransfer } from "./useTerminalTransfer";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
@@ -24,6 +25,11 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const transfer = useTerminalTransfer(hostRef, visible && ready, (text) => {
+    terminalRef.current?.paste(text);
+    terminalRef.current?.focus();
+  });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -87,6 +93,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
           return;
         }
         terminal.clear();
+        setReady(true);
         resize();
         terminal.focus();
       } catch (cause) {
@@ -129,6 +136,8 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
           <TerminalIcon size={14} /> Terminal
         </span>
         {error && <span className="terminal-error">{error}</span>}
+        {transfer.error && <span className="terminal-error" role="alert">{transfer.error}</span>}
+        {transfer.busy && <span role="status">Saving pasted file…</span>}
         <span className="grow" />
         {onClose && (
           <button className="icon-btn sm" title={`Close Terminal (${formatAccelerator(shortcuts.terminal)})`} aria-label="Close Terminal" onClick={onClose}>
@@ -137,6 +146,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
         )}
       </div>
       <div className="terminal-host" ref={hostRef} />
+      {transfer.dragging && <div className="terminal-drop-hint">Drop files to insert their paths</div>}
     </section>
   );
 }

@@ -1,0 +1,38 @@
+name: Set up Rust
+description: Pinned toolchain, Rust cache and native build requirements. The single place to change them.
+
+inputs:
+  save-cache:
+    description: Whether this run may save the Rust cache ("true" or "false").
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned toolchain
+      shell: bash
+      # rust-toolchain.toml names the channel and components.
+      run: rustup toolchain install --no-self-update
+
+    - name: Restore the Rust cache
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        save-if: ${{ inputs.save-cache }}
+
+    - name: Make libclang available (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      # whisper.cpp's bindgen needs libclang; the image ships LLVM.
+      run: |
+        if [ ! -f "C:/Program Files/LLVM/bin/libclang.dll" ]; then
+          echo "::error::libclang.dll not found in C:/Program Files/LLVM/bin on this runner image."
+          exit 1
+        fi
+        echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
+
+    - name: Assert CMake and Python are present
+      shell: bash
+      # The runner images ship both; whisper.cpp's build needs them.
+      run: |
+        cmake --version
+        if command -v python3 >/dev/null 2>&1; then python3 --version; else python --version; fi

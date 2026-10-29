@@ -1,0 +1,251 @@
+name: CI
+
+# Every decision (which lanes run, whether the gate passes, whether the PR title
+# is valid) lives in tools/ci/policy.mjs; the jobs only gather inputs and run
+# the commands that `node tools/check.mjs` runs locally. `gate` is the one
+# required status check.
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded PR runs are wasted work; a push to main or release/** must finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      web: ${{ steps.lanes.outputs.web }}
+      rust: ${{ steps.lanes.outputs.rust }}
+      bundle: ${{ steps.lanes.outputs.bundle }}
+      supplyChain: ${{ steps.lanes.outputs.supplyChain }}
+      automation: ${{ steps.lanes.outputs.automation }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: List the changed files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        # A rename lists both the new and the previous path.
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/changed-files.txt"
+      - name: Decide the lanes
+        id: lanes
+        env:
+          CHANGED_FILES_TOTAL: ${{ github.event.pull_request.changed_files }}
+        # Fails open: without a list, every lane runs.
+        run: node tools/ci/cli.mjs lanes "${RUNNER_TEMP}/changed-files.txt"
+
+  web:
+    name: web
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web typecheck
+      - run: pnpm --dir web lint
+      - run: pnpm --dir web test
+      - run: pnpm --dir web build
+
+  rust-fmt:
+    name: rust-fmt
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - run: cargo fmt --all --check
+
+  rust:
+    name: rust (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macos, runner: macos-15, timeout: 45 }
+          - { label: windows, runner: windows-2025, timeout: 60 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No Node and no frontend build: debug builds don't embed web/dist.
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-nextest@0.9.150
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo nextest run --locked --workspace --profile ci
+      - name: Bindings are committed
+        # The Rust tests regenerate web/src/bindings.ts; a diff means it was not committed.
+        run: |
+          git diff --exit-code web/src/bindings.ts || {
+            echo "::error file=web/src/bindings.ts::web/src/bindings.ts is stale. Regenerate it with 'cargo test -p oxide-app --test bindings_and_capabilities' and commit it."
+            exit 1
+          }
+      - name: Flaky tests
+        if: always()
+        run: |
+          junit=target/nextest/ci/junit.xml
+          [ -f "$junit" ] || exit 0
+          flaky=$(awk '/<testcase /{match($0,/ name="[^"]*"/); name=substr($0,RSTART+7,RLENGTH-8)} /<flakyFailure/{print "- `" name "`"}' "$junit" | sort -u)
+          if [ -n "$flaky" ]; then
+            { echo "### Flaky tests on ${{ matrix.label }} (passed on retry)"; echo; echo "$flaky"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-${{ matrix.label }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  supply-chain:
+    name: supply-chain
+    needs: changes
+    if: needs.changes.outputs.supplyChain == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: node tools/ci/cli.mjs tauri-alignment
+      - name: Dependency review
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          allow-licenses: >-
+            MIT, MIT-0, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD,
+            Unicode-3.0, Unicode-DFS-2016, Zlib, MPL-2.0, CC0-1.0, Unlicense, BSL-1.0, BlueOak-1.0.0,
+            CC-BY-4.0, Python-2.0, CDLA-Permissive-2.0
+
+  automation:
+    name: automation
+    needs: changes
+    if: needs.changes.outputs.automation == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: zizmor@1.31.1
+      - name: Install actionlint 1.7.12
+        # Pinned release, verified against a checksum committed here.
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${RUNNER_TEMP}/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "${RUNNER_TEMP}/actionlint.tar.gz" -C "${RUNNER_TEMP}" actionlint
+      - name: actionlint
+        run: '"${RUNNER_TEMP}/actionlint"'
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --format github .github
+      - name: Schemas
+        run: |
+          python3 -m pip install --user check-jsonschema==0.39.0
+          check-jsonschema --builtin-schema vendor.github-issue-forms .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
+          check-jsonschema --builtin-schema vendor.github-issue-config .github/ISSUE_TEMPLATE/config.yml
+          if [ -f .github/dependabot.yml ]; then check-jsonschema --builtin-schema vendor.dependabot .github/dependabot.yml; fi
+      - run: node --test "tools/**/*.test.mjs"
+
+  pr-title:
+    name: pr-title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Check the title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node tools/ci/cli.mjs pr-title
+
+  gate:
+    name: gate
+    if: always()
+    needs: [changes, web, rust-fmt, rust, supply-chain, automation, pr-title]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Evaluate the gate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node tools/ci/cli.mjs gate

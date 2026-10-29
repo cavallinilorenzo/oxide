@@ -1,0 +1,59 @@
+name: Advisories
+
+# Daily RustSec scan of the whole Rust dependency tree. Not a PR gate: a new
+# advisory against a crate nobody touched would block unrelated PRs. A failure
+# opens, or comments on, one `needs-triage` tracking issue.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny@0.20.2
+      - id: scan
+        name: cargo deny check advisories
+        run: |
+          set +e
+          cargo deny --locked check advisories 2>&1 | tee "${RUNNER_TEMP}/advisories.txt"
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Open or update the tracking issue
+        if: steps.scan.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Security advisories found in Rust dependencies"
+          {
+            echo "The daily \`cargo deny check advisories\` scan failed: ${RUN_URL}"
+            echo
+            echo '```'
+            tail -c 50000 "${RUNNER_TEMP}/advisories.txt"
+            echo '```'
+          } > "${RUNNER_TEMP}/body.md"
+          existing=$(gh issue list --state open --label needs-triage --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP}/body.md"
+          else
+            gh issue create --title "$title" --label needs-triage --body-file "${RUNNER_TEMP}/body.md"
+          fi
+      - name: Fail the run
+        if: steps.scan.outputs.status != '0'
+        run: exit 1

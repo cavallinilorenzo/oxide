@@ -166,6 +166,13 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
       - run: node tools/ci/cli.mjs tauri-alignment
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny@0.20.2
+      # Advisories are not checked here: the daily Advisories workflow does.
+      - run: cargo deny --locked check bans licenses sources
       - name: Dependency review
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

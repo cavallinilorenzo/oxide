@@ -240,46 +240,66 @@ fn cpu_mode_never_requests_offload() {
 
 #[test]
 fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
-    let runtime = oxide_core::dictation::MetalRuntime;
-    let missing_request = TranscriptionRequest {
-        model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
-        language: None,
-        samples: vec![0.0; 16000],
-        sample_rate: 16000,
-        threads: 4,
-    };
-    let err = runtime.transcribe(&missing_request).unwrap_err();
-    match err {
-        BackendError::InitializationFailed(msg) => {
-            assert!(
-                msg.contains("Model file not found") || msg.contains("not found"),
-                "Expected file not found message, got: {msg}"
-            );
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let runtime = oxide_core::dictation::MetalRuntime;
+        let missing_request = TranscriptionRequest {
+            model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err = runtime.transcribe(&missing_request).unwrap_err();
+        match err {
+            BackendError::InitializationFailed(msg) => {
+                assert!(
+                    msg.contains("Model file not found") || msg.contains("not found"),
+                    "Expected file not found message, got: {msg}"
+                );
+            }
+            other => panic!("Expected InitializationFailed, got: {other:?}"),
         }
-        other => panic!("Expected InitializationFailed, got: {other:?}"),
+
+        // Corrupt / invalid model file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let corrupt_path = temp_dir.path().join("corrupt.bin");
+        std::fs::write(&corrupt_path, b"not a valid ggml model file").unwrap();
+
+        let corrupt_request = TranscriptionRequest {
+            model_path: corrupt_path,
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err2 = runtime.transcribe(&corrupt_request).unwrap_err();
+        match err2 {
+            BackendError::InitializationFailed(msg) => {
+                assert!(
+                    msg.contains("Metal initialization failed"),
+                    "Expected Metal initialization failure, got: {msg}"
+                );
+            }
+            other => panic!("Expected InitializationFailed, got: {other:?}"),
+        }
     }
 
-    // Corrupt / invalid model file
-    let temp_dir = tempfile::tempdir().unwrap();
-    let corrupt_path = temp_dir.path().join("corrupt.bin");
-    std::fs::write(&corrupt_path, b"not a valid ggml model file").unwrap();
-
-    let corrupt_request = TranscriptionRequest {
-        model_path: corrupt_path,
-        language: None,
-        samples: vec![0.0; 16000],
-        sample_rate: 16000,
-        threads: 4,
-    };
-    let err2 = runtime.transcribe(&corrupt_request).unwrap_err();
-    match err2 {
-        BackendError::InitializationFailed(msg) => {
-            assert!(
-                msg.contains("Metal initialization failed"),
-                "Expected Metal initialization failure, got: {msg}"
-            );
-        }
-        other => panic!("Expected InitializationFailed, got: {other:?}"),
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let runtime = oxide_core::dictation::MetalRuntime;
+        let dummy_request = TranscriptionRequest {
+            model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err = runtime.transcribe(&dummy_request).unwrap_err();
+        assert_eq!(
+            err,
+            BackendError::Unavailable(CapabilityState::NoCompatibleDevice)
+        );
     }
 }
 

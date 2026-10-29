@@ -81,9 +81,10 @@ conservative provisional working-set estimates on CPU/CUDA/Vulkan/Metal:
 | Large v3 Turbo | 6 GiB |
 
 Every estimate has `measured: false`. These are not measured VRAM requirements or
-claims of GPU support. Native loading refreshes available RAM against the model's
-estimate; Auto's CPU retry uses the selected model's CPU estimate. Shared memory,
-safety reserves, device budgets and recommendations are the #231 policy slice.
+claims of GPU support. Native loading and Auto's CPU retry refresh resources and
+apply model-specific estimates with RAM reserves and GPU budget headroom. Shared
+memory accounting, advice confidence and examples are documented in
+[resource policy v1](dictation-resources.md).
 
 Windows x64 CPU smoke validation on 2026-10-29 verified Tiny/Base/Small downloads
 against their catalogue hashes and transcribed the bundled 11-second JFK sample

@@ -2,6 +2,7 @@
 pub mod cuda;
 pub mod metal;
 pub mod models;
+pub mod resources;
 pub mod runtime;
 pub mod types;
 pub mod vulkan;
@@ -73,15 +74,38 @@ pub struct Status {
     pub last_execution: Option<ExecutionDetails>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_pool: Option<MemoryPool>,
+    pub resource_advice: resources::ResourceAdvice,
 }
 
 pub fn status(home: &Path) -> Status {
-    let mut system = sysinfo::System::new();
-    system.refresh_memory();
-    let available = system.available_memory() as f64 / 1_073_741_824.0;
-    let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    let probes = probe_backends();
+    let resource_advice = resources::inspect(home, resources::Preference::Balanced);
+    let available =
+        resource_advice.resources.available_ram_bytes.unwrap_or(0) as f64 / 1_073_741_824.0;
+    let threads = resource_advice.resources.cpu.usable_cores;
+    let probes: Vec<_> = resource_advice
+        .backends
+        .iter()
+        .map(|b| b.probe.clone())
+        .collect();
     let memory_pool = probes.iter().find_map(|p| p.memory_pool.clone());
+    let report = &resource_advice.recommendation;
+    let recommendation = if let Some(index) = report.selected {
+        let choice = &report.decisions[index];
+        format!(
+            "{}: {} · {}. {}",
+            choice.status, choice.model, choice.backend, choice.reason
+        )
+    } else {
+        let unknown = report
+            .decisions
+            .iter()
+            .any(|d| d.status == resources::AdviceStatus::InsufficientData);
+        if unknown {
+            "Insufficient data. Refresh resources and check available RAM, GPU budget and model disk space before enabling dictation.".into()
+        } else {
+            "Not recommended with current resources. Free memory or disk space, or keep dictation disabled.".into()
+        }
+    };
 
     Status {
         installed: models::ModelManager::default()
@@ -90,21 +114,12 @@ pub fn status(home: &Path) -> Status {
         gpu_compiled: gpu_compiled(),
         available_memory_gb: available,
         cpu_threads: threads,
-        recommendation: recommendation(available, threads).into(),
+        recommendation,
         manifest: BuildManifest::current(),
         probes,
         last_execution: None,
         memory_pool,
-    }
-}
-
-pub fn recommendation(available: f64, threads: usize) -> &'static str {
-    if available < 2.0 {
-        "Not recommended now: less than 2 GB of RAM is available. Free memory before enabling Whisper small."
-    } else if threads < 4 {
-        "Usable, but CPU transcription may be slow. Keep recordings short or use a supported GPU."
-    } else {
-        "Recommended for short dictation on CPU. Whisper small uses roughly 1 GB of memory; speed depends on your processor. GPU acceleration may reduce the wait."
+        resource_advice,
     }
 }
 
@@ -176,6 +191,7 @@ pub struct Dictation {
     last_execution: Mutex<Option<ExecutionDetails>>,
     runtime: Arc<dyn WhisperBackendRuntime>,
     memory_checker: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
+    resource_provider: Option<Arc<dyn Fn() -> resources::ResourceSnapshot + Send + Sync>>,
 }
 
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
@@ -224,6 +240,7 @@ impl Default for Dictation {
             last_execution: Mutex::new(None),
             runtime: default_runtime(),
             memory_checker: None,
+            resource_provider: None,
         }
     }
 }
@@ -244,6 +261,7 @@ impl Dictation {
             last_execution: Mutex::new(None),
             runtime,
             memory_checker: None,
+            resource_provider: None,
         }
     }
 
@@ -261,11 +279,21 @@ impl Dictation {
             last_execution: Mutex::new(None),
             runtime,
             memory_checker: Some(memory_checker),
+            resource_provider: None,
         }
     }
 
     pub fn with_models(mut self, models: Arc<models::ModelManager>) -> Self {
         self.models = models;
+        self
+    }
+
+    /// OS resource boundary for deterministic pressure/recovery tests and host integration.
+    pub fn with_resources(
+        mut self,
+        provider: Arc<dyn Fn() -> resources::ResourceSnapshot + Send + Sync>,
+    ) -> Self {
+        self.resource_provider = Some(provider);
         self
     }
 
@@ -484,7 +512,7 @@ impl Dictation {
         };
 
         // Execution logic based on mode:
-        // - Auto: attempts preferred backend; on failure retries CPU once if memory permits (>= 2GB available RAM)
+        // - Auto: attempts preferred backend; retries CPU once only after a fresh policy check.
         // - Gpu: explicit GPU request. If it fails or runtime is CPU-only, report failure and offer CPU; NEVER silently substitute CPU for GPU.
         // - Cpu: executes directly on CPU, never requests offload.
         match snapshot.device {
@@ -528,24 +556,25 @@ impl Dictation {
                             if request.cancelled.load(Ordering::SeqCst) {
                                 return Err(err("Dictation cancelled. Recording discarded."));
                             }
-                            // Check memory budget before retrying on CPU
-                            let available_gb = match &self.memory_checker {
-                                Some(checker) => checker(),
-                                None => {
-                                    let mut system = sysinfo::System::new();
-                                    system.refresh_memory();
-                                    system.available_memory() as f64 / 1_073_741_824.0
-                                }
-                            };
-                            let required_gb = models::catalogue()
-                                .entry(snapshot.model)
-                                .and_then(|entry| entry.estimated_peak(BackendId::Cpu))
-                                .expect("catalogue CPU memory estimate")
-                                as f64
-                                / 1_073_741_824.0;
-                            if available_gb < required_gb {
+                            let mut resources = self.resource_provider.as_ref().map_or_else(
+                                || resources::capture(&home.join("models")),
+                                |provider| provider(),
+                            );
+                            if let Some(checker) = &self.memory_checker {
+                                let available = checker();
+                                resources.available_ram_bytes = (available.is_finite()
+                                    && available >= 0.0)
+                                    .then_some((available * 1_073_741_824.0) as u64);
+                            }
+                            if let Err(refusal) = resources::assess_load(
+                                &resources,
+                                &CpuRuntime.probe(),
+                                snapshot.model,
+                                resources::now_secs(),
+                            ) {
                                 return Err(err(format!(
-                                    "Auto execution failed on primary backend ({gpu_err}) and CPU retry was refused due to low memory ({available_gb:.1} GB available, {required_gb:.1} GB required)."
+                                    "Auto execution failed on primary backend ({gpu_err}) and CPU retry was refused due to low memory or unavailable resource data. {}",
+                                    refusal.reason
                                 )));
                             }
 
@@ -685,13 +714,6 @@ pub fn resample(samples: &[f32], rate: u32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn resource_advice_covers_low_memory_and_slow_cpu() {
-        assert!(recommendation(1.0, 8).starts_with("Not recommended"));
-        assert!(recommendation(4.0, 2).contains("slow"));
-        assert!(recommendation(4.0, 8).starts_with("Recommended"));
-    }
 
     #[test]
     fn resampling_preserves_duration_and_dc() {

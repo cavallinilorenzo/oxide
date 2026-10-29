@@ -194,6 +194,12 @@ export const commands = {
 /* Types */
 export type ActivityCategory = "explore" | "edit" | "run" | "delegate" | "other";
 
+export type AdviceConfidence = "low" | "medium" | "high";
+
+export type AdvicePreference = "balanced" | "quality";
+
+export type AdviceStatus = "recommended" | "usableSlower" | "notRecommended" | "insufficientData";
+
 export type AppError = {
 	message: string,
 };
@@ -261,6 +267,22 @@ export type Attachment = {
 };
 
 export type AttachmentKind = "image" | "pdf" | "text" | "other";
+
+export type BackendCandidate = BackendCandidate_Serialize | BackendCandidate_Deserialize;
+
+export type BackendCandidate_Deserialize = {
+	probe: BackendProbe_Deserialize,
+	adapterId?: string | null,
+	driverVersion?: string | null,
+	runtimeVersion: string,
+};
+
+export type BackendCandidate_Serialize = {
+	probe: BackendProbe_Serialize,
+	adapterId: string | null,
+	driverVersion: string | null,
+	runtimeVersion: string,
+};
 
 export type BackendId = "cpu" | "cuda" | "vulkan" | "metal";
 
@@ -358,6 +380,22 @@ export type ContinuedThread_Serialize = {
 	recap: string,
 };
 
+export type CpuResources = CpuResources_Serialize | CpuResources_Deserialize;
+
+export type CpuResources_Deserialize = {
+	architecture: string,
+	model: string,
+	usableCores: number,
+	instructionCompatible?: boolean | null,
+};
+
+export type CpuResources_Serialize = {
+	architecture: string,
+	model: string,
+	usableCores: number,
+	instructionCompatible: boolean | null,
+};
+
 export type DebugSequencedThreadEvent = DebugSequencedThreadEvent_Serialize | DebugSequencedThreadEvent_Deserialize;
 
 export type DebugSequencedThreadEvent_Deserialize = {
@@ -444,6 +482,20 @@ export type DictationModelStatus = {
 	state: DictationModelState,
 };
 
+export type DictationResourceAdvice = DictationResourceAdvice_Serialize | DictationResourceAdvice_Deserialize;
+
+export type DictationResourceAdvice_Deserialize = {
+	resources: ResourceSnapshot_Deserialize,
+	backends: BackendCandidate_Deserialize[],
+	recommendation: ResourceRecommendation_Deserialize,
+};
+
+export type DictationResourceAdvice_Serialize = {
+	resources: ResourceSnapshot_Serialize,
+	backends: BackendCandidate_Serialize[],
+	recommendation: ResourceRecommendation_Serialize,
+};
+
 export type DictationSettings = DictationSettings_Serialize | DictationSettings_Deserialize;
 
 export type DictationSettings_Deserialize = {
@@ -472,6 +524,7 @@ export type DictationStatus_Deserialize = {
 	probes: BackendProbe_Deserialize[],
 	lastExecution?: ExecutionDetails_Deserialize | null,
 	memoryPool?: MemoryPool_Deserialize | null,
+	resourceAdvice?: DictationResourceAdvice_Deserialize | null,
 };
 
 export type DictationStatus_Serialize = {
@@ -484,6 +537,7 @@ export type DictationStatus_Serialize = {
 	probes: BackendProbe_Serialize[],
 	lastExecution: ExecutionDetails_Serialize | null,
 	memoryPool?: MemoryPool_Serialize,
+	resourceAdvice?: DictationResourceAdvice_Serialize,
 };
 
 export type Diff = Diff_Serialize | Diff_Deserialize;
@@ -1072,6 +1126,74 @@ export type PullRequestState_Serialize = {
 	branch: string | null,
 	defaultBranch: string | null,
 	pullRequest: PullRequest | null,
+};
+
+export type ResourceDecision = ResourceDecision_Serialize | ResourceDecision_Deserialize;
+
+export type ResourceDecision_Deserialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapter?: string | null,
+	adapterId?: string | null,
+	status: AdviceStatus,
+	confidence: AdviceConfidence,
+	provisional: boolean,
+	safeToLoad: boolean,
+	reason: string,
+	medianRtfMilli?: number | null,
+	coldLoadMs?: number | null,
+};
+
+export type ResourceDecision_Serialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapter: string | null,
+	adapterId: string | null,
+	status: AdviceStatus,
+	confidence: AdviceConfidence,
+	provisional: boolean,
+	safeToLoad: boolean,
+	reason: string,
+	medianRtfMilli: number | null,
+	coldLoadMs: number | null,
+};
+
+export type ResourceRecommendation = ResourceRecommendation_Serialize | ResourceRecommendation_Deserialize;
+
+export type ResourceRecommendation_Deserialize = {
+	policyVersion: number,
+	catalogueVersion: number,
+	preference: AdvicePreference,
+	decisions: ResourceDecision_Deserialize[],
+	selected?: number | null,
+};
+
+export type ResourceRecommendation_Serialize = {
+	policyVersion: number,
+	catalogueVersion: number,
+	preference: AdvicePreference,
+	decisions: ResourceDecision_Serialize[],
+	selected: number | null,
+};
+
+export type ResourceSnapshot = ResourceSnapshot_Serialize | ResourceSnapshot_Deserialize;
+
+export type ResourceSnapshot_Deserialize = {
+	capturedAtSecs: number | null,
+	cpu: CpuResources_Deserialize,
+	totalRamBytes?: number | null,
+	availableRamBytes?: number | null,
+	baselineBytes?: number | null,
+	freeDiskBytes?: number | null,
+};
+
+export type ResourceSnapshot_Serialize = {
+	capturedAtSecs: number | null,
+	cpu: CpuResources_Serialize,
+	totalRamBytes: number | null,
+	availableRamBytes: number | null,
+	baselineBytes: number | null,
+	freeDiskBytes: number | null,
 };
 
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";

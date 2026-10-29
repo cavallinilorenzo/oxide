@@ -1,6 +1,7 @@
 //! The App shell: a thin Tauri layer that exposes [`oxide_core::Core`] to the webview.
 //! The webview talks only to the TypeScript bindings generated from here.
 
+mod dictation_advice;
 mod system;
 mod updates;
 use updates::{app_update_status, check_app_update, install_app_update};
@@ -439,6 +440,8 @@ pub struct DictationStatus {
     last_execution: Option<ExecutionDetails>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_pool: Option<MemoryPool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_advice: Option<dictation_advice::DictationResourceAdvice>,
 }
 
 #[tauri::command]

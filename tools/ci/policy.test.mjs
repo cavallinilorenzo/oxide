@@ -446,14 +446,12 @@ describe("localPlan", () => {
 
   // The one parity test: green locally must mean the same commands as CI.
   const workflowDir = fileURLToPath(new URL("../../.github/workflows/", import.meta.url));
-  const workflows = existsSync(workflowDir)
-    ? readdirSync(workflowDir).filter((name) => /\.ya?ml$/.test(name)).map((name) => readFileSync(join(workflowDir, name), "utf8"))
-    : [];
-  test("every local command appears verbatim in a CI workflow", {
-    skip: workflows.length === 0 && "no CI workflow yet: the CI workflow lands in CI/CD slice 2 (#237)",
-  }, () => {
+  const workflows = readdirSync(workflowDir).filter((name) => /\.ya?ml$/.test(name)).map((name) => readFileSync(join(workflowDir, name), "utf8"));
+  test("every local command appears verbatim in a CI workflow", () => {
     for (const platform of ["darwin", "win32", "linux"]) {
-      for (const line of lines(localPlan(platform))) {
+      // The bundle jobs call the shared build workflow, which lands in CI/CD slice 3 (#238).
+      const checks = localPlan(platform).run.filter(({ id }) => !id.startsWith("bundle-") || existsSync(join(workflowDir, "build.yml")));
+      for (const line of lines({ run: checks })) {
         assert.ok(workflows.some((workflow) => workflow.includes(line)), `${line} is not in .github/workflows/`);
       }
     }

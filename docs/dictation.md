@@ -76,6 +76,8 @@ object path in the normal checkout. `vulkaninfoSDK.exe --summary` from that
 SDK detected an AMD Radeon RX 5600 XT, vendor/device `1002:731f`, Vulkan
 1.4.315, AMD driver 26.10.1 (Windows driver 32.0.21045.16010). This is evidence
 that the loader can enumerate this card, not that Whisper can offload to it.
+The clean Vulkan application build completed using `CARGO_TARGET_DIR=C:\oxide-build`
+and the committed Cargo lockfile (`whisper-rs 0.16.0`, `whisper-rs-sys 0.15.0`).
 The exact remaining hardware validation gap is a completed model load and
 inference with native offload evidence on this card; NVIDIA validation is
 also outstanding. Reproduce adapter diagnostics with:

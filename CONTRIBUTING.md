@@ -30,6 +30,19 @@ PRs into `main` also run the `bundle` job of the [Release workflow](.github/work
 
 `cargo deny check advisories` runs daily in the [Advisories workflow](.github/workflows/advisories.yml), not on PRs, so a new advisory against an untouched crate doesn't block unrelated work.
 
+### Local build disk usage
+
+Development builds and tests use line-table debug information and disable
+incremental compilation to keep `target/` manageable. Backtraces retain file and
+line information; inspecting local variables in a native debugger requires full
+debug information. Dependency builds remain cached, while rebuilding a changed
+workspace crate can take longer. Release settings are unchanged.
+
+Use `cargo clean` to remove accumulated build artifacts. Close a locally built
+Oxide first if Windows reports that its release executable is in use. For a
+debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
+`CARGO_INCREMENTAL=1` opts back into incremental compilation.
+
 ### Regenerating the TypeScript bindings
 
 `web/src/bindings.ts` is generated from the Rust command signatures by [tauri-specta](https://github.com/specta-rs/tauri-specta). After changing a Tauri command or a type it exposes, regenerate and commit the file:

@@ -7,3 +7,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
+
+# Tauri integration tests link large binaries. Keep backtraces useful without
+# full debug symbols or an unbounded set of incremental compilation artifacts.
+# The test profile inherits these development settings; release is unaffected.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false

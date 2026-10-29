@@ -420,7 +420,7 @@ impl Dictation {
                             *self.last_execution.lock().unwrap() = Some(outcome.execution);
                             Ok(outcome.text)
                         }
-                        Err(BackendError::Cancelled) => return Err(err("Transcription cancelled")),
+                        Err(BackendError::Cancelled) => Err(err("Transcription cancelled")),
                         Err(gpu_err) => {
                             // Check memory budget before retrying on CPU
                             let available_gb = match &self.memory_checker {

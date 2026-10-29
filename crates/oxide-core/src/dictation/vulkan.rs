@@ -92,13 +92,13 @@ pub fn worker_path() -> PathBuf {
 /// Keep 20% of the current reported device budget free; unknown stays unknown.
 pub fn check_memory(device: &VulkanAdapter) -> Result<(), BackendError> {
     let required = 2 * 1024 * 1024 * 1024;
-    if let Some(available) = device.memory.as_ref().and_then(|m| m.available_bytes) {
-        if available.saturating_mul(4) / 5 < required {
-            return Err(BackendError::InsufficientMemory {
-                required_bytes: required,
-                available_bytes: Some(available),
-            });
-        }
+    if let Some(available) = device.memory.as_ref().and_then(|m| m.available_bytes)
+        && available.saturating_mul(4) / 5 < required
+    {
+        return Err(BackendError::InsufficientMemory {
+            required_bytes: required,
+            available_bytes: Some(available),
+        });
     }
     Ok(())
 }

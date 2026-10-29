@@ -521,6 +521,7 @@ mod native_commands {
 
     fn fake_provider(dir: &std::path::Path) -> CodexProvider {
         let command = fake_cli(dir);
+        #[allow(unused_mut)]
         let mut provider = CodexProvider::with_command(command.to_str().unwrap());
         #[cfg(windows)]
         {

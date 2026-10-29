@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    Dictation(String),
     #[error("database error: {0}")]
     Db(#[from] rusqlite::Error),
     #[error("I/O error at {path}: {source}")]

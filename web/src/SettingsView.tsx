@@ -1,4 +1,5 @@
-﻿import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
+import { DictationSettings } from "./DictationSettings";
+import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
 import { useEffect, useRef, useState } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GithubSetup } from "./GithubSetup";
@@ -178,6 +179,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         editVersion.current++;
         setSaveStatus((status) => status === "saving" ? status : "idle");
       }} />
+      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu" }} onChange={(dictation) => set({ dictation })} />
       <section className="settings-section" aria-labelledby="settings-general">
         <header className="settings-section-header">
           <h2 id="settings-general">General</h2>

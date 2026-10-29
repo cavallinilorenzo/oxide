@@ -12,6 +12,7 @@ type KeyPress = {
 
 /** Every rebindable action; the names are the keys of `settings.shortcuts`. */
 export type ShortcutAction =
+  | "dictation"
   | "newThread"
   | "openProject"
   | "modelPicker"
@@ -32,6 +33,7 @@ export type Shortcuts = Record<ShortcutAction, string>;
 
 /** Mirrors the defaults of the Core's Settings, for the moment before Settings have loaded. */
 export const DEFAULT_SHORTCUTS: Shortcuts = {
+  dictation: "Mod+Shift+R",
   newThread: "Mod+N",
   openProject: "Mod+Shift+N",
   modelPicker: "Mod+Shift+M",
@@ -50,6 +52,7 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
 
 /** The actions in the order Settings lists them, with their labels. */
 export const SHORTCUT_ACTIONS: { action: ShortcutAction; label: string; group: string }[] = [
+  { action: "dictation", label: "Start / stop dictation", group: "Input" },
   { action: "newThread", label: "New Thread", group: "Threads" },
   { action: "previousThread", label: "Previous Thread", group: "Threads" },
   { action: "nextThread", label: "Next Thread", group: "Threads" },

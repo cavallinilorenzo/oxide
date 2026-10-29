@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 
 export const SETTINGS_SECTIONS = [
-  ["appearance", "Appearance"], ["general", "General"], ["providers", "Providers"],
+  ["appearance", "Appearance"], ["dictation", "Dictation"], ["general", "General"], ["providers", "Providers"],
   ["github", "GitHub tools"], ["shortcuts", "Keyboard shortcuts"], ["updates", "Updates"],
 ] as const;
 

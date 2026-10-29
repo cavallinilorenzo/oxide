@@ -1,3 +1,4 @@
+import { dictationLine, useDictationTarget } from "./dictation";
 import { formatAccelerator } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { useEffect, useRef, useState } from "react";
@@ -30,6 +31,8 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
     terminalRef.current?.paste(text);
     terminalRef.current?.focus();
   });
+
+  useDictationTarget(hostRef, (text) => terminalRef.current?.paste(dictationLine(text)), visible && ready);
 
   useEffect(() => {
     const host = hostRef.current;

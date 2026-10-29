@@ -6,6 +6,11 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
+	dictationStatus: () => typedError<DictationStatus, AppError>(__TAURI_INVOKE("dictation_status")),
+	dictationInstall: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_install")),
+	dictationStart: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_start")),
+	dictationStop: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_stop")),
+	dictationCancel: () => __TAURI_INVOKE<void>("dictation_cancel"),
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	/**
 	 *  Scans the scan roots for new repositories, then lists all Projects.
@@ -362,6 +367,22 @@ export type DeveloperTool_Serialize = {
 	path: string | null,
 	canInstall: boolean,
 	documentation: string,
+};
+
+export type DictationDevice = "cpu" | "gpu";
+
+export type DictationSettings = {
+	enabled: boolean,
+	language: string,
+	device: DictationDevice,
+};
+
+export type DictationStatus = {
+	installed: boolean,
+	gpuCompiled: boolean,
+	availableMemoryGb: number | null,
+	cpuThreads: number,
+	recommendation: string,
 };
 
 export type Diff = Diff_Serialize | Diff_Deserialize;
@@ -957,6 +978,7 @@ export type SettingsState_Serialize = {
 };
 
 export type Settings_Deserialize = {
+	dictation: DictationSettings,
 	defaultProvider: Provider,
 	providers: Providers_Deserialize,
 	confirmQuit: boolean,
@@ -966,6 +988,7 @@ export type Settings_Deserialize = {
 };
 
 export type Settings_Serialize = {
+	dictation: DictationSettings,
 	defaultProvider: Provider,
 	providers: Providers_Serialize,
 	confirmQuit: boolean,
@@ -975,6 +998,7 @@ export type Settings_Serialize = {
 };
 
 export type Shortcuts = {
+	dictation: string,
 	newThread: string,
 	openProject: string,
 	modelPicker: string,

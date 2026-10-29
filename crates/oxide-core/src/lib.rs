@@ -10,6 +10,7 @@ mod continuation;
 mod db;
 pub mod desktop_tools;
 mod detection_cache;
+pub mod dictation;
 mod discovery;
 pub mod editor;
 mod error;

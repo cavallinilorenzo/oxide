@@ -14,7 +14,7 @@ function BlockView({ block }: { block: Block }) {
     case "message":
       return (
         <div className={block.final ? "agent-message final" : "agent-message"}>
-          <ItemContent content={block.item.content} />
+          <ItemContent content={block.item.content} markdown />
         </div>
       );
     case "command":

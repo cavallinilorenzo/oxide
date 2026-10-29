@@ -44,10 +44,10 @@ pub fn query_metal_device() -> Result<MetalDeviceInfo, String> {
         let msg_send_void: MsgSendVoid = std::mem::transmute(objc_msgSend as *const ());
 
         // 1. Query name: [device name] -> NSString -> UTF8String
-        let name_sel = sel_registerName(b"name\0".as_ptr() as *const c_char);
+        let name_sel = sel_registerName(c"name".as_ptr());
         let ns_name = msg_send_ptr(device, name_sel);
         let name = if !ns_name.is_null() {
-            let utf8_sel = sel_registerName(b"UTF8String\0".as_ptr() as *const c_char);
+            let utf8_sel = sel_registerName(c"UTF8String".as_ptr());
             let cstr = msg_send_str(ns_name, utf8_sel);
             if !cstr.is_null() {
                 CStr::from_ptr(cstr).to_string_lossy().to_string()
@@ -59,19 +59,18 @@ pub fn query_metal_device() -> Result<MetalDeviceInfo, String> {
         };
 
         // 2. Query hasUnifiedMemory: [device hasUnifiedMemory] -> BOOL
-        let has_unified_sel = sel_registerName(b"hasUnifiedMemory\0".as_ptr() as *const c_char);
+        let has_unified_sel = sel_registerName(c"hasUnifiedMemory".as_ptr());
         let unified_memory = msg_send_bool(device, has_unified_sel) != 0;
 
         // 3. Query recommendedMaxWorkingSetSize: [device recommendedMaxWorkingSetSize] -> uint64_t
-        let max_working_set_sel =
-            sel_registerName(b"recommendedMaxWorkingSetSize\0".as_ptr() as *const c_char);
+        let max_working_set_sel = sel_registerName(c"recommendedMaxWorkingSetSize".as_ptr());
         let max_working_set_bytes = {
             let val = msg_send_u64(device, max_working_set_sel);
             if val > 0 { Some(val) } else { None }
         };
 
         // Release the retained device object
-        let release_sel = sel_registerName(b"release\0".as_ptr() as *const c_char);
+        let release_sel = sel_registerName(c"release".as_ptr());
         msg_send_void(device, release_sel);
 
         if !unified_memory {

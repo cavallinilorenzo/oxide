@@ -194,7 +194,7 @@ pub struct Dictation {
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        let metal = MetalRuntime::default();
+        let metal = MetalRuntime;
         if matches!(metal.probe().state, CapabilityState::Available) {
             return Arc::new(metal);
         }

@@ -240,7 +240,7 @@ fn cpu_mode_never_requests_offload() {
 
 #[test]
 fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
-    let runtime = oxide_core::dictation::MetalRuntime::default();
+    let runtime = oxide_core::dictation::MetalRuntime;
     let missing_request = TranscriptionRequest {
         model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
         language: None,

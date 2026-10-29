@@ -487,14 +487,27 @@ mod native_commands {
     };
     use std::path::PathBuf;
 
+    #[cfg(windows)]
+    fn python_executable() -> PathBuf {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|dir| dir.join("python.exe"))
+            .find(|candidate| candidate.is_file())
+            .expect("Python is installed on the Windows test runner")
+    }
+
     fn fake_cli(dir: &std::path::Path) -> PathBuf {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/codex/fake_codex.py");
         #[cfg(windows)]
         {
+            let python = python_executable();
             let wrapper = dir.join("fake-codex.cmd");
             std::fs::write(
                 &wrapper,
-                format!("@echo off\r\npy -3 \"{}\" %*\r\n", script.display()),
+                format!(
+                    "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+                    python.display(),
+                    script.display()
+                ),
             )
             .unwrap();
             wrapper
@@ -506,10 +519,24 @@ mod native_commands {
         }
     }
 
+    fn fake_provider(dir: &std::path::Path) -> CodexProvider {
+        let command = fake_cli(dir);
+        let mut provider = CodexProvider::with_command(command.to_str().unwrap());
+        #[cfg(windows)]
+        {
+            let python_dir = python_executable().parent().unwrap().to_path_buf();
+            let system_dir =
+                PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+            let path = std::env::join_paths([python_dir, system_dir]).unwrap();
+            provider.set_env("PATH", path.to_string_lossy());
+        }
+        provider
+    }
+
     #[test]
     fn codex_catalog_offers_native_commands_and_skills() {
         let dir = tempfile::tempdir().unwrap();
-        let provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let provider = fake_provider(dir.path());
         let commands = provider.slash_commands(dir.path()).unwrap();
         let names: Vec<_> = commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["compact", "review", "sample-skill"]);
@@ -519,7 +546,7 @@ mod native_commands {
     #[test]
     fn catalog_refetches_skills_after_change() {
         let dir = tempfile::tempdir().unwrap();
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_FAKE_SKILLS_CHANGE", "1");
         assert!(
             provider
@@ -536,7 +563,7 @@ mod native_commands {
     #[test]
     fn compact_is_a_turn_with_command_output() {
         let dir = tempfile::tempdir().unwrap();
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         let rx = provider
             .start(&StartContext {
                 working_dir: dir.path().into(),
@@ -578,7 +605,7 @@ mod native_commands {
     fn review_runs_inline_and_preserves_unknown_items() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("wire.log");
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
         let rx = provider
             .start(&StartContext {
@@ -618,7 +645,7 @@ mod native_commands {
     fn skill_is_sent_as_structured_input_followed_by_text() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("wire.log");
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
         let rx = provider
             .start(&StartContext {
@@ -655,7 +682,7 @@ mod native_commands {
     #[test]
     fn rejected_native_command_ends_the_turn_with_error() {
         let dir = tempfile::tempdir().unwrap();
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_FAKE_REJECT_REVIEW", "1");
         let rx = provider
             .start(&StartContext {
@@ -680,7 +707,7 @@ mod native_commands {
     #[test]
     fn skills_changed_reaches_the_thread() {
         let dir = tempfile::tempdir().unwrap();
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_FAKE_SKILLS_CHANGE", "1");
         let rx = provider
             .start(&StartContext {
@@ -702,7 +729,7 @@ mod native_commands {
     fn listed_skill_stays_structured_if_refresh_fails() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("wire.log");
-        let mut provider = CodexProvider::with_command(fake_cli(dir.path()).to_str().unwrap());
+        let mut provider = fake_provider(dir.path());
         provider.set_env("OXIDE_WIRE_LOG", log.to_str().unwrap());
         provider.set_env("OXIDE_FAKE_SKILLS_FAIL_AFTER_FIRST", "1");
         let rx = provider

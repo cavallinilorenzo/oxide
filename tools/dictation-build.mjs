@@ -13,7 +13,7 @@ export function dictationBuild(backend, inherited = process.env) {
   // both CMake invocations from the same explicit, MSVC/Ninja environment.
   const env = Object.fromEntries(Object.entries(inherited).filter(([key]) =>
     !key.toUpperCase().startsWith("CMAKE_") &&
-    !["CC", "CXX", "CARGO_TARGET_DIR"].includes(key.toUpperCase())));
+    !["CC", "CXX", "CARGO_TARGET_DIR", "GGML_VULKAN", "GGML_CUDA", "GGML_METAL", "GGML_HIP"].includes(key.toUpperCase())));
   Object.assign(env, {
     CMAKE_GENERATOR: "Ninja", CC: "cl.exe", CXX: "cl.exe",
     CMAKE_C_COMPILER: "cl.exe", CMAKE_CXX_COMPILER: "cl.exe",

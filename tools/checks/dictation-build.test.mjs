@@ -8,6 +8,7 @@ test("CPU and Vulkan builds isolate inherited Cargo and CMake state", () => {
     CMAKE_GENERATOR: "Visual Studio 18 2026",
     CMAKE_GENERATOR_INSTANCE: "old-vs", CMAKE_GENERATOR_PLATFORM: "x64",
     CMAKE_GENERATOR_TOOLSET: "old-toolset", CMAKE_TOOLCHAIN_FILE: "old.cmake",
+    GGML_VULKAN: "ON", GGML_CUDA: "ON", GGML_METAL: "ON", GGML_HIP: "ON",
   };
   const cpu = dictationBuild("cpu", inherited);
   const vulkan = dictationBuild("vulkan", inherited);
@@ -18,6 +19,9 @@ test("CPU and Vulkan builds isolate inherited Cargo and CMake state", () => {
     assert.equal(build.env.CMAKE_GENERATOR_PLATFORM, undefined);
     assert.equal(build.env.CMAKE_GENERATOR_TOOLSET, undefined);
     assert.equal(build.env.CMAKE_TOOLCHAIN_FILE, undefined);
+    for (const flag of ["GGML_VULKAN", "GGML_CUDA", "GGML_METAL", "GGML_HIP"]) {
+      assert.equal(build.env[flag], undefined);
+    }
     assert.equal(build.env.CC, "cl.exe");
     assert.equal(build.env.CXX, "cl.exe");
     assert.equal(build.env.PATH, "tools");

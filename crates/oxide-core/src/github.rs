@@ -423,7 +423,7 @@ impl Gh {
                 (GithubAvailability::Ready, None)
             }
             Err(GhError::Missing) => (GithubAvailability::Missing, Some(INSTALL_GUIDANCE.into())),
-            Err(GhError::Failed(_)) => (GithubAvailability::LoggedOut, Some(LOGIN_GUIDANCE.into())),
+            Err(GhError::Failed(m)) => (GithubAvailability::LoggedOut, Some(format!("{LOGIN_GUIDANCE} DEBUG[{m}]"))),
         }
     }
 

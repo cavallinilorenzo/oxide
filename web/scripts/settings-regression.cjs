@@ -1,0 +1,55 @@
+// Browser QA of the real settings components with deterministic native-service fixtures.
+const { chromium } = require(process.env.OXIDE_PLAYWRIGHT_PATH || "playwright");
+const path = require("node:path");
+const fs = require("node:fs");
+const assert = require("node:assert/strict");
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const output = process.env.OXIDE_TEST_OUTPUT || path.resolve(__dirname, "../../docs/ui-review/settings-rework");
+  fs.mkdirSync(output, { recursive: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const origin = process.env.OXIDE_TEST_URL || "http://127.0.0.1:1420";
+  try {
+    await page.goto(origin + "/tests/settings-harness.html");
+    const family = page.getByLabel("Terminal font", { exact: true });
+    await family.selectOption("Consolas");
+    await page.getByLabel("Terminal size", { exact: true }).selectOption("18");
+    await page.getByLabel("Terminal weight", { exact: true }).selectOption("700");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Settings saved.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--font-terminal-size")), "18px");
+    await page.locator(".settings").evaluate((el) => { el.scrollTop = 0; });
+    await page.screenshot({ path: path.join(output, "appearance-wide.png") });
+    const theme = page.getByRole("button", { name: /^Theme variant:/ });
+    await theme.click();
+    await page.getByRole("option", { name: "Oxide Dark", exact: true }).click();
+    await page.getByRole("link", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: /^Codex Permission mode:/ }).click();
+    await page.getByRole("option", { name: /^Ask/ }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Settings saved.", { exact: true }).waitFor();
+    await page.getByRole("link", { name: "Providers", exact: true }).click();
+    await page.screenshot({ path: path.join(output, "providers-wide.png") });
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.getByRole("link", { name: "Appearance", exact: true }).click();
+    await page.locator(".settings").evaluate((el) => { el.scrollTop = 0; });
+    await page.screenshot({ path: path.join(output, "appearance-900.png") });
+    await page.setViewportSize({ width: 540, height: 760 });
+    await page.screenshot({ path: path.join(output, "appearance-narrow.png") });
+    assert.ok(await page.locator(".settings").evaluate((el) => el.scrollWidth <= el.clientWidth), "Settings must not overflow horizontally");
+    await page.goto(origin + "/tests/settings-harness.html?setup");
+    await page.setViewportSize({ width: 340, height: 760 });
+    await page.getByRole("button", { name: "Install Git", exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "github-missing.png") });
+    assert.ok(await page.locator(".github-setup").evaluate((el) => el.scrollWidth <= el.clientWidth), "GitHub setup must fit a narrow docked Surface");
+    await page.getByRole("button", { name: "Install Git", exact: true }).click();
+    await page.getByRole("button", { name: "Install Git", exact: true }).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Install GitHub CLI", exact: true }).click();
+    await page.getByText("Both tools are available.", { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "github-ready.png") });
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ passed: true, viewports: [1280, 900, 540], browserErrors: errors }));
+  } finally { await browser.close(); }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -5,6 +5,7 @@ import { TerminalWorkbench } from "../src/TerminalWorkbench";
 import "../src/styles.css";
 import "../src/workbench.css";
 import "../src/appearance.css";
+import "../src/interactions.css";
 import { applyAppearance } from "../src/appearance";
 import { AppearanceSettings } from "../src/AppearanceSettings";
 import { WorkbenchLoading } from "../src/WorkbenchLoading";

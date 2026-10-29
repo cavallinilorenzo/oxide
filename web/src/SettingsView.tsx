@@ -1,6 +1,8 @@
 ﻿import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
 import { useEffect, useRef, useState } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { GithubSetup } from "./GithubSetup";
+import { getAppearance, saveAppearance, validateAppearance } from "./appearance";
 import { Skeleton } from "./Skeleton";
 import { listen } from "@tauri-apps/api/event";
 import { EditorMark } from "./EditorMark";
@@ -54,6 +56,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const editVersion = useRef(0);
+  const appearanceDraft = useRef(getAppearance());
   const [claudeDetection, setClaudeDetection] = useState<Detection | null>(
     null,
   );
@@ -122,7 +125,10 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     setSaveStatus("saving");
     setSaveError(null);
     try {
+      const appearance = structuredClone(appearanceDraft.current);
+      validateAppearance(appearance);
       const r = await commands.saveSettings(draft);
+      if (r.status === "ok") saveAppearance(appearance);
       setSaveError(r.status === "error" ? r.error.message : null);
       setSaveStatus(r.status === "ok" && editVersion.current === savingVersion ? "saved" : "idle");
     } catch (error) {
@@ -144,6 +150,9 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         <h1>Settings</h1>
         <p>Manage your defaults, Providers and Projects.</p>
       </header>
+      <nav className="settings-nav" aria-label="Settings sections">
+        {[["appearance", "Appearance"], ["general", "General"], ["providers", "Providers"], ["github", "GitHub tools"], ["shortcuts", "Keyboard shortcuts"]].map(([id, label]) => <a key={id} href={`#settings-${id}`} onClick={(e) => { e.preventDefault(); document.getElementById(`settings-${id}`)?.scrollIntoView({ block: "start" }); }}>{label}</a>)}
+      </nav>
       {fileErrors.length > 0 && (
         <section className="error-summary" role="alert">
           <p>
@@ -160,7 +169,11 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         </section>
       )}
 
-      <AppearanceSettings/>
+      <AppearanceSettings onDraftChange={(appearance) => {
+        appearanceDraft.current = appearance;
+        editVersion.current++;
+        setSaveStatus((status) => status === "saving" ? status : "idle");
+      }} />
       <section className="settings-section" aria-labelledby="settings-general">
         <header className="settings-section-header">
           <h2 id="settings-general">General</h2>
@@ -324,6 +337,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
           );
         })}
       </section>
+
+      <section className="settings-section" aria-labelledby="settings-github"><header className="settings-section-header"><h2 id="settings-github">GitHub tools</h2><p>Prepare this computer for Git and GitHub.</p></header><GithubSetup /></section>
 
       <ShortcutsSettings
         shortcuts={draft.shortcuts}

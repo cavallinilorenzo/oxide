@@ -8,6 +8,7 @@ mod checkpoint;
 mod clock;
 mod continuation;
 mod db;
+pub mod desktop_tools;
 mod detection_cache;
 mod discovery;
 pub mod editor;

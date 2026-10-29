@@ -127,14 +127,14 @@ export function TerminalWorkbench({
             setRunning(false);
             activeBlock.current = null;
             setBlocks((old) =>
-              old.map((b) => (b.ended ? b : { ...b, ended: true })),
+              old.map((b) => (b.ended ? b : { ...b, ended: true, completedAt: Date.now() })),
             );
           }
           if (event.type === "start" && activeBlock.current === event.token) {
             inCommand = true;
             setBlocks((old) =>
               old.map((b) =>
-                b.token === event.token ? { ...b, started: true } : b,
+                b.token === event.token ? { ...b, started: true, at: Date.now() } : b,
               ),
             );
           }
@@ -158,7 +158,7 @@ export function TerminalWorkbench({
             setBlocks((old) =>
               old.map((b) =>
                 b.token === event.token
-                  ? { ...b, ended: true, exitCode: event.exitCode }
+                  ? { ...b, ended: true, exitCode: event.exitCode, completedAt: Date.now() }
                   : b,
               ),
             );
@@ -296,7 +296,7 @@ export function TerminalWorkbench({
       setRunning(false);
       activeBlock.current = null;
       setBlocks((old) =>
-        old.map((b) => (b.token === block.token ? { ...b, ended: true } : b)),
+        old.map((b) => (b.token === block.token ? { ...b, ended: true, completedAt: Date.now() } : b)),
       );
     });
   }

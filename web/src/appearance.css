@@ -1,12 +1,16 @@
 :root {
   --mono: var(--font-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: var(--font-ui-size, 13px);
+  font-weight: var(--font-ui-weight, 400);
 }
 .markdown-body,
 .message-content,
 .user-bubble,
 .composer-input {
   font-family: var(--font-chat, inherit);
+  font-size: var(--font-chat-size, 14px);
+  font-weight: var(--font-chat-weight, 400);
 }
 .markdown-body code,
 .markdown-body pre {
@@ -23,18 +27,34 @@
 }
 .appearance-fonts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 0;
 }
+.appearance-font-row { display: grid; grid-template-columns: 110px minmax(150px, 1fr) 120px 86px; align-items: center; column-gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.appearance-font-row:first-child { padding-top: 4px; }
+.appearance-font-row > strong { color: var(--fg-bright); font-weight: 500; }
+.appearance-font-row label { font-size: 12px; }
+.appearance-font-row select { height: 34px; padding: 0 8px; font: inherit; color: var(--fg); background: var(--bg3); border: 1px solid var(--line-strong); border-radius: 6px; cursor: pointer; }
+.appearance-font-row select:hover { border-color: var(--dim); }
+.appearance-font-row select:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+.appearance-font-row select option { color: var(--fg); background: var(--bg2); }
 .appearance-font-preview {
   display: block;
   padding: 8px 0;
   font-size: 14px;
-  color: var(--dim);
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  grid-column: 2 / -1;
+  margin-top: 4px;
+  min-height: 28px;
 }
+.settings-note { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.6; max-width: 75ch; }
+.appearance-advanced { border-top: 1px solid var(--line); padding-top: 14px; }
+.appearance-advanced summary { cursor: pointer; color: var(--fg); padding: 4px 0; }
+.appearance-advanced summary > span { margin-left: 8px; font-size: 12px; }
+.appearance-advanced[open] summary { margin-bottom: 14px; }
+.appearance-actions { padding: 12px 0; margin-bottom: 0; }
 .appearance-theme-controls,
 .appearance-actions {
   display: flex;
@@ -62,7 +82,40 @@
   color: var(--dim);
 }
 @container (max-width: 500px) {
-  .appearance-fonts {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .appearance-font-row { grid-template-columns: minmax(0, 1fr) 110px 76px; gap: 12px; }
+  .appearance-font-row > strong { grid-column: 1 / -1; }
+  .appearance-font-preview { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
+}
+.terminal-input-editor textarea, .terminal-ghost, .terminal-prompt-symbol { font-family: var(--font-terminal, monospace); font-size: var(--font-terminal-size, 13px); font-weight: var(--font-terminal-weight, 400); line-height: 1.6; }
+.settings { gap: 24px; }
+.settings-header, .settings-section, .settings > .actions, .settings > .error-summary { width: 100%; max-width: 960px; margin-inline: auto; }
+.settings-section { scroll-margin-top: 72px; }
+.settings h2[id] { scroll-margin-top: 72px; }
+.settings-nav { position: sticky; top: -24px; z-index: 3; display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 0; margin: -12px auto 0; width: 100%; max-width: 960px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.settings-nav a { color: var(--dim); text-decoration: none; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+.settings-nav a:hover, .settings-nav a:focus-visible { color: var(--fg-bright); background: var(--bg3); }
+.settings-card { border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 20px 0; background: transparent; }
+.settings .appearance-actions { background: var(--bg); }
+.settings-provider-title { padding-bottom: 6px; }
+.dropdown-trigger { display: flex; align-items: center; gap: 8px; }
+.dropdown-trigger > svg { flex: none; }
+.github-setup { width: 100%; padding: 20px; display: flex; flex-direction: column; gap: 16px; min-width: 0; container-type: inline-size; }
+.settings .github-setup { padding: 20px 0; border-top: 1px solid var(--line); }
+.github-setup > header { display: flex; align-items: flex-start; gap: 12px; }
+.github-setup > header > svg { flex: none; color: var(--dim); margin-top: 2px; }
+.github-setup h3 { margin: 0; font-size: 15px; color: var(--fg-bright); }
+.github-setup p { margin: 4px 0 0; color: var(--dim); line-height: 1.6; }
+.github-setup-steps { list-style: none; padding: 0; margin: 0; }
+.github-setup-steps > li { display: flex; gap: 12px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.github-setup-steps > li > div { flex: 1; min-width: 0; }
+.github-setup-steps p, .github-setup-steps small, .github-setup-footer { font-size: 12px; }
+.setup-step-state { display: flex; color: var(--dim); flex: none; }
+.setup-step-state.complete { color: var(--green); }
+.github-setup .error { color: var(--red); overflow-wrap: anywhere; }
+.github-setup-footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.github-signin-terminal { height: 360px; display: flex; border: 1px solid var(--line-strong); }
+@container (max-width: 400px) {
+  .github-setup-steps > li { flex-wrap: wrap; }
+  .github-setup-steps > li > div { min-width: 70%; }
+  .github-setup-steps > li > button { margin-left: 30px; }
 }

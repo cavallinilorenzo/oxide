@@ -1,8 +1,10 @@
 # Fonts and JSON themes
 
 Open **Settings → Appearance**. Interface, Chat, Code editor and Terminal each
-have a font-family field and preview. Enter an installed family, or a fallback
-list such as `"JetBrains Mono", Consolas, monospace`. Press **Apply appearance**.
+have dropdowns for the installed font family, weight (Regular through Bold) and
+size (10–32 px), with a preview. Font families come from the operating system;
+there is no CSS to type. Existing saved fallback lists remain selectable.
+Press **Save** in Settings (or **Apply appearance** in a standalone appearance view).
 Existing buffers and shell processes stay open. **Restore defaults** resets
 appearance.
 
@@ -13,9 +15,9 @@ font files must already be installed on the destination machine.
 
 ## Create or import a theme
 
-1. Start with [oxide-night.json](themes/oxide-night.json), or edit **Theme JSON**
-   in Appearance settings.
-2. Import the file, select its variant in **Theme**, and press **Apply appearance**.
+1. Start with [oxide-night.json](themes/oxide-night.json), or expand
+   **Edit theme JSON → Advanced** in Appearance settings.
+2. Import the file, select its variant in **Theme**, and press **Save**.
    Editing JSON alone keeps the current appearance.
 3. Use **Export JSON** to share or edit the pack externally. Reimport external
    changes to apply them.

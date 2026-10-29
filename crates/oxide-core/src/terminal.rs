@@ -86,7 +86,22 @@ impl TerminalSession {
         };
         #[cfg(windows)]
         let shell_init: Option<PathBuf> = None;
-        let command = shell_command(cwd, blocks, shell_init.as_deref());
+        let mut command = shell_command(cwd, blocks, shell_init.as_deref());
+        // Installers can update PATH after the GUI process started. New shells must
+        // see the same Git/GitHub CLI executables that Core just detected.
+        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default();
+        for tool in ["git", "gh"] {
+            if let Some(binary) = crate::desktop_tools::resolve(tool)
+                && let Some(parent) = binary.parent()
+            {
+                dirs.push(parent.to_path_buf());
+            }
+        }
+        if let Ok(path) = std::env::join_paths(dirs) {
+            command.env("PATH", path);
+        }
         let shell = command
             .get_argv()
             .first()

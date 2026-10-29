@@ -70,6 +70,49 @@ fn missing_selection_keeps_working_model_protected_until_explicit_install() {
 }
 
 #[test]
+fn disable_invalidates_pending_recording_start_before_microphone_capture() {
+    use oxide_core::dictation::{Dictation, DictationSettings};
+    let home = tempfile::tempdir().unwrap();
+    let models = Arc::new(manager(b"abc", 100));
+    models.install(home.path(), ModelId::Small, |_| {}).unwrap();
+    let dictation = Dictation::default().with_models(models.clone());
+    let settings = DictationSettings {
+        enabled: true,
+        ..Default::default()
+    };
+    let pending = dictation
+        .prepare_recording(home.path(), || settings.clone())
+        .unwrap();
+    dictation
+        .configure(home.path(), &DictationSettings::default())
+        .unwrap();
+    let error = dictation.start_prepared(pending).unwrap_err();
+    assert!(error.to_string().contains("cancelled"));
+    models.delete(home.path(), ModelId::Small).unwrap();
+}
+
+#[test]
+fn disable_while_reading_settings_invalidates_stale_enabled_snapshot() {
+    use oxide_core::dictation::{Dictation, DictationSettings};
+    let home = tempfile::tempdir().unwrap();
+    let models = Arc::new(manager(b"abc", 100));
+    models.install(home.path(), ModelId::Small, |_| {}).unwrap();
+    let dictation = Dictation::default().with_models(models.clone());
+    let stale = DictationSettings {
+        enabled: true,
+        ..Default::default()
+    };
+    let pending = dictation.prepare_recording(home.path(), || {
+        dictation
+            .configure(home.path(), &DictationSettings::default())
+            .unwrap();
+        stale
+    });
+    assert!(pending.err().unwrap().to_string().contains("cancelled"));
+    models.delete(home.path(), ModelId::Small).unwrap();
+}
+
+#[test]
 fn installation_publishes_verified_artifact_and_reuses_cached_small_offline() {
     let home = tempfile::tempdir().unwrap();
     let models = manager(b"abc", 100);

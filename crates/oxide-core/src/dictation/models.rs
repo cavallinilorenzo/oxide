@@ -54,6 +54,32 @@ pub struct MemoryEstimate {
     pub measured: bool,
 }
 
+impl ModelCatalogue {
+    pub fn entry(&self, id: ModelId) -> Option<&ModelEntry> {
+        self.models.iter().find(|entry| entry.id == id)
+    }
+
+    pub fn entry_for_path(&self, path: &Path) -> Option<&ModelEntry> {
+        self.models.iter().find(|entry| {
+            path.file_name()
+                .is_some_and(|name| name == entry.file_name().as_str())
+        })
+    }
+}
+
+impl ModelEntry {
+    pub fn file_name(&self) -> String {
+        format!("ggml-{}.bin", self.id)
+    }
+
+    pub fn estimated_peak(&self, backend: BackendId) -> Option<u64> {
+        self.estimated_peak_bytes
+            .iter()
+            .find(|estimate| estimate.backend == backend)
+            .map(|estimate| estimate.bytes)
+    }
+}
+
 pub fn catalogue() -> &'static ModelCatalogue {
     static CATALOGUE: LazyLock<ModelCatalogue> = LazyLock::new(|| {
         serde_json::from_str(include_str!("catalogue.json")).expect("trusted model catalogue")
@@ -117,11 +143,7 @@ impl ModelManager {
     }
 
     fn entry(&self, id: ModelId) -> Result<&ModelEntry> {
-        self.catalogue
-            .models
-            .iter()
-            .find(|m| m.id == id)
-            .ok_or_else(|| err("Unknown model"))
+        self.catalogue.entry(id).ok_or_else(|| err("Unknown model"))
     }
 
     fn lock(&self, home: &Path, id: ModelId) -> Result<File> {
@@ -323,7 +345,8 @@ mod tests {
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut request = [0; 4096];
-                connection.read(&mut request).unwrap();
+                let received = connection.read(&mut request).unwrap();
+                assert!(received > 0);
                 if headers_sent {
                     write!(
                         connection,
@@ -373,7 +396,8 @@ mod tests {
             let server = std::thread::spawn(move || {
                 let (mut connection, _) = listener.accept().unwrap();
                 let mut request = [0; 4096];
-                connection.read(&mut request).unwrap();
+                let received = connection.read(&mut request).unwrap();
+                assert!(received > 0);
                 write!(connection, "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\nabc").unwrap();
             });
             let home = tempfile::tempdir().unwrap();

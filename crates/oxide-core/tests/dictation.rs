@@ -74,6 +74,20 @@ fn missing_model_selection_does_not_overwrite_saved_settings() {
 }
 
 #[test]
+fn startup_preserves_saved_settings_when_disabled_selected_model_was_deleted() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join("settings.json"), r#"{"dictation":{"model":"tiny","enabled":false,"language":"it","device":"gpu"},"shortcuts":{"dictation":"Mod+Alt+R"},"confirmQuit":false}"#).unwrap();
+    let core = oxide_core::Core::open(home.path()).unwrap();
+    let state = core.settings();
+    assert!(state.errors.is_empty(), "{:?}", state.errors);
+    assert_eq!(state.settings.dictation.model, ModelId::Tiny);
+    assert_eq!(state.settings.dictation.language, "it");
+    assert_eq!(state.settings.dictation.device, Device::Gpu);
+    assert_eq!(state.settings.shortcuts.dictation, "Mod+Alt+R");
+    assert!(!state.settings.confirm_quit);
+}
+
+#[test]
 fn unified_memory_topology_and_budget_signals_serialize_as_shared_pool() {
     let pool = MemoryPool {
         unified: true,

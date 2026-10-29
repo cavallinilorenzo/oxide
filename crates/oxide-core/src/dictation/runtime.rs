@@ -63,21 +63,9 @@ pub fn run_whisper_inference(
     sys.refresh_memory();
     let available = sys.available_memory();
     let required = super::models::catalogue()
-        .models
-        .iter()
-        .find(|entry| {
-            request
-                .model_path
-                .file_name()
-                .is_some_and(|name| name == format!("ggml-{}.bin", entry.id).as_str())
-        })
-        .and_then(|entry| {
-            entry
-                .estimated_peak_bytes
-                .iter()
-                .find(|estimate| estimate.backend == BackendId::Cpu)
-        })
-        .map_or(500 * 1024 * 1024, |estimate| estimate.bytes);
+        .entry_for_path(&request.model_path)
+        .and_then(|entry| entry.estimated_peak(BackendId::Cpu))
+        .unwrap_or(500 * 1024 * 1024);
     if available < required {
         return Err(BackendError::InsufficientMemory {
             required_bytes: required,

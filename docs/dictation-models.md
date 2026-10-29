@@ -53,10 +53,13 @@ reused without downloading another copy.
 settings and shortcuts are preserved. Saving or externally editing settings to
 select a missing/corrupt model retains the last valid settings. Install first,
 then explicitly select it. Installing alone does not change the selection.
+Startup restores saved preferences even if their selected artifact has since been
+deleted; model status reports its absence and recording requires installation.
 
 Recording start snapshots model/language/device and leases its artifact. Changing
 settings affects the next recording. Disable cancels capture/inference and
-discards late results. Native inference runs on a blocking worker, with one
+discards late results. A cancellation generation captured before reading settings
+also invalidates startup work still verifying a model. Native inference runs on a blocking worker, with one
 inference at a time per coordinator. Native contexts are scoped to that inference:
 **zero contexts are retained between recordings**, so switches and disabling
 cannot leave a previous model resident. This conservative lifetime trades cold

@@ -588,7 +588,9 @@ async fn dictation_start(
     let core = core.inner().clone();
     let dictation = dictation.inner().clone();
     Ok(tauri::async_runtime::spawn_blocking(move || {
-        dictation.start(core.home(), &core.settings().settings.dictation)
+        let prepared =
+            dictation.prepare_recording(core.home(), || core.settings().settings.dictation)?;
+        dictation.start_prepared(prepared)
     })
     .await
     .map_err(|e| oxide_core::Error::Dictation(e.to_string()))??)

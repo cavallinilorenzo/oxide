@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     time::Duration,
@@ -148,6 +148,13 @@ pub struct RecordingSnapshot {
     pub model: ModelId,
 }
 
+/// Verified model and settings prepared off the UI thread, invalidated by cancellation.
+pub struct PreparedRecording {
+    generation: u64,
+    snapshot: RecordingSnapshot,
+    lease: models::ModelLease,
+}
+
 struct Recording {
     stop: mpsc::Sender<()>,
     result: mpsc::Receiver<Result<(Vec<f32>, u32)>>,
@@ -158,6 +165,7 @@ struct Recording {
 
 pub struct Dictation {
     pub models: Arc<models::ModelManager>,
+    generation: AtomicU64,
     selected: Mutex<Option<(ModelId, models::ModelLease)>>,
     cancellation: Mutex<Option<Arc<AtomicBool>>>,
     recording: Mutex<Option<Recording>>,
@@ -182,6 +190,7 @@ impl Default for Dictation {
     fn default() -> Self {
         Self {
             models: Arc::new(models::ModelManager::default()),
+            generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
             recording: Mutex::new(None),
@@ -201,6 +210,7 @@ impl Dictation {
     pub fn with_runtime(runtime: Arc<dyn WhisperBackendRuntime>) -> Self {
         Self {
             models: Arc::new(models::ModelManager::default()),
+            generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
             recording: Mutex::new(None),
@@ -217,6 +227,7 @@ impl Dictation {
     ) -> Self {
         Self {
             models: Arc::new(models::ModelManager::default()),
+            generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
             recording: Mutex::new(None),
@@ -234,13 +245,28 @@ impl Dictation {
 
     /// Apply on the settings worker. Missing selections leave the current lease intact.
     pub fn configure(&self, home: &Path, settings: &DictationSettings) -> Result<()> {
-        let mut selected = self.selected.lock().unwrap();
         if !settings.enabled {
             self.cancel();
-            *selected = None;
-        } else if selected.as_ref().map(|s| s.0) != Some(settings.model) {
-            let lease = self.models.acquire(home, settings.model)?;
-            *selected = Some((settings.model, lease));
+            *self.selected.lock().unwrap() = None;
+            return Ok(());
+        }
+        self.select(home, settings.model, self.generation.load(Ordering::SeqCst))
+    }
+
+    fn select(&self, home: &Path, model: ModelId, generation: u64) -> Result<()> {
+        let mut selected = self.selected.lock().unwrap();
+        self.check_generation(generation)?;
+        if selected.as_ref().map(|s| s.0) != Some(model) {
+            let lease = self.models.acquire(home, model)?;
+            self.check_generation(generation)?;
+            *selected = Some((model, lease));
+        }
+        Ok(())
+    }
+
+    fn check_generation(&self, generation: u64) -> Result<()> {
+        if self.generation.load(Ordering::SeqCst) != generation {
+            return Err(err("Dictation cancelled. Recording discarded."));
         }
         Ok(())
     }
@@ -277,28 +303,45 @@ impl Dictation {
     }
 
     pub fn start(&self, home: &Path, settings: &DictationSettings) -> Result<()> {
+        self.start_prepared(self.prepare_recording(home, || settings.clone())?)
+    }
+
+    /// Artifact verification is separate from opening the microphone so disable invalidates
+    /// pending work even when hashing a large cached model takes time.
+    pub fn prepare_recording(
+        &self,
+        home: &Path,
+        settings: impl FnOnce() -> DictationSettings,
+    ) -> Result<PreparedRecording> {
+        let generation = self.generation.load(Ordering::SeqCst);
+        let settings = settings();
         if !settings.enabled {
             return Err(err("Enable dictation in Settings first."));
         }
-        self.configure(home, settings)?;
+        self.select(home, settings.model, generation)?;
         let lease = self.models.acquire(home, settings.model)?;
         if settings.device == Device::Gpu && !gpu_compiled() {
             return Err(err(
                 "This build has CPU support only. Choose CPU in Settings.",
             ));
         }
+        Ok(PreparedRecording {
+            generation,
+            lease,
+            snapshot: RecordingSnapshot {
+                language: settings.language.clone(),
+                device: settings.device,
+                model: settings.model,
+            },
+        })
+    }
+
+    pub fn start_prepared(&self, prepared: PreparedRecording) -> Result<()> {
         let mut recording = self.recording.lock().unwrap();
+        self.check_generation(prepared.generation)?;
         if recording.is_some() || *self.busy.lock().unwrap() {
             return Err(err("Dictation is already active."));
         }
-
-        // Snapshot settings at recording start
-        let snapshot = RecordingSnapshot {
-            language: settings.language.clone(),
-            device: settings.device,
-            model: settings.model,
-        };
-
         let (stop, stopped) = mpsc::channel();
         let (result_tx, result) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
@@ -307,19 +350,24 @@ impl Dictation {
             let _ = result_tx.send(outcome);
         });
         ready.recv().map_err(err)??;
+        if let Err(error) = self.check_generation(prepared.generation) {
+            let _ = stop.send(());
+            return Err(error);
+        }
         let cancelled = Arc::new(AtomicBool::new(false));
         *self.cancellation.lock().unwrap() = Some(cancelled.clone());
         *recording = Some(Recording {
             stop,
             result,
-            snapshot,
+            snapshot: prepared.snapshot,
             cancelled,
-            _lease: Some(lease),
+            _lease: Some(prepared.lease),
         });
         Ok(())
     }
 
     pub fn cancel(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let recording = self.recording.lock().unwrap().take();
         if let Some(cancelled) = self.cancellation.lock().unwrap().take() {
             cancelled.store(true, Ordering::SeqCst);
@@ -462,15 +510,10 @@ impl Dictation {
                                 }
                             };
                             let required_gb = models::catalogue()
-                                .models
-                                .iter()
-                                .find(|m| m.id == snapshot.model)
-                                .unwrap()
-                                .estimated_peak_bytes
-                                .iter()
-                                .find(|m| m.backend == BackendId::Cpu)
-                                .unwrap()
-                                .bytes as f64
+                                .entry(snapshot.model)
+                                .and_then(|entry| entry.estimated_peak(BackendId::Cpu))
+                                .expect("catalogue CPU memory estimate")
+                                as f64
                                 / 1_073_741_824.0;
                             if available_gb < required_gb {
                                 return Err(err(format!(

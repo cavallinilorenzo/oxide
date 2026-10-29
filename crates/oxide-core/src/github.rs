@@ -408,7 +408,7 @@ impl Gh {
         } else {
             stderr
         };
-        Err(GhError::Failed(format!("{} RUSTPATH=[{}] INHERITED=[{}]", message.trim(), child_path.to_string_lossy(), std::env::var_os("PATH").map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())))
+        Err(GhError::Failed(message.trim().to_string()))
     }
 
     /// Whether `gh` can be used, and if not, what to tell the user.
@@ -423,7 +423,7 @@ impl Gh {
                 (GithubAvailability::Ready, None)
             }
             Err(GhError::Missing) => (GithubAvailability::Missing, Some(INSTALL_GUIDANCE.into())),
-            Err(GhError::Failed(m)) => (GithubAvailability::LoggedOut, Some(format!("{LOGIN_GUIDANCE} DEBUG[{m}]"))),
+            Err(GhError::Failed(_)) => (GithubAvailability::LoggedOut, Some(LOGIN_GUIDANCE.into())),
         }
     }
 

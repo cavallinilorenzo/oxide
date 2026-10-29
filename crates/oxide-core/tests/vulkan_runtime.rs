@@ -257,3 +257,26 @@ fn windows_loader_failure_and_worker_crashes_are_recoverable() {
     std::fs::remove_file(dir.path().join("exit-code")).unwrap();
     assert_eq!(runtime.probe().state, CapabilityState::Available);
 }
+
+#[test]
+fn native_allocation_failure_is_reported_as_memory_pressure() {
+    let dir = inference_fixture("vk::Device::allocateMemory: VK_ERROR_OUT_OF_DEVICE_MEMORY\n");
+    std::fs::write(
+        dir.path().join("reply.json"),
+        response(
+            serde_json::json!({"Err":{"InitializationFailed":"Failed to create whisper context"}}),
+        )
+        .to_string(),
+    )
+    .unwrap();
+    let runtime = VulkanRuntime::new(worker(&dir), None);
+    assert!(matches!(
+        runtime.transcribe(&request()),
+        Err(oxide_core::dictation::BackendError::InsufficientMemory { .. })
+    ));
+    std::fs::copy(dir.path().join("reply.json"), dir.path().join("probe.json")).unwrap();
+    assert!(matches!(
+        runtime.probe().state,
+        CapabilityState::InsufficientMemory { .. }
+    ));
+}

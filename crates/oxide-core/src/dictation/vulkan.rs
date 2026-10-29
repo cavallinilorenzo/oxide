@@ -14,6 +14,7 @@ use std::{
 
 pub const ENGINE_VERSION: &str = "1.8.3";
 const MAX_FRAME: usize = 64 * 1024 * 1024;
+const SMALL_WORKING_SET: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulkanAdapter {
@@ -91,7 +92,7 @@ pub fn worker_path() -> PathBuf {
 /// Provisional conservative Small working set, separate from model file size.
 /// Keep 20% of the current reported device budget free; unknown stays unknown.
 pub fn check_memory(device: &VulkanAdapter) -> Result<(), BackendError> {
-    let required = 2 * 1024 * 1024 * 1024;
+    let required = SMALL_WORKING_SET;
     if let Some(available) = device.memory.as_ref().and_then(|m| m.available_bytes)
         && available.saturating_mul(4) / 5 < required
     {
@@ -204,6 +205,28 @@ impl VulkanRuntime {
             .map_err(|_| BackendError::InitializationFailed("Worker reader failed".into()))?;
         let logs = logger.join().unwrap_or_default();
         let status = status?;
+        // Budgets can change after the preflight. Preserve a native allocation
+        // failure even when the binding only returns a generic context error.
+        let normalized = logs.to_ascii_lowercase().replace(['_', ' '], "");
+        let native_oom = [
+            "outofdevicememory",
+            "outofhostmemory",
+            "outofmemory",
+            "badalloc",
+        ]
+        .iter()
+        .any(|message| normalized.contains(message));
+        let failed = !status.success()
+            || matches!(
+                &response,
+                Err(_) | Ok(WorkerResponse { result: Err(_), .. })
+            );
+        if native_oom && failed {
+            return Err(BackendError::InsufficientMemory {
+                required_bytes: SMALL_WORKING_SET,
+                available_bytes: None,
+            });
+        }
         if !status.success() {
             // Windows loader exits before main when vulkan-1.dll is absent.
             if status.code().map(|c| c as u32) == Some(0xc0000135) {
@@ -267,6 +290,13 @@ impl WhisperBackendRuntime for VulkanRuntime {
                 };
             }
             Err(BackendError::Unavailable(state)) => state,
+            Err(BackendError::InsufficientMemory {
+                required_bytes,
+                available_bytes,
+            }) => CapabilityState::InsufficientMemory {
+                required_bytes,
+                available_bytes,
+            },
             Err(e) => CapabilityState::InitializationFailure(e.to_string()),
         };
         BackendProbe {

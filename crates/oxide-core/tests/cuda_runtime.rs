@@ -177,6 +177,7 @@ fn native_allocation_failure_is_reported_as_memory_pressure() {
 }
 
 #[test]
+#[cfg(windows)]
 fn windows_loader_failure_and_worker_crashes_are_recoverable() {
     let dir = fixture(serde_json::json!({}), "");
     std::fs::write(dir.path().join("exit-code"), "-1073741515").unwrap(); // 0xc0000135
@@ -297,6 +298,7 @@ fn cancelled_recording_never_starts_a_cuda_worker() {
 }
 
 #[test]
+#[cfg(windows)]
 fn cuda_and_vulkan_coexist_without_mandatory_cuda_loading_at_startup() {
     let dir = tempfile::tempdir().unwrap();
     let cuda_bin = dir

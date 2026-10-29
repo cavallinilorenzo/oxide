@@ -6,7 +6,7 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	dictationStatus: () => typedError<DictationStatus, AppError>(__TAURI_INVOKE("dictation_status")),
+	dictationStatus: () => typedError<DictationStatus_Serialize, AppError>(__TAURI_INVOKE("dictation_status")),
 	dictationInstall: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_install")),
 	dictationStart: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_start")),
 	dictationStop: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_stop")),
@@ -255,6 +255,22 @@ export type Attachment = {
 
 export type AttachmentKind = "image" | "pdf" | "text" | "other";
 
+export type BackendId = "cpu" | "cuda" | "vulkan" | "metal";
+
+export type BackendProbe = BackendProbe_Serialize | BackendProbe_Deserialize;
+
+export type BackendProbe_Deserialize = {
+	backend: BackendId,
+	state: CapabilityState_Deserialize,
+	adapter?: string | null,
+};
+
+export type BackendProbe_Serialize = {
+	backend: BackendId,
+	state: CapabilityState_Serialize,
+	adapter: string | null,
+};
+
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
 
@@ -289,6 +305,24 @@ export type BranchPullRequest = {
 	checksFailed: number,
 	checksPending: number,
 };
+
+export type BuildManifest = {
+	whisperRsVersion: string,
+	whisperCppPinned: string,
+	includedBackends: BackendId[],
+};
+
+export type CapabilityState = CapabilityState_Serialize | CapabilityState_Deserialize;
+
+export type CapabilityState_Deserialize = { status: "omittedFromBuild" } | { status: "noCompatibleDevice" } | { status: "missingDriverOrRuntime" } | { status: "initializationFailure"; details: string } | { status: "insufficientMemory"; details: {
+	required_bytes: number | null,
+	available_bytes?: number | null,
+} } | { status: "available" } | { status: "verifiedByInference" };
+
+export type CapabilityState_Serialize = { status: "omittedFromBuild" } | { status: "noCompatibleDevice" } | { status: "missingDriverOrRuntime" } | { status: "initializationFailure"; details: string } | { status: "insufficientMemory"; details: {
+	required_bytes: number | null,
+	available_bytes?: number | null,
+} } | { status: "available" } | { status: "verifiedByInference" };
 
 export type CheckState = "success" | "failure" | "pending";
 
@@ -369,7 +403,7 @@ export type DeveloperTool_Serialize = {
 	documentation: string,
 };
 
-export type DictationDevice = "cpu" | "gpu";
+export type DictationDevice = "cpu" | "gpu" | "auto";
 
 export type DictationSettings = {
 	enabled: boolean,
@@ -377,12 +411,28 @@ export type DictationSettings = {
 	device: DictationDevice,
 };
 
-export type DictationStatus = {
+export type DictationStatus = DictationStatus_Serialize | DictationStatus_Deserialize;
+
+export type DictationStatus_Deserialize = {
 	installed: boolean,
 	gpuCompiled: boolean,
 	availableMemoryGb: number | null,
 	cpuThreads: number,
 	recommendation: string,
+	manifest: BuildManifest,
+	probes: BackendProbe_Deserialize[],
+	lastExecution?: ExecutionDetails_Deserialize | null,
+};
+
+export type DictationStatus_Serialize = {
+	installed: boolean,
+	gpuCompiled: boolean,
+	availableMemoryGb: number | null,
+	cpuThreads: number,
+	recommendation: string,
+	manifest: BuildManifest,
+	probes: BackendProbe_Serialize[],
+	lastExecution: ExecutionDetails_Serialize | null,
 };
 
 export type Diff = Diff_Serialize | Diff_Deserialize;
@@ -469,6 +519,22 @@ export type DispatchRequest_Serialize = {
 export type Editor = {
 	name: string,
 	bundleId: string,
+};
+
+export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
+
+export type ExecutionDetails_Deserialize = {
+	backend: BackendId,
+	adapter?: string | null,
+	offloaded: boolean,
+	offloadEvidence?: string | null,
+};
+
+export type ExecutionDetails_Serialize = {
+	backend: BackendId,
+	adapter: string | null,
+	offloaded: boolean,
+	offloadEvidence: string | null,
 };
 
 export type FieldError = {

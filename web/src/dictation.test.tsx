@@ -40,3 +40,24 @@ it("never redirects speech into an input opened later", async () => {
   await key(); expect(insert).not.toHaveBeenCalled(); expect(host.textContent).toContain("original input was closed");
 });
 it("strips terminal control characters and newlines", () => { expect(dictationLine("echo hi\n\r\x1b[31m\x00")).toBe("echo hi   [31m "); });
+it("displays runtime failure without inserting text", async () => {
+  await setup();
+  vi.spyOn(commands, "dictationStop").mockResolvedValue({
+    status: "error",
+    error: { message: "GPU transcription failed: initialization error. Choose CPU in Settings." },
+  });
+  await key();
+  await key();
+  expect(insert).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("GPU transcription failed");
+});
+it("displays start failure when dictation is disabled", async () => {
+  await setup();
+  vi.spyOn(commands, "dictationStart").mockResolvedValue({
+    status: "error",
+    error: { message: "Enable dictation in Settings first." },
+  });
+  await key();
+  expect(insert).not.toHaveBeenCalled();
+  expect(host.textContent).toContain("Enable dictation in Settings first");
+});

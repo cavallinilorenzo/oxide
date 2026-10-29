@@ -1,22 +1,36 @@
 //! Local, bounded microphone capture and whisper.cpp inference. Audio never touches disk.
+pub mod runtime;
+pub mod types;
+
 use crate::{Error, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{
+    Sample,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub use runtime::{
+    BackendError, CpuRuntime, TranscriptionOutcome, TranscriptionRequest, WhisperBackendRuntime,
+    probe_backends,
+};
+pub use types::{
+    BackendId, BackendProbe, BuildManifest, CapabilityState, ExecutionDetails, ModelId,
+};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Device {
     #[default]
     Cpu,
     Gpu,
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +40,7 @@ pub struct DictationSettings {
     pub language: String,
     pub device: Device,
 }
+
 impl Default for DictationSettings {
     fn default() -> Self {
         Self {
@@ -36,7 +51,7 @@ impl Default for DictationSettings {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub installed: bool,
@@ -44,6 +59,9 @@ pub struct Status {
     pub available_memory_gb: f64,
     pub cpu_threads: usize,
     pub recommendation: String,
+    pub manifest: BuildManifest,
+    pub probes: Vec<BackendProbe>,
+    pub last_execution: Option<ExecutionDetails>,
 }
 
 pub fn status(home: &Path) -> Status {
@@ -57,9 +75,13 @@ pub fn status(home: &Path) -> Status {
         available_memory_gb: available,
         cpu_threads: threads,
         recommendation: recommendation(available, threads).into(),
+        manifest: BuildManifest::current(),
+        probes: probe_backends(),
+        last_execution: None,
     }
 }
-fn recommendation(available: f64, threads: usize) -> &'static str {
+
+pub fn recommendation(available: f64, threads: usize) -> &'static str {
     if available < 2.0 {
         "Not recommended now: less than 2 GB of RAM is available. Free memory before enabling Whisper small."
     } else if threads < 4 {
@@ -68,12 +90,15 @@ fn recommendation(available: f64, threads: usize) -> &'static str {
         "Recommended for short dictation on CPU. Whisper small uses roughly 1 GB of memory; speed depends on your processor. GPU acceleration may reduce the wait."
     }
 }
-fn gpu_compiled() -> bool {
+
+pub fn gpu_compiled() -> bool {
     cfg!(any(target_os = "macos", feature = "dictation-vulkan"))
 }
-fn model(home: &Path) -> std::path::PathBuf {
+
+pub fn model(home: &Path) -> PathBuf {
     home.join("models/ggml-small.bin")
 }
+
 fn err(e: impl std::fmt::Display) -> Error {
     Error::Dictation(e.to_string())
 }
@@ -120,18 +145,99 @@ pub fn install(home: &Path, progress: impl Fn(u64, u64)) -> Result<()> {
     file.persist(&path).map_err(err)?;
     Ok(())
 }
+
 const MODEL_SHA256: &str = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
+
+/// Snapshot of the configuration taken at the instant recording begins.
+/// Prevents changes to Settings during a recording from corrupting or switching the in-flight inference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordingSnapshot {
+    pub language: String,
+    pub device: Device,
+    pub model: ModelId,
+}
 
 struct Recording {
     stop: mpsc::Sender<()>,
     result: mpsc::Receiver<Result<(Vec<f32>, u32)>>,
+    snapshot: RecordingSnapshot,
 }
-#[derive(Default)]
+
 pub struct Dictation {
     recording: Mutex<Option<Recording>>,
     busy: Mutex<bool>,
+    last_execution: Mutex<Option<ExecutionDetails>>,
+    runtime: Arc<dyn WhisperBackendRuntime>,
+    memory_checker: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
 }
+
+impl Default for Dictation {
+    fn default() -> Self {
+        Self {
+            recording: Mutex::new(None),
+            busy: Mutex::new(false),
+            last_execution: Mutex::new(None),
+            runtime: Arc::new(CpuRuntime),
+            memory_checker: None,
+        }
+    }
+}
+
 impl Dictation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_runtime(runtime: Arc<dyn WhisperBackendRuntime>) -> Self {
+        Self {
+            recording: Mutex::new(None),
+            busy: Mutex::new(false),
+            last_execution: Mutex::new(None),
+            runtime,
+            memory_checker: None,
+        }
+    }
+
+    pub fn with_runtime_and_memory(
+        runtime: Arc<dyn WhisperBackendRuntime>,
+        memory_checker: Arc<dyn Fn() -> f64 + Send + Sync>,
+    ) -> Self {
+        Self {
+            recording: Mutex::new(None),
+            busy: Mutex::new(false),
+            last_execution: Mutex::new(None),
+            runtime,
+            memory_checker: Some(memory_checker),
+        }
+    }
+
+    pub fn last_execution(&self) -> Option<ExecutionDetails> {
+        self.last_execution.lock().unwrap().clone()
+    }
+
+    pub fn status(&self, home: &Path) -> Status {
+        let mut s = status(home);
+        s.last_execution = self.last_execution();
+        s
+    }
+
+    #[doc(hidden)]
+    pub fn inject_recording_for_test(
+        &self,
+        snapshot: RecordingSnapshot,
+        samples: Vec<f32>,
+        rate: u32,
+    ) {
+        let (stop, _) = mpsc::channel();
+        let (result_tx, result) = mpsc::channel();
+        let _ = result_tx.send(Ok((samples, rate)));
+        *self.recording.lock().unwrap() = Some(Recording {
+            stop,
+            result,
+            snapshot,
+        });
+    }
+
     pub fn start(&self, home: &Path, settings: &DictationSettings) -> Result<()> {
         if !settings.enabled {
             return Err(err("Enable dictation in Settings first."));
@@ -148,6 +254,14 @@ impl Dictation {
         if recording.is_some() || *self.busy.lock().unwrap() {
             return Err(err("Dictation is already active."));
         }
+
+        // Snapshot settings at recording start
+        let snapshot = RecordingSnapshot {
+            language: settings.language.clone(),
+            device: settings.device,
+            model: ModelId::Small,
+        };
+
         let (stop, stopped) = mpsc::channel();
         let (result_tx, result) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
@@ -156,34 +270,154 @@ impl Dictation {
             let _ = result_tx.send(outcome);
         });
         ready.recv().map_err(err)??;
-        *recording = Some(Recording { stop, result });
+        *recording = Some(Recording {
+            stop,
+            result,
+            snapshot,
+        });
         Ok(())
     }
+
     pub fn cancel(&self) {
         if let Some(recording) = self.recording.lock().unwrap().take() {
             let _ = recording.stop.send(());
         }
     }
+
     pub fn stop(&self, home: &Path, settings: &DictationSettings) -> Result<String> {
         let mut slot = self.recording.lock().unwrap();
         let recording = slot.take().ok_or_else(|| err("No recording is active."))?;
         *self.busy.lock().unwrap() = true;
         drop(slot);
+
         let result = (|| {
             let _ = recording.stop.send(());
             let (samples, rate) = recording
                 .result
                 .recv_timeout(Duration::from_secs(5))
                 .map_err(err)??;
+
             if !settings.enabled {
                 return Err(err("Dictation was disabled. Recording discarded."));
             }
-            transcribe(home, settings, &samples, rate)
+
+            // Execute using the snapshotted parameters taken at start
+            self.transcribe_snapshot(home, &recording.snapshot, &samples, rate)
         })();
+
         *self.busy.lock().unwrap() = false;
         result
     }
+
+    fn transcribe_snapshot(
+        &self,
+        home: &Path,
+        snapshot: &RecordingSnapshot,
+        samples: &[f32],
+        rate: u32,
+    ) -> Result<String> {
+        if samples.len() < rate as usize / 4
+            || samples.iter().map(|s| s * s).sum::<f32>() / (samples.len().max(1) as f32) < 0.00001
+        {
+            return Ok(String::new());
+        }
+
+        let model_path = match snapshot.model {
+            ModelId::Small => model(home),
+        };
+        let language = if snapshot.language == "auto" {
+            None
+        } else {
+            Some(snapshot.language.clone())
+        };
+
+        let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(1, 8));
+
+        let request = TranscriptionRequest {
+            model_path,
+            language,
+            samples: samples.to_vec(),
+            sample_rate: rate,
+            threads,
+        };
+
+        // Execution logic based on mode:
+        // - Auto: attempts preferred backend; on failure retries CPU once if memory permits (>= 2GB available RAM)
+        // - Gpu: explicit GPU request. If it fails or runtime is CPU-only, report failure and offer CPU; NEVER silently substitute CPU for GPU.
+        // - Cpu: executes directly on CPU, never requests offload.
+        match snapshot.device {
+            Device::Cpu => {
+                let cpu = CpuRuntime;
+                let outcome = cpu
+                    .transcribe(&request)
+                    .map_err(|e| err(format!("CPU transcription failed: {e}")))?;
+                *self.last_execution.lock().unwrap() = Some(outcome.execution);
+                Ok(outcome.text)
+            }
+            Device::Gpu => {
+                if self.runtime.backend_id() == BackendId::Cpu {
+                    return Err(err(
+                        "GPU transcription failed: active runtime has CPU support only. Choose CPU in Settings to transcribe on CPU.",
+                    ));
+                }
+                let outcome = self
+                    .runtime
+                    .transcribe(&request)
+                    .map_err(|e| err(format!("GPU transcription failed: {e}. Choose CPU in Settings to transcribe on CPU.")))?;
+                *self.last_execution.lock().unwrap() = Some(outcome.execution);
+                Ok(outcome.text)
+            }
+            Device::Auto => {
+                if self.runtime.backend_id() == BackendId::Cpu {
+                    let outcome = self
+                        .runtime
+                        .transcribe(&request)
+                        .map_err(|e| err(format!("Auto transcription failed on CPU: {e}")))?;
+                    *self.last_execution.lock().unwrap() = Some(outcome.execution);
+                    Ok(outcome.text)
+                } else {
+                    match self.runtime.transcribe(&request) {
+                        Ok(outcome) => {
+                            *self.last_execution.lock().unwrap() = Some(outcome.execution);
+                            Ok(outcome.text)
+                        }
+                        Err(gpu_err) => {
+                            // Check memory budget before retrying on CPU
+                            let available_gb = match &self.memory_checker {
+                                Some(checker) => checker(),
+                                None => {
+                                    let mut system = sysinfo::System::new();
+                                    system.refresh_memory();
+                                    system.available_memory() as f64 / 1_073_741_824.0
+                                }
+                            };
+                            if available_gb < 2.0 {
+                                return Err(err(format!(
+                                    "Auto execution failed on primary backend ({gpu_err}) and CPU retry was refused due to low memory ({available_gb:.1} GB available, 2.0 GB required)."
+                                )));
+                            }
+
+                            // Retry once on CPU
+                            let cpu = CpuRuntime;
+                            let outcome = cpu.transcribe(&request).map_err(|e| {
+                                err(format!(
+                                    "Primary backend failed ({gpu_err}) and CPU fallback also failed: {e}"
+                                ))
+                            })?;
+                            let mut exec = outcome.execution;
+                            exec.offload_evidence = Some(format!(
+                                "Fell back to CPU after primary backend failure: {gpu_err}"
+                            ));
+                            *self.last_execution.lock().unwrap() = Some(exec);
+                            Ok(outcome.text)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
 impl Drop for Dictation {
     fn drop(&mut self) {
         self.cancel();
@@ -237,6 +471,7 @@ fn capture(stop: mpsc::Receiver<()>, ready: mpsc::Sender<Result<()>>) -> Result<
     }
     result
 }
+
 fn input<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -253,7 +488,6 @@ where
         .build_input_stream(
             config,
             move |data: &[T], _| {
-                use cpal::Sample;
                 let mut out = samples.lock().unwrap();
                 for frame in data
                     .chunks_exact(channels)
@@ -269,7 +503,8 @@ where
         )
         .map_err(err)
 }
-fn resample(samples: &[f32], rate: u32) -> Vec<f32> {
+
+pub fn resample(samples: &[f32], rate: u32) -> Vec<f32> {
     // Windowed sinc low-pass conversion prevents high-frequency aliasing at 16 kHz.
     let ratio = rate as f64 / 16000.0;
     let cutoff = (1.0 / ratio).min(1.0) * 0.9;
@@ -294,63 +529,25 @@ fn resample(samples: &[f32], rate: u32) -> Vec<f32> {
         })
         .collect()
 }
-fn transcribe(
-    home: &Path,
-    settings: &DictationSettings,
-    samples: &[f32],
-    rate: u32,
-) -> Result<String> {
-    if samples.len() < rate as usize / 4
-        || samples.iter().map(|s| s * s).sum::<f32>() / (samples.len().max(1) as f32) < 0.00001
-    {
-        return Ok(String::new());
-    }
-    let mut context = WhisperContextParameters::default();
-    context.use_gpu(settings.device == Device::Gpu);
-    let model = model(home);
-    let path = model.to_str().ok_or_else(|| err("Invalid model path"))?;
-    let context = WhisperContext::new_with_params(path, context).map_err(err)?;
-    let mut state = context.create_state().map_err(err)?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(if settings.language == "auto" {
-        None
-    } else {
-        Some(&settings.language)
-    });
-    params.set_translate(false);
-    params.set_no_context(true);
-    params.set_suppress_blank(true);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_print_special(false);
-    params.set_n_threads(
-        std::thread::available_parallelism().map_or(2, |n| n.get().clamp(1, 8)) as i32,
-    );
-    state.full(params, &resample(samples, rate)).map_err(err)?;
-    Ok(state
-        .as_iter()
-        .map(|s| s.to_string())
-        .collect::<String>()
-        .trim()
-        .to_string())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn resource_advice_covers_low_memory_and_slow_cpu() {
         assert!(recommendation(1.0, 8).starts_with("Not recommended"));
         assert!(recommendation(4.0, 2).contains("slow"));
         assert!(recommendation(4.0, 8).starts_with("Recommended"));
     }
+
     #[test]
     fn resampling_preserves_duration_and_dc() {
         let result = resample(&vec![0.25; 48000], 48000);
         assert_eq!(result.len(), 16000);
         assert!(result.iter().all(|v| (v - 0.25).abs() < 0.001));
     }
+
     #[test]
     fn disabled_does_not_open_microphone() {
         assert!(

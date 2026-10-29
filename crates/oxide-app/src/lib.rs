@@ -275,7 +275,61 @@ pub struct Settings {
 pub enum DictationDevice {
     Cpu,
     Gpu,
+    Auto,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendId {
+    Cpu,
+    Cuda,
+    Vulkan,
+    Metal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "status", content = "details", rename_all = "camelCase")]
+pub enum CapabilityState {
+    OmittedFromBuild,
+    NoCompatibleDevice,
+    MissingDriverOrRuntime,
+    InitializationFailure(String),
+    InsufficientMemory {
+        #[specta(type = f64)]
+        required_bytes: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[specta(type = Option<f64>)]
+        available_bytes: Option<u64>,
+    },
+    Available,
+    VerifiedByInference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendProbe {
+    pub backend: BackendId,
+    pub state: CapabilityState,
+    pub adapter: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionDetails {
+    pub backend: BackendId,
+    pub adapter: Option<String>,
+    pub offloaded: bool,
+    pub offload_evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildManifest {
+    pub whisper_rs_version: String,
+    pub whisper_cpp_pinned: String,
+    pub included_backends: Vec<BackendId>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DictationSettings {
@@ -283,6 +337,7 @@ pub struct DictationSettings {
     language: String,
     device: DictationDevice,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DictationStatus {
@@ -291,17 +346,24 @@ pub struct DictationStatus {
     available_memory_gb: f64,
     cpu_threads: u32,
     recommendation: String,
+    manifest: BuildManifest,
+    probes: Vec<BackendProbe>,
+    last_execution: Option<ExecutionDetails>,
 }
 
 #[tauri::command]
 #[specta::specta]
-async fn dictation_status(core: State<'_, Arc<Core>>) -> Result<DictationStatus, AppError> {
+async fn dictation_status(
+    core: State<'_, Arc<Core>>,
+    dictation: State<'_, Arc<oxide_core::dictation::Dictation>>,
+) -> Result<DictationStatus, AppError> {
     let core = core.inner().clone();
-    Ok(tauri::async_runtime::spawn_blocking(move || {
-        convert(&oxide_core::dictation::status(core.home()))
-    })
-    .await
-    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))?)
+    let dictation = dictation.inner().clone();
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || convert(&dictation.status(core.home())))
+            .await
+            .map_err(|e| oxide_core::Error::Dictation(e.to_string()))?,
+    )
 }
 #[tauri::command]
 #[specta::specta]

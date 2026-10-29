@@ -176,7 +176,8 @@ code { font-family: var(--mono); font-size: 12px; }
   margin-bottom: -1px;
 }
 .tab:hover:not(:disabled) { color: var(--fg); background: var(--bg3); border-color: transparent; }
-.tab[aria-selected="true"], .tab[aria-selected="true"]:hover { color: var(--fg-bright); border-bottom-color: var(--acc2); }
+.tab[aria-selected="true"], .tab[aria-selected="true"]:hover,
+.tab[aria-current="location"], .tab[aria-current="location"]:hover { color: var(--fg-bright); border-bottom-color: var(--acc2); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 ::-webkit-scrollbar { width: 10px; height: 10px; }

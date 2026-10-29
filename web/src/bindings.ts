@@ -174,6 +174,9 @@ export const commands = {
 	rememberSelection: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("remember_selection", { projectId, threadId })),
 	/**  The user confirmed quitting: interrupt every Thread and exit. */
 	confirmQuit: (dontAskAgain: boolean) => typedError<null, AppError>(__TAURI_INVOKE("confirm_quit", { dontAskAgain })),
+	appUpdateStatus: () => __TAURI_INVOKE<UpdateStatus_Serialize>("app_update_status"),
+	checkAppUpdate: () => typedError<UpdateStatus_Serialize, AppError>(__TAURI_INVOKE("check_app_update")),
+	installAppUpdate: (onProgress: Channel<UpdateStatus_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("install_app_update", { onProgress })),
 };
 
 /* Types */
@@ -1250,6 +1253,28 @@ export type UnknownEventSnapshot = {
 	id: number,
 	raw: string,
 	createdAt: string,
+};
+
+export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing";
+
+export type UpdateStatus = UpdateStatus_Serialize | UpdateStatus_Deserialize;
+
+export type UpdateStatus_Deserialize = {
+	currentVersion: string,
+	version?: string | null,
+	notes?: string | null,
+	phase: UpdatePhase,
+	downloaded: number | null,
+	total?: number | null,
+};
+
+export type UpdateStatus_Serialize = {
+	currentVersion: string,
+	version: string | null,
+	notes: string | null,
+	phase: UpdatePhase,
+	downloaded: number | null,
+	total: number | null,
 };
 
 export type UsageLimitWindow = UsageLimitWindow_Serialize | UsageLimitWindow_Deserialize;

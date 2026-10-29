@@ -126,9 +126,37 @@ Releases are tagged on `main` by the maintainer:
    git fetch origin && git tag -a vX.Y.Z origin/main -m "Oxide vX.Y.Z" && git push origin vX.Y.Z
    ```
    A tag with a pre-release suffix (`vX.Y.Z-rc.1`) creates a pre-release. The release workflow refuses a tag that doesn't match the three declared versions.
-4. **Review and publish** the draft release. It contains the `.dmg`, the `.app` archive, `SHA256SUMS.txt`, build-provenance attestations and notes generated from merged PRs, grouped by label (see [.github/release.yml](.github/release.yml)).
+4. **Review and publish** the draft release. It contains the macOS `.dmg` and `.app` archive, Windows x64 NSIS installer, updater signatures, `latest.json`, `SHA256SUMS.txt`, build-provenance attestations and generated notes. Publishing a stable release makes its signed packages available to **Settings → Updates → Check for updates**. Drafts and prereleases do not become the stable feed.
 
 To test the pipeline without tagging, run the Release workflow manually (**Actions → Release → Run workflow**). It builds the bundle and uploads it as a workflow artifact only.
+
+### Application updater signing
+
+The updater's public key and stable feed URL are in `crates/oxide-app/tauri.conf.json`.
+The release build merges `tauri.updater.conf.json` to produce signed packages.
+Normal PR and local builds do not need the private key. Native commands own the
+updater; the webview has no generic updater, process or filesystem permissions.
+
+| Repository secret | Value |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the updater private key corresponding to the committed public key |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Optional password, only for a password-protected key |
+
+The initial key is configured in the repository secret. Its local backup is
+outside the checkout, in the user's `.oxide/release-keys/oxide-updater.key`, with
+access restricted to that user. Keep a secure backup: future updates must use
+the same key. Never commit the private key or replace the public key casually.
+
+For a local updater package build, point `TAURI_SIGNING_PRIVATE_KEY` at that key
+and run Tauri with `--config crates/oxide-app/tauri.updater.conf.json`.
+The release pipeline requires the secret, builds both supported packages, and
+generates a feed only when each package has a signature. An unpublished/missing
+feed or a network failure is reported as a check failure, never as “up to date”.
+The first published stable release from this pipeline enables the feed; there
+is no update to download until a newer version is published. macOS Intel and
+Linux packages are not currently built by the release workflow.
+
+The package/feed format follows [Tauri's updater contract](https://v2.tauri.app/plugin/updater/).
 
 ### Signing and notarization
 

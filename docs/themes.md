@@ -15,8 +15,9 @@ font files must already be installed on the destination machine.
 
 ## Create or import a theme
 
-1. Start with [oxide-night.json](themes/oxide-night.json), or expand
-   **Edit theme JSON → Advanced** in Appearance settings.
+1. Start with [oxide-night.json](themes/oxide-night.json), or press **Edit JSON**
+   under **Custom theme** in Appearance settings. **Close JSON editor** hides it
+   without discarding the draft.
 2. Import the file, select its variant in **Theme**, and press **Save**.
    Editing JSON alone keeps the current appearance.
 3. Use **Export JSON** to share or edit the pack externally. Reimport external

@@ -268,6 +268,11 @@ impl Core {
         (active > 0 && self.settings().settings.confirm_quit).then_some(active)
     }
 
+    /// Working Threads and pending approvals, independent of quit preferences.
+    pub fn active_thread_count(&self) -> u32 {
+        self.activity.active_count()
+    }
+
     /// Turns the quit-confirmation Setting off ("don't ask again").
     pub fn disable_quit_confirmation(&self) -> Result<()> {
         let mut settings = self.settings().settings;

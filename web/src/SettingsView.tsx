@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GithubSetup } from "./GithubSetup";
+import { UpdatesSettings } from "./UpdatesSettings";
+import { SETTINGS_SECTIONS, useSettingsSection } from "./useSettingsSection";
 import { getAppearance, saveAppearance, validateAppearance } from "./appearance";
 import { Skeleton } from "./Skeleton";
 import { listen } from "@tauri-apps/api/event";
@@ -62,6 +64,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   );
   const [editors, setEditors] = useState<Editor[]>([]);
   const [catalogs, setCatalogs] = useState<Partial<Record<Provider, ModelInfo[]>>>({});
+  const scroller = useRef<HTMLElement>(null);
+  const activeSection = useSettingsSection(scroller, state !== null && draft !== null);
 
   useEffect(() => {
     // A valid change on disk replaces the draft (the file is the source of
@@ -145,13 +149,13 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
     ));
 
   return (
-    <main className="settings" aria-label="Settings">
+    <main ref={scroller} className="settings" aria-label="Settings">
       <header className="settings-header">
         <h1>Settings</h1>
         <p>Manage your defaults, Providers and Projects.</p>
       </header>
       <nav className="settings-nav" aria-label="Settings sections">
-        {[["appearance", "Appearance"], ["general", "General"], ["providers", "Providers"], ["github", "GitHub tools"], ["shortcuts", "Keyboard shortcuts"]].map(([id, label]) => <a key={id} href={`#settings-${id}`} onClick={(e) => { e.preventDefault(); document.getElementById(`settings-${id}`)?.scrollIntoView({ block: "start" }); }}>{label}</a>)}
+        {SETTINGS_SECTIONS.map(([id, label]) => <a className="tab" key={id} href={`#settings-${id}`} aria-current={activeSection === id ? "location" : undefined} onClick={(e) => { e.preventDefault(); document.getElementById(`settings-${id}`)?.scrollIntoView({ block: "start" }); }}>{label}</a>)}
       </nav>
       {fileErrors.length > 0 && (
         <section className="error-summary" role="alert">
@@ -346,6 +350,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
       />
 
+      <UpdatesSettings />
       {saveError && <p className="error" role="alert">{saveError}</p>}
       <div className="actions">
         <button className="primary" onClick={save} disabled={saveStatus === "saving"}>

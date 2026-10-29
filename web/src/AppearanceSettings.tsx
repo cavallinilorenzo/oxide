@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { commands } from "./bindings";
-import { DownloadIcon, UploadIcon } from "@primer/octicons-react";
+import { CodeIcon, DownloadIcon, UploadIcon } from "@primer/octicons-react";
 import {
   DEFAULT_APPEARANCE,
   getAppearance,
@@ -14,6 +14,8 @@ export function AppearanceSettings({ onDraftChange }: { onDraftChange?: (value: 
   const [draft, setDraft] = useState(getAppearance);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [editingJson, setEditingJson] = useState(false);
+  const jsonId = useId();
   const [fonts, setFonts] = useState<string[]>([]);
   const [fontError, setFontError] = useState<string | null>(null);
   const [fontRevision, setFontRevision] = useState(0);
@@ -179,7 +181,8 @@ export function AppearanceSettings({ onDraftChange }: { onDraftChange?: (value: 
             }}
           />
         </div>
-        <details className="appearance-advanced"><summary>Edit theme JSON <span className="dim">Advanced</span></summary>
+        <div className="appearance-advanced"><div className="appearance-advanced-header"><div><strong>Custom theme</strong><p className="settings-note">Edit the theme’s color and syntax tokens.</p></div><button type="button" className="btn appearance-json-toggle" aria-expanded={editingJson} aria-controls={jsonId} onClick={() => setEditingJson((value) => !value)}><CodeIcon size={16} />{editingJson ? "Close JSON editor" : "Edit JSON"}</button></div>
+        <div id={jsonId} hidden={!editingJson}>
         <label className="appearance-json-label">
           Theme JSON
           <textarea
@@ -196,7 +199,7 @@ export function AppearanceSettings({ onDraftChange }: { onDraftChange?: (value: 
           and style tokens. See <code>docs/themes.md</code> for the supported
           tokens and examples.
         </p>
-        </details>
+        </div></div>
         {error && (
           <p role="alert" className="error">
             {error}

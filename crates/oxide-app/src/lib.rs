@@ -2,6 +2,8 @@
 //! The webview talks only to the TypeScript bindings generated from here.
 
 mod system;
+mod updates;
+use updates::{app_update_status, check_app_update, install_app_update};
 
 use std::sync::Arc;
 
@@ -2635,7 +2637,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         open_issue,
         last_selection,
         remember_selection,
-        confirm_quit
+        confirm_quit,
+        app_update_status,
+        check_app_update,
+        install_app_update
     ])
 }
 
@@ -2658,6 +2663,8 @@ pub fn run() {
     export_bindings();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Arc::new(updates::Updates::default()))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler({

@@ -138,7 +138,7 @@ const repository = path.resolve(__dirname, "../..");
       await page
         .getByLabel("Code editor font", { exact: true })
         .selectOption("Consolas");
-      await page.getByText("Edit theme JSON", { exact: false }).click();
+      await page.getByRole("button", { name: "Edit JSON", exact: true }).click();
       await page
         .getByLabel("Theme JSON", { exact: true })
         .fill(

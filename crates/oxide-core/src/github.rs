@@ -342,9 +342,18 @@ impl Gh {
             && let Some(inherited_path) = std::env::var_os("PATH")
         {
             // The test shim is found through the explicit search path, but its .cmd launcher
-            // needs tools such as Python from the runner's PATH.
-            child_path.push(";");
-            child_path.push(inherited_path);
+            // needs tools such as Python from the runner's PATH. Only those directories: cargo
+            // adds every build-script output directory to PATH in tests, and cmd.exe ignores a
+            // PATH that long, so the launcher would find neither Python nor `where`.
+            let needed = std::env::split_paths(&inherited_path).filter(|dir| {
+                ["python.exe", "git.exe", "cmd.exe"]
+                    .iter()
+                    .any(|tool| dir.join(tool).is_file())
+            });
+            if let Ok(needed) = std::env::join_paths(needed) {
+                child_path.push(";");
+                child_path.push(needed);
+            }
         }
         #[cfg(not(windows))]
         let child_path = path.clone();
@@ -423,7 +432,7 @@ impl Gh {
                 (GithubAvailability::Ready, None)
             }
             Err(GhError::Missing) => (GithubAvailability::Missing, Some(INSTALL_GUIDANCE.into())),
-            Err(GhError::Failed(m)) => (GithubAvailability::LoggedOut, Some(format!("{LOGIN_GUIDANCE} DEBUG[{m}]"))),
+            Err(GhError::Failed(_)) => (GithubAvailability::LoggedOut, Some(LOGIN_GUIDANCE.into())),
         }
     }
 

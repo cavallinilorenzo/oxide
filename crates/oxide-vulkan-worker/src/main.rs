@@ -218,6 +218,40 @@ fn execute(message: WorkerRequest) -> Result<WorkerResult, BackendError> {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--dictation-benchmark-worker") {
+        use oxide_core::dictation::{
+            BackendId, BackendProbe,
+            benchmark::{NativeDevice, worker_main_with},
+            resources::BackendCandidate,
+        };
+        worker_main_with(|backend, adapter_id| {
+            if backend != BackendId::Vulkan {
+                return Err(BackendError::Unavailable(CapabilityState::OmittedFromBuild));
+            }
+            let device = adapters()?
+                .into_iter()
+                .find(|d| Some(&d.id) == adapter_id.as_ref())
+                .ok_or(BackendError::Unavailable(
+                    CapabilityState::NoCompatibleDevice,
+                ))?;
+            Ok(NativeDevice {
+                candidate: BackendCandidate {
+                    probe: BackendProbe {
+                        backend,
+                        state: device.capability,
+                        adapter: Some(device.name),
+                        memory_pool: device.memory,
+                    },
+                    adapter_id: Some(device.id),
+                    driver_version: device.driver,
+                    runtime_version: oxide_core::dictation::resources::runtime_version(backend),
+                },
+                native_index: device.native_index,
+                native_backend: device.native_backend,
+            })
+        });
+        return;
+    }
     let response = WorkerResponse {
         protocol_version: 1,
         engine_version: ENGINE_VERSION.into(),

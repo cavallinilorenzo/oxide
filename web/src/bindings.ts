@@ -7,6 +7,8 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	dictationStatus: () => typedError<DictationStatus_Serialize, AppError>(__TAURI_INVOKE("dictation_status")),
+	dictationCheckPerformance: (request: DictationBenchmarkRequest_Deserialize, progress: Channel<DictationBenchmarkProgress_Deserialize>) => typedError<DictationBenchmarkResult_Serialize[], AppError>(__TAURI_INVOKE("dictation_check_performance", { request, progress })),
+	dictationCancelPerformance: () => __TAURI_INVOKE<void>("dictation_cancel_performance"),
 	dictationInstall: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_install")),
 	dictationModelCatalogue: () => __TAURI_INVOKE<DictationModelCatalogue>("dictation_model_catalogue"),
 	dictationModels: () => typedError<DictationModelStatus[], AppError>(__TAURI_INVOKE("dictation_models")),
@@ -302,6 +304,8 @@ export type BackendProbe_Serialize = {
 	memoryPool?: MemoryPool_Serialize,
 };
 
+export type BenchmarkPhase = { phase: "loading" } | { phase: "warmup" } | { phase: "measuring"; run: number };
+
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
 
@@ -448,6 +452,58 @@ export type DeveloperTool_Serialize = {
 	path: string | null,
 	canInstall: boolean,
 	documentation: string,
+};
+
+export type DictationBenchmarkProgress = DictationBenchmarkProgress_Serialize | DictationBenchmarkProgress_Deserialize;
+
+export type DictationBenchmarkProgress_Deserialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapterId?: string | null,
+	phase: BenchmarkPhase,
+};
+
+export type DictationBenchmarkProgress_Serialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapterId: string | null,
+	phase: BenchmarkPhase,
+};
+
+export type DictationBenchmarkRequest = DictationBenchmarkRequest_Serialize | DictationBenchmarkRequest_Deserialize;
+
+export type DictationBenchmarkRequest_Deserialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapterId?: string | null,
+	includeConservativeCandidate: boolean,
+};
+
+export type DictationBenchmarkRequest_Serialize = {
+	model: DictationModelId,
+	backend: BackendId,
+	adapterId: string | null,
+	includeConservativeCandidate: boolean,
+};
+
+export type DictationBenchmarkResult = DictationBenchmarkResult_Serialize | DictationBenchmarkResult_Deserialize;
+
+export type DictationBenchmarkResult_Deserialize = {
+	fixtureVersion: string,
+	model: DictationModelId,
+	measurement: PerformanceMeasurement_Deserialize,
+	execution: ExecutionDetails_Deserialize,
+	medianInferenceMs: number | null,
+	medianRtfMilli: number | null,
+};
+
+export type DictationBenchmarkResult_Serialize = {
+	fixtureVersion: string,
+	model: DictationModelId,
+	measurement: PerformanceMeasurement_Serialize,
+	execution: ExecutionDetails_Serialize,
+	medianInferenceMs: number | null,
+	medianRtfMilli: number | null,
 };
 
 export type DictationDevice = "cpu" | "gpu" | "auto";
@@ -914,6 +970,48 @@ export type PendingApproval_Serialize = {
 	kind: ApprovalKind_Serialize,
 	summary: string,
 	options: string[],
+};
+
+export type PerformanceIdentity = PerformanceIdentity_Serialize | PerformanceIdentity_Deserialize;
+
+export type PerformanceIdentity_Deserialize = {
+	modelSha256: string,
+	backend: BackendId,
+	adapterId?: string | null,
+	driverVersion?: string | null,
+	runtimeVersion: string,
+	policyVersion: number,
+	catalogueVersion: number,
+	cpu: CpuResources_Deserialize,
+};
+
+export type PerformanceIdentity_Serialize = {
+	modelSha256: string,
+	backend: BackendId,
+	adapterId: string | null,
+	driverVersion: string | null,
+	runtimeVersion: string,
+	policyVersion: number,
+	catalogueVersion: number,
+	cpu: CpuResources_Serialize,
+};
+
+export type PerformanceMeasurement = PerformanceMeasurement_Serialize | PerformanceMeasurement_Deserialize;
+
+export type PerformanceMeasurement_Deserialize = {
+	key: PerformanceIdentity_Deserialize,
+	recordedAtSecs: number | null,
+	audioDurationMs: number | null,
+	warmInferenceMs: [(number | null), (number | null), (number | null)],
+	coldLoadMs: number | null,
+};
+
+export type PerformanceMeasurement_Serialize = {
+	key: PerformanceIdentity_Serialize,
+	recordedAtSecs: number | null,
+	audioDurationMs: number | null,
+	warmInferenceMs: [(number | null), (number | null), (number | null)],
+	coldLoadMs: number | null,
 };
 
 export type PermissionMode = "ask" | "auto-edit" | "full-access";

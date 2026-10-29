@@ -1,4 +1,5 @@
 //! Local, bounded microphone capture and whisper.cpp inference. Audio never touches disk.
+pub mod benchmark;
 pub mod cuda;
 pub mod metal;
 pub mod models;
@@ -186,6 +187,7 @@ pub struct Dictation {
     generation: AtomicU64,
     selected: Mutex<Option<(ModelId, models::ModelLease)>>,
     cancellation: Mutex<Option<Arc<AtomicBool>>>,
+    benchmark_cancellation: Mutex<Option<Arc<AtomicBool>>>,
     recording: Mutex<Option<Recording>>,
     busy: Mutex<bool>,
     last_execution: Mutex<Option<ExecutionDetails>>,
@@ -235,6 +237,7 @@ impl Default for Dictation {
             generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
+            benchmark_cancellation: Mutex::new(None),
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
@@ -256,6 +259,7 @@ impl Dictation {
             generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
+            benchmark_cancellation: Mutex::new(None),
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
@@ -274,6 +278,7 @@ impl Dictation {
             generation: AtomicU64::new(0),
             selected: Mutex::new(None),
             cancellation: Mutex::new(None),
+            benchmark_cancellation: Mutex::new(None),
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
@@ -422,6 +427,7 @@ impl Dictation {
 
     pub fn cancel(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.cancel_performance();
         let recording = self.recording.lock().unwrap().take();
         if let Some(cancelled) = self.cancellation.lock().unwrap().take() {
             cancelled.store(true, Ordering::SeqCst);

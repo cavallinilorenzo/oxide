@@ -29,7 +29,7 @@ struct ResourceSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-struct CpuResources {
+pub(crate) struct CpuResources {
     architecture: String,
     model: String,
     usable_cores: u32,

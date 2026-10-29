@@ -207,12 +207,19 @@ impl ModelManager {
     }
 
     pub fn acquire(&self, home: &Path, id: ModelId) -> Result<ModelLease> {
-        let lock = self.lock(home, id)?;
-        lock.try_lock_shared()
-            .map_err(|_| err("Model operation is already active"))?;
+        let lease = self.lease_for_verification(home, id)?;
         if !self.verify(&model_path(home, id), self.entry(id)?)? {
             return Err(err("Download and verify the selected model first"));
         }
+        Ok(lease)
+    }
+
+    /// Protect a path while a disposable worker performs bounded verification.
+    /// This lease alone is NOT proof that an artifact is installed or valid.
+    pub fn lease_for_verification(&self, home: &Path, id: ModelId) -> Result<ModelLease> {
+        let lock = self.lock(home, id)?;
+        lock.try_lock_shared()
+            .map_err(|_| err("Model operation is already active"))?;
         Ok(ModelLease { _lock: lock })
     }
 

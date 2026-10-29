@@ -151,7 +151,10 @@ pub fn inspect(home: &std::path::Path, preference: Preference) -> ResourceAdvice
         &backends,
         &installed,
         preference,
-        &[],
+        &super::super::benchmark::read_cache(home)
+            .into_iter()
+            .map(|r| r.measurement)
+            .collect::<Vec<_>>(),
         now_secs(),
     );
     ResourceAdvice {
@@ -162,9 +165,9 @@ pub fn inspect(home: &std::path::Path, preference: Preference) -> ResourceAdvice
 }
 
 pub fn backend_candidates() -> Vec<BackendCandidate> {
-    let version = dictation::BuildManifest::current().whisper_cpp_pinned;
     let mut candidates = Vec::new();
     for probe in dictation::probe_backends() {
+        let version = runtime_version(probe.backend);
         // Native workers enumerate stable identities and driver versions. Never merge
         // CUDA and Vulkan memory budgets, even when they refer to the same physical GPU.
         if matches!(

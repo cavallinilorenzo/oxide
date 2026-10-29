@@ -27,6 +27,8 @@ pub struct TranscriptionOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
 pub enum BackendError {
+    #[error("Selected model is missing or invalid. Install it explicitly first.")]
+    ModelUnavailable,
     #[error("Transcription cancelled")]
     Cancelled,
     #[error("Backend unavailable: {0:?}")]
@@ -66,6 +68,25 @@ pub fn run_whisper_on_device(
     use_gpu: bool,
     gpu_device: i32,
 ) -> Result<(String, bool, Option<String>), BackendError> {
+    let context = load_context(request, use_gpu, gpu_device)?;
+    let mut state = context
+        .create_state()
+        .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
+    infer(request, &mut state)?;
+    let text = state
+        .as_iter()
+        .map(|s| s.to_string())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    Ok((text, use_gpu, None))
+}
+
+fn load_context(
+    request: &TranscriptionRequest,
+    use_gpu: bool,
+    gpu_device: i32,
+) -> Result<WhisperContext, BackendError> {
     if !request.model_path.is_file() {
         return Err(BackendError::InitializationFailed(format!(
             "Model file not found at: {}",
@@ -86,7 +107,7 @@ pub fn run_whisper_on_device(
         .to_str()
         .ok_or_else(|| BackendError::InitializationFailed("Invalid model path".into()))?;
 
-    let context = WhisperContext::new_with_params(path_str, context_params).map_err(|e| {
+    WhisperContext::new_with_params(path_str, context_params).map_err(|e| {
         let message = e.to_string();
         let lower = message.to_lowercase();
         if lower.contains("out of memory") || lower.contains("cannot allocate") {
@@ -106,12 +127,13 @@ pub fn run_whisper_on_device(
         } else {
             BackendError::InitializationFailed(message)
         }
-    })?;
+    })
+}
 
-    let mut state = context
-        .create_state()
-        .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
-
+fn infer(
+    request: &TranscriptionRequest,
+    state: &mut whisper_rs::WhisperState,
+) -> Result<(), BackendError> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     unsafe extern "C" fn abort_cancelled(data: *mut std::ffi::c_void) -> bool {
         // SAFETY: installed below from the request's Arc, alive throughout synchronous full().
@@ -139,14 +161,35 @@ pub fn run_whisper_on_device(
         .full(params, &resampled)
         .map_err(|e| BackendError::InferenceFailed(e.to_string()))?;
 
-    let text = state
-        .as_iter()
-        .map(|s| s.to_string())
-        .collect::<String>()
-        .trim()
-        .to_string();
+    Ok(())
+}
 
-    Ok((text, use_gpu, None))
+/// One cold context/state, one discarded warmup and three warm runs. No text leaves
+/// this boundary. The calling process is disposable and is killed on timeout/cancel.
+pub(crate) fn benchmark_on_device(
+    request: &TranscriptionRequest,
+    backend: BackendId,
+    gpu_device: i32,
+    mut progress: impl FnMut(super::benchmark::Phase),
+) -> Result<super::benchmark::Timing, BackendError> {
+    use std::time::Instant;
+    progress(super::benchmark::Phase::Loading);
+    let started = Instant::now();
+    let context = load_context(request, backend != BackendId::Cpu, gpu_device)?;
+    let mut state = context
+        .create_state()
+        .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
+    let cold_load_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    super::benchmark::measure(
+        super::benchmark::FIXTURE_DURATION_MS,
+        cold_load_ms,
+        || {
+            let started = Instant::now();
+            infer(request, &mut state)?;
+            Ok(started.elapsed())
+        },
+        progress,
+    )
 }
 
 /// Native CPU execution runtime. Never requests offload.

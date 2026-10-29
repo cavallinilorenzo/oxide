@@ -1,6 +1,7 @@
 # Dictation resource policy v1
 
-Issue #231 implements advice, not a benchmark or automatic model selection.
+Issue #231 implements advice; #232 adds an explicit local performance check.
+Neither changes the user's model selection or enables dictation automatically.
 `oxide_core::dictation::resources::recommend` is the deterministic seam:
 resource snapshot + backend/device candidates + installed model IDs + preference
 + optional measurements + explicit current time -> decisions and an optional
@@ -126,7 +127,64 @@ The selected index is absent when nothing can be advised. Show the per-choice
 actionable reasons and offer freeing resources or keeping dictation disabled.
 Safe manual choices remain possible; advice does not write persisted settings.
 
-## Measured-performance input for #232
+## Explicit local performance check (#232)
+
+`Dictation::check_performance` runs only on explicit request. It accepts a
+catalogue model ID, backend, stable adapter ID, and whether to include a
+conservative candidate. The selected model must already be verified installed.
+The optional candidate uses the same backend/device: Base for Small or larger,
+Tiny for Base, none for Tiny. A missing file is skipped; the worker verifies
+each candidate before inference. No other models are explored; a larger model
+requires another explicit request.
+
+The worker uses `jfk-16khz-pcm-v1`, the bundled 11-second public-domain speech
+excerpt attributed in `docs/licenses/dictation-fixture.txt`. It never opens the
+microphone or starts downloads. CPU runs in the app's
+`--dictation-benchmark-worker` mode, before Tauri starts; Vulkan uses its isolated
+native worker with the same protocol. Each combination has a
+120-second process limit, including worker-side verification, device probing,
+context loading, warmup and inference. At most two combinations run serially.
+The host terminates and reaps the child on timeout/cancellation/error. Native
+contexts and inference buffers belong to that process and are released at exit.
+
+The coordinator shares dictation's busy gate, refuses checks during recording
+or transcription and prevents recording start during a check. Disabling
+dictation cancels the check. The separate performance-cancel command does not
+cancel ordinary dictation. Host RAM is refreshed before each worker; native
+RAM/device budgets are checked again before loading. Models remain leased
+against deletion throughout their check. Full artifact verification and native
+device probing run inside the child deadline, with GPU budgets collected after
+verification. The host only leases the file and refreshes RAM. No Settings value
+is changed.
+
+The worker times one cold context/state load, discards one warmup, then measures
+three runs on the same context/state. Warm milliseconds and RTF round upward
+so a result just above a product target cannot qualify by truncation. CPU uses
+no offload; GPU measurements require observed device/driver identity to match
+and native backend selection plus completed compute evidence (Vulkan additionally
+requires positive GPU kernel timestamps). Missing evidence refuses the result;
+there is no benchmark GPU-to-CPU fallback. The pinned CUDA/Metal paths expose
+selection/allocation logs but no completed dispatch counters. Their checks
+currently return an explicit unavailable-evidence error before inference, with
+CPU/Vulkan offered instead. Measuring those backends requires native execution
+instrumentation, tracked in [#258](https://github.com/cavallinilorenzo/oxide/issues/258)
+after the maintainer accepted CPU/Vulkan scope for #232. Ordinary CUDA/Metal
+dictation is unchanged; physical hardware acceptance remains with #235.
+
+Settings IPC is `dictationCheckPerformance(request, progressChannel)` and
+`dictationCancelPerformance()`. The typed channel reports Loading, Warmup and
+Measuring runs 1–3 with model/backend/adapter identity. Results include fixture
+version, observed execution, key, cold load, three warm times, median inference
+milliseconds and median RTF in thousandths. Call `dictationStatus` afterward to
+refresh advice. The full UI is the #233 slice.
+
+Only metadata is stored in `dictation-performance.json`: at most 32 results in a
+bounded atomic JSON cache. Fixture version and execution evidence are validated
+on read; corrupt/oversized caches are ignored. Cancelled/failed checks do not
+publish results. No audio, transcript, user paths, native logs or telemetry are
+persisted; the operation has no network path.
+
+### Measurement identity and advice
 
 `MeasuredPerformance` contains a `PerformanceKey`, recording time, fixture audio
 duration, three warm inference durations and separate cold-load milliseconds.
@@ -134,7 +192,8 @@ The producer must warm up first and time the same licensed fixture without
 opening the microphone. Store no audio or transcript in this input.
 
 The key includes model SHA-256, backend, stable adapter ID, driver version,
-runtime version, catalogue version, policy version and host CPU configuration
+runtime version (including app version, development/release profile and CPU
+native instruction build flags), catalogue version, policy version and host CPU configuration
 (architecture, model, usable cores and instruction compatibility). CPU or
 parallelism changes invalidate measurements as well. Unknown GPU identity or
 driver cannot establish a cache match. Results older than 30 days, future-dated,
@@ -154,3 +213,42 @@ Worker protocol tests inject the host OS resource snapshot independently of the
 fake GPU's reported budget, including a 3 GiB available-RAM pressure case. They
 do not depend on the runner's RAM or concurrent compilation. Production defaults
 still capture real resources, and native workers retain their own fresh guards.
+
+### Local smoke evidence
+
+On 2026-10-29, Small with whisper.cpp 1.8.3 / whisper-rs-sys 0.15.0 on
+Windows x64, AMD Ryzen 7 5700X (16 usable logical cores, 8 inference threads),
+using the existing verified artifact and `jfk-16khz-pcm-v1`:
+
+| Actual backend | Cold context/state | Three warm runs | Median inference | RTF |
+| --- | ---: | --- | ---: | ---: |
+| CPU, no offload | 437 ms | 2229 / 2240 / 2230 ms | 2230 ms | 0.203 |
+| Vulkan, RX 5600 XT, AMD 26.10.1 | 700 ms | 501 / 496 / 498 ms | 498 ms | 0.046 |
+| CPU, release app worker, no offload | 468 ms | 29669 / 26453 / 26069 ms | 26453 ms | 2.405 |
+
+The first two rows use development builds. The release app worker was exercised
+directly after the Windows bundle build and was substantially slower in this
+session. Build flags and concurrent system load can affect results; the cache
+separates build variants so the fast development observation cannot be reused
+as a release measurement. A post-review Vulkan development repeat returned
+586 ms cold, 495 / 494 / 494 ms warm, median 494 ms, RTF 0.045.
+
+The Vulkan run observed `whisper_backend_init_gpu: using Vulkan0 backend`
+and positive native GPU kernel timestamps with `MUL_MAT`. The stable adapter
+identity and driver version are retained with the measurement. No CPU fallback
+was used. These are development workers, not distributed-package sign-off.
+
+This is a local observation, not a hardware guarantee or a measured memory peak.
+Reproduce offline with an installed Small model:
+
+```sh
+cargo run --locked -p oxide-core --example dictation_benchmark -- HOME cpu
+```
+
+For Vulkan, set the documented worker-path environment override, then pass
+`HOME vulkan WORKER STABLE_ADAPTER_ID`. CUDA/Metal requests currently report
+unavailable execution evidence. This developer smoke
+prints only measurement metadata and progress, never audio/transcripts, and
+shares the production coordinator/process path. The app executable implements
+the same CPU child entry point. The Metal and CUDA worker protocol entry points
+are present but cannot produce accepted measurements until instrumented.

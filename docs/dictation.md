@@ -38,6 +38,32 @@ additional models are tracked in [spec #225](https://github.com/cavallinilorenzo
 
 ## Recoverable runtime architecture and extension points
 
+### Windows native-build diagnostic path
+
+From the repository root in an **x64 Native Tools Command Prompt**, with CMake,
+Ninja, libclang and the Vulkan SDK's `glslc.exe` on the appropriate search paths:
+
+```bat
+set LIBCLANG_PATH=C:\path\to\directory-containing-libclang
+node tools/dictation-build.mjs cpu
+node tools/dictation-build.mjs vulkan
+```
+
+The command selects MSVC (`cl.exe`) and Ninja for both the outer native build
+and the nested Vulkan shader compiler build. It removes inherited `CMAKE_*`
+settings, including Visual Studio instance, platform, toolset and toolchain
+selections, which cannot be reused with Ninja. It uses separate
+`target/dictation-cpu` and `target/dictation-vulkan` directories (under
+`CARGO_TARGET_DIR` when set). These direct diagnostic builds retain compiler
+caches; `cargo clean` removes them. The normal one-shot app build and local
+check runner keep their existing temporary-build behavior.
+
+An installed SDK and a successful build establish only build capability.
+This command does not establish GPU compatibility, adapter selection or actual
+offload, and it does not isolate Vulkan loader dependencies from app startup.
+The runtime and hardware acceptance criteria in #227 remain necessary before
+Windows Vulkan support can be claimed.
+
 The dictation architecture separates microphone capture and lifecycle coordination
 from native model inference behind the `WhisperBackendRuntime` boundary:
 

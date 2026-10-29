@@ -45,6 +45,7 @@ Ninja, libclang and the Vulkan SDK's `glslc.exe` on the appropriate search paths
 
 ```bat
 set LIBCLANG_PATH=C:\path\to\directory-containing-libclang
+set CARGO_TARGET_DIR=C:\oxide-build
 node tools/dictation-build.mjs cpu
 node tools/dictation-build.mjs vulkan
 ```
@@ -53,16 +54,35 @@ The command selects MSVC (`cl.exe`) and Ninja for both the outer native build
 and the nested Vulkan shader compiler build. It removes inherited `CMAKE_*`
 settings, including Visual Studio instance, platform, toolset and toolchain
 selections, which cannot be reused with Ninja. It uses separate
-`target/dictation-cpu` and `target/dictation-vulkan` directories (under
+`target/dc` and `target/dv` directories (under
 `CARGO_TARGET_DIR` when set). These direct diagnostic builds retain compiler
 caches; `cargo clean` removes them. The normal one-shot app build and local
 check runner keep their existing temporary-build behavior.
+
+Use a short `CARGO_TARGET_DIR` as shown: the shader generator's deeply nested
+compiler checks can exceed MSVC's object/PDB path limit, producing misleading
+`C1041` or `C1083` compiler-detection failures even with a working compiler.
 
 An installed SDK and a successful build establish only build capability.
 This command does not establish GPU compatibility, adapter selection or actual
 offload, and it does not isolate Vulkan loader dependencies from app startup.
 The runtime and hardware acceptance criteria in #227 remain necessary before
 Windows Vulkan support can be claimed.
+
+Diagnostic observation (2026-10-29, Windows x64): Visual Studio Build Tools
+18.10.2, MSVC 14.51.36231, CMake 4.3.1-msvc1, Vulkan SDK 1.4.363.0 and
+shaderc 2026.4 reproduced the nested compiler failure at a 272-character
+object path in the normal checkout. `vulkaninfoSDK.exe --summary` from that
+SDK detected an AMD Radeon RX 5600 XT, vendor/device `1002:731f`, Vulkan
+1.4.315, AMD driver 26.10.1 (Windows driver 32.0.21045.16010). This is evidence
+that the loader can enumerate this card, not that Whisper can offload to it.
+The exact remaining hardware validation gap is a completed model load and
+inference with native offload evidence on this card; NVIDIA validation is
+also outstanding. Reproduce adapter diagnostics with:
+
+```bat
+"%VULKAN_SDK%\Bin\vulkaninfoSDK.exe" --summary
+```
 
 The dictation architecture separates microphone capture and lifecycle coordination
 from native model inference behind the `WhisperBackendRuntime` boundary:

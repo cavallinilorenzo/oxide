@@ -17,7 +17,9 @@ export function dictationBuild(backend, inherited = process.env) {
   Object.assign(env, {
     CMAKE_GENERATOR: "Ninja", CC: "cl.exe", CXX: "cl.exe",
     CMAKE_C_COMPILER: "cl.exe", CMAKE_CXX_COMPILER: "cl.exe",
-    CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", `dictation-${backend}`)),
+    // Nested shader-generator TryCompile paths approach MSVC's 260-character
+    // object/PDB limit even in an ordinary checkout. Keep these names short.
+    CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", backend === "cpu" ? "dc" : "dv")),
   });
   return {
     env,

@@ -2,6 +2,7 @@ import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PullRequestCreate } from "./PullRequestCreate";
+import { GithubSetup } from "./GithubSetup";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -154,9 +155,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
         )}
         {list.state === "loading" && <Skeleton label="Loading pull requests…" />}
         {list.state === "error" && (
-          <p role="alert" className="pr-empty error">
-            {list.message}
-          </p>
+          <GithubSetup projectId={projectId} guidance={list.message} onReady={() => { invalidateQueries(`p${projectId}:`); setManual((v) => v + 1); }} />
         )}
         {list.state === "ready" && list.data.length === 0 && (
           <p className="pr-empty">{search || mine ? "No pull requests match." : "No open pull requests."}</p>

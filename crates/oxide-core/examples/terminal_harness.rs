@@ -29,6 +29,8 @@ fn main() {
             let args = &request["args"];
             let id = args["terminalId"].as_u64().unwrap_or(0) as u32;
             let result = match request["cmd"].as_str().unwrap() {
+                "system_fonts" => oxide_core::desktop_tools::system_fonts()
+                    .map(|fonts| serde_json::to_value(fonts).unwrap()),
                 "start_block_terminal" => {
                     core.start_block_terminal(project_id, None).map(|terminal| {
                         let receiver = core.subscribe_terminal(terminal.id).unwrap();

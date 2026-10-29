@@ -12,6 +12,7 @@ import { issuePhase } from "./issueView";
 import { LabelChip } from "./PullRequestPeople";
 import { relativeTime } from "./pullRequestReview";
 import { useAutoRefresh } from "./useAutoRefresh";
+import { GithubSetup } from "./GithubSetup";
 
 export interface IssuesSurfaceProps {
   projectId: number;
@@ -52,12 +53,10 @@ function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: Iss
   // The list starts loading together with the check; only a real setup problem replaces it.
   if (availability.state === "error") {
     content = (
-      <p role="alert" className="pr-empty error">
-        {availability.message}
-      </p>
+      <GithubSetup projectId={projectId} guidance={availability.message} onReady={() => invalidateQueries(`p${projectId}:issues:`)} />
     );
   } else if (availability.state === "ready" && availability.data.availability !== "ready") {
-    content = <p className="pr-empty">{availability.data.guidance ?? "The GitHub CLI is not ready."}</p>;
+    content = <GithubSetup projectId={projectId} guidance={availability.data.guidance ?? "The GitHub CLI is not ready."} onReady={() => invalidateQueries(`p${projectId}:issues:`)} />;
   } else if (creating) {
     content = (
       <IssueCreate

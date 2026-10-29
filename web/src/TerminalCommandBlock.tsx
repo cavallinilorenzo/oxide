@@ -7,6 +7,8 @@ import {
   ChevronRightIcon,
   CopyIcon,
   HistoryIcon,
+  ClockIcon,
+  FileDirectoryIcon,
 } from "@primer/octicons-react";
 import { terminalAppearance } from "./appearance";
 
@@ -17,6 +19,7 @@ export interface TerminalBlock {
   outputOffset: number;
   cwd: string;
   at: number;
+  completedAt?: number;
   exitCode: number | null;
   started: boolean;
   ended: boolean;
@@ -45,6 +48,13 @@ export function TerminalCommandBlock(props: Props) {
   const [expanded, setExpanded] = useState(true);
   const [screen, setScreen] = useState(false);
   const [height, setHeight] = useState(16);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  const elapsed = Math.max(0, (block.completedAt ?? now) - block.at);
   useLayoutEffect(() => {
     callbacks.current = props;
   });
@@ -55,7 +65,6 @@ export function TerminalCommandBlock(props: Props) {
       ".workbench-terminal-header",
     )!;
     const term = new Terminal({
-      fontSize: 13,
       ...terminalAppearance(),
       cursorBlink: true,
       cursorInactiveStyle: "none",
@@ -115,6 +124,8 @@ export function TerminalCommandBlock(props: Props) {
     const appearance = () => {
       const options = terminalAppearance();
       term.options.fontFamily = options.fontFamily;
+      term.options.fontSize = options.fontSize;
+      term.options.fontWeight = options.fontWeight;
       term.options.theme = options.theme;
       scheduleFit();
     };
@@ -191,7 +202,10 @@ export function TerminalCommandBlock(props: Props) {
       className={`terminal-command-block${active ? " running" : ""}${active && screen ? " fullscreen" : ""}`}
       aria-label={`Command: ${block.command}`}
     >
+      <div className="terminal-block-meta"><span title={block.cwd}><FileDirectoryIcon size={12} /> {block.cwd}</span></div>
       <header>
+        <code>{block.command}</code>
+        <span className="grow" />
         <button
           className="icon-btn sm"
           aria-label={expanded ? "Collapse output" : "Expand output"}
@@ -204,8 +218,7 @@ export function TerminalCommandBlock(props: Props) {
             <ChevronRightIcon size={14} />
           )}
         </button>
-        <code>{block.command}</code>
-        <span className="grow" />
+        <span className="block-duration" aria-label={`Command duration: ${formatDuration(elapsed)}`}><ClockIcon size={12} /> {formatDuration(elapsed)}</span>
         <span className={`block-exit${block.exitCode ? " error" : ""}`}>
           {active ? (
             "Running"
@@ -260,4 +273,11 @@ export function TerminalCommandBlock(props: Props) {
       </div>
     </section>
   );
+}
+
+export function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  const seconds = milliseconds / 1000;
+  if (seconds < 60) return `${seconds.toFixed(2)} s`;
+  return `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(1)}s`;
 }

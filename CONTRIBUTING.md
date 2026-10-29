@@ -83,3 +83,51 @@ Use the issue forms ([bug report](https://github.com/cavallinilorenzo/oxide/issu
 
 Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single source of instructions for them (Claude Code, Codex, Antigravity). `CLAUDE.md` and `GEMINI.md` just point to it. The agent docs live in [docs/agents/](docs/agents/), and the skills agents use are in `.agents/skills/`. Human contributors follow the same branch model and checks.
 
+
+## Publishing application updates manually
+
+Settings → Updates checks the latest published stable GitHub release. Publishing
+stays a human action; this repository has no CI/CD release workflows.
+
+The updater public key and feed URL are in `crates/oxide-app/tauri.conf.json`.
+The corresponding private key is kept outside the checkout in the user's
+`.oxide/release-keys/oxide-updater.key`, with access restricted to that user.
+Keep a secure backup: installed versions need future packages signed by that
+same key. Never commit it or replace the public key casually.
+
+1. Bump the version in `Cargo.toml`, the Tauri config and `web/package.json` through
+   a PR into `main`. Only a human tags a release.
+2. Build on the platform being released. Set `TAURI_SIGNING_PRIVATE_KEY` to the
+   private-key file path, then run Tauri from the repository root with
+   `--config crates/oxide-app/tauri.updater.conf.json`. For example, on Windows:
+
+   ```powershell
+   $env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $env:USERPROFILE '.oxide/release-keys/oxide-updater.key'
+   web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.updater.conf.json
+   Remove-Item Env:/TAURI_SIGNING_PRIVATE_KEY
+   ```
+
+   On macOS Apple Silicon, use `--target aarch64-apple-darwin --bundles app,dmg`.
+   Set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
+   Normal local builds do not need the signing key or the extra config.
+3. Collect the updater packages and their `.sig` files in a release directory:
+   Windows `Oxide_X.Y.Z_x64-setup.exe`, macOS `Oxide.app.tar.gz`. Each included
+   package must have a signature; platforms can be released independently.
+4. Generate the feed locally, for example:
+
+   ```sh
+   node tools/releases/update-manifest.mjs release-artifacts v0.2.0
+   node --test tools/releases/update-manifest.test.mjs
+   ```
+
+   An optional fourth argument overrides `cavallinilorenzo/oxide` for a fork.
+5. Upload the packages, signatures and generated `latest.json` to the matching
+   draft GitHub release, then review and publish it. The human-created tag must
+   match the package version. Do not upload debug builds as releases.
+
+Drafts and prereleases do not become the stable feed. The first published signed
+stable release enables the feed; an update appears only when it is newer than
+an installed app. A missing feed or connection failure is reported as a failed
+check, never as “up to date”. The local manifest helper supports Windows x64 and
+macOS Apple Silicon packages. OS signing/notarization is separate from the
+updater signature; see [Tauri's updater guide](https://v2.tauri.app/plugin/updater/).

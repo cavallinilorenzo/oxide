@@ -25,7 +25,7 @@ import { EditorFileTree } from "./EditorFileTree";
 import { LanguageTools } from "./LanguageTools";
 import { LanguageSupportNotice } from "./LanguageSupport";
 import { Skeleton } from "./Skeleton";
-import { getAppearance } from "./appearance";
+import { fontStyle, getAppearance } from "./appearance";
 import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
@@ -250,7 +250,8 @@ export function CodeWorkbench({
       model: null,
       theme: "oxide",
       automaticLayout: true,
-      fontSize: 13,
+      fontSize: fontStyle("code").size,
+      fontWeight: String(fontStyle("code").weight),
       fontFamily: getAppearance().fonts.code,
       fontLigatures: true,
       minimap: { enabled: false },
@@ -267,7 +268,7 @@ export function CodeWorkbench({
       stickyScroll: { enabled: true },
     });
     editor.current = instance;
-    const appearance=()=>instance.updateOptions({fontFamily:getAppearance().fonts.code});
+    const appearance=()=>instance.updateOptions({fontFamily:getAppearance().fonts.code, fontSize:fontStyle("code").size, fontWeight:String(fontStyle("code").weight)});
     window.addEventListener("oxide-appearance-changed",appearance);
     const bridge = new EditorLanguages(
       projectId,

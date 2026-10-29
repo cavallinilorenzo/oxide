@@ -6,6 +6,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import type { Settings_Deserialize as Settings } from "./bindings";
 import { SettingsView } from "./SettingsView";
 import { DEFAULT_SHORTCUTS } from "./shortcuts";
+import { getAppearance } from "./appearance";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const container = document.createElement("div");
@@ -13,7 +14,7 @@ document.body.append(container);
 const root = createRoot(container);
 afterEach(async () => { await act(async () => root.render(null)); clearMocks(); });
 
-it("offers supported defaults with descriptions, warns about Full access and saves each Provider independently", async () => {
+it("offers supported defaults and saves appearance, dictation and each Provider independently", async () => {
   const settings: Settings = {
     dictation: { enabled: false, language: "auto", device: "cpu" },
     defaultProvider: "claude", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS, claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
@@ -36,6 +37,9 @@ it("offers supported defaults with descriptions, warns about Full access and sav
     throw new Error(`Unexpected command ${command}`);
   });
   await act(async () => root.render(<SettingsView onClose={() => {}} />));
+  expect(container.querySelector('nav[aria-label="Settings sections"] a[href="#settings-dictation"]')?.textContent).toBe("Dictation");
+  const dictation = container.querySelector<HTMLInputElement>('[aria-labelledby="settings-dictation"] input[type="checkbox"]')!;
+  act(() => dictation.click());
   const modeButton = (provider: string) => container.querySelector<HTMLButtonElement>(`button[aria-label^="${provider} Permission mode:"]`)!;
   for (const provider of ["Claude Code", "Codex", "Antigravity CLI"]) {
     act(() => modeButton(provider).click());
@@ -51,7 +55,11 @@ it("offers supported defaults with descriptions, warns about Full access and sav
     act(() => options[options.length - 1].click());
     expect(container.querySelector(`[aria-label="${provider} Full access warning"]`)?.textContent).toContain("modify or delete files and run commands without asking");
   }
+  const terminalSize = container.querySelector<HTMLSelectElement>('select[aria-label="Terminal size"]')!;
+  await act(async () => { terminalSize.value = "18"; terminalSize.dispatchEvent(new Event("change", { bubbles: true })); });
   await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Save")!.click());
+  expect(getAppearance().typography?.terminal.size).toBe(18);
+  expect(saved?.dictation).toEqual({ enabled: true, language: "auto", device: "cpu" });
   expect(container.querySelector('[role="status"]')?.textContent).toBe("Settings saved.");
   expect(saved?.providers).toEqual({
     claude: { model: null, effort: null, permissionMode: "full-access" },

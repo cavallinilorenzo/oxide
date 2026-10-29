@@ -40,7 +40,6 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
     const terminal = new Terminal({
       cursorBlink: true,
       ...terminalAppearance(),
-      fontSize: 12,
       scrollback: 10_000,
       convertEol: true,
     });
@@ -78,7 +77,7 @@ export function TerminalPanel({ projectId, threadId, contextKey, visible, onClos
       }
     };
     const observer = new ResizeObserver(resize);
-    const appearance=()=>{const options=terminalAppearance();terminal.options.fontFamily=options.fontFamily;terminal.options.theme=options.theme;resize();};
+    const appearance=()=>{const options=terminalAppearance();terminal.options.fontFamily=options.fontFamily;terminal.options.fontSize=options.fontSize;terminal.options.fontWeight=options.fontWeight;terminal.options.theme=options.theme;resize();};
     window.addEventListener("oxide-appearance-changed",appearance);
     observer.observe(host);
     const dataSubscription = terminal.onData((data) => {

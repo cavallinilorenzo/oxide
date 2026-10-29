@@ -1,4 +1,5 @@
 import { MarkGithubIcon, RepoIcon } from "@primer/octicons-react";
+import { GithubSetup } from "./GithubSetup";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { commands, type AppError, type GithubRepository, type Project } from "./bindings";
@@ -68,6 +69,7 @@ export function ProjectPalette({
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const [repositories, setRepositories] = useState<GithubRepository[]>([]);
+  const [githubRevision, setGithubRevision] = useState(0);
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +121,7 @@ export function ProjectPalette({
       current = false;
       clearTimeout(timer);
     };
-  }, [stage.kind, query]);
+  }, [stage.kind, query, githubRevision]);
 
   const goTo = (next: Stage, initialValues: string[] = []) => {
     setStage(next);
@@ -272,7 +274,7 @@ export function ProjectPalette({
         />
         {field && <div className="palette-hint">{field.label} · Enter to continue · Esc to go back</div>}
         {busy && <p className="palette-hint">Working…</p>}
-        {error && <p className="error palette-error">{error}</p>}
+        {error && stage.kind !== "github" && <p className="error palette-error">{error}</p>}
         {stage.kind === "search" && (
           <ul ref={list} id={listId} className="palette-list" role="listbox" aria-label="Results">
             {projectRows.map((p, i) => (
@@ -303,6 +305,7 @@ export function ProjectPalette({
           </ul>
         )}
         {stage.kind === "github" && (
+          error ? <GithubSetup guidance={error} onReady={() => { setError(null); setGithubRevision((v) => v + 1); }} /> :
           <ul ref={list} id={listId} className="palette-list" role="listbox" aria-label="GitHub repositories">
             {repositories.map((r, i) => (
               <li key={r.nameWithOwner} id={`${listId}-${i}`} role="option" aria-selected={i === activeIndex}

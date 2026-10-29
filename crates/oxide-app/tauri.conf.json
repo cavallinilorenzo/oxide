@@ -27,6 +27,13 @@
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost ws://localhost:1420; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://github.com https://avatars.githubusercontent.com"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA5RTg4Qjk0RTBGRTlCRjEKUldUeG0vN2dsSXZvQ2FkZHd2bFBJTDM3MTZJRE1GWHFFUXh1ejEvN3VIcFJ2YmtwbzM5N21OT3kK",
+      "endpoints": ["https://github.com/cavallinilorenzo/oxide/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
   "bundle": {
     "active": true,
     "resources": { "../../docs/licenses/whisper.txt": "licenses/whisper.txt" },

@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Result<Vec<_>, _>>()?;
         let started = std::time::Instant::now();
         let outcome = runtime.transcribe(&TranscriptionRequest {
+            cancelled: Default::default(),
             model_path: args[1].clone().into(),
             language: Some("en".into()),
             samples,

@@ -275,7 +275,7 @@ impl SettingsStore {
             }),
             subscribers: Mutex::new(vec![]),
         });
-        store.reload()?;
+        store.reload(true)?;
 
         let weak = Arc::downgrade(&store);
         let pending = Arc::new(AtomicBool::new(false));
@@ -300,7 +300,7 @@ impl SettingsStore {
                 std::thread::spawn(move || {
                     std::thread::sleep(RELOAD_DEBOUNCE);
                     pending.store(false, Ordering::SeqCst);
-                    let _ = store.reload();
+                    let _ = store.reload(false);
                 });
             })
             .map_err(|e| watch_error(home, e))?;
@@ -323,12 +323,21 @@ impl SettingsStore {
     }
 
     pub(crate) fn save(&self, settings: &Settings) -> Result<()> {
+        self.verify_model_selection(&self.get().settings, settings)?;
         write_file(&self.path, settings)?;
-        self.reload()
+        self.reload(false)
+    }
+
+    fn verify_model_selection(&self, previous: &Settings, next: &Settings) -> Result<()> {
+        if previous.dictation.model != next.dictation.model {
+            crate::dictation::models::ModelManager::default()
+                .acquire(self.path.parent().unwrap(), next.dictation.model)?;
+        }
+        Ok(())
     }
 
     /// Re-reads the file; notifies subscribers only if the resulting state changed.
-    fn reload(&self) -> Result<()> {
+    fn reload(&self, restoring: bool) -> Result<()> {
         if !self.path.exists() {
             // Deleted while running: recreate it from the Settings in effect.
             write_file(&self.path, &self.get().settings)?;
@@ -339,7 +348,21 @@ impl SettingsStore {
         })?;
         let next = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            let next = match parse(&text) {
+            let next = match parse(&text).and_then(|settings| {
+                // Restore preferences even if a disabled model was deleted or a disk is offline.
+                // New selections made while running must still be explicitly installed first.
+                if restoring {
+                    return Ok(settings);
+                }
+                self.verify_model_selection(&state.settings, &settings)
+                    .map_err(|e| {
+                        vec![FieldError {
+                            path: "dictation.model".into(),
+                            message: e.to_string(),
+                        }]
+                    })?;
+                Ok(settings)
+            }) {
                 Ok(settings) => SettingsState {
                     settings,
                     errors: vec![],

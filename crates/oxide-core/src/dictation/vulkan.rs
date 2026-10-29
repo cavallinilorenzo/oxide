@@ -6,7 +6,7 @@ use super::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
@@ -14,7 +14,7 @@ use std::{
 
 pub const ENGINE_VERSION: &str = "1.8.3";
 const MAX_FRAME: usize = 64 * 1024 * 1024;
-const SMALL_WORKING_SET: u64 = 2 * 1024 * 1024 * 1024;
+const DEFAULT_WORKING_SET: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulkanAdapter {
@@ -91,8 +91,15 @@ pub fn worker_path() -> PathBuf {
 
 /// Provisional conservative Small working set, separate from model file size.
 /// Keep 20% of the current reported device budget free; unknown stays unknown.
-pub fn check_memory(device: &VulkanAdapter) -> Result<(), BackendError> {
-    let required = SMALL_WORKING_SET;
+fn required_memory(path: &Path) -> u64 {
+    super::models::catalogue()
+        .entry_for_path(path)
+        .and_then(|entry| entry.estimated_peak(BackendId::Vulkan))
+        .unwrap_or(DEFAULT_WORKING_SET)
+}
+
+pub fn check_memory(device: &VulkanAdapter, model_path: &Path) -> Result<(), BackendError> {
+    let required = required_memory(model_path);
     if let Some(available) = device.memory.as_ref().and_then(|m| m.available_bytes)
         && available.saturating_mul(4) / 5 < required
     {
@@ -162,6 +169,10 @@ impl VulkanRuntime {
         let input = child.stdin.take().unwrap();
         let output = child.stdout.take().unwrap();
         let mut errors = child.stderr.take().unwrap();
+        let required = match &request {
+            WorkerRequest::Transcribe { request, .. } => required_memory(&request.model_path),
+            WorkerRequest::Probe => DEFAULT_WORKING_SET,
+        };
         let writer = std::thread::spawn(move || write_frame(input, &request));
         let reader = std::thread::spawn(move || read_frame::<WorkerResponse>(output));
         // Drain all native output, retaining a bounded prefix containing device
@@ -223,7 +234,7 @@ impl VulkanRuntime {
             );
         if native_oom && failed {
             return Err(BackendError::InsufficientMemory {
-                required_bytes: SMALL_WORKING_SET,
+                required_bytes: required,
                 available_bytes: None,
             });
         }
@@ -249,7 +260,11 @@ impl VulkanRuntime {
     }
 
     pub fn adapters(&self) -> Result<Vec<VulkanAdapter>, BackendError> {
-        match self.exchange(WorkerRequest::Probe, None)?.0 {
+        self.adapters_at(None)
+    }
+
+    fn adapters_at(&self, generation: Option<u64>) -> Result<Vec<VulkanAdapter>, BackendError> {
+        match self.exchange(WorkerRequest::Probe, generation)?.0 {
             WorkerResult::Adapters(devices) => Ok(devices),
             _ => Err(BackendError::InitializationFailed(
                 "Unexpected probe response".into(),
@@ -257,8 +272,8 @@ impl VulkanRuntime {
         }
     }
 
-    fn selected(&self) -> Result<VulkanAdapter, BackendError> {
-        let devices = self.adapters()?;
+    fn selected(&self, generation: Option<u64>) -> Result<VulkanAdapter, BackendError> {
+        let devices = self.adapters_at(generation)?;
         let selected = match &self.adapter_id {
             Some(id) => devices.iter().find(|d| &d.id == id),
             None => devices
@@ -280,7 +295,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
         BackendId::Vulkan
     }
     fn probe(&self) -> BackendProbe {
-        let state = match self.selected() {
+        let state = match self.selected(None) {
             Ok(device) => {
                 return BackendProbe {
                     backend: BackendId::Vulkan,
@@ -311,11 +326,14 @@ impl WhisperBackendRuntime for VulkanRuntime {
         request: &TranscriptionRequest,
     ) -> Result<TranscriptionOutcome, BackendError> {
         let generation = self.generation.load(Ordering::Acquire);
-        let device = self.selected()?;
+        if request.cancelled.load(Ordering::SeqCst) {
+            return Err(BackendError::Cancelled);
+        }
+        let device = self.selected(Some(generation))?;
         if device.capability != CapabilityState::Available {
             return Err(BackendError::Unavailable(device.capability));
         }
-        check_memory(&device)?;
+        check_memory(&device, &request.model_path)?;
         let mut request = request.clone();
         request.samples = super::resample(&request.samples, request.sample_rate);
         request.sample_rate = 16000;

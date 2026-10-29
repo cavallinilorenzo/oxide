@@ -1310,6 +1310,7 @@ dependencies = [
  "sysinfo",
  "tar",
  "tempfile",
+ "tokio",
  "thiserror 2.0.21",
  "whisper-rs",
  "windows-sys 0.61.2",

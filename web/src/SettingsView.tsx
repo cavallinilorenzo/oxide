@@ -179,7 +179,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
         editVersion.current++;
         setSaveStatus((status) => status === "saving" ? status : "idle");
       }} />
-      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu" }} onChange={(dictation) => set({ dictation })} />
+      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu", model: "small" }} onChange={(dictation) => set({ dictation })} />
       <section className="settings-section" aria-labelledby="settings-general">
         <header className="settings-section-header">
           <h2 id="settings-general">General</h2>

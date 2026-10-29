@@ -206,7 +206,7 @@ fn execute(message: WorkerRequest) -> Result<WorkerResult, BackendError> {
             if device.capability != CapabilityState::Available {
                 return Err(BackendError::Unavailable(device.capability));
             }
-            oxide_core::dictation::vulkan::check_memory(&device)?;
+            oxide_core::dictation::vulkan::check_memory(&device, &request.model_path)?;
             let (text, _, _) = run_whisper_on_device(&request, true, device.native_index)?;
             Ok(WorkerResult::Transcription {
                 text,

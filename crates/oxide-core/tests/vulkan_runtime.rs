@@ -96,12 +96,44 @@ fn a_probe_selects_the_requested_identity_without_claiming_verified_inference() 
 
 fn request() -> oxide_core::dictation::TranscriptionRequest {
     oxide_core::dictation::TranscriptionRequest {
+        cancelled: Default::default(),
         model_path: "model.bin".into(),
         language: None,
         samples: vec![0.1; 16000],
         sample_rate: 16000,
         threads: 2,
     }
+}
+
+#[test]
+fn cancelled_recording_never_starts_a_vulkan_worker() {
+    let runtime = VulkanRuntime::new("absent-worker.exe".into(), None);
+    let request = request();
+    request
+        .cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        runtime.transcribe(&request).unwrap_err(),
+        oxide_core::dictation::BackendError::Cancelled
+    );
+}
+
+#[test]
+fn model_selection_uses_the_catalogue_vulkan_budget() {
+    let dir = fixture(
+        response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
+        "",
+    );
+    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let mut request = request();
+    request.model_path = "ggml-large-v3.bin".into();
+    assert!(matches!(
+        runtime.transcribe(&request),
+        Err(oxide_core::dictation::BackendError::InsufficientMemory {
+            required_bytes: 10_737_418_240,
+            ..
+        })
+    ));
 }
 
 #[test]

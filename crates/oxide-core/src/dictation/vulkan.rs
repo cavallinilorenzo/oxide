@@ -260,7 +260,11 @@ impl VulkanRuntime {
     }
 
     pub fn adapters(&self) -> Result<Vec<VulkanAdapter>, BackendError> {
-        match self.exchange(WorkerRequest::Probe, None)?.0 {
+        self.adapters_at(None)
+    }
+
+    fn adapters_at(&self, generation: Option<u64>) -> Result<Vec<VulkanAdapter>, BackendError> {
+        match self.exchange(WorkerRequest::Probe, generation)?.0 {
             WorkerResult::Adapters(devices) => Ok(devices),
             _ => Err(BackendError::InitializationFailed(
                 "Unexpected probe response".into(),
@@ -268,8 +272,8 @@ impl VulkanRuntime {
         }
     }
 
-    fn selected(&self) -> Result<VulkanAdapter, BackendError> {
-        let devices = self.adapters()?;
+    fn selected(&self, generation: Option<u64>) -> Result<VulkanAdapter, BackendError> {
+        let devices = self.adapters_at(generation)?;
         let selected = match &self.adapter_id {
             Some(id) => devices.iter().find(|d| &d.id == id),
             None => devices
@@ -291,7 +295,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
         BackendId::Vulkan
     }
     fn probe(&self) -> BackendProbe {
-        let state = match self.selected() {
+        let state = match self.selected(None) {
             Ok(device) => {
                 return BackendProbe {
                     backend: BackendId::Vulkan,
@@ -325,7 +329,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
         if request.cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
         }
-        let device = self.selected()?;
+        let device = self.selected(Some(generation))?;
         if device.capability != CapabilityState::Available {
             return Err(BackendError::Unavailable(device.capability));
         }

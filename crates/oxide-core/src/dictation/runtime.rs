@@ -27,6 +27,8 @@ pub struct TranscriptionOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error, serde::Serialize, serde::Deserialize)]
 pub enum BackendError {
+    #[error("Selected model is missing or invalid. Install it explicitly first.")]
+    ModelUnavailable,
     #[error("Transcription cancelled")]
     Cancelled,
     #[error("Backend unavailable: {0:?}")]

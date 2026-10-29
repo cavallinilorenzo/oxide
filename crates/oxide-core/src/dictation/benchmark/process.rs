@@ -22,6 +22,22 @@ enum Event {
     Finished(Result<Box<Observation>, BackendError>),
 }
 
+fn handle_event(
+    event: std::io::Result<Event>,
+    progress: &mut dyn FnMut(Phase),
+    observation: &mut Option<Result<Box<Observation>, BackendError>>,
+) {
+    match event {
+        Ok(Event::Progress(phase)) => progress(phase),
+        Ok(Event::Finished(result)) => *observation = Some(result),
+        Err(_) => {
+            *observation = Some(Err(BackendError::InferenceFailed(
+                "Invalid performance response".into(),
+            )))
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct Observation {
     candidate: BackendCandidate,
@@ -88,6 +104,11 @@ impl PerformanceWorker for ProcessWorker {
     ) -> Result<BenchmarkResult, BackendError> {
         if cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
+        }
+        if matches!(candidate.probe.backend, BackendId::Cuda | BackendId::Metal) {
+            return Err(BackendError::InferenceFailed(
+                "This native runtime does not expose CUDA/Metal execution counters for performance checks. Choose CPU or Vulkan; ordinary dictation remains available.".into()
+            ));
         }
         let executable = match candidate.probe.backend {
             BackendId::Cpu | BackendId::Metal => &self.host,
@@ -162,15 +183,7 @@ impl PerformanceWorker for ProcessWorker {
                 ));
             }
             while let Ok(event) = rx.try_recv() {
-                match event {
-                    Ok(Event::Progress(phase)) => progress(phase),
-                    Ok(Event::Finished(result)) => observation = Some(result),
-                    Err(_) => {
-                        observation = Some(Err(BackendError::InferenceFailed(
-                            "Performance worker failed".into(),
-                        )))
-                    }
-                }
+                handle_event(event, progress, &mut observation);
             }
             match child.0.try_wait() {
                 Ok(Some(status)) => {
@@ -197,15 +210,7 @@ impl PerformanceWorker for ProcessWorker {
         let logs = logger.join().unwrap_or_default();
         status?;
         for event in rx.try_iter() {
-            match event {
-                Ok(Event::Progress(phase)) => progress(phase),
-                Ok(Event::Finished(result)) => observation = Some(result),
-                Err(_) => {
-                    return Err(BackendError::InferenceFailed(
-                        "Invalid performance response".into(),
-                    ));
-                }
-            }
+            handle_event(event, progress, &mut observation);
         }
         if cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
@@ -215,7 +220,8 @@ impl PerformanceWorker for ProcessWorker {
         })??;
         if observed.candidate.probe.backend != candidate.probe.backend
             || observed.candidate.adapter_id != candidate.adapter_id
-            || observed.candidate.driver_version != candidate.driver_version
+            || (candidate.driver_version.is_some()
+                && observed.candidate.driver_version != candidate.driver_version)
             || observed.candidate.runtime_version != candidate.runtime_version
         {
             return Err(BackendError::InferenceFailed(
@@ -266,8 +272,10 @@ fn execution_evidence(
                         .is_some_and(|n| n.is_finite() && n > 0.0)
                 })
         }
-        BackendId::Cuda => logs.contains("compute buffer") && native.starts_with("CUDA"),
-        BackendId::Metal => logs.contains("compute buffer") && native == "Metal",
+        // The pinned CUDA/Metal integrations expose selection/allocation logs,
+        // not completed GPU dispatch counters. Those also appear on CPU fallback.
+        // Refuse measurements until those runtimes supply execution instrumentation.
+        BackendId::Cuda | BackendId::Metal => false,
         BackendId::Cpu => false,
     };
     if !logs.contains(&selected) || !executed {
@@ -300,7 +308,7 @@ pub fn worker_main() {
                     adapter_id: probe.adapter.clone(),
                     probe,
                     driver_version: sysinfo::System::kernel_version(),
-                    runtime_version: crate::dictation::BuildManifest::current().whisper_cpp_pinned,
+                    runtime_version: runtime_version(BackendId::Metal),
                 }
             }
             _ => return Err(BackendError::Unavailable(CapabilityState::OmittedFromBuild)),
@@ -325,13 +333,13 @@ pub fn worker_main_with(
     let run = || -> Result<Observation, BackendError> {
         let job: Job = read_frame(std::io::stdin().lock())
             .map_err(|_| BackendError::InitializationFailed("Invalid benchmark request".into()))?;
-        let device = resolve(job.backend, job.adapter_id)?;
         let models = crate::dictation::models::ModelManager::default();
-        let _lease = models.acquire(&job.home, job.model).map_err(|_| {
-            BackendError::InitializationFailed(
-                "Selected model is missing or invalid. Install it explicitly first.".into(),
-            )
-        })?;
+        let _lease = models
+            .acquire(&job.home, job.model)
+            .map_err(|_| BackendError::ModelUnavailable)?;
+        // Hashing can be lengthy. Refresh the device budget after verification,
+        // immediately before the combined memory check and context allocation.
+        let device = resolve(job.backend, job.adapter_id)?;
         let resources = capture(&job.home.join("models"));
         assess_load(&resources, &device.candidate.probe, job.model, now_secs())
             .map_err(|r| r.backend_error())?;

@@ -133,14 +133,15 @@ Safe manual choices remain possible; advice does not write persisted settings.
 catalogue model ID, backend, stable adapter ID, and whether to include a
 conservative candidate. The selected model must already be verified installed.
 The optional candidate uses the same backend/device: Base for Small or larger,
-Tiny for Base, none for Tiny. It is skipped when not installed. No other models
-are explored; a larger model requires another explicit request.
+Tiny for Base, none for Tiny. A missing file is skipped; the worker verifies
+each candidate before inference. No other models are explored; a larger model
+requires another explicit request.
 
 The worker uses `jfk-16khz-pcm-v1`, the bundled 11-second public-domain speech
 excerpt attributed in `docs/licenses/dictation-fixture.txt`. It never opens the
-microphone or starts downloads. CPU/Metal run in the app's
-`--dictation-benchmark-worker` mode, before Tauri starts; Vulkan/CUDA use their
-isolated native workers with the same protocol. Each combination has a
+microphone or starts downloads. CPU runs in the app's
+`--dictation-benchmark-worker` mode, before Tauri starts; Vulkan uses its isolated
+native worker with the same protocol. Each combination has a
 120-second process limit, including worker-side verification, device probing,
 context loading, warmup and inference. At most two combinations run serially.
 The host terminates and reaps the child on timeout/cancellation/error. Native
@@ -151,7 +152,10 @@ or transcription and prevents recording start during a check. Disabling
 dictation cancels the check. The separate performance-cancel command does not
 cancel ordinary dictation. Host RAM is refreshed before each worker; native
 RAM/device budgets are checked again before loading. Models remain leased
-against deletion throughout their check. No Settings value is changed.
+against deletion throughout their check. Full artifact verification and native
+device probing run inside the child deadline, with GPU budgets collected after
+verification. The host only leases the file and refreshes RAM. No Settings value
+is changed.
 
 The worker times one cold context/state load, discards one warmup, then measures
 three runs on the same context/state. Warm milliseconds and RTF round upward
@@ -159,8 +163,13 @@ so a result just above a product target cannot qualify by truncation. CPU uses
 no offload; GPU measurements require observed device/driver identity to match
 and native backend selection plus completed compute evidence (Vulkan additionally
 requires positive GPU kernel timestamps). Missing evidence refuses the result;
-there is no benchmark GPU-to-CPU fallback. CUDA/Metal hardware acceptance remains
-with #235; absence of local hardware is not a measured success.
+there is no benchmark GPU-to-CPU fallback. The pinned CUDA/Metal paths expose
+selection/allocation logs but no completed dispatch counters. Their checks
+currently return an explicit unavailable-evidence error before inference, with
+CPU/Vulkan offered instead. Measuring those backends requires native execution
+instrumentation, tracked in [#258](https://github.com/cavallinilorenzo/oxide/issues/258)
+after the maintainer accepted CPU/Vulkan scope for #232. Ordinary CUDA/Metal
+dictation is unchanged; physical hardware acceptance remains with #235.
 
 Settings IPC is `dictationCheckPerformance(request, progressChannel)` and
 `dictationCancelPerformance()`. The typed channel reports Loading, Warmup and
@@ -183,7 +192,8 @@ The producer must warm up first and time the same licensed fixture without
 opening the microphone. Store no audio or transcript in this input.
 
 The key includes model SHA-256, backend, stable adapter ID, driver version,
-runtime version, catalogue version, policy version and host CPU configuration
+runtime version (including app version, development/release profile and CPU
+native instruction build flags), catalogue version, policy version and host CPU configuration
 (architecture, model, usable cores and instruction compatibility). CPU or
 parallelism changes invalidate measurements as well. Unknown GPU identity or
 driver cannot establish a cache match. Results older than 30 days, future-dated,
@@ -214,6 +224,14 @@ using the existing verified artifact and `jfk-16khz-pcm-v1`:
 | --- | ---: | --- | ---: | ---: |
 | CPU, no offload | 437 ms | 2229 / 2240 / 2230 ms | 2230 ms | 0.203 |
 | Vulkan, RX 5600 XT, AMD 26.10.1 | 700 ms | 501 / 496 / 498 ms | 498 ms | 0.046 |
+| CPU, release app worker, no offload | 468 ms | 29669 / 26453 / 26069 ms | 26453 ms | 2.405 |
+
+The first two rows use development builds. The release app worker was exercised
+directly after the Windows bundle build and was substantially slower in this
+session. Build flags and concurrent system load can affect results; the cache
+separates build variants so the fast development observation cannot be reused
+as a release measurement. A post-review Vulkan development repeat returned
+586 ms cold, 495 / 494 / 494 ms warm, median 494 ms, RTF 0.045.
 
 The Vulkan run observed `whisper_backend_init_gpu: using Vulkan0 backend`
 and positive native GPU kernel timestamps with `MUL_MAT`. The stable adapter
@@ -227,9 +245,10 @@ Reproduce offline with an installed Small model:
 cargo run --locked -p oxide-core --example dictation_benchmark -- HOME cpu
 ```
 
-For Vulkan/CUDA, set the documented worker-path environment override for device
-discovery, then pass `HOME vulkan WORKER STABLE_ADAPTER_ID` (or `cuda`). On
-Apple Silicon, use `HOME metal UNUSED_PATH DEVICE_NAME`. This developer smoke
+For Vulkan, set the documented worker-path environment override, then pass
+`HOME vulkan WORKER STABLE_ADAPTER_ID`. CUDA/Metal requests currently report
+unavailable execution evidence. This developer smoke
 prints only measurement metadata and progress, never audio/transcripts, and
 shares the production coordinator/process path. The app executable implements
-the same CPU/Metal child entry point.
+the same CPU child entry point. The Metal and CUDA worker protocol entry points
+are present but cannot produce accepted measurements until instrumented.

@@ -15,6 +15,58 @@ pub const SNAPSHOT_MAX_AGE_SECS: u64 = 30;
 pub const PERFORMANCE_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 const GIB: u64 = 1 << 30;
 
+/// Development/native build variants can have materially different performance
+/// despite sharing a whisper.cpp revision. Never reuse them across app builds.
+pub fn runtime_version(backend: BackendId) -> String {
+    let mut identity = format!(
+        "{}; oxide {}; benchmark-v1; {}",
+        super::BuildManifest::current().whisper_cpp_pinned,
+        env!("CARGO_PKG_VERSION"),
+        if cfg!(debug_assertions) {
+            "development"
+        } else {
+            "release"
+        }
+    );
+    if backend == BackendId::Cpu {
+        use whisper_rs::whisper_rs_sys::*;
+        // SAFETY: pinned native getters return compile-time instruction flags,
+        // without allocation or mutable global strings. Do not use the native
+        // system-info formatter, whose shared std::string is not thread-safe.
+        let flags = unsafe {
+            [
+                ggml_cpu_has_sse3(),
+                ggml_cpu_has_ssse3(),
+                ggml_cpu_has_avx(),
+                ggml_cpu_has_avx2(),
+                ggml_cpu_has_avx_vnni(),
+                ggml_cpu_has_avx512(),
+                ggml_cpu_has_bmi2(),
+                ggml_cpu_has_avx512_vbmi(),
+                ggml_cpu_has_avx512_vnni(),
+                ggml_cpu_has_avx512_bf16(),
+                ggml_cpu_has_fma(),
+                ggml_cpu_has_f16c(),
+                ggml_cpu_has_neon(),
+                ggml_cpu_has_arm_fma(),
+                ggml_cpu_has_fp16_va(),
+                ggml_cpu_has_dotprod(),
+                ggml_cpu_has_matmul_int8(),
+                ggml_cpu_has_sve(),
+                ggml_cpu_has_amx_int8(),
+                ggml_cpu_has_sme(),
+                ggml_cpu_has_riscv_v(),
+                ggml_cpu_has_vsx(),
+                ggml_cpu_has_vxe(),
+                ggml_cpu_has_wasm_simd(),
+                ggml_cpu_has_llamafile(),
+            ]
+        };
+        identity.push_str(&format!("; cpu-build-flags={flags:?}"));
+    }
+    identity
+}
+
 impl LoadRefusal {
     pub fn backend_error(&self) -> super::BackendError {
         match self.required_bytes {
@@ -205,7 +257,7 @@ impl BackendCandidate {
             probe: super::CpuRuntime.probe(),
             adapter_id: None,
             driver_version: None,
-            runtime_version: super::BuildManifest::current().whisper_cpp_pinned,
+            runtime_version: runtime_version(BackendId::Cpu),
         }
     }
 }

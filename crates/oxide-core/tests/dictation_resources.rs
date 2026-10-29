@@ -332,3 +332,26 @@ fn measured_product_targets_have_inclusive_half_and_one_rtf_boundaries() {
         assert!(!decision.provisional);
     }
 }
+
+#[test]
+fn measurements_without_native_build_identity_are_not_reused() {
+    let snapshot = resources();
+    let candidate = BackendCandidate::cpu();
+    let mut sample = MeasuredPerformance {
+        key: PerformanceKey::for_candidate(ModelId::Small, &candidate, &snapshot.cpu),
+        recorded_at_secs: 100,
+        audio_duration_ms: 11000,
+        warm_inference_ms: [2000, 2100, 2200],
+        cold_load_ms: 400,
+    };
+    sample.key.runtime_version = "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0)".into();
+    let result = recommend(
+        &snapshot,
+        &[candidate],
+        &[ModelId::Small],
+        Preference::Balanced,
+        &[sample],
+        100,
+    );
+    assert!(result.decisions.iter().all(|d| d.provisional));
+}

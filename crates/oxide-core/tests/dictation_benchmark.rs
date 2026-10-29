@@ -59,6 +59,54 @@ fn cache_retains_only_current_fixture_and_proven_execution() {
 }
 
 #[test]
+fn a_failed_batch_does_not_publish_its_successful_first_combination() {
+    let home = tempfile::tempdir().unwrap();
+    let good = sample();
+    let mut invalid = sample();
+    invalid.fixture_version = "obsolete".into();
+    assert!(
+        oxide_core::dictation::benchmark::store_results(home.path(), &[good.clone(), invalid])
+            .is_err()
+    );
+    assert!(read_cache(home.path()).is_empty());
+    oxide_core::dictation::benchmark::store_results(home.path(), &[good]).unwrap();
+    assert_eq!(read_cache(home.path()).len(), 1);
+}
+
+#[test]
+fn corrupt_optional_artifact_is_skipped_without_discarding_the_selected_measurement() {
+    struct VerifyingWorker;
+    impl PerformanceWorker for VerifyingWorker {
+        fn run(
+            &self,
+            home: &Path,
+            model: ModelId,
+            candidate: &BackendCandidate,
+            cancelled: Arc<AtomicBool>,
+            progress: &mut dyn FnMut(Phase),
+        ) -> Result<BenchmarkResult, BackendError> {
+            if std::fs::read(model_path(home, model)).unwrap() != b"abc" {
+                return Err(BackendError::ModelUnavailable);
+            }
+            Worker {
+                fail: false,
+                cancel: false,
+            }
+            .run(home, model, candidate, cancelled, progress)
+        }
+    }
+    let home = tempfile::tempdir().unwrap();
+    let dictation = dictation(home.path());
+    std::fs::write(model_path(home.path(), ModelId::Base), b"bad").unwrap();
+    let results = dictation
+        .check_performance(home.path(), &request(), &VerifyingWorker, |_| {})
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].model, ModelId::Small);
+    assert_eq!(read_cache(home.path()).len(), 1);
+}
+
+#[test]
 fn warmup_is_excluded_and_three_runs_report_the_median() {
     let mut times = [90_000, 9_000, 4_000, 3_000].into_iter();
     let mut phases = Vec::new();
@@ -370,7 +418,7 @@ fn main() {
     let exe = dir.path().join(executable.file_name().unwrap());
     std::fs::copy(executable, &exe).unwrap();
     let reply = serde_json::json!({"Finished":{"Ok":{
-        "candidate":candidate, "native_backend":"Vulkan0", "cpu":sample().measurement.key.cpu,
+        "candidate":candidate, "native_backend":match candidate.probe.backend { BackendId::Cuda => "CUDA0", BackendId::Metal => "Metal", _ => "Vulkan0" }, "cpu":sample().measurement.key.cpu,
         "timing":{"audioDurationMs":11000,"coldLoadMs":12000,"warmInferenceMs":[9000,4000,3000]}
     }}});
     std::fs::write(dir.path().join("reply.json"), reply.to_string()).unwrap();
@@ -419,6 +467,31 @@ fn gpu_process_measurements_require_actual_native_execution_and_matching_driver(
                     dir.path(),
                     ModelId::Small,
                     &changed,
+                    Default::default(),
+                    &mut |_| {}
+                )
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn cuda_and_metal_initialization_and_allocation_never_prove_gpu_execution() {
+    for (backend, native) in [(BackendId::Cuda, "CUDA0"), (BackendId::Metal, "Metal")] {
+        let mut candidate = BackendCandidate::cpu();
+        candidate.probe.backend = backend;
+        candidate.adapter_id = Some("gpu".into());
+        candidate.driver_version = Some("driver".into());
+        let logs = format!(
+            "whisper_backend_init_gpu: using {native} backend\ncompute buffer (encode) = 100 MB\n"
+        );
+        let (dir, worker) = process_fixture(&candidate, &logs, false);
+        assert!(
+            worker
+                .run(
+                    dir.path(),
+                    ModelId::Small,
+                    &candidate,
                     Default::default(),
                     &mut |_| {}
                 )

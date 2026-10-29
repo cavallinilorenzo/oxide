@@ -310,7 +310,7 @@ fn execute(message: WorkerRequest) -> Result<WorkerResult, BackendError> {
 fn main() {
     if std::env::args().any(|arg| arg == "--dictation-benchmark-worker") {
         use oxide_core::dictation::{
-            BackendId, BackendProbe, BuildManifest,
+            BackendId, BackendProbe,
             benchmark::{NativeDevice, worker_main_with},
             resources::BackendCandidate,
         };
@@ -334,7 +334,7 @@ fn main() {
                     },
                     adapter_id: Some(device.id),
                     driver_version: device.driver,
-                    runtime_version: BuildManifest::current().whisper_cpp_pinned,
+                    runtime_version: oxide_core::dictation::resources::runtime_version(backend),
                 },
                 native_index: device.native_index,
                 native_backend: device.native_backend,

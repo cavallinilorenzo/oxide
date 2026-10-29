@@ -81,17 +81,12 @@ impl super::Dictation {
             }
         }
         let _release = Release(self);
-        let candidates = if request.backend == BackendId::Cpu {
-            vec![BackendCandidate::cpu()]
-        } else {
-            backend_candidates()
-        };
-        let candidate = candidates
-            .into_iter()
-            .find(|c| c.probe.backend == request.backend && c.adapter_id == request.adapter_id)
-            .ok_or_else(|| {
-                super::err("Selected backend/device unavailable. Refresh devices or choose CPU.")
-            })?;
+        // Native probing and full artifact hashing belong inside the bounded child.
+        let mut candidate = BackendCandidate::cpu();
+        candidate.probe.backend = request.backend;
+        candidate.runtime_version = runtime_version(request.backend);
+        candidate.adapter_id = request.adapter_id.clone();
+        candidate.probe.adapter = None;
         let mut plan = vec![request.model];
         if request.include_conservative_candidate {
             let smaller = match request.model {
@@ -100,10 +95,7 @@ impl super::Dictation {
                 _ => Some(ModelId::Base),
             };
             if let Some(id) = smaller
-                && self
-                    .models
-                    .status(home, id)
-                    .is_ok_and(|s| matches!(s.state, super::models::ModelState::Installed))
+                && super::models::model_path(home, id).is_file()
             {
                 plan.push(id);
             }
@@ -113,29 +105,48 @@ impl super::Dictation {
             if cancelled.load(Ordering::SeqCst) {
                 return Err(super::err(BackendError::Cancelled));
             }
-            let _lease = self.models.acquire(home, model)?;
+            if !super::models::model_path(home, model).is_file() {
+                if model != request.model {
+                    continue;
+                }
+                return Err(super::err(
+                    "Install the selected model explicitly before checking performance.",
+                ));
+            }
+            let _lease = self.models.lease_for_verification(home, model)?;
             let resources = self
                 .resource_provider
                 .as_ref()
                 .map_or_else(|| capture(&home.join("models")), |read| read());
-            assess_load(&resources, &candidate.probe, model, now_secs())
-                .map_err(|e| super::err(e.reason))?;
-            let result = worker
-                .run(home, model, &candidate, cancelled.clone(), &mut |phase| {
-                    progress(Progress {
-                        model,
-                        backend: candidate.probe.backend,
-                        adapter_id: candidate.adapter_id.clone(),
-                        phase,
-                    })
+            // Refresh host RAM here; the worker refreshes actual GPU resources
+            // after verification and checks the combined budget before loading.
+            assess_load(
+                &resources,
+                &BackendCandidate::cpu().probe,
+                model,
+                now_secs(),
+            )
+            .map_err(|e| super::err(e.reason))?;
+            let result = worker.run(home, model, &candidate, cancelled.clone(), &mut |phase| {
+                progress(Progress {
+                    model,
+                    backend: candidate.probe.backend,
+                    adapter_id: candidate.adapter_id.clone(),
+                    phase,
                 })
-                .map_err(super::err)?;
+            });
+            let result = match result {
+                Err(BackendError::ModelUnavailable) if model != request.model => continue,
+                other => other.map_err(super::err)?,
+            };
             if cancelled.load(Ordering::SeqCst) {
                 return Err(super::err(BackendError::Cancelled));
             }
+            let mut observed = candidate.clone();
+            observed.driver_version = result.measurement.key.driver_version.clone();
             if result.model != model
                 || result.measurement.key
-                    != PerformanceKey::for_candidate(model, &candidate, &resources.cpu)
+                    != PerformanceKey::for_candidate(model, &observed, &resources.cpu)
             {
                 return Err(super::err(
                     "Device, driver or CPU identity changed during the check. Refresh and retry.",
@@ -145,9 +156,10 @@ impl super::Dictation {
             results.push(result);
         }
         // Publish only complete checks; cancelling the candidate cannot publish a partial check.
-        for result in &results {
-            store_result(home, result)?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(super::err(BackendError::Cancelled));
         }
+        store_results(home, &results)?;
         Ok(results)
     }
 }
@@ -209,10 +221,17 @@ pub fn read_cache(home: &Path) -> Vec<BenchmarkResult> {
 }
 
 pub fn store_result(home: &Path, result: &BenchmarkResult) -> crate::Result<()> {
-    result.validate().map_err(super::err)?;
+    store_results(home, std::slice::from_ref(result))
+}
+
+/// One atomic publish point for the complete check, including both combinations.
+pub fn store_results(home: &Path, batch: &[BenchmarkResult]) -> crate::Result<()> {
+    for result in batch {
+        result.validate().map_err(super::err)?;
+    }
     let mut results = read_cache(home);
-    results.retain(|r| r.measurement.key != result.measurement.key);
-    results.insert(0, result.clone());
+    results.retain(|r| !batch.iter().any(|b| b.measurement.key == r.measurement.key));
+    results.splice(0..0, batch.iter().cloned());
     results.truncate(32);
     fs::create_dir_all(home).map_err(super::err)?;
     let mut temporary = tempfile::NamedTempFile::new_in(home).map_err(super::err)?;

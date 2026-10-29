@@ -146,7 +146,7 @@
       "id": "tooling-tests",
       "name": "Tooling tests",
       "why": "The DevOps decision logic (catalogue, gate, Dependabot policy, release gates) is code; a bug there silently weakens every other check.",
-      "command": ["node", "--test", "tools/checks/catalogue.test.mjs", ".github/scripts/dependabot-policy.test.mjs", ".github/scripts/release-version.test.mjs", ".github/scripts/tauri-alignment.test.mjs"],
+      "command": ["node", "--test", "tools/checks/catalogue.test.mjs", ".github/scripts/dependabot-policy.test.mjs", ".github/scripts/release-version.test.mjs", ".github/scripts/tauri-alignment.test.mjs", ".github/scripts/build-space.test.mjs"],
       "tiers": ["pr"],
       "platforms": ["macos", "windows", "linux"],
       "blocking": true,

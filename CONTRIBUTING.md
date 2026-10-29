@@ -43,6 +43,14 @@ Oxide first if Windows reports that its release executable is in use. For a
 debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
 `CARGO_INCREMENTAL=1` opts back into incremental compilation.
 
+The local check runner (`node tools/checks/run.mjs pr`) checks the build-artifact
+budget before and after each Rust compilation or Tauri bundle. It stops further
+checks above 12 GiB and asks for cleanup; it never deletes files or closes the app.
+`OXIDE_BUILD_BUDGET_GIB` sets a different positive budget, and `CARGO_TARGET_DIR`
+is respected. This is a checkpoint between commands, not a filesystem quota:
+one command can exceed the budget before returning, and direct Cargo invocations
+bypass the runner.
+
 ### Regenerating the TypeScript bindings
 
 `web/src/bindings.ts` is generated from the Rust command signatures by [tauri-specta](https://github.com/specta-rs/tauri-specta). After changing a Tauri command or a type it exposes, regenerate and commit the file:

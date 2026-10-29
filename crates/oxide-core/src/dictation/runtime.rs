@@ -231,12 +231,7 @@ pub fn probe_backends() -> Vec<BackendProbe> {
 
     // 4. CUDA
     if manifest.included_backends.contains(&BackendId::Cuda) {
-        probes.push(BackendProbe {
-            backend: BackendId::Cuda,
-            state: CapabilityState::Available,
-            adapter: Some("NVIDIA CUDA Adapter".into()),
-            memory_pool: None,
-        });
+        probes.push(super::cuda::CudaRuntime::default().probe());
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Cuda,

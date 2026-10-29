@@ -42,6 +42,7 @@ whisper-rs = { version = "=0.16.0", features = ["metal"] }
 
 [features]
 dictation-vulkan = []
+dictation-cuda = []
 
 [dev-dependencies]
 hound = "=3.5.1"

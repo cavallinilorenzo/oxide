@@ -1,4 +1,5 @@
 //! Local, bounded microphone capture and whisper.cpp inference. Audio never touches disk.
+pub mod cuda;
 pub mod metal;
 pub mod models;
 pub mod runtime;
@@ -119,9 +120,8 @@ pub fn gpu_compiled() -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        BuildManifest::current()
-            .included_backends
-            .contains(&BackendId::Vulkan)
+        let backends = &BuildManifest::current().included_backends;
+        backends.contains(&BackendId::Vulkan) || backends.contains(&BackendId::Cuda)
     }
 }
 
@@ -180,8 +180,27 @@ pub struct Dictation {
 
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
     #[cfg(windows)]
-    if vulkan::worker_path().is_file() {
-        return Arc::new(vulkan::VulkanRuntime::default());
+    {
+        let requested_backend = std::env::var("OXIDE_DICTATION_BACKEND")
+            .ok()
+            .map(|s| s.to_ascii_lowercase());
+
+        if (requested_backend.as_deref() == Some("cuda")
+            || (requested_backend.is_none()
+                && cuda::worker_path().is_file()
+                && !vulkan::worker_path().is_file()))
+            && cuda::worker_path().is_file()
+        {
+            return Arc::new(cuda::CudaRuntime::default());
+        }
+
+        if vulkan::worker_path().is_file() {
+            return Arc::new(vulkan::VulkanRuntime::default());
+        }
+
+        if cuda::worker_path().is_file() {
+            return Arc::new(cuda::CudaRuntime::default());
+        }
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {

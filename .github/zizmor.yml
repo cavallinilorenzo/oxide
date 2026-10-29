@@ -1,0 +1,6 @@
+rules:
+  self-repository:
+    ignore:
+      # Low severity: `./` is the long-standing, documented way to call a local
+      # composite action, and actionlint understands it.
+      - ci.yml:121

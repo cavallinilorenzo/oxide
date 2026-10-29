@@ -77,6 +77,25 @@ from native model inference behind the `WhisperBackendRuntime` boundary:
     device name and offload proof. A successful transcription alone is never accepted
     as GPU evidence.
 
+### macOS Apple Silicon Metal validation
+
+- **Architecture filtering**: Metal acceleration is enabled exclusively for Apple Silicon
+  Macs (`aarch64`). Intel Mac GPU support remains unadvertised until separately validated on
+  supported x86_64 hardware.
+- **Device enumeration and unified memory**: Probes query the physical Metal device via
+  the Metal framework (`MTLCreateSystemDefaultDevice`). Topology is reported as a single shared
+  unified pool (`MemoryPool: { unified: true, totalBytes, availableBytes, maxWorkingSetBytes }`),
+  derived from Metal's `recommendedMaxWorkingSetSize` without inventing separate dedicated VRAM.
+  Missing signals remain `None` (unknown).
+- **Embedded shaders**: Shaders are compiled and embedded into native binaries via
+  `GGML_METAL_EMBED_LIBRARY`, guaranteeing zero external developer tool dependencies on the
+  end-user machine in both development and packaged distributed bundles.
+- **Tested environment**:
+  - Operating System: macOS 27.2 (Darwin 26B123, arm64)
+  - Processor: Apple M1 Pro (10 cores, Metal GPU Family Apple7, Metal4)
+  - Working set budget: 12.71 GB recommended working set
+  - Native runtime: `whisper-rs 0.16.0` (bundled `whisper.cpp`) with embedded Metal library
+
 Building whisper-rs requires CMake, a C/C++ compiler, and libclang for bindgen. Set
 `LIBCLANG_PATH` to the directory containing libclang when it is outside the search
 path. Linux also needs ALSA development headers. macOS uses the system microphone

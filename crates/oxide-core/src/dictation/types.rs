@@ -53,10 +53,23 @@ pub enum CapabilityState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MemoryPool {
+    pub unified: bool,
+    pub total_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_working_set_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendProbe {
     pub backend: BackendId,
     pub state: CapabilityState,
     pub adapter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_pool: Option<MemoryPool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,7 +92,7 @@ pub struct BuildManifest {
 impl BuildManifest {
     pub fn current() -> Self {
         let mut included_backends = vec![BackendId::Cpu];
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         included_backends.push(BackendId::Metal);
         #[cfg(feature = "dictation-vulkan")]
         included_backends.push(BackendId::Vulkan);

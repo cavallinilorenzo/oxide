@@ -57,6 +57,7 @@ impl WhisperBackendRuntime for CpuRuntime {
             backend: BackendId::Cpu,
             state: CapabilityState::Available,
             adapter: Some("CPU".into()),
+            memory_pool: None,
         }
     }
 
@@ -126,26 +127,22 @@ pub fn probe_backends() -> Vec<BackendProbe> {
         backend: BackendId::Cpu,
         state: CapabilityState::Available,
         adapter: Some("CPU".into()),
+        memory_pool: None,
     });
 
     // 2. Metal
     if manifest.included_backends.contains(&BackendId::Metal) {
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            // Pinned whisper-rs on macOS Apple Silicon has Metal embedded.
-            // Probes report Available (never VerifiedByInference).
-            probes.push(BackendProbe {
-                backend: BackendId::Metal,
-                state: CapabilityState::Available,
-                adapter: Some("Apple Silicon Metal".into()),
-            });
+            probes.push(super::metal::MetalRuntime.probe());
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         {
             probes.push(BackendProbe {
                 backend: BackendId::Metal,
                 state: CapabilityState::OmittedFromBuild,
                 adapter: None,
+                memory_pool: None,
             });
         }
     } else {
@@ -153,6 +150,7 @@ pub fn probe_backends() -> Vec<BackendProbe> {
             backend: BackendId::Metal,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 
@@ -162,12 +160,14 @@ pub fn probe_backends() -> Vec<BackendProbe> {
             backend: BackendId::Vulkan,
             state: CapabilityState::Available,
             adapter: Some("Vulkan Adapter".into()),
+            memory_pool: None,
         });
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Vulkan,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 
@@ -177,12 +177,14 @@ pub fn probe_backends() -> Vec<BackendProbe> {
             backend: BackendId::Cuda,
             state: CapabilityState::Available,
             adapter: Some("NVIDIA CUDA Adapter".into()),
+            memory_pool: None,
         });
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Cuda,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 

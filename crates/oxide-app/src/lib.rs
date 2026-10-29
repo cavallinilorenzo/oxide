@@ -305,12 +305,28 @@ pub enum CapabilityState {
     VerifiedByInference,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPool {
+    pub unified: bool,
+    #[specta(type = f64)]
+    pub total_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(type = Option<f64>)]
+    pub available_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(type = Option<f64>)]
+    pub max_working_set_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendProbe {
     pub backend: BackendId,
     pub state: CapabilityState,
     pub adapter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_pool: Option<MemoryPool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -349,6 +365,8 @@ pub struct DictationStatus {
     manifest: BuildManifest,
     probes: Vec<BackendProbe>,
     last_execution: Option<ExecutionDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_pool: Option<MemoryPool>,
 }
 
 #[tauri::command]

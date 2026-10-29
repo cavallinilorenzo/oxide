@@ -342,9 +342,19 @@ impl Gh {
             && let Some(inherited_path) = std::env::var_os("PATH")
         {
             // The test shim is found through the explicit search path, but its .cmd launcher
-            // needs tools such as Python from the runner's PATH.
-            child_path.push(";");
-            child_path.push(inherited_path);
+            // needs tools such as Python from the runner's PATH. Only include directories
+            // containing the tools: cargo adds every build-script output directory to PATH
+            // while running tests, and cmd.exe can fail to resolve commands from a PATH that
+            // long.
+            let needed = std::env::split_paths(&inherited_path).filter(|dir| {
+                ["python.exe", "git.exe", "cmd.exe"]
+                    .iter()
+                    .any(|tool| dir.join(tool).is_file())
+            });
+            if let Ok(needed) = std::env::join_paths(needed) {
+                child_path.push(";");
+                child_path.push(needed);
+            }
         }
         #[cfg(not(windows))]
         let child_path = path.clone();

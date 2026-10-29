@@ -36,6 +36,47 @@ Vulkan build encountered native CMake configuration failures. A compiled backend
 does not prove GPU execution. Runtime verification, packaged GPU backends and
 additional models are tracked in [spec #225](https://github.com/cavallinilorenzo/oxide/issues/225).
 
+## Recoverable runtime architecture and extension points
+
+The dictation architecture separates microphone capture and lifecycle coordination
+from native model inference behind the `WhisperBackendRuntime` boundary:
+
+- **Runtime ownership**: The `Dictation` coordinator in `oxide_core::dictation`
+  owns the in-flight recording session and delegates inference to a backend
+  runtime (`Arc<dyn WhisperBackendRuntime>`). Host application startup does not
+  load or initialize GPU libraries; backend discovery is non-blocking and isolated
+  so driver or runtime failures cannot crash Oxide or disable CPU dictation.
+- **Build manifest and pinned versions**: `BuildManifest::current()` exposes
+  pinned binding/native versions (`whisper-rs 0.16.0` and its bundled `whisper.cpp`)
+  and the list of included backends (`cpu`, `metal`, `vulkan`, `cuda`). Compile-time
+  flags specify packaged capability, never proof of runtime GPU use.
+- **Capability states vs. verified execution**: Probes return typed capability
+  states (`omittedFromBuild`, `noCompatibleDevice`, `missingDriverOrRuntime`,
+  `initializationFailure`, `insufficientMemory`, `available`). Probes can **never**
+  claim `verifiedByInference`; that status is only attained after a successful
+  inference run returns concrete offload evidence (`ExecutionDetails`: backend,
+  adapter name, offloaded boolean, and evidence string). CPU mode never requests
+  offload.
+- **Snapshotting and recovery policy**:
+  - Parameters (`language`, `model`, `device`) are snapshotted at recording start.
+    Settings changes during an active recording do not mutate the in-flight session.
+  - In `Auto` mode: if the primary backend fails, Oxide retries once on CPU if
+    available memory is at least 2.0 GB, attaching the fallback reason to the
+    execution details. If memory is insufficient, the retry is refused.
+  - In explicit `GPU` mode: failures are reported immediately with an offer to
+    switch to CPU. CPU is never silently substituted for GPU.
+- **Backend extension points and worker protocol**:
+  - Direct native backends implement the `WhisperBackendRuntime` trait (`backend_id`, `probe`,
+    `transcribe`).
+  - Where GPU drivers or runtimes risk process instability, runtimes can execute as isolated
+    worker child processes. Worker processes communicate over standard I/O using length-prefixed
+    JSON messages corresponding to `TranscriptionRequest` and `TranscriptionOutcome`.
+    At startup, workers exchange a versioned handshake (`protocolVersion: 1`, pinned binding
+    and engine version) and must shut down immediately when stdin closes or on cancel.
+  - Every backend implementation returns concrete `ExecutionDetails` providing actual
+    device name and offload proof. A successful transcription alone is never accepted
+    as GPU evidence.
+
 Building whisper-rs requires CMake, a C/C++ compiler, and libclang for bindgen. Set
 `LIBCLANG_PATH` to the directory containing libclang when it is outside the search
 path. Linux also needs ALSA development headers. macOS uses the system microphone

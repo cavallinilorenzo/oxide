@@ -1,0 +1,211 @@
+name: Build
+
+# The one place Oxide's installers are built. CI calls it with `release: false`
+# (unsigned, caches allowed) to prove packaging works; Release calls it with
+# `release: true` (no caches, signed updater packages) on a tag.
+#
+# The `release` environment is declared here, not by the callers: a job that
+# calls a reusable workflow cannot name an environment, and the environment's
+# required reviewers and secrets must guard the job that reads them.
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: macos-aarch64 or windows-x64
+        type: string
+        required: true
+      release:
+        description: Build for publication (signed updater packages, no caches)
+        type: boolean
+        default: false
+    outputs:
+      artifact:
+        description: Name of the uploaded artifact
+        value: ${{ jobs.build.outputs.artifact }}
+      signed:
+        description: Whether the macOS app carries a Developer ID signature
+        value: ${{ jobs.build.outputs.signed }}
+      notarized:
+        description: Whether the macOS app was notarized
+        value: ${{ jobs.build.outputs.notarized }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  build:
+    name: build (${{ inputs.platform }})
+    runs-on: ${{ inputs.platform == 'macos-aarch64' && 'macos-15' || 'windows-2025' }}
+    timeout-minutes: 75
+    environment: ${{ inputs.release && 'release' || '' }}
+    outputs:
+      artifact: ${{ steps.name.outputs.artifact }}
+      signed: ${{ steps.apple.outputs.signed }}
+      notarized: ${{ steps.apple.outputs.notarized }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the inputs
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          case "$PLATFORM" in
+            macos-aarch64|windows-x64) ;;
+            *) echo "::error::Unknown platform '$PLATFORM': use macos-aarch64 or windows-x64."; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require the updater signing key
+        if: inputs.release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        # Without the key Tauri would build unsigned updater packages that no installed app accepts.
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is missing from the 'release' environment. A release without a signed updater package would break updates for every installed app."
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          # A release is a clean build: it neither reads nor writes a cache.
+          save-cache: "false"
+          use-cache: ${{ !inputs.release }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: pnpm --dir web install --frozen-lockfile
+
+      - name: Apple signing and notarization
+        id: apple
+        if: inputs.platform == 'macos-aarch64'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        # Tauri treats a set-but-empty APPLE_CERTIFICATE as a certificate to import,
+        # so nothing is exported unless the secret has a value.
+        run: |
+          signed=false
+          notarized=false
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            signed=true
+            {
+              echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+              echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+              echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+            } >> "$GITHUB_ENV"
+            if [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+              notarized=true
+              key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY}.p8"
+              umask 077
+              printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+              {
+                echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+                echo "APPLE_API_KEY=$APPLE_API_KEY"
+                echo "APPLE_API_KEY_PATH=$key_path"
+              } >> "$GITHUB_ENV"
+            fi
+          else
+            # Apple Silicon refuses to launch a downloaded app that has no signature at all.
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "notarized=$notarized" >> "$GITHUB_OUTPUT"
+
+      - name: Build the macOS bundles
+        if: inputs.platform == 'macos-aarch64'
+        env:
+          RELEASE: ${{ inputs.release }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          extra=()
+          if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
+          web/node_modules/.bin/tauri build --ci --bundles app,dmg "${extra[@]}"
+
+      - name: Build the Windows installer
+        if: inputs.platform == 'windows-x64'
+        env:
+          RELEASE: ${{ inputs.release }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          extra=()
+          if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
+          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis "${extra[@]}"
+
+      - name: Name the artifact
+        id: name
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          RELEASE: ${{ inputs.release }}
+        run: echo "artifact=oxide-${PLATFORM}$([ "$RELEASE" = "true" ] && echo -release || echo -ci)" >> "$GITHUB_OUTPUT"
+
+      - name: Stage the release deliverables
+        if: inputs.release
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          SIGNED: ${{ steps.apple.outputs.signed }}
+          NOTARIZED: ${{ steps.apple.outputs.notarized }}
+        # Each deliverable gets the name users and latest.json see.
+        run: |
+          version=$(node -p "require('./crates/oxide-app/tauri.conf.json').version")
+          bundle=target/release/bundle
+          mkdir -p staged
+          if [ "$PLATFORM" = "macos-aarch64" ]; then
+            cp "$bundle/dmg/Oxide_${version}_aarch64.dmg" staged/
+            cp "$bundle/macos/Oxide.app.tar.gz" "staged/Oxide_${version}_aarch64.app.tar.gz"
+            cp "$bundle/macos/Oxide.app.tar.gz.sig" "staged/Oxide_${version}_aarch64.app.tar.gz.sig"
+            if [ "$NOTARIZED" = "true" ]; then
+              notice="The macOS build is signed with a Developer ID certificate and notarized by Apple."
+            elif [ "$SIGNED" = "true" ]; then
+              notice="The macOS build is signed with a Developer ID certificate but not notarized; Gatekeeper may ask for confirmation on first launch."
+            else
+              notice="The macOS build is ad-hoc signed, not notarized: after downloading, open it with right-click → Open (or run \`xattr -dr com.apple.quarantine Oxide.app\`). Updates installed through Oxide are unaffected."
+            fi
+          else
+            cp "$bundle/nsis/Oxide_${version}_x64-setup.exe" staged/
+            cp "$bundle/nsis/Oxide_${version}_x64-setup.exe.sig" staged/
+            notice="The Windows installer is not Authenticode-signed: SmartScreen may warn on first run (More info → Run anyway). Verify the download against SHA256SUMS.txt."
+          fi
+          printf '%s\n' "$notice" > "staged/NOTICE-${PLATFORM}.txt"
+          ls -l staged
+
+      - name: Upload the release deliverables
+        if: inputs.release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: staged/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the CI bundles
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: |
+            target/release/bundle/macos/Oxide.app
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7

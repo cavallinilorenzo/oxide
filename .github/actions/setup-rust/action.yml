@@ -6,6 +6,10 @@ inputs:
     description: Whether this run may save the Rust cache ("true" or "false").
     default: "false"
 
+  use-cache:
+    description: Whether to restore the Rust cache at all ("true" or "false"). Release builds are clean.
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -15,6 +19,7 @@ runs:
       run: rustup toolchain install --no-self-update
 
     - name: Restore the Rust cache
+      if: inputs.use-cache == 'true'
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         save-if: ${{ inputs.save-cache }}

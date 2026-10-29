@@ -93,52 +93,76 @@ Use the issue forms ([bug report](https://github.com/cavallinilorenzo/oxide/issu
 Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single source of instructions for them (Claude Code, Codex, Antigravity). `CLAUDE.md` and `GEMINI.md` just point to it. The agent docs live in [docs/agents/](docs/agents/), and the skills agents use are in `.agents/skills/`. Human contributors follow the same branch model and checks.
 
 
-## Publishing application updates manually
+## Releasing Oxide
 
-Settings → Updates checks the latest published stable GitHub release. Publishing
-stays a human action; this repository has no CI/CD release workflows.
-
-The updater public key and feed URL are in `crates/oxide-app/tauri.conf.json`.
-The corresponding private key is kept outside the checkout in the user's
-`.oxide/release-keys/oxide-updater.key`, with access restricted to that user.
-Keep a secure backup: installed versions need future packages signed by that
-same key. Never commit it or replace the public key casually.
+Only the two Release Managers, `cavallinilorenzo` and `itsmrma`, turn a `main`
+commit into an official release. The binding control is the `release`
+environment: its required reviewers are exactly those two, and the signing
+secrets are unreadable until one of them approves. A `v*` tag ruleset makes tags
+immutable (no update, no deletion) for everyone but the repository admin.
+Publishing stays a human click.
 
 1. Bump the version through a PR into `main` titled `chore(release): vX.Y.Z`.
    `node tools/ci/cli.mjs bump X.Y.Z` writes it to `Cargo.toml`, the Tauri config
    and `web/package.json`, and updates the workspace entries of `Cargo.lock`.
-   `node tools/ci/cli.mjs release-version vX.Y.Z` confirms the tag will match.
-   Only a human tags a release.
-2. Build on the platform being released. Set `TAURI_SIGNING_PRIVATE_KEY` to the
-   private-key file path, then run Tauri from the repository root with
-   `--config crates/oxide-app/tauri.updater.conf.json`. For example, on Windows:
-
-   ```powershell
-   $env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $env:USERPROFILE '.oxide/release-keys/oxide-updater.key'
-   web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.updater.conf.json
-   Remove-Item Env:/TAURI_SIGNING_PRIVATE_KEY
-   ```
-
-   On macOS Apple Silicon, use `--target aarch64-apple-darwin --bundles app,dmg`.
-   Set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
-   Normal local builds do not need the signing key or the extra config.
-3. Collect the updater packages and their `.sig` files in a release directory:
-   Windows `Oxide_X.Y.Z_x64-setup.exe`, macOS `Oxide.app.tar.gz`. Each included
-   package must have a signature; platforms can be released independently.
-4. Generate the feed locally, for example:
+   Use `vX.Y.Z-rc.N` for a release candidate: it is published as a pre-release
+   and never reaches the update feed.
+2. Wait for `gate` to succeed on the `main` run of the merge commit. That run
+   also builds both bundles, so the commit is proven packageable.
+3. Tag that commit and push the tag:
 
    ```sh
-   node tools/ci/cli.mjs update-manifest release-artifacts v0.2.0
+   git tag -a vX.Y.Z <sha> -m "Oxide vX.Y.Z"
+   git push origin vX.Y.Z
    ```
 
-   An optional fourth argument overrides `cavallinilorenzo/oxide` for a fork.
-5. Upload the packages, signatures and generated `latest.json` to the matching
-   draft GitHub release, then review and publish it. The human-created tag must
-   match the package version. Do not upload debug builds as releases.
+   The Release workflow's `verify` job fails with an actionable message unless
+   the tag is on `main` (or `release/*`), matches the three manifests, and has
+   a successful `gate` on that commit's push run.
+4. Approve the `release` deployment in the Release run (Actions → Release →
+   Review deployments). Either Release Manager may approve, including the one
+   who pushed the tag.
+5. The `publish` job creates a **draft** release with the `.dmg`, the
+   `.app.tar.gz` and `-setup.exe` updater packages with their `.sig` files,
+   `latest.json`, `SHA256SUMS.txt`, the SPDX SBOM, build provenance
+   attestations, and draft notes with per-platform signing notices. Each build
+   is a clean, cache-free rebuild of the tagged commit.
+6. Download the draft's builds and run the live Provider smoke tests on each
+   platform you can. Edit the notes, then Publish.
+7. Watch the "Verify release" run. It re-downloads every asset, checks the
+   checksums and attestations (`gh attestation verify <file> --repo
+   cavallinilorenzo/oxide`) and, for a stable release, that
+   `releases/latest/download/latest.json` serves this version with resolving URLs
+   and non-empty signatures. On failure it opens a `needs-triage` issue.
 
-Drafts and prereleases do not become the stable feed. The first published signed
+**Rollback is rolling forward.** Published releases are immutable and installed
+apps only update forward: ship a patch release.
+
+### Secrets and signing
+
+The `release` environment holds `TAURI_SIGNING_PRIVATE_KEY` (and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one). The release build fails
+if the key is missing. Keep an encrypted offline backup: installed apps accept
+only packages signed by that key, and the matching public key is in
+`crates/oxide-app/tauri.conf.json`. Never commit the key or replace the public
+key casually.
+
+When the Apple secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY`,
+`APPLE_API_PRIVATE_KEY`) are present in the same environment, the macOS build is
+signed and notarized. Without them it is ad-hoc signed, and the release notes
+say so. The Windows installer is not Authenticode-signed; the notes mention
+SmartScreen.
+
+### Rehearsing a release
+
+Normal local builds need neither the signing key nor the updater config. To
+rehearse the pipeline, tag a release candidate (`vX.Y.Z-rc.1`) after the bump
+merged; it produces a draft pre-release. Afterwards the repository admin deletes
+the draft and the tag.
+
+Drafts and pre-releases never become the stable feed. The first published signed
 stable release enables the feed; an update appears only when it is newer than
 an installed app. A missing feed or connection failure is reported as a failed
-check, never as “up to date”. The local manifest helper supports Windows x64 and
-macOS Apple Silicon packages. OS signing/notarization is separate from the
-updater signature; see [Tauri's updater guide](https://v2.tauri.app/plugin/updater/).
+check, never as "up to date". See [Tauri's updater
+guide](https://v2.tauri.app/plugin/updater/) for the signing model.

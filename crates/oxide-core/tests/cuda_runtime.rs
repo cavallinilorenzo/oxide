@@ -295,3 +295,54 @@ fn cancelled_recording_never_starts_a_cuda_worker() {
     ));
     assert!(!marker.exists());
 }
+
+#[test]
+fn cuda_and_vulkan_coexist_without_mandatory_cuda_loading_at_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    let cuda_bin = dir
+        .path()
+        .join(format!("oxide-cuda-worker{}", std::env::consts::EXE_SUFFIX));
+    let vulkan_bin = dir.path().join(format!(
+        "oxide-vulkan-worker{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    std::fs::write(
+        &cuda_bin,
+        b"invalid-executable-that-would-crash-if-executed",
+    )
+    .unwrap();
+    std::fs::write(
+        &vulkan_bin,
+        b"invalid-executable-that-would-crash-if-executed",
+    )
+    .unwrap();
+
+    // With both workers present, default_runtime must not crash or spawn workers eagerly
+    unsafe {
+        std::env::set_var("OXIDE_CUDA_WORKER", &cuda_bin);
+        std::env::set_var("OXIDE_VULKAN_WORKER", &vulkan_bin);
+        std::env::remove_var("OXIDE_DICTATION_BACKEND");
+    }
+    let runtime = oxide_core::dictation::default_runtime();
+    // Preserves Vulkan as the default when both exist without assuming CUDA is faster
+    assert_eq!(
+        runtime.backend_id(),
+        oxide_core::dictation::BackendId::Vulkan
+    );
+
+    // Explicit override selects CUDA without assuming precedence
+    unsafe {
+        std::env::set_var("OXIDE_DICTATION_BACKEND", "cuda");
+    }
+    let cuda_runtime = oxide_core::dictation::default_runtime();
+    assert_eq!(
+        cuda_runtime.backend_id(),
+        oxide_core::dictation::BackendId::Cuda
+    );
+
+    unsafe {
+        std::env::remove_var("OXIDE_CUDA_WORKER");
+        std::env::remove_var("OXIDE_VULKAN_WORKER");
+        std::env::remove_var("OXIDE_DICTATION_BACKEND");
+    }
+}

@@ -181,14 +181,25 @@ pub struct Dictation {
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
     #[cfg(windows)]
     {
-        if cuda::worker_path().is_file() {
-            let cuda = cuda::CudaRuntime::default();
-            if matches!(cuda.probe().state, CapabilityState::Available) {
-                return Arc::new(cuda);
-            }
+        let requested_backend = std::env::var("OXIDE_DICTATION_BACKEND")
+            .ok()
+            .map(|s| s.to_ascii_lowercase());
+
+        if (requested_backend.as_deref() == Some("cuda")
+            || (requested_backend.is_none()
+                && cuda::worker_path().is_file()
+                && !vulkan::worker_path().is_file()))
+            && cuda::worker_path().is_file()
+        {
+            return Arc::new(cuda::CudaRuntime::default());
         }
+
         if vulkan::worker_path().is_file() {
             return Arc::new(vulkan::VulkanRuntime::default());
+        }
+
+        if cuda::worker_path().is_file() {
+            return Arc::new(cuda::CudaRuntime::default());
         }
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

@@ -1,0 +1,17 @@
+NVIDIA CUDA Toolkit Redistribution Notice
+==========================================
+
+The CUDA native worker (oxide-cuda-worker) links against the NVIDIA CUDA Toolkit
+runtime and cuBLAS libraries.
+
+Redistributable Files (under NVIDIA CUDA Toolkit End User License Agreement):
+- cudart64_*.dll (CUDA Runtime Library)
+- cublas64_*.dll (NVIDIA cuBLAS Library)
+- cublasLt64_*.dll (NVIDIA cuBLAS Light Library)
+
+Subject to the NVIDIA CUDA Toolkit EULA (https://docs.nvidia.com/cuda/eula/index.html):
+NVIDIA grants a non-exclusive, non-transferable license to distribute the runtime
+shared library files listed above alongside distributed application binaries.
+
+No end-user installation of the full CUDA Toolkit is required.
+Packaging and installer distribution of these DLLs is tracked in issue #234.

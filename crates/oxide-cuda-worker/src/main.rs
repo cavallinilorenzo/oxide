@@ -17,6 +17,9 @@ fn initialization(e: impl std::fmt::Display) -> BackendError {
 const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR: i32 = 75;
 const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR: i32 = 76;
 const CU_DEVICE_ATTRIBUTE_INTEGRATED: i32 = 18;
+const CU_DEVICE_ATTRIBUTE_PCI_BUS_ID: i32 = 33;
+const CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID: i32 = 34;
+const CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID: i32 = 50;
 
 type CuInit = unsafe extern "system" fn(flags: u32) -> i32;
 type CuDriverGetVersion = unsafe extern "system" fn(driver_version: *mut i32) -> i32;
@@ -131,7 +134,18 @@ fn adapters() -> Result<Vec<CudaAdapter>, BackendError> {
         let description = unsafe { CStr::from_ptr(sys::ggml_backend_dev_description(dev)) }
             .to_string_lossy()
             .into_owned();
-        native.push((gpu_index, name, description));
+        let mut props = unsafe { std::mem::zeroed::<sys::ggml_backend_dev_props>() };
+        unsafe { sys::ggml_backend_dev_get_props(dev, &mut props) };
+        let pci = if props.device_id.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { CStr::from_ptr(props.device_id) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        };
+        native.push((gpu_index, name, description, pci));
         gpu_index += 1;
     }
 
@@ -220,7 +234,31 @@ fn adapters() -> Result<Vec<CudaAdapter>, BackendError> {
             CapabilityState::Available
         };
 
-        let matching = native.get(i as usize);
+        let mut pci_bus = 0;
+        let mut pci_device = 0;
+        let mut pci_domain = 0;
+        let has_pci = unsafe {
+            (driver.cu_device_get_attribute)(&mut pci_bus, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, dev) == 0
+                && (driver.cu_device_get_attribute)(
+                    &mut pci_device,
+                    CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID,
+                    dev,
+                ) == 0
+                && (driver.cu_device_get_attribute)(
+                    &mut pci_domain,
+                    CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID,
+                    dev,
+                ) == 0
+        };
+        let pci_id = format!("{pci_domain:04x}:{pci_bus:02x}:{pci_device:02x}.0");
+
+        let matching = native.iter().find(|(_, _, description, native_pci)| {
+            if let Some(native_pci) = native_pci {
+                has_pci && native_pci == &pci_id
+            } else {
+                description == &name
+            }
+        });
         let native_index = matching.map_or(i, |d| d.0);
         let native_backend = matching.map_or_else(|| format!("CUDA{i}"), |d| d.1.clone());
 

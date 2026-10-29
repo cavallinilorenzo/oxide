@@ -339,10 +339,10 @@ impl WhisperBackendRuntime for CudaRuntime {
             } if adapter_id == device.id && native_backend == device.native_backend => {
                 let selected = format!("whisper_backend_init_gpu: using {native_backend} backend");
                 let has_offload_evidence = logs.contains(&selected)
-                    || logs.contains("ggml_cuda_init")
-                    || logs.contains("CUDA Timings:")
-                    || logs.contains("CUDA0")
-                    || logs.contains("compute capability");
+                    && (logs.contains("compute buffer")
+                        || logs.contains("ggml_backend_cuda_init")
+                        || logs.contains("CUDA Timings:")
+                        || logs.contains("allocating"));
                 if !has_offload_evidence {
                     return Err(BackendError::InferenceFailed(
                         "CUDA offload was not evidenced by native GPU execution; CPU fallback is refused".into(),
@@ -353,7 +353,7 @@ impl WhisperBackendRuntime for CudaRuntime {
                     .find(|line| {
                         line.contains("CUDA Timings:")
                             || line.contains("Total time: ")
-                            || line.contains("compute capability")
+                            || line.contains("compute buffer")
                     })
                     .unwrap_or("CUDA verified");
                 let evidence = format!(

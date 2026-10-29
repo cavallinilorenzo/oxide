@@ -6,7 +6,7 @@
 
 Oxide is a desktop app for agentic engineering. You open a Project and drive coding agents from a chat, switching between the agent CLIs already installed on your machine, with Git and GitHub at hand.
 
-> **Status: pre-release.** Official release builds currently target **macOS with Apple Silicon**. You can also build and run Oxide from source on Windows; expect rough edges and breaking changes between versions.
+> **Status: pre-release.** Official release builds target **macOS on Apple Silicon** and **Windows x64**. Expect rough edges and breaking changes between versions.
 
 ## Supported Providers
 
@@ -20,20 +20,40 @@ Each Provider must be **installed and logged in** before you launch Oxide. Oxide
 
 ## Install
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/cavallinilorenzo/oxide/releases). Each release lists SHA-256 checksums and has a [build-provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). You can check that a download was built by this repository's release workflow:
+Download the installer for your platform from [GitHub Releases](https://github.com/cavallinilorenzo/oxide/releases):
+
+- **macOS (Apple Silicon):** `Oxide_<version>_aarch64.dmg`. Drag `Oxide.app` into `/Applications`.
+- **Windows (x64):** `Oxide_<version>_x64-setup.exe`.
+
+Pre-release (`-rc`) builds are for testing and never reach the in-app updater.
+
+### Updates
+
+Oxide checks for new versions in **Settings → Updates** and installs them in place. It only offers published stable releases, and only accepts packages signed with Oxide's updater key.
+
+### Verifying a download
+
+Every release attaches `SHA256SUMS.txt` and a [build-provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) for each file, which ties it to the exact workflow run and commit that built it:
 
 ```sh
+shasum -a 256 --check --ignore-missing SHA256SUMS.txt   # macOS; use sha256sum on Linux
 gh attestation verify Oxide_<version>_aarch64.dmg --repo cavallinilorenzo/oxide
 ```
 
+On Windows, compare `(Get-FileHash .\Oxide_<version>_x64-setup.exe).Hash` with the line in `SHA256SUMS.txt`.
+
 ### Opening an unsigned build
 
-Until Oxide has an Apple Developer ID, releases are **unsigned**: ad-hoc signed and not notarized. Each release says whether it is signed. macOS Gatekeeper blocks unsigned apps on first launch. To open one:
+Each release says whether it is code-signed on your platform.
+
+**macOS.** Until Oxide has an Apple Developer ID, releases are **ad-hoc signed and not notarized**, and Gatekeeper blocks them on first launch. To open one:
 
 1. Drag `Oxide.app` from the `.dmg` into `/Applications` and try to open it once.
 2. Open **System Settings → Privacy & Security**, scroll to the message about Oxide, and click **Open Anyway**.
 
-Alternatively, remove the quarantine flag from the terminal: `xattr -dr com.apple.quarantine /Applications/Oxide.app`.
+Alternatively, remove the quarantine flag from the terminal: `xattr -dr com.apple.quarantine /Applications/Oxide.app`. Updates installed through Oxide are unaffected.
+
+**Windows.** The installer is **not Authenticode-signed**, so SmartScreen may warn on first run. Choose **More info → Run anyway** after verifying the download as above.
 
 ## Build from source
 
@@ -61,7 +81,7 @@ The Tauri CLI must run from the repository root: that is where it finds `crates/
 
 ### Windows
 
-There are no official Windows installers yet. To build and run Oxide from source, install:
+To build and run Oxide from source on Windows (or to build your own installer), install:
 
 - Windows 10 (version 1803 or later) or Windows 11. These include the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); on older or customized installations, install the Evergreen Runtime manually.
 - [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **Desktop development with C++** workload.
@@ -101,13 +121,14 @@ cargo test -p oxide-provider --test codex_live_smoke -- --ignored
 cargo test -p oxide-provider --test agy_live_smoke -- --ignored
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) lists every check CI runs and its local equivalent.
+[docs/devops.md](docs/devops.md) lists every check CI runs, why it exists and its local equivalent.
 
 ## Learn more
 
 - [GLOSSARY.md](GLOSSARY.md): the domain language (Project, Thread, Turn, Provider…)
 - [docs/adr/](docs/adr/): architecture decisions
-- [CONTRIBUTING.md](CONTRIBUTING.md): branch model, local checks, releases
+- [CONTRIBUTING.md](CONTRIBUTING.md): branch model, local checks
+- [docs/devops.md](docs/devops.md): CI, releases and the release runbook
 - [SECURITY.md](SECURITY.md): how to report a vulnerability
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 

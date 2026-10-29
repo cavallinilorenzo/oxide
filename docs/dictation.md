@@ -31,6 +31,11 @@ it does not claim to have benchmarked or measured GPU VRAM. CPU-only builds repo
 an actionable error if GPU is selected. whisper.cpp may fall back to CPU if its GPU
 backend cannot initialize.
 
+Windows GPU inference has not been validated with this integration, and the local
+Vulkan build encountered native CMake configuration failures. A compiled backend
+does not prove GPU execution. Runtime verification, packaged GPU backends and
+additional models are tracked in [spec #225](https://github.com/cavallinilorenzo/oxide/issues/225).
+
 Building whisper-rs requires CMake, a C/C++ compiler, and libclang for bindgen. Set
 `LIBCLANG_PATH` to the directory containing libclang when it is outside the search
 path. Linux also needs ALSA development headers. macOS uses the system microphone
@@ -43,5 +48,7 @@ Oxide is MIT. whisper.cpp and the original OpenAI model weights are MIT; whisper
 is Unlicense; CPAL is Apache-2.0; sysinfo is MIT. Their licenses permit commercial
 redistribution. The MIT notices for whisper.cpp and the model are retained in
 `docs/licenses/whisper.txt`. The model download URL follows whisper.cpp's official
-download script; its LFS SHA-256 is pinned in Core. Library and GPU dependencies
-remain subject to the repository's cargo-deny license checks.
+download script; its LFS SHA-256 is pinned in Core. Review license terms when
+adding or redistributing native GPU dependencies. The CI removal on main also
+removed the cargo-deny configuration; restoring automated license checks is
+tracked separately in issue #224.

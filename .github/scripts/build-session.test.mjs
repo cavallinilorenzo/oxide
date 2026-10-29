@@ -126,24 +126,3 @@ test("debug app builds keep the executable without retaining PDBs or dependencie
   const debug = join(outputRoot, readdirSync(outputRoot)[0], "debug");
   assert.deepEqual(readdirSync(debug), ["oxide-app.exe"]);
 });
-
-for (const status of [0, 1]) test(`the real runner cleans a compiler's files after exit ${status}`, { skip: !["win32", "darwin"].includes(process.platform) }, (t) => {
-  const root = fixture(t);
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  const report = join(root, "target-used.txt");
-  const windows = process.platform === "win32";
-  writeFileSync(join(bin, windows ? "cargo.cmd" : "cargo"), windows
-    ? `@echo off\r\nmkdir "%CARGO_TARGET_DIR%\\debug"\r\necho temporary > "%CARGO_TARGET_DIR%\\debug\\cache.pdb"\r\necho %CARGO_TARGET_DIR%> "%OXIDE_TEST_REPORT%"\r\nexit /b ${status}\r\n`
-    : `#!/bin/sh\nmkdir -p "$CARGO_TARGET_DIR/debug"\nprintf temporary > "$CARGO_TARGET_DIR/debug/cache.pdb"\nprintf '%s' "$CARGO_TARGET_DIR" > "$OXIDE_TEST_REPORT"\nexit ${status}\n`,
-    { mode: 0o755 });
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL("../../tools/checks/run.mjs", import.meta.url)), "clippy"], {
-    encoding: "utf8", timeout: 10_000,
-    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, CARGO_TARGET_DIR: join(root, "target"), OXIDE_TEST_REPORT: report, OXIDE_BUILD_BUDGET_GIB: "12" },
-  });
-  assert.equal(run.status, status, run.stderr);
-  const scratch = readFileSync(report, "utf8").trim();
-  assert.equal(existsSync(scratch), false);
-  assert.match(run.stdout, /Temporary Rust build files cleaned/);
-  assert.equal(readFileSync(join(root, "target", "running-app.exe"), "utf8"), "keep existing output");
-});

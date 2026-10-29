@@ -317,7 +317,8 @@ export function updateManifest(artifactNames, signatures, { repository, tag, dat
 export function checkUpdateFeed(feed, tag) {
   const fail = (message) => ({ ok: false, message, urls: [] });
   if (!feed || typeof feed !== "object") return fail("The update feed is not a JSON object.");
-  if (feed.version !== String(tag).replace(/^v/, "")) return fail(`The update feed serves version ${feed.version ?? "(none)"}, not ${String(tag).replace(/^v/, "")}.`);
+  const version = String(tag).replace(/^v/, "");
+  if (feed.version !== version) return fail(`The update feed serves version ${feed.version ?? "(none)"}, not ${version}.`);
   const platforms = Object.entries(feed.platforms ?? {});
   if (platforms.length === 0) return fail("The update feed lists no platforms.");
   const urls = [];

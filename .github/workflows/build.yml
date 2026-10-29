@@ -139,7 +139,7 @@ jobs:
         run: |
           extra=()
           if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
-          web/node_modules/.bin/tauri build --ci --bundles app,dmg "${extra[@]}"
+          web/node_modules/.bin/tauri build --ci --bundles app,dmg "${extra[@]}" -- --locked
 
       - name: Build the Windows installer
         if: inputs.platform == 'windows-x64'
@@ -150,7 +150,7 @@ jobs:
         run: |
           extra=()
           if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
-          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis "${extra[@]}"
+          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis "${extra[@]}" -- --locked
 
       - name: Name the artifact
         id: name

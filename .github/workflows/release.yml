@@ -3,7 +3,7 @@ name: Release
 # A Release Manager pushes a v*.*.* tag. `verify` proves the tag is releasable,
 # `build` waits for a Release Manager to approve the `release` environment (that
 # approval unlocks the signing secrets), and `publish` creates a DRAFT release.
-# Publishing the draft stays a human click. See docs/devops.md for the runbook.
+# Publishing the draft stays a human click. See CONTRIBUTING.md ("Releasing Oxide") for the runbook.
 on:
   push:
     tags: ["v*.*.*"]

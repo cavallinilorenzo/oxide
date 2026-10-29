@@ -45,6 +45,7 @@ jobs:
             file="${file#\*}"
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < SHA256SUMS.txt
+          gh attestation verify SHA256SUMS.txt --repo "$GITHUB_REPOSITORY"
 
       - name: Verify the update feed
         if: env.PRERELEASE != 'true'

@@ -6,8 +6,8 @@ import { copyFileSync } from "node:fs";
 import { assertBuildSpace } from "./checks/build-space.mjs";
 
 export function dictationBuild(backend, inherited = process.env) {
-  if (!["cpu", "vulkan"].includes(backend)) {
-    throw new Error("Expected backend: cpu or vulkan");
+  if (!["cpu", "vulkan", "cuda"].includes(backend)) {
+    throw new Error("Expected backend: cpu, vulkan or cuda");
   }
   // whisper-rs-sys forwards CMAKE_* variables into its nested shader build.
   // In particular, a VS instance is invalid with the Ninja generator. Start
@@ -20,15 +20,20 @@ export function dictationBuild(backend, inherited = process.env) {
     CMAKE_C_COMPILER: "cl.exe", CMAKE_CXX_COMPILER: "cl.exe",
     // Nested shader-generator TryCompile paths approach MSVC's 260-character
     // object/PDB limit even in an ordinary checkout. Keep these names short.
-    CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", backend === "cpu" ? "dc" : "dv")),
+    CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", backend === "cpu" ? "dc" : (backend === "cuda" ? "dcu" : "dv"))),
   });
   return {
     env,
     args: ["build", "--locked", "-p", "oxide-app",
-      ...(backend === "vulkan" ? ["--features", "dictation-vulkan"] : [])],
+      ...(backend === "vulkan" ? ["--features", "dictation-vulkan"] : []),
+      ...(backend === "cuda" ? ["--features", "dictation-cuda"] : [])],
     ...(backend === "vulkan" ? { worker: {
       args: ["build", "--locked", "--manifest-path", "crates/oxide-vulkan-worker/Cargo.toml"],
       env: { ...env, CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", "vw")) },
+    } } : {}),
+    ...(backend === "cuda" ? { worker: {
+      args: ["build", "--locked", "--manifest-path", "crates/oxide-cuda-worker/Cargo.toml"],
+      env: { ...env, CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", "cw")) },
     } } : {}),
   };
 }
@@ -37,7 +42,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (process.platform !== "win32") throw new Error("This build entry point requires Windows x64");
     const build = dictationBuild(process.argv[2]);
-    for (const command of ["cl.exe", "cmake.exe", "ninja.exe", ...(process.argv[2] === "vulkan" ? ["glslc.exe"] : [])]) {
+    for (const command of ["cl.exe", "cmake.exe", "ninja.exe", ...(process.argv[2] === "vulkan" ? ["glslc.exe"] : []), ...(process.argv[2] === "cuda" ? ["nvcc.exe"] : [])]) {
       if (spawnSync("where.exe", [command], { env: build.env }).status !== 0) {
         throw new Error(`Missing ${command}: use an x64 Native Tools prompt; see docs/dictation.md`);
       }
@@ -50,8 +55,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const worker = spawnSync("cargo", build.worker.args, { env: build.worker.env, stdio: "inherit" });
       if (worker.error) throw worker.error;
       if (worker.status !== 0) process.exit(worker.status ?? 1);
-      copyFileSync(join(build.worker.env.CARGO_TARGET_DIR, "debug", "oxide-vulkan-worker.exe"),
-        join(build.env.CARGO_TARGET_DIR, "debug", "oxide-vulkan-worker.exe"));
+      const workerName = process.argv[2] === "cuda" ? "oxide-cuda-worker.exe" : "oxide-vulkan-worker.exe";
+      copyFileSync(join(build.worker.env.CARGO_TARGET_DIR, "debug", workerName),
+        join(build.env.CARGO_TARGET_DIR, "debug", workerName));
     }
     assertBuildSpace(process.cwd());
     process.exitCode = result.status ?? 1;

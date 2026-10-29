@@ -229,6 +229,47 @@ path. Linux also needs ALSA development headers. macOS uses the system microphon
 permission and the bundled NSMicrophoneUsageDescription. Windows needs microphone
 access for desktop applications enabled in system privacy settings.
 
+### Windows NVIDIA CUDA inference
+
+CUDA acceleration on Windows runs as an isolated worker process (`oxide-cuda-worker.exe`),
+mirroring the Vulkan worker design. The host application never links or loads CUDA DLLs
+directly, ensuring machines without an NVIDIA GPU or driver launch Oxide safely and fall
+back to CPU or Vulkan dictation without crashing.
+
+- **Build and setup**:
+  - `tools/dictation-build.mjs cuda` builds `oxide-app` with `--features dictation-cuda`
+    and compiles `oxide-cuda-worker` with `CARGO_TARGET_DIR=target/cw`.
+  - Requires Visual Studio Build Tools (MSVC `cl.exe`), CMake, Ninja, and the NVIDIA CUDA
+    Toolkit (with `CUDA_PATH` and `nvcc.exe` in `PATH`).
+  - Worker binaries are discovered alongside the application or via `OXIDE_CUDA_WORKER`.
+- **Architecture and driver requirements**:
+  - Requires an NVIDIA GPU with compute capability >= 5.0 (Maxwell, Pascal, Turing,
+    Ampere, Ada Lovelace, Blackwell). Older architectures (e.g. Kepler, Fermi) report
+    `CapabilityState::InitializationFailure`.
+  - Probes query `nvcuda.dll` via the CUDA Driver API (`cuInit`, `cuDeviceGetUuid`,
+    `cuDeviceTotalMem`, `cuMemGetInfo`, `cuDeviceGetAttribute`). If `nvcuda.dll` is
+    absent or the driver is missing, the worker exits or reports
+    `CapabilityState::MissingDriverOrRuntime`.
+  - Stable adapter IDs follow `cuda:<device_uuid_hex>`, aligning with physical UUIDs
+    reported by Vulkan for the same physical card.
+- **Diagnostics**:
+  Run diagnostic enumeration and test inference with:
+  ```bat
+  cargo run --locked -p oxide-core --example cuda_diagnostic -- C:\oxide-build\cw\debug\oxide-cuda-worker.exe
+  cargo run --locked -p oxide-core --example cuda_diagnostic -- C:\oxide-build\cw\debug\oxide-cuda-worker.exe C:\Users\YOU\.oxide\models\ggml-small.bin C:\fixtures\jfk.wav cuda:0000000010de00000000000000000000
+  ```
+- **Physical hardware validation gap**:
+  Physical NVIDIA hardware was unavailable on the development machine. Automated contract
+  and failure tests (13/13 passing in `crates/oxide-core/tests/cuda_runtime.rs`) verify
+  missing runtime, worker crashes, OOM pressure, budget limits, cancellation, and evidence
+  checks. Verification on physical NVIDIA hardware remains an explicit validation gap
+  carried to the final acceptance ticket #235.
+- **Redistribution and packaging**:
+  End users must not be required to install the CUDA Toolkit. The packaging ticket (#234)
+  owns bundling the required runtime libraries (`cudart64_*.dll`, `cublas64_*.dll`,
+  `cublasLt64_*.dll`) alongside `oxide-cuda-worker.exe` with retained NVIDIA redistribution
+  notices.
+
 ## Licenses
 
 Oxide is MIT. whisper.cpp and the original OpenAI model weights are MIT; whisper-rs

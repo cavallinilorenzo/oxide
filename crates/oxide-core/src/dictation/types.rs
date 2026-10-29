@@ -114,6 +114,9 @@ impl BuildManifest {
             if super::vulkan::worker_path().is_file() {
                 backends.push(BackendId::Vulkan);
             }
+            if super::cuda::worker_path().is_file() {
+                backends.push(BackendId::Cuda);
+            }
             backends
         };
 

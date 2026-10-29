@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/oxide-provider", "crates/oxide-core", "crates/oxide-app"]
+exclude = ["crates/oxide-vulkan-worker"]
 
 [workspace.package]
 version = "0.1.0"

@@ -3,6 +3,7 @@ pub mod metal;
 pub mod models;
 pub mod runtime;
 pub mod types;
+pub mod vulkan;
 
 use crate::{Error, Result};
 use cpal::{
@@ -118,7 +119,9 @@ pub fn gpu_compiled() -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        cfg!(feature = "dictation-vulkan")
+        BuildManifest::current()
+            .included_backends
+            .contains(&BackendId::Vulkan)
     }
 }
 
@@ -176,6 +179,10 @@ pub struct Dictation {
 }
 
 pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
+    #[cfg(windows)]
+    if vulkan::worker_path().is_file() {
+        return Arc::new(vulkan::VulkanRuntime::default());
+    }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         let metal = MetalRuntime;
@@ -372,6 +379,7 @@ impl Dictation {
         if let Some(cancelled) = self.cancellation.lock().unwrap().take() {
             cancelled.store(true, Ordering::SeqCst);
         }
+        self.runtime.cancel();
         if let Some(recording) = recording {
             let _ = recording.stop.send(());
         }
@@ -496,6 +504,7 @@ impl Dictation {
                             self.record_execution(&request, outcome.execution)?;
                             Ok(outcome.text)
                         }
+                        Err(BackendError::Cancelled) => Err(err("Transcription cancelled")),
                         Err(gpu_err) => {
                             if request.cancelled.load(Ordering::SeqCst) {
                                 return Err(err("Dictation cancelled. Recording discarded."));

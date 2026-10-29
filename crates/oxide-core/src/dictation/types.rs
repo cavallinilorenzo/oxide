@@ -107,13 +107,19 @@ impl BuildManifest {
             BackendId::Cpu,
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             BackendId::Metal,
-            #[cfg(feature = "dictation-vulkan")]
-            BackendId::Vulkan,
         ];
+        #[cfg(windows)]
+        let included_backends = {
+            let mut backends = included_backends;
+            if super::vulkan::worker_path().is_file() {
+                backends.push(BackendId::Vulkan);
+            }
+            backends
+        };
 
         Self {
             whisper_rs_version: "0.16.0".into(),
-            whisper_cpp_pinned: "whisper.cpp (whisper-rs 0.16.0)".into(),
+            whisper_cpp_pinned: "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0)".into(),
             included_backends,
         }
     }

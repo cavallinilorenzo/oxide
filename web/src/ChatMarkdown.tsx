@@ -46,7 +46,7 @@ function blockView(b: Block, key: number): ReactNode {
             <span className={`md-box${item.checked ? " done" : ""}`} role="img" aria-label={item.checked ? "Done" : "Not done"} />
           )}
           <div>
-            {inline(item.inline)}
+            <span>{inline(item.inline)}</span>
             {item.children.map(blockView)}
           </div>
         </li>

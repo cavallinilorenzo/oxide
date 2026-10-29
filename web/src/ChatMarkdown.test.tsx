@@ -28,10 +28,15 @@ describe("ChatMarkdown", () => {
     expect(html).not.toMatch(/##|\*\*|`/);
     expect(html).toContain('<strong>due file</strong>');
     expect(html).toContain("<code>parseChatMarkdown</code>");
-    expect(html).toMatch(/<ol[^>]*><li><div>Primo passo<ul><li><div>dettaglio annidato/);
+    expect(html).toMatch(/<ol[^>]*><li><div><span>Primo passo<\/span><ul><li><div><span>dettaglio annidato/);
     expect(html).toContain("<th>File</th>");
     // The checklist is its own list, not more steps of the numbered one.
     expect(html.match(/<ol/g)).toHaveLength(1);
     expect(html.match(/<ul/g)).toHaveLength(2);
+  });
+
+  it("keeps a list item's inline text in one element, so the item's grid does not split it into rows", () => {
+    const html = renderToStaticMarkup(<ChatMarkdown text={"- usa `code` e **forte** qui"} />);
+    expect(html).toContain("<li><div><span>usa <code>code</code> e <strong>forte</strong> qui</span></div></li>");
   });
 });

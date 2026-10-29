@@ -150,3 +150,7 @@ observations, not guaranteed latency, quality or GPU execution evidence.
 
 Deterministic coverage lives at `tests/dictation_resources.rs`; the coordinator
 test in `tests/dictation.rs` exercises refusal after a primary GPU failure.
+Worker protocol tests inject the host OS resource snapshot independently of the
+fake GPU's reported budget, including a 3 GiB available-RAM pressure case. They
+do not depend on the runner's RAM or concurrent compilation. Production defaults
+still capture real resources, and native workers retain their own fresh guards.

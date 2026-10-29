@@ -113,12 +113,21 @@ pub fn check_before_load(
     path: &std::path::Path,
     probe: &BackendProbe,
 ) -> Result<(), dictation::BackendError> {
+    check_before_load_with(path, probe, None)
+}
+
+pub(crate) fn check_before_load_with(
+    path: &std::path::Path,
+    probe: &BackendProbe,
+    provider: Option<&ResourceProvider>,
+) -> Result<(), dictation::BackendError> {
     let entry = models::catalogue().entry_for_path(path).ok_or_else(|| {
         dictation::BackendError::InitializationFailed(
             "Unknown model memory estimate. Select a catalogue model.".into(),
         )
     })?;
-    let snapshot = capture(path.parent().unwrap_or_else(|| std::path::Path::new(".")));
+    let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let snapshot = provider.map_or_else(|| capture(directory), |read| read(directory));
     assess_load(&snapshot, probe, entry.id, now_secs()).map_err(|e| e.backend_error())
 }
 

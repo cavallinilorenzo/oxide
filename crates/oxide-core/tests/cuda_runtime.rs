@@ -2,6 +2,13 @@ use oxide_core::dictation::cuda::CudaRuntime;
 use oxide_core::dictation::{CapabilityState, WhisperBackendRuntime};
 use std::{path::PathBuf, sync::OnceLock};
 
+#[path = "support/dictation_resources.rs"]
+mod resources;
+
+fn fixture_runtime(dir: &tempfile::TempDir, adapter: Option<String>) -> CudaRuntime {
+    CudaRuntime::new(worker(dir), adapter).with_resources(resources::host_resources(6 << 30))
+}
+
 fn fixture(reply: serde_json::Value, logs: &str) -> tempfile::TempDir {
     static EXECUTABLE: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     let (_, executable) = EXECUTABLE.get_or_init(|| {
@@ -64,7 +71,7 @@ fn a_driver_error_is_reported_without_loading_it_into_the_host() {
         response(serde_json::json!({"Err":{"Unavailable":{"status":"missingDriverOrRuntime"}}})),
         "",
     );
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert_eq!(
         runtime.probe().state,
         CapabilityState::MissingDriverOrRuntime
@@ -84,7 +91,7 @@ fn a_probe_selects_the_requested_identity_without_claiming_verified_inference() 
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
         "",
     );
-    let runtime = CudaRuntime::new(worker(&dir), Some("cuda:0000000010de".into()));
+    let runtime = fixture_runtime(&dir, Some("cuda:0000000010de".into()));
     let probe = runtime.probe();
     assert_eq!(probe.state, CapabilityState::Available);
     assert_eq!(probe.adapter.as_deref(), Some("RTX 4090"));
@@ -115,7 +122,7 @@ fn unsupported_capabilities_and_initialization_errors_have_explicit_probe_states
         response(serde_json::json!({"Ok":{"Adapters":[unsupported]}})),
         "",
     );
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert_eq!(
         runtime.probe().state,
         CapabilityState::InitializationFailure("Requires compute capability >= 5.0".into())
@@ -134,7 +141,7 @@ fn model_selection_uses_the_catalogue_cuda_budget() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
         "",
     );
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     let mut request = request();
     request.model_path = "ggml-large-v3.bin".into();
     assert!(matches!(
@@ -156,7 +163,7 @@ fn low_device_budget_refuses_gpu_inference_instead_of_silently_using_cpu() {
         response(serde_json::json!({"Ok":{"Adapters":[small_memory]}})),
         "",
     );
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::InsufficientMemory { .. })
@@ -169,7 +176,7 @@ fn native_allocation_failure_is_reported_as_memory_pressure() {
         response(serde_json::json!({"Err":{"InitializationFailed":"cudaMalloc failed"}})),
         "CUDA error: out of memory",
     );
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::InsufficientMemory { .. })
@@ -181,7 +188,7 @@ fn native_allocation_failure_is_reported_as_memory_pressure() {
 fn windows_loader_failure_and_worker_crashes_are_recoverable() {
     let dir = fixture(serde_json::json!({}), "");
     std::fs::write(dir.path().join("exit-code"), "-1073741515").unwrap(); // 0xc0000135
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert_eq!(
         runtime.probe().state,
         CapabilityState::MissingDriverOrRuntime
@@ -197,7 +204,7 @@ fn windows_loader_failure_and_worker_crashes_are_recoverable() {
 #[test]
 fn adapter_disappearance_and_worker_initialization_failure_never_claim_gpu_success() {
     let dir = fixture(response(serde_json::json!({"Ok":{"Adapters":[]}})), "");
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert_eq!(runtime.probe().state, CapabilityState::NoCompatibleDevice);
     assert!(matches!(
         runtime.transcribe(&request()),
@@ -219,7 +226,7 @@ fn successful_text_without_native_gpu_execution_is_rejected() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})).to_string(),
     )
     .unwrap();
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::InferenceFailed(reason))
@@ -241,7 +248,7 @@ fn inference_reports_the_actual_adapter_and_native_cuda_evidence() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})).to_string(),
     )
     .unwrap();
-    let runtime = CudaRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     let outcome = runtime.transcribe(&request()).unwrap();
     assert_eq!(outcome.text, "ask not what your country can do for you");
     assert_eq!(
@@ -269,10 +276,19 @@ fn cancellation_terminates_the_worker_and_allows_a_new_inference() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})).to_string(),
     )
     .unwrap();
-    let runtime = std::sync::Arc::new(CudaRuntime::new(worker(&dir), None));
+    let runtime = std::sync::Arc::new(fixture_runtime(&dir, None));
     let worker_clone = runtime.clone();
     let handle = std::thread::spawn(move || worker_clone.transcribe(&request()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !dir.path().join("started").exists() {
+        assert!(
+            !handle.is_finished(),
+            "CUDA inference ended before the worker started"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "CUDA worker did not start"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     runtime.cancel();
@@ -280,6 +296,30 @@ fn cancellation_terminates_the_worker_and_allows_a_new_inference() {
         handle.join().unwrap(),
         Err(oxide_core::dictation::BackendError::Cancelled)
     ));
+}
+
+#[test]
+fn host_ram_pressure_refuses_the_model_before_starting_inference() {
+    let dir = fixture(
+        response(serde_json::json!({"Ok":{"Transcription":{
+        "text":"unused","adapter_id":"cuda:0000000010de","native_backend":"CUDA0"}}})),
+        "",
+    );
+    std::fs::write(
+        dir.path().join("probe.json"),
+        response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})).to_string(),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("delay-ms"), "1000").unwrap();
+    let runtime = fixture_runtime(&dir, None).with_resources(resources::host_resources(3 << 30));
+    assert!(matches!(
+        runtime.transcribe(&request()),
+        Err(oxide_core::dictation::BackendError::InsufficientMemory {
+            required_bytes: 3_865_470_567,
+            ..
+        })
+    ));
+    assert!(!dir.path().join("started").exists());
 }
 
 #[test]

@@ -2,6 +2,13 @@ use oxide_core::dictation::vulkan::VulkanRuntime;
 use oxide_core::dictation::{CapabilityState, WhisperBackendRuntime};
 use std::{path::PathBuf, sync::OnceLock};
 
+#[path = "support/dictation_resources.rs"]
+mod resources;
+
+fn fixture_runtime(dir: &tempfile::TempDir, adapter: Option<String>) -> VulkanRuntime {
+    VulkanRuntime::new(worker(dir), adapter).with_resources(resources::host_resources(6 << 30))
+}
+
 fn fixture(reply: serde_json::Value, logs: &str) -> tempfile::TempDir {
     static EXECUTABLE: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     let (_, executable) = EXECUTABLE.get_or_init(|| {
@@ -64,7 +71,7 @@ fn a_driver_error_is_reported_without_loading_it_into_the_host() {
         response(serde_json::json!({"Err":{"Unavailable":{"status":"missingDriverOrRuntime"}}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert_eq!(
         runtime.probe().state,
         CapabilityState::MissingDriverOrRuntime
@@ -84,7 +91,7 @@ fn a_probe_selects_the_requested_identity_without_claiming_verified_inference() 
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), Some("uuid:amd".into()));
+    let runtime = fixture_runtime(&dir, Some("uuid:amd".into()));
     let probe = runtime.probe();
     assert_eq!(probe.state, CapabilityState::Available);
     assert_eq!(probe.adapter.as_deref(), Some("RX 5600 XT"));
@@ -106,6 +113,21 @@ fn request() -> oxide_core::dictation::TranscriptionRequest {
 }
 
 #[test]
+fn host_ram_pressure_refuses_the_model_before_starting_inference() {
+    let dir = inference_fixture("unused");
+    std::fs::write(dir.path().join("delay-ms"), "1000").unwrap();
+    let runtime = fixture_runtime(&dir, None).with_resources(resources::host_resources(3 << 30));
+    assert!(matches!(
+        runtime.transcribe(&request()),
+        Err(oxide_core::dictation::BackendError::InsufficientMemory {
+            required_bytes: 3_865_470_567,
+            ..
+        })
+    ));
+    assert!(!dir.path().join("started").exists());
+}
+
+#[test]
 fn cancelled_recording_never_starts_a_vulkan_worker() {
     let runtime = VulkanRuntime::new("absent-worker.exe".into(), None);
     let request = request();
@@ -124,7 +146,7 @@ fn model_selection_uses_the_catalogue_vulkan_budget() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     let mut request = request();
     request.model_path = "ggml-large-v3.bin".into();
     assert!(matches!(
@@ -144,7 +166,7 @@ fn low_device_budget_refuses_gpu_inference_instead_of_silently_using_cpu() {
         response(serde_json::json!({"Ok":{"Adapters":[device]}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), Some("uuid:amd".into()));
+    let runtime = fixture_runtime(&dir, Some("uuid:amd".into()));
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::InsufficientMemory { .. })
@@ -170,7 +192,7 @@ fn inference_reports_the_actual_adapter_and_native_gpu_timestamps() {
     let dir = inference_fixture(
         "whisper_backend_init_gpu: using Vulkan0 backend\nVulkan Timings:\nMUL_MAT: 1 x 500 us = 500 us\nTotal time: 500 us.\n",
     );
-    let outcome = VulkanRuntime::new(worker(&dir), Some("uuid:amd".into()))
+    let outcome = fixture_runtime(&dir, Some("uuid:amd".into()))
         .transcribe(&request())
         .unwrap();
     assert_eq!(outcome.text, "Hello world");
@@ -190,7 +212,7 @@ fn successful_text_without_native_gpu_execution_is_rejected() {
     let dir = inference_fixture(
         "whisper_backend_init_gpu: using Vulkan0 backend\nwhisper_model_load: Vulkan0 total size = 486 MB\n",
     );
-    let result = VulkanRuntime::new(worker(&dir), None).transcribe(&request());
+    let result = fixture_runtime(&dir, None).transcribe(&request());
     assert!(matches!(
         result,
         Err(oxide_core::dictation::BackendError::InferenceFailed(_))
@@ -203,11 +225,15 @@ fn cancellation_terminates_the_worker_and_allows_a_new_inference() {
         "whisper_backend_init_gpu: using Vulkan0 backend\nVulkan Timings:\nMUL_MAT: 1 x 500 us = 500 us\nTotal time: 500 us.\n",
     );
     std::fs::write(dir.path().join("delay-ms"), "1000").unwrap();
-    let runtime = std::sync::Arc::new(VulkanRuntime::new(worker(&dir), None));
+    let runtime = std::sync::Arc::new(fixture_runtime(&dir, None));
     let running = runtime.clone();
     let job = std::thread::spawn(move || running.transcribe(&request()));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !dir.path().join("started").exists() {
+        assert!(
+            !job.is_finished(),
+            "Vulkan inference ended before the worker started"
+        );
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -228,7 +254,7 @@ fn unsupported_capabilities_and_initialization_errors_have_explicit_probe_states
         response(serde_json::json!({"Ok":{"Adapters":[device]}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert!(
         matches!(runtime.probe().state, CapabilityState::InitializationFailure(message) if message.contains("storageBuffer16BitAccess"))
     );
@@ -244,7 +270,7 @@ fn adapter_disappearance_and_worker_initialization_failure_never_claim_gpu_succe
             .to_string(),
     )
     .unwrap();
-    let runtime = VulkanRuntime::new(worker(&dir), Some("uuid:amd".into()));
+    let runtime = fixture_runtime(&dir, Some("uuid:amd".into()));
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::Unavailable(
@@ -260,7 +286,7 @@ fn adapter_disappearance_and_worker_initialization_failure_never_claim_gpu_succe
     assert!(
         matches!(runtime.transcribe(&request()), Err(oxide_core::dictation::BackendError::InitializationFailed(message)) if message.contains("vkCreateDevice"))
     );
-    let removed = VulkanRuntime::new(worker(&dir), Some("uuid:removed".into()));
+    let removed = fixture_runtime(&dir, Some("uuid:removed".into()));
     assert_eq!(removed.probe().state, CapabilityState::NoCompatibleDevice);
 }
 
@@ -271,7 +297,7 @@ fn windows_loader_failure_and_worker_crashes_are_recoverable() {
         response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
         "",
     );
-    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     std::fs::write(dir.path().join("exit-code"), "-1073741515").unwrap();
     assert_eq!(
         runtime.probe().state,
@@ -301,7 +327,7 @@ fn native_allocation_failure_is_reported_as_memory_pressure() {
         .to_string(),
     )
     .unwrap();
-    let runtime = VulkanRuntime::new(worker(&dir), None);
+    let runtime = fixture_runtime(&dir, None);
     assert!(matches!(
         runtime.transcribe(&request()),
         Err(oxide_core::dictation::BackendError::InsufficientMemory { .. })

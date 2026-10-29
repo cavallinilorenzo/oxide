@@ -149,18 +149,24 @@ impl WhisperBackendRuntime for MetalRuntime {
         let device_info = query_metal_device()
             .map_err(|_| BackendError::Unavailable(CapabilityState::NoCompatibleDevice))?;
 
-        super::resources::check_before_load(&request.model_path, &self.probe())?;
+        if !request.model_path.is_file() {
+            return Err(BackendError::InitializationFailed(format!(
+                "Model file not found at: {}",
+                request.model_path.display()
+            )));
+        }
 
-        let (text, offloaded, _) =
-            super::runtime::run_whisper_inference(request, true).map_err(|e| match e {
-                BackendError::InitializationFailed(msg) => BackendError::InitializationFailed(
-                    format!("Metal initialization failed: {msg}"),
-                ),
-                BackendError::InferenceFailed(msg) => {
-                    BackendError::InferenceFailed(format!("Metal inference failed: {msg}"))
-                }
-                other => other,
-            })?;
+        let result = super::resources::check_before_load(&request.model_path, &self.probe())
+            .and_then(|()| super::runtime::run_whisper_inference(request, true));
+        let (text, offloaded, _) = result.map_err(|e| match e {
+            BackendError::InitializationFailed(msg) => {
+                BackendError::InitializationFailed(format!("Metal initialization failed: {msg}"))
+            }
+            BackendError::InferenceFailed(msg) => {
+                BackendError::InferenceFailed(format!("Metal inference failed: {msg}"))
+            }
+            other => other,
+        })?;
 
         let budget_desc = match device_info.max_working_set_bytes {
             Some(bytes) => format!(", max working set {:.1} GB", bytes as f64 / 1_073_741_824.0),

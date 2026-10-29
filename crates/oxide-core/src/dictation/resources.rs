@@ -3,7 +3,12 @@ use super::{BackendId, BackendProbe, CapabilityState, ModelId, WhisperBackendRun
 use serde::{Deserialize, Serialize};
 
 mod native;
+pub(crate) use native::check_before_load_with;
 pub use native::{backend_candidates, capture, check_before_load, inspect, now_secs};
+
+/// Injectable OS boundary; native workers keep refreshing their own device budgets.
+pub type ResourceProvider =
+    std::sync::Arc<dyn Fn(&std::path::Path) -> ResourceSnapshot + Send + Sync>;
 
 pub const POLICY_VERSION: u32 = 1;
 pub const SNAPSHOT_MAX_AGE_SECS: u64 = 30;

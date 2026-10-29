@@ -99,7 +99,15 @@ fn required_memory(path: &Path) -> u64 {
 }
 
 pub fn check_memory(device: &VulkanAdapter, model_path: &Path) -> Result<(), BackendError> {
-    super::resources::check_before_load(
+    check_memory_with(device, model_path, None)
+}
+
+fn check_memory_with(
+    device: &VulkanAdapter,
+    model_path: &Path,
+    provider: Option<&super::resources::ResourceProvider>,
+) -> Result<(), BackendError> {
+    super::resources::check_before_load_with(
         model_path,
         &BackendProbe {
             backend: BackendId::Vulkan,
@@ -107,6 +115,7 @@ pub fn check_memory(device: &VulkanAdapter, model_path: &Path) -> Result<(), Bac
             adapter: Some(device.name.clone()),
             memory_pool: device.memory.clone(),
         },
+        provider,
     )
 }
 
@@ -114,6 +123,7 @@ pub struct VulkanRuntime {
     worker: PathBuf,
     adapter_id: Option<String>,
     generation: AtomicU64,
+    resource_provider: Option<super::resources::ResourceProvider>,
 }
 
 impl Default for VulkanRuntime {
@@ -128,7 +138,14 @@ impl VulkanRuntime {
             worker,
             adapter_id,
             generation: AtomicU64::new(0),
+            resource_provider: None,
         }
+    }
+
+    /// Supply the host OS resource boundary independently of native worker probes.
+    pub fn with_resources(mut self, provider: super::resources::ResourceProvider) -> Self {
+        self.resource_provider = Some(provider);
+        self
     }
 
     fn exchange(
@@ -332,7 +349,11 @@ impl WhisperBackendRuntime for VulkanRuntime {
         if device.capability != CapabilityState::Available {
             return Err(BackendError::Unavailable(device.capability));
         }
-        check_memory(&device, &request.model_path)?;
+        check_memory_with(
+            &device,
+            &request.model_path,
+            self.resource_provider.as_ref(),
+        )?;
         let mut request = request.clone();
         request.samples = super::resample(&request.samples, request.sample_rate);
         request.sample_rate = 16000;

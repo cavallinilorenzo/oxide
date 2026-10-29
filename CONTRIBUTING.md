@@ -15,7 +15,7 @@ The full rules are in [docs/agents/git-workflow.md](docs/agents/git-workflow.md)
 
 ## Local checks
 
-One cross-platform command runs what the pull request lanes of CI run on your OS, with the same commands (it works in PowerShell too). The CI workflow that runs these lanes is being added ([#224](https://github.com/cavallinilorenzo/oxide/issues/224)); until it lands, this command is the only check.
+One cross-platform command runs what the pull request lanes of CI run on your OS, with the same commands (it works in PowerShell too). The CI workflow (`.github/workflows/ci.yml`) runs these lanes on every pull request, and its `gate` job is the one required check. The Rust jobs need no Node and no `web/dist`.
 
 ```sh
 node tools/check.mjs        # everything the PR lanes run on this OS

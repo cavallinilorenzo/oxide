@@ -33,6 +33,10 @@ describe("lanesFor", () => {
     assert.deepEqual(lanesFor(["web/pnpm-lock.yaml"], "pull_request"), { ...ALL_OFF, web: true, supplyChain: true, bundle: true });
   });
 
+  test("a change to the shared Rust setup turns on rust and automation", () => {
+    assert.deepEqual(lanesFor([".github/actions/setup-rust/action.yml"], "pull_request"), { ...ALL_OFF, rust: true, automation: true });
+  });
+
   test("a workflow change turns on automation, and bundle if it is the build workflow", () => {
     assert.deepEqual(lanesFor([".github/workflows/ci.yml"], "pull_request"), { ...ALL_OFF, automation: true });
     assert.deepEqual(lanesFor([".github/workflows/build.yml"], "pull_request"), { ...ALL_OFF, automation: true, bundle: true });

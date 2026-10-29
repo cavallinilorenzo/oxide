@@ -13,6 +13,7 @@ const BUILD_WORKFLOW = ".github/workflows/build.yml";
 const PATH_RULES = [
   [/^crates\//, ["rust"]],
   [/^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.cargo\/.*|\.config\/nextest\.toml)$/, ["rust"]],
+  [/^\.github\/actions\/setup-rust\//, ["rust"]], // the shared Rust setup: toolchain, cache, libclang
   [/^web\/src\/bindings\.ts$/, ["rust"]], // also web: the Rust tests generate what the web app imports
   [/^web\//, ["web"]],
   [/^\.node-version$/, ["web", "bundle"]],

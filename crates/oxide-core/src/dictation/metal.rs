@@ -149,6 +149,8 @@ impl WhisperBackendRuntime for MetalRuntime {
         let device_info = query_metal_device()
             .map_err(|_| BackendError::Unavailable(CapabilityState::NoCompatibleDevice))?;
 
+        super::resources::check_before_load(&request.model_path, &self.probe())?;
+
         let (text, offloaded, _) =
             super::runtime::run_whisper_inference(request, true).map_err(|e| match e {
                 BackendError::InitializationFailed(msg) => BackendError::InitializationFailed(

@@ -181,8 +181,10 @@ from native model inference behind the `WhisperBackendRuntime` boundary:
   - Parameters (`language`, `model`, `device`) are snapshotted at recording start.
     Settings changes during an active recording do not mutate the in-flight session.
   - In `Auto` mode: if the primary backend fails, Oxide retries once on CPU if
-    available memory is at least 2.0 GB, attaching the fallback reason to the
-    execution details. If memory is insufficient, the retry is refused.
+    a fresh model-specific RAM check preserves the policy reserve, attaching the
+    fallback reason to execution details. Unsafe or unknown budgets refuse retry.
+    See [resource policy v1](dictation-resources.md) for estimates, accounting,
+    confidence, benchmark inputs and example decisions for Settings.
   - In explicit `GPU` mode: failures are reported immediately with an offer to
     switch to CPU. CPU is never silently substituted for GPU.
 - **Backend extension points and worker protocol**:

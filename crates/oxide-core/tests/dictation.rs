@@ -307,6 +307,52 @@ fn auto_mode_refuses_cpu_fallback_when_memory_insufficient() {
 }
 
 #[test]
+fn auto_retry_preserves_the_ram_reserve_even_when_the_model_peak_fits() {
+    let mock = Arc::new(MockFailingGpuRuntime {
+        calls: AtomicUsize::new(0),
+    });
+    let dictation = Dictation::with_runtime(mock.clone()).with_resources(Arc::new(|| {
+        use oxide_core::dictation::resources::*;
+        ResourceSnapshot {
+            captured_at_secs: now_secs(),
+            cpu: CpuResources {
+                architecture: "x86_64".into(),
+                model: "CPU".into(),
+                usable_cores: 8,
+                instruction_compatible: Some(true),
+            },
+            total_ram_bytes: Some(16 << 30),
+            available_ram_bytes: Some(4 << 30),
+            baseline_bytes: Some(1 << 29),
+            free_disk_bytes: None,
+        }
+    }));
+    dictation.inject_recording_for_test(
+        RecordingSnapshot {
+            language: "auto".into(),
+            device: Device::Auto,
+            model: ModelId::Small,
+        },
+        vec![0.1; 16000],
+        16000,
+    );
+    let home = tempfile::tempdir().unwrap();
+    let settings = DictationSettings {
+        enabled: true,
+        device: Device::Auto,
+        ..Default::default()
+    };
+    let refusal = dictation
+        .stop(home.path(), &settings)
+        .unwrap_err()
+        .to_string();
+    assert!(refusal.contains("Free memory"), "{refusal}");
+    assert!(refusal.contains("CPU retry was refused"), "{refusal}");
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+    assert!(dictation.last_execution().is_none());
+}
+
+#[test]
 fn cpu_mode_never_requests_offload() {
     let runtime = oxide_core::dictation::CpuRuntime;
     assert_eq!(runtime.backend_id(), BackendId::Cpu);

@@ -73,19 +73,9 @@ pub fn run_whisper_on_device(
         )));
     }
 
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    let available = sys.available_memory();
-    let required = super::models::catalogue()
-        .entry_for_path(&request.model_path)
-        .and_then(|entry| entry.estimated_peak(BackendId::Cpu))
-        .unwrap_or(500 * 1024 * 1024);
-    if available < required {
-        return Err(BackendError::InsufficientMemory {
-            required_bytes: required,
-            available_bytes: Some(available),
-        });
-    }
+    // GPU-specific checks run in the native adapters as well. This last host check
+    // refreshes RAM immediately before context allocation, including CPU retries.
+    super::resources::check_before_load(&request.model_path, &CpuRuntime.probe())?;
 
     let mut context_params = WhisperContextParameters::default();
     context_params.use_gpu(use_gpu);
@@ -97,16 +87,24 @@ pub fn run_whisper_on_device(
         .ok_or_else(|| BackendError::InitializationFailed("Invalid model path".into()))?;
 
     let context = WhisperContext::new_with_params(path_str, context_params).map_err(|e| {
-        let err_msg = e.to_string();
-        if err_msg.to_lowercase().contains("out of memory")
-            || err_msg.to_lowercase().contains("cannot allocate")
-        {
+        let message = e.to_string();
+        let lower = message.to_lowercase();
+        if lower.contains("out of memory") || lower.contains("cannot allocate") {
             BackendError::InsufficientMemory {
-                required_bytes: required,
-                available_bytes: Some(available),
+                required_bytes: super::models::catalogue()
+                    .entry_for_path(&request.model_path)
+                    .and_then(|entry| entry.estimated_peak(BackendId::Cpu))
+                    .expect("preflight checked catalogue estimate"),
+                available_bytes: super::resources::capture(
+                    request
+                        .model_path
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )
+                .available_ram_bytes,
             }
         } else {
-            BackendError::InitializationFailed(err_msg)
+            BackendError::InitializationFailed(message)
         }
     })?;
 

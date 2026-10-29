@@ -98,7 +98,7 @@ fn a_probe_selects_the_requested_identity_without_claiming_verified_inference() 
 fn request() -> oxide_core::dictation::TranscriptionRequest {
     oxide_core::dictation::TranscriptionRequest {
         cancelled: Default::default(),
-        model_path: "model.bin".into(),
+        model_path: "ggml-small.bin".into(),
         language: Some("en".into()),
         samples: vec![0.0; 1600],
         sample_rate: 16000,
@@ -140,7 +140,7 @@ fn model_selection_uses_the_catalogue_cuda_budget() {
     assert!(matches!(
         runtime.transcribe(&request),
         Err(oxide_core::dictation::BackendError::InsufficientMemory {
-            required_bytes: 10_737_418_240,
+            required_bytes: 13_421_772_800,
             ..
         })
     ));

@@ -96,16 +96,15 @@ fn required_memory(path: &Path) -> u64 {
 }
 
 pub fn check_memory(adapter: &CudaAdapter, path: &Path) -> Result<(), BackendError> {
-    let required = required_memory(path);
-    if let Some(available) = adapter.memory.as_ref().and_then(|m| m.available_bytes)
-        && available.saturating_mul(4) / 5 < required
-    {
-        return Err(BackendError::InsufficientMemory {
-            required_bytes: required,
-            available_bytes: Some(available),
-        });
-    }
-    Ok(())
+    super::resources::check_before_load(
+        path,
+        &BackendProbe {
+            backend: BackendId::Cuda,
+            state: adapter.capability.clone(),
+            adapter: Some(adapter.name.clone()),
+            memory_pool: adapter.memory.clone(),
+        },
+    )
 }
 
 #[derive(Clone)]

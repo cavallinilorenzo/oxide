@@ -99,16 +99,15 @@ fn required_memory(path: &Path) -> u64 {
 }
 
 pub fn check_memory(device: &VulkanAdapter, model_path: &Path) -> Result<(), BackendError> {
-    let required = required_memory(model_path);
-    if let Some(available) = device.memory.as_ref().and_then(|m| m.available_bytes)
-        && available.saturating_mul(4) / 5 < required
-    {
-        return Err(BackendError::InsufficientMemory {
-            required_bytes: required,
-            available_bytes: Some(available),
-        });
-    }
-    Ok(())
+    super::resources::check_before_load(
+        model_path,
+        &BackendProbe {
+            backend: BackendId::Vulkan,
+            state: device.capability.clone(),
+            adapter: Some(device.name.clone()),
+            memory_pool: device.memory.clone(),
+        },
+    )
 }
 
 pub struct VulkanRuntime {

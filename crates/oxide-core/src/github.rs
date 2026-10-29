@@ -345,7 +345,7 @@ impl Gh {
             // needs tools such as Python from the runner's PATH. Only include directories
             // containing the tools: cargo adds every build-script output directory to PATH
             // while running tests, and cmd.exe can fail to resolve commands from a PATH that
-            // long.
+            // long, so the launcher cannot find Python or `where`.
             let needed = std::env::split_paths(&inherited_path).filter(|dir| {
                 ["python.exe", "git.exe", "cmd.exe"]
                     .iter()

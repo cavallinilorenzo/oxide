@@ -309,6 +309,27 @@ export function updateManifest(artifactNames, signatures, { repository, tag, dat
   };
 }
 
+/**
+ * Whether the feed the updater reads (`releases/latest/download/latest.json`)
+ * serves the version just published, with a signature and URL per platform.
+ * `urls` are what the caller still has to resolve.
+ */
+export function checkUpdateFeed(feed, tag) {
+  const fail = (message) => ({ ok: false, message, urls: [] });
+  if (!feed || typeof feed !== "object") return fail("The update feed is not a JSON object.");
+  const version = String(tag).replace(/^v/, "");
+  if (feed.version !== version) return fail(`The update feed serves version ${feed.version ?? "(none)"}, not ${version}.`);
+  const platforms = Object.entries(feed.platforms ?? {});
+  if (platforms.length === 0) return fail("The update feed lists no platforms.");
+  const urls = [];
+  for (const [platform, entry] of platforms) {
+    if (!String(entry?.signature ?? "").trim()) return fail(`The update feed has an empty signature for ${platform}.`);
+    if (!String(entry?.url ?? "").trim()) return fail(`The update feed has no URL for ${platform}.`);
+    urls.push(entry.url);
+  }
+  return { ok: true, message: `The update feed serves ${tag} for ${platforms.map(([platform]) => platform).join(", ")}.`, urls };
+}
+
 // Node platform names and how the plan names them.
 const OS_NAMES = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 const EVERY_OS = Object.keys(OS_NAMES);

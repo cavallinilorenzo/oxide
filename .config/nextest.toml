@@ -6,6 +6,8 @@
 slow-timeout = { period = "60s", terminate-after = 5 }
 # One retry, so a flaky pass is visible in the job summary instead of red.
 retries = 1
+# Report every failing test, not only the first.
+fail-fast = false
 failure-output = "immediate-final"
 status-level = "retry"
 final-status-level = "flaky"

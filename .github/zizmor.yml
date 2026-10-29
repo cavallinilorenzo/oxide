@@ -2,5 +2,14 @@ rules:
   self-repository:
     ignore:
       # Low severity: `./` is the long-standing, documented way to call a local
-      # composite action, and actionlint understands it.
+      # composite action or reusable workflow, and actionlint understands it.
       - ci.yml:121
+      - ci.yml:245
+      - build.yml:78
+      - release.yml:80
+  secrets-inherit:
+    ignore:
+      # The `release` environment's secrets are read by the job inside build.yml
+      # that declares the environment, so the caller can't list them by name.
+      # Callers without the environment (CI) hold no signing secrets.
+      - release.yml:80

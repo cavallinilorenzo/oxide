@@ -408,7 +408,7 @@ impl Gh {
         } else {
             stderr
         };
-        Err(GhError::Failed(message.trim().to_string()))
+        Err(GhError::Failed(format!("{} RUSTPATH=[{}] INHERITED=[{}]", message.trim(), child_path.to_string_lossy(), std::env::var_os("PATH").map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())))
     }
 
     /// Whether `gh` can be used, and if not, what to tell the user.

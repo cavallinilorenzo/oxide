@@ -1,4 +1,5 @@
-﻿import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
+import { DictationSettings } from "./DictationSettings";
+import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
 import { useEffect, useRef, useState } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { Skeleton } from "./Skeleton";
@@ -161,6 +162,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       )}
 
       <AppearanceSettings/>
+      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu" }} onChange={(dictation) => set({ dictation })} />
       <section className="settings-section" aria-labelledby="settings-general">
         <header className="settings-section-header">
           <h2 id="settings-general">General</h2>

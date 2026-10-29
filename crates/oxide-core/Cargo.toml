@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+cpal = "0.15.3"
+whisper-rs = "0.16.0"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 dunce = "1"
 base64 = "0.22.1"
 flate2 = "1"
@@ -32,4 +35,10 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_System_Registry",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[features]
+dictation-vulkan = ["whisper-rs/vulkan"]
 

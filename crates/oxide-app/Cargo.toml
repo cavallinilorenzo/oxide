@@ -34,3 +34,6 @@ windows-sys = { version = "0.61.2", features = [
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 
+
+[features]
+dictation-vulkan = ["oxide-core/dictation-vulkan"]

@@ -21,6 +21,7 @@ ignore = []
 # stay MPL, which we never do with crates.io dependencies.
 allow = [
   "MIT",
+  "Unlicense", # whisper-rs bindings; whisper.cpp and original model weights are MIT.
   "MIT-0",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",

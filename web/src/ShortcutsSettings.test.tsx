@@ -24,7 +24,7 @@ const press = (button: HTMLButtonElement, init: KeyboardEventInit) =>
 
 it("records a new shortcut for an action, then resets it", async () => {
   await act(async () => root.render(<Harness />));
-  expect(container.querySelectorAll(".shortcut-row")).toHaveLength(14);
+  expect(container.querySelectorAll(".shortcut-row")).toHaveLength(Object.keys(DEFAULT_SHORTCUTS).length);
   act(() => keyButton("Terminal").click());
   expect(keyButton("Terminal").textContent).toBe("Press keys…");
   await press(keyButton("Terminal"), { key: "Meta", metaKey: true });

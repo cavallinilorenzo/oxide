@@ -15,6 +15,7 @@ afterEach(async () => { await act(async () => root.render(null)); clearMocks(); 
 
 it("offers supported defaults with descriptions, warns about Full access and saves each Provider independently", async () => {
   const settings: Settings = {
+    dictation: { enabled: false, language: "auto", device: "cpu" },
     defaultProvider: "claude", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS, claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },
@@ -73,6 +74,7 @@ it("offers supported defaults with descriptions, warns about Full access and sav
 
 it("groups model effort variants while keeping the saved effort selectable", async () => {
   const settings: Settings = {
+    dictation: { enabled: false, language: "auto", device: "cpu" },
     defaultProvider: "antigravity", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS,
     claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {

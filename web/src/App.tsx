@@ -1,3 +1,4 @@
+import { DictationController } from "./dictation";
 import { Skeleton } from "./Skeleton";
 import { WorkbenchLoading } from "./WorkbenchLoading";
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
@@ -570,6 +571,7 @@ export function App() {
     <div className={`window ${isMac ? "macos" : "windows"}`}>
       {isWindows && <WindowResizeHandles />}
       <QuitDialog />
+      <DictationController />
       <WorkspaceOverlays ref={overlays} projects={projects ?? []} onProjectsScanned={onProjectsScanned}
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>

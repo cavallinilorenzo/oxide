@@ -1,3 +1,4 @@
+import { useDictationTarget } from "./dictation";
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AttachmentChip } from "./AttachmentChip";
@@ -491,6 +492,8 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
     sync();
     root.current?.focus();
   };
+
+  useDictationTarget(root, insertText, !disabled);
 
   return (
     <div

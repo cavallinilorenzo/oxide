@@ -1,3 +1,4 @@
+import { toggleDictation, useDictationState } from "./dictation";
 import { Skeleton } from "./Skeleton";
 import { LruCache } from "./lru";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -207,6 +208,7 @@ export function ThreadView({
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const shortcuts = useShortcuts();
+  const dictation = useDictationState();
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
@@ -1195,6 +1197,7 @@ export function ThreadView({
           </ul>
         )}
         <ComposerInput
+          key={`${projectId}:${threadId}`}
           ref={composerRef}
           ariaLabel="Message to agent"
           value={value}
@@ -1265,6 +1268,7 @@ export function ThreadView({
               onChange={(mode) => void handlePermissionChange(mode)}
             />
           </div>
+          <button type="button" className="cbtn" aria-label="Toggle dictation" aria-pressed={dictation.phase === "recording"} title={`Dictation (${formatAccelerator(shortcuts.dictation)})`} disabled={sending || dictation.phase === "starting" || dictation.phase === "transcribing"} onMouseDown={(e) => e.preventDefault()} onClick={(e) => toggleDictation(e.currentTarget.closest("form")?.querySelector("[contenteditable]") ?? null)}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5.5" y="1" width="5" height="8" rx="2.5"/><path d="M3 7a5 5 0 0 0 10 0M8 12v3M5 15h6"/></svg></button>
           <button
             type="button"
             className="cbtn"

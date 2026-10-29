@@ -239,6 +239,7 @@ pub struct ClaudeCustomizations {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Shortcuts {
+    dictation: String,
     new_thread: String,
     open_project: String,
     model_picker: String,
@@ -258,12 +259,100 @@ pub struct Shortcuts {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    dictation: DictationSettings,
     default_provider: Provider,
     providers: Providers,
     confirm_quit: bool,
     editor: String,
     claude_customizations: ClaudeCustomizations,
     shortcuts: Shortcuts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationDevice {
+    Cpu,
+    Gpu,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationSettings {
+    enabled: bool,
+    language: String,
+    device: DictationDevice,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationStatus {
+    installed: bool,
+    gpu_compiled: bool,
+    available_memory_gb: f64,
+    cpu_threads: u32,
+    recommendation: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn dictation_status(core: State<'_, Arc<Core>>) -> Result<DictationStatus, AppError> {
+    let core = core.inner().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        convert(&oxide_core::dictation::status(core.home()))
+    })
+    .await
+    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))?)
+}
+#[tauri::command]
+#[specta::specta]
+async fn dictation_install(
+    core: State<'_, Arc<Core>>,
+    app: tauri::AppHandle,
+) -> Result<(), AppError> {
+    static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if INSTALLING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err(oxide_core::Error::Dictation("Model download is already active".into()).into());
+    }
+    let core = core.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        oxide_core::dictation::install(core.home(), |received, total| {
+            let _ = app.emit("dictation-download", (received, total));
+        })
+    })
+    .await;
+    INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+    Ok(result.map_err(|e| oxide_core::Error::Dictation(e.to_string()))??)
+}
+#[tauri::command]
+#[specta::specta]
+async fn dictation_start(
+    core: State<'_, Arc<Core>>,
+    dictation: State<'_, Arc<oxide_core::dictation::Dictation>>,
+) -> Result<(), AppError> {
+    let core = core.inner().clone();
+    let dictation = dictation.inner().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        dictation.start(core.home(), &core.settings().settings.dictation)
+    })
+    .await
+    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))??)
+}
+#[tauri::command]
+#[specta::specta]
+async fn dictation_stop(
+    core: State<'_, Arc<Core>>,
+    dictation: State<'_, Arc<oxide_core::dictation::Dictation>>,
+) -> Result<String, AppError> {
+    let core = core.inner().clone();
+    let dictation = dictation.inner().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        dictation.stop(core.home(), &core.settings().settings.dictation)
+    })
+    .await
+    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))??)
+}
+#[tauri::command]
+#[specta::specta]
+fn dictation_cancel(dictation: State<'_, Arc<oxide_core::dictation::Dictation>>) {
+    dictation.cancel();
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -2488,6 +2577,11 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
+        dictation_status,
+        dictation_install,
+        dictation_start,
+        dictation_stop,
+        dictation_cancel,
         list_projects,
         rescan_projects,
         add_project,
@@ -2610,6 +2704,7 @@ pub fn run() {
     export_bindings();
 
     tauri::Builder::default()
+        .manage(Arc::new(oxide_core::dictation::Dictation::default()))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler({
@@ -2639,6 +2734,10 @@ pub fn run() {
                 // Closing only hides the window: Threads keep running in the background.
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
+                    window
+                        .app_handle()
+                        .state::<Arc<oxide_core::dictation::Dictation>>()
+                        .cancel();
                     let _ = window.hide();
                     if let Some(core) = window.app_handle().try_state::<Arc<Core>>() {
                         core.set_window_active(false);

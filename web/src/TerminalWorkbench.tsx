@@ -1,3 +1,4 @@
+import { dictationLine, useDictationTarget } from "./dictation";
 import {
   useCallback,
   useEffect,
@@ -89,6 +90,11 @@ export function TerminalWorkbench({
     if (running) pasteActive.current?.(text);
     else composer.current?.insert(text);
   });
+
+  useDictationTarget(host, (text) => {
+    const line = dictationLine(text);
+    if (running) pasteActive.current?.(line); else composer.current?.insert(line);
+  }, visible && !closed && sessionId !== null);
 
   useEffect(() => {
     let active = true;

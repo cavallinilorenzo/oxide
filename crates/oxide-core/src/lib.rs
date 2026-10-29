@@ -9,6 +9,7 @@ mod clock;
 mod continuation;
 mod db;
 mod detection_cache;
+pub mod dictation;
 mod discovery;
 pub mod editor;
 mod error;

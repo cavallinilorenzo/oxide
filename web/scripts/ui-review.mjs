@@ -17,11 +17,11 @@ export async function waitForLayout(page) {
     return !files?.dataset.splitAxis || files.dataset.splitAxis === (files.getBoundingClientRect().width > 560 ? "x" : "y");
   });
 }
-export async function openReview(engine = "chromium", scenario = "completed") {
+export async function openReview(engine = "chromium", scenario = "completed", inputOnly = false) {
   const browser = await ({ chromium, webkit }[engine]).launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
   await page.addInitScript((scenario) => {
     let callbackId = 0;
     const callbacks = new Map();
@@ -39,12 +39,13 @@ export async function openReview(engine = "chromium", scenario = "completed") {
       { ...base, id: 4, title: "Investigate provider connection", status: "error" },
     ];
     const provider = { model: null, effort: null, permissionMode: "auto-edit" };
-    const settings = { defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {
+    const settings = { shortcuts: {"dictation": "Mod+Shift+R", "newThread": "Mod+N", "openProject": "Mod+Shift+N", "modelPicker": "Mod+Shift+M", "pullRequests": "Mod+Shift+P", "issues": "Mod+Shift+I", "terminal": "Mod+Shift+T", "files": "Mod+Shift+F", "diff": "Mod+Shift+D", "previousThread": "Mod+ArrowUp", "nextThread": "Mod+ArrowDown", "closeThread": "Mod+Shift+W", "toggleTools": "Mod+\\", "toggleBoard": "Mod+B", "openSettings": "Mod+,"}, defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {
       claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false,
     }, providers: { claude: provider, codex: provider, antigravity: provider } };
     const caps = { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
       transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id; },
       unregisterCallback(id) { callbacks.delete(id); },
       async invoke(command, args = {}) {
@@ -66,6 +67,9 @@ export async function openReview(engine = "chromium", scenario = "completed") {
           { nameWithOwner: "demo/uni", description: "Another Project", isPrivate: false },
         ];
         if (command === "list_slash_commands") return [{ name: "review", description: "Review the current changes" }];
+        if (command === "dictation_status") return { installed: false, gpuCompiled: true, availableMemoryGb: 6.3, cpuThreads: 8, recommendation: "Recommended for short dictation on CPU. Whisper small uses roughly 1 GB of memory; speed depends on your processor." };
+        if (command === "dictation_start" || command === "dictation_cancel") return null;
+        if (command === "dictation_stop") return "Test di dettatura locale";
         if (command === "get_settings") return { settings, errors: [], scanRoots: [] };
         if (command === "set_thread_permission_mode") {
           threads.find((thread) => thread.id === args.threadId).permissionMode = args.permissionMode;
@@ -106,6 +110,7 @@ export async function openReview(engine = "chromium", scenario = "completed") {
     };
   }, scenario);
   await page.goto(process.env.OXIDE_REVIEW_URL ?? "http://127.0.0.1:1420");
+  if (inputOnly) { await page.locator(".header").waitFor(); return { browser, page, errors }; }
   await page.locator(".thread-title").waitFor();
   if (scenario !== "empty") await page.locator(".agent-message").waitFor();
   for (const name of ["Toggle tools panel", "Toggle Terminal"]) {

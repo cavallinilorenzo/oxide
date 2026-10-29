@@ -75,6 +75,7 @@ impl Default for Providers {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Shortcuts {
+    pub dictation: String,
     pub new_thread: String,
     pub open_project: String,
     pub model_picker: String,
@@ -95,6 +96,7 @@ impl Default for Shortcuts {
     fn default() -> Self {
         let s = |accelerator: &str| accelerator.to_string();
         Self {
+            dictation: s("Mod+Shift+R"),
             new_thread: s("Mod+N"),
             open_project: s("Mod+Shift+N"),
             model_picker: s("Mod+Shift+M"),
@@ -115,8 +117,9 @@ impl Default for Shortcuts {
 
 impl Shortcuts {
     /// Every shortcut as `(settings key, accelerator)`.
-    fn slots(&mut self) -> [(&'static str, &mut String); 14] {
+    fn slots(&mut self) -> [(&'static str, &mut String); 15] {
         [
+            ("dictation", &mut self.dictation),
             ("newThread", &mut self.new_thread),
             ("openProject", &mut self.open_project),
             ("modelPicker", &mut self.model_picker),
@@ -206,6 +209,7 @@ fn shortcuts(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> S
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    pub dictation: crate::dictation::DictationSettings,
     pub default_provider: Provider,
     pub providers: Providers,
     pub confirm_quit: bool,
@@ -222,6 +226,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            dictation: crate::dictation::DictationSettings::default(),
             default_provider: Provider::Claude,
             providers: Providers::default(),
             confirm_quit: true,
@@ -403,6 +408,7 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
     // Older versions exposed discovery roots as a setting. Ignore it, even if malformed.
     root.remove("scanRoots");
     let settings = Settings {
+        dictation: field(&mut root, "", "dictation", defaults.dictation, &mut errors),
         default_provider: field(
             &mut root,
             "",
@@ -449,6 +455,20 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             )
         },
     };
+    if settings.dictation.language != "auto"
+        && (!(2..=3).contains(&settings.dictation.language.len())
+            || !settings
+                .dictation
+                .language
+                .bytes()
+                .all(|b| b.is_ascii_lowercase())
+            || whisper_rs::get_lang_id(&settings.dictation.language).is_none())
+    {
+        errors.push(FieldError {
+            path: "dictation.language".into(),
+            message: "Use auto or a supported Whisper language code (for example it or en)".into(),
+        });
+    }
     unknown_keys(&root, "", &mut errors);
     if errors.is_empty() {
         Ok(settings)
@@ -550,5 +570,23 @@ fn unknown_keys(obj: &Map<String, Value>, at: &str, errors: &mut Vec<FieldError>
             path: join(at, key),
             message: "unknown setting".into(),
         });
+    }
+}
+
+#[cfg(test)]
+mod dictation_tests {
+    use super::*;
+    #[test]
+    fn old_settings_disable_dictation_and_language_is_validated() {
+        assert!(!parse("{}").unwrap().dictation.enabled);
+        assert_eq!(
+            parse(r#"{"dictation":{"language":"it","enabled":true,"device":"gpu"}}"#)
+                .unwrap()
+                .dictation
+                .language,
+            "it"
+        );
+        assert!(parse(r#"{"dictation":{"language":"\u0000"}}"#).is_err());
+        assert!(parse(r#"{"dictation":{"language":"zz"}}"#).is_err());
     }
 }

@@ -1,4 +1,5 @@
 //! Local, bounded microphone capture and whisper.cpp inference. Audio never touches disk.
+pub mod metal;
 pub mod runtime;
 pub mod types;
 
@@ -16,12 +17,13 @@ use std::{
     time::Duration,
 };
 
+pub use metal::MetalRuntime;
 pub use runtime::{
     BackendError, CpuRuntime, TranscriptionOutcome, TranscriptionRequest, WhisperBackendRuntime,
     probe_backends,
 };
 pub use types::{
-    BackendId, BackendProbe, BuildManifest, CapabilityState, ExecutionDetails, ModelId,
+    BackendId, BackendProbe, BuildManifest, CapabilityState, ExecutionDetails, MemoryPool, ModelId,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +64,8 @@ pub struct Status {
     pub manifest: BuildManifest,
     pub probes: Vec<BackendProbe>,
     pub last_execution: Option<ExecutionDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_pool: Option<MemoryPool>,
 }
 
 pub fn status(home: &Path) -> Status {
@@ -69,6 +73,9 @@ pub fn status(home: &Path) -> Status {
     system.refresh_memory();
     let available = system.available_memory() as f64 / 1_073_741_824.0;
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    let probes = probe_backends();
+    let memory_pool = probes.iter().find_map(|p| p.memory_pool.clone());
+
     Status {
         installed: model(home).is_file(),
         gpu_compiled: gpu_compiled(),
@@ -76,8 +83,9 @@ pub fn status(home: &Path) -> Status {
         cpu_threads: threads,
         recommendation: recommendation(available, threads).into(),
         manifest: BuildManifest::current(),
-        probes: probe_backends(),
+        probes,
         last_execution: None,
+        memory_pool,
     }
 }
 
@@ -92,7 +100,19 @@ pub fn recommendation(available: f64, threads: usize) -> &'static str {
 }
 
 pub fn gpu_compiled() -> bool {
-    cfg!(any(target_os = "macos", feature = "dictation-vulkan"))
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        true
+    }
+    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+    {
+        // Intel Mac GPU support remains unadvertised until separately validated
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        cfg!(feature = "dictation-vulkan")
+    }
 }
 
 pub fn model(home: &Path) -> PathBuf {
@@ -171,13 +191,24 @@ pub struct Dictation {
     memory_checker: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
 }
 
+pub fn default_runtime() -> Arc<dyn WhisperBackendRuntime> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let metal = MetalRuntime;
+        if matches!(metal.probe().state, CapabilityState::Available) {
+            return Arc::new(metal);
+        }
+    }
+    Arc::new(CpuRuntime)
+}
+
 impl Default for Dictation {
     fn default() -> Self {
         Self {
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
-            runtime: Arc::new(CpuRuntime),
+            runtime: default_runtime(),
             memory_checker: None,
         }
     }

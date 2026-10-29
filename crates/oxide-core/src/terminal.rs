@@ -154,7 +154,7 @@ impl TerminalSession {
                         let result =
                             write_terminal_input(&mut writer, master.as_ref(), &input, pid as i32);
                         #[cfg(windows)]
-                        let result = writer.write_all(&input).and_then(|_| writer.flush());
+                        let result = write_terminal_input(&mut writer, &input, pid);
                         let _ = reply.send(result);
                     }
                     SessionCommand::Resize(size, reply) => {
@@ -245,6 +245,58 @@ impl TerminalSession {
             let _ = result.recv();
         }
     }
+}
+
+#[cfg(windows)]
+fn write_terminal_input(
+    writer: &mut dyn Write,
+    input: &[u8],
+    shell_pid: u32,
+) -> std::io::Result<()> {
+    let mut start = 0;
+    for (index, byte) in input.iter().enumerate() {
+        if *byte != 0x03 {
+            continue;
+        }
+        writer.write_all(&input[start..index])?;
+        if !interrupt_shell_children(shell_pid) {
+            writer.write_all(&input[index..index + 1])?;
+        }
+        start = index + 1;
+    }
+    writer.write_all(&input[start..])?;
+    writer.flush()
+}
+
+#[cfg(windows)]
+fn interrupt_shell_children(shell_pid: u32) -> bool {
+    use std::collections::HashSet;
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+
+    let shell = Pid::from_u32(shell_pid);
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    let mut descendants = vec![shell];
+    let mut seen = HashSet::from([shell]);
+    let mut index = 0;
+    while index < descendants.len() {
+        let parent = descendants[index];
+        index += 1;
+        for (&pid, process) in system.processes() {
+            if process.parent() == Some(parent) && seen.insert(pid) {
+                descendants.push(pid);
+            }
+        }
+    }
+
+    let mut interrupted = false;
+    for pid in descendants.into_iter().skip(1).rev() {
+        if let Some(process) = system.process(pid) {
+            interrupted |= process.kill();
+        }
+    }
+    interrupted
 }
 
 #[cfg(unix)]

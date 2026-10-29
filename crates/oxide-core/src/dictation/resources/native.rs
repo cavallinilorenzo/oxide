@@ -151,7 +151,10 @@ pub fn inspect(home: &std::path::Path, preference: Preference) -> ResourceAdvice
         &backends,
         &installed,
         preference,
-        &[],
+        &super::super::benchmark::read_cache(home)
+            .into_iter()
+            .map(|r| r.measurement)
+            .collect::<Vec<_>>(),
         now_secs(),
     );
     ResourceAdvice {

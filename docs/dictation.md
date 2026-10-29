@@ -6,6 +6,13 @@ for migration, API usage, verification evidence and the hardware-validation hand
 The current settings interface continues to expose the original Small download;
 the detailed model-selection interface is tracked in #233.
 
+An explicit offline performance-check API now measures an installed combination
+using bundled speech, with no microphone or automatic downloads. It reports
+cold loading separately from the median of three warm runs and improves resource
+advice using local measurements. See [performance checks and smoke evidence](dictation-resources.md#explicit-local-performance-check-232)
+for bounds, cancellation, cache invalidation and troubleshooting. Settings controls
+for this API belong to #233; no existing dictation setting is changed by a check.
+
 In Settings, download Whisper small (466 MiB), enable dictation, choose a language
 (`auto`, `it`, `en`, or another Whisper language code), and save. CPU is the default.
 The shortcut is Ctrl+Shift+R on Windows/Linux or Cmd+Shift+R on macOS, rebindable

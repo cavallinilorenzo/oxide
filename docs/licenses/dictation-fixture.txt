@@ -1,0 +1,19 @@
+Oxide local performance fixture: jfk-16khz-pcm-v1
+
+John F. Kennedy, inaugural address, 20 January 1961. The recording is a
+United States federal government work in the public domain (17 USC 105).
+No model-generated speech or third-party music is included.
+
+Source: whisper.cpp v1.8.3 samples/jfk.wav
+https://github.com/ggml-org/whisper.cpp/blob/v1.8.3/samples/jfk.wav
+whisper.cpp is distributed under MIT; see licenses/whisper.txt.
+
+Oxide bundles the existing test fixture as 11 seconds of 16 kHz, mono,
+signed little-endian 16-bit PCM, extracted without resampling.
+Source WAV SHA-256:
+59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e
+Bundled PCM SHA-256:
+a29462b8ebd467318000e683b9117ade46230d3255ed2024e7db894abd9b38c9
+
+The fixture is used only after the user explicitly requests a local
+performance check. It requires neither microphone access nor a download.

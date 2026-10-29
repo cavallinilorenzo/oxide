@@ -2,6 +2,8 @@
 //! The webview talks only to the TypeScript bindings generated from here.
 
 mod dictation_advice;
+mod dictation_benchmark;
+use dictation_benchmark::{dictation_cancel_performance, dictation_check_performance};
 mod system;
 mod updates;
 use updates::{app_update_status, check_app_update, install_app_update};
@@ -2907,6 +2909,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         dictation_status,
+        dictation_check_performance,
+        dictation_cancel_performance,
         dictation_install,
         dictation_model_catalogue,
         dictation_models,

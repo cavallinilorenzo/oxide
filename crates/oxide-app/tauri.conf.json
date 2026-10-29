@@ -36,7 +36,10 @@
   },
   "bundle": {
     "active": true,
-    "resources": { "../../docs/licenses/whisper.txt": "licenses/whisper.txt" },
+    "resources": {
+      "../../docs/licenses/whisper.txt": "licenses/whisper.txt",
+      "../../docs/licenses/dictation-fixture.txt": "licenses/dictation-fixture.txt"
+    },
     "targets": ["app", "dmg", "nsis", "msi"],
     "macOS": { "minimumSystemVersion": "11.0" },
     "icon": [

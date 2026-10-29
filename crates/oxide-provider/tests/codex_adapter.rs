@@ -494,7 +494,7 @@ mod native_commands {
             let wrapper = dir.join("fake-codex.cmd");
             std::fs::write(
                 &wrapper,
-                format!("@echo off\r\npy -3 \"{}\" %*\r\n", script.display()),
+                format!("@echo off\r\npython \"{}\" %*\r\n", script.display()),
             )
             .unwrap();
             wrapper

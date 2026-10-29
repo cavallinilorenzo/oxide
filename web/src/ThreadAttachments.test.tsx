@@ -99,7 +99,10 @@ it("pastes a screenshot as a chip at the caret and sends it in place", async () 
   expect(chips()[0].getAttribute("aria-label")).toBe("Attachment, image.png, image");
   expect(editor().textContent).toContain("Ciao prova ");
   expect(editor().textContent).toContain(" 123!!!");
-  const order = Array.from(editor().childNodes).map((n) => (n.nodeType === 3 ? n.textContent : "[chip]"));
+  // The zero-width spacers around a chip (they keep the caret visible) are not part of the prompt.
+  const order = Array.from(editor().childNodes)
+    .map((n) => (n.nodeType === 3 ? (n.textContent ?? "").replaceAll("​", "") : "[chip]"))
+    .filter((t) => t !== "");
   expect(order).toEqual(["Ciao prova ", "[chip]", " 123!!!"]);
 
   await act(async () => container.querySelector("form")!.requestSubmit());
@@ -166,15 +169,15 @@ it("Backspace next to a chip removes the whole chip, and undo brings it back", a
   await render({ draft: encodeDraft([{ kind: "text", text: "see " }, chip, { kind: "text", text: " ok" }]) });
   expect(chips()).toHaveLength(1);
 
-  // Caret just after the chip.
+  // Caret just after the chip (children: "see ", spacer, chip, spacer, " ok").
   const range = document.createRange();
-  range.setStart(editor(), 2);
+  range.setStart(editor(), 3);
   range.collapse(true);
   window.getSelection()!.removeAllRanges();
   window.getSelection()!.addRange(range);
   await press("Backspace");
   expect(chips()).toHaveLength(0);
-  expect(editor().textContent).toBe("see  ok");
+  expect(editor().textContent?.replaceAll("​", "")).toBe("see  ok");
 
   await press("z", { metaKey: true });
   expect(chips()).toHaveLength(1);

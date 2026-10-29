@@ -13,7 +13,7 @@ feat/x   ●    fix/y  docs/z     one topic per branch
 | `main` | The default branch. Always builds, always green. Releases are tagged here. | Nobody directly. PRs from topic branches only. | squash |
 | `<type>/<slug>` | One feature, fix, research note or map/label task. | The author. | n/a |
 
-`main` is protected by a GitHub ruleset: PR required, `rust` and `web` CI checks must pass, no force-push, no deletion.
+`main` is protected by a GitHub ruleset: PR required, no force-push, no deletion.
 
 ## Rules for every agent and human
 

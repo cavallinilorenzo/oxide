@@ -12,6 +12,7 @@ fn fixture(reply: serde_json::Value, logs: &str) -> tempfile::TempDir {
 use std::io::{Read, Write};
 fn main() {
  let dir = std::env::current_exe().unwrap().parent().unwrap().to_owned();
+ if let Ok(code) = std::fs::read_to_string(dir.join("exit-code")) { std::process::exit(code.parse().unwrap()); }
  let mut size = [0;4]; std::io::stdin().read_exact(&mut size).unwrap();
  let mut request = vec![0;u32::from_le_bytes(size) as usize];
  std::io::stdin().read_exact(&mut request).unwrap();
@@ -229,4 +230,30 @@ fn adapter_disappearance_and_worker_initialization_failure_never_claim_gpu_succe
     );
     let removed = VulkanRuntime::new(worker(&dir), Some("uuid:removed".into()));
     assert_eq!(removed.probe().state, CapabilityState::NoCompatibleDevice);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_loader_failure_and_worker_crashes_are_recoverable() {
+    let dir = fixture(
+        response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})),
+        "",
+    );
+    let runtime = VulkanRuntime::new(worker(&dir), None);
+    std::fs::write(dir.path().join("exit-code"), "-1073741515").unwrap();
+    assert_eq!(
+        runtime.probe().state,
+        CapabilityState::MissingDriverOrRuntime
+    );
+    assert_eq!(
+        oxide_core::dictation::CpuRuntime.probe().state,
+        CapabilityState::Available
+    );
+    std::fs::write(dir.path().join("exit-code"), "3").unwrap();
+    assert!(matches!(
+        runtime.probe().state,
+        CapabilityState::InitializationFailure(_)
+    ));
+    std::fs::remove_file(dir.path().join("exit-code")).unwrap();
+    assert_eq!(runtime.probe().state, CapabilityState::Available);
 }

@@ -23,11 +23,14 @@ other programs and GPU backend allocations require additional headroom.
 ## GPU and building
 
 CPU works on all supported desktop platforms. macOS builds include Metal.
-Windows x64 uses an optional `oxide-vulkan-worker.exe` for Vulkan, supporting
-AMD and NVIDIA without ROCm/HIP. The application itself links CPU Whisper only:
+Windows x64 uses an optional `oxide-vulkan-worker.exe` for Vulkan, the shared
+AMD/NVIDIA path without ROCm/HIP. RX 5600 XT inference is physically validated;
+NVIDIA inference remains unvalidated. The application itself links CPU Whisper only:
 a missing Vulkan loader, incompatible driver or worker crash leaves CPU usable.
 Explicit GPU mode rejects inference without native GPU execution evidence.
 Auto retains its single CPU retry policy. Linux GPU expansion is outside this slice.
+`dumpbin /dependents` on the locally built executables confirmed that the host
+does not import `vulkan-1.dll`, while the isolated worker does.
 
 ## Recoverable runtime architecture and extension points
 
@@ -97,7 +100,7 @@ also requires compute timestamps to verify execution. Ambiguous native-to-physic
 adapter mappings are rejected rather than guessed. Multiple identical cards need
 native PCI identity support for an unambiguous mapping.
 
-Diagnostic observation (2026-10-29, Windows x64): Visual Studio Build Tools
+Diagnostic observation (2026-10-29, Windows 11 Pro x64, build 26300.9818): Visual Studio Build Tools
 18.10.2, MSVC 14.51.36231, CMake 4.3.1-msvc1, Vulkan SDK 1.4.363.0 and
 shaderc 2026.4 reproduced the nested compiler failure at a 272-character
 object path in the normal checkout. `vulkaninfoSDK.exe --summary` from that
@@ -114,7 +117,11 @@ Native evidence: `whisper_backend_init_gpu: using Vulkan0 backend`, followed by
 MUL_MAT operations. This timestamp is one graph's GPU time, not end-to-end latency
 or a benchmark. The device ID was `vulkan:00000000290000000000000000000000`.
 No NVIDIA card was available; NVIDIA inference and final cross-vendor hardware
-sign-off remain unvalidated and tracked by the acceptance ticket under #225.
+sign-off remain unvalidated and tracked by #235. A single cold-process comparison
+on the same fixture returned identical text: CPU 6.262 s, Vulkan 4.884 s including
+model loading. Other native builds were running concurrently; these observations
+are not a benchmark or a latency guarantee. Distributed-package validation remains
+with #234/#235.
 
 Reproduce loader diagnostics with:
 
@@ -134,6 +141,16 @@ PCM16 WAV (at most two minutes), and an optional adapter ID from enumeration.
 It prints transcription plus actual execution details, and fails if offload is
 not evidenced. Fixtures are explicitly supplied; the diagnostic downloads nothing.
 Do not replace your adapter ID with the example ID unless enumeration matches it.
+For a CPU comparison, replace the worker path with `cpu` and omit the adapter ID.
+The reported wall time includes model loading and runtime initialization.
+
+Run worker checks separately from the CPU workspace (in the same native-tools
+environment, with a short `CARGO_TARGET_DIR`):
+
+```bat
+cargo fmt --manifest-path crates/oxide-vulkan-worker/Cargo.toml --check
+cargo clippy --locked --manifest-path crates/oxide-vulkan-worker/Cargo.toml --all-targets -- -D warnings
+```
 
 The dictation architecture separates microphone capture and lifecycle coordination
 from native model inference behind the `WhisperBackendRuntime` boundary:
@@ -216,3 +233,7 @@ download script; its LFS SHA-256 is pinned in Core. Review license terms when
 adding or redistributing native GPU dependencies. The CI removal on main also
 removed the cargo-deny configuration; restoring automated license checks is
 tracked separately in issue #224.
+
+The worker's ash binding is MIT/Apache-2.0. The diagnostic WAV reader (hound) is
+Apache-2.0. The local build does not redistribute the Vulkan SDK or a driver;
+packaged runtime dependencies and their retained notices are owned by #234.

@@ -68,12 +68,15 @@ function parseList(lines: string[], from: number): { block: Block; next: number 
       while (j < lines.length && !lines[j].trim()) j++;
       const following = j < lines.length ? ITEM.exec(lines[j]) : null;
       if (!following || following[1].length < base) break;
+      if (following[1].length === base && /\d/.test(following[2]) !== ordered) break;
       i = j;
       continue;
     }
     const item = ITEM.exec(line);
     const depth = indentOf(line);
     if (item && depth === base) {
+      // Switching between numbered and bulleted starts a new list.
+      if (/\d/.test(item[2]) !== ordered) break;
       const task = /^\[([ xX])\]\s+(.*)$/.exec(item[3]);
       items.push({
         inline: parseInline(task ? task[2] : item[3]),

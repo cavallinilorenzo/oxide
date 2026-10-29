@@ -47,6 +47,11 @@ describe("parseChatMarkdown", () => {
     expect(blocks).toHaveLength(1);
   });
 
+  it("starts a new list when numbered turns into bulleted", () => {
+    expect(parseChatMarkdown("1. a\n2. b\n\n- c").map((b) => b.kind)).toEqual(["list", "list"]);
+    expect(parseChatMarkdown("1. a\n- c").map((b) => b.kind)).toEqual(["list", "list"]);
+  });
+
   it("reads task items", () => {
     const [list] = parseChatMarkdown("- [x] done\n- [ ] todo");
     if (list.kind !== "list") throw new Error();

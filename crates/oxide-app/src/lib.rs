@@ -2172,6 +2172,15 @@ fn discard_attachment(core: State<'_, Arc<Core>>, id: String) {
     core.discard_attachment(&id);
 }
 
+#[tauri::command]
+#[specta::specta]
+async fn attachment_preview(
+    core: State<'_, Arc<Core>>,
+    id: String,
+) -> Result<Option<String>, AppError> {
+    git_blocking(&core, move |core| core.attachment_preview(&id)).await
+}
+
 /// Stores pasted bytes. The bytes travel as the raw request body rather than JSON, and the
 /// file name (percent-encoded; may be empty) in the `x-oxide-name` header. Not a specta
 /// command: the typed bindings can't express a raw body, so the web side calls it by hand.
@@ -2512,6 +2521,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_threads,
         send_prompt,
         attach_paths,
+        attachment_preview,
         discard_attachment,
         list_slash_commands,
         interrupt_thread,

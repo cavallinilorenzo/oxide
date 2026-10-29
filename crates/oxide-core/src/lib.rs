@@ -1164,6 +1164,10 @@ impl Core {
         self.attachment_store().remove(id);
     }
 
+    pub fn attachment_preview(&self, id: &str) -> Result<Option<String>> {
+        self.attachment_store().preview(id)
+    }
+
     fn attachment_store(&self) -> attachments::AttachmentStore {
         attachments::AttachmentStore::new(self.attachments_dir())
     }

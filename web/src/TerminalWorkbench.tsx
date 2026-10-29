@@ -22,6 +22,7 @@ import { terminalPath } from "./terminalPaths";
 import { commands } from "./bindings";
 import { BlockParser, type CommandHistory } from "./terminalBlocks";
 import { takeFrameBatch } from "./terminalOutput";
+import { useTerminalTransfer } from "./useTerminalTransfer";
 import "@xterm/xterm/css/xterm.css";
 
 interface Props {
@@ -81,6 +82,13 @@ export function TerminalWorkbench({
   const scroll = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const runRef = useRef<(command: string) => void>(() => {});
+  const host = useRef<HTMLElement>(null);
+  const pasteActive = useRef<((text: string) => void) | null>(null);
+  const onPasteReady = useCallback((paste: ((text: string) => void) | null) => { pasteActive.current = paste; }, []);
+  const transfer = useTerminalTransfer(host, visible && !closed && sessionId !== null, (text) => {
+    if (running) pasteActive.current?.(text);
+    else composer.current?.insert(text);
+  });
 
   useEffect(() => {
     let active = true;
@@ -239,6 +247,14 @@ export function TerminalWorkbench({
       activeBlock.current
     )
       return;
+    if (/^(clear|cls|clear-host)\s*$/i.test(command.trim())) {
+      setBlocks([]);
+      launched.current.clear();
+      setFullscreen(null);
+      composer.current?.clear();
+      setError(null);
+      return;
+    }
     const token = crypto.randomUUID();
     setFullscreen(null);
     const block: Block = {
@@ -298,6 +314,11 @@ export function TerminalWorkbench({
     if (!visible) return;
     if (!running) composer.current?.focus();
     const key = (event: KeyboardEvent) => {
+      if (event.target instanceof Node && !host.current?.contains(event.target)) return;
+      if (!running && event.ctrlKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        runRef.current("clear");
+      }
       if (
         !running &&
         (event.ctrlKey || event.metaKey) &&
@@ -313,6 +334,9 @@ export function TerminalWorkbench({
   return (
     <main
       className="terminal-workbench"
+      ref={host}
+      data-dragging={transfer.dragging || undefined}
+      aria-busy={transfer.busy || undefined}
       aria-label="Terminal workbench"
       hidden={!visible}
       data-fullscreen={running && fullscreen !== null ? "true" : undefined}
@@ -324,6 +348,7 @@ export function TerminalWorkbench({
           {cwd}
         </span>
         <span className="grow" />
+        <button className="btn sm" disabled={running || sessionId === null || closed} title="Clear terminal (Ctrl+L)" onClick={() => run("clear")}>Clear</button>
         <button
           className="btn sm"
           disabled={running}
@@ -355,6 +380,7 @@ export function TerminalWorkbench({
       >
         {blocks.map((block) => (
           <TerminalCommandBlock
+            onPasteReady={onPasteReady}
             key={block.token}
             block={block}
             active={!block.ended}
@@ -378,6 +404,9 @@ export function TerminalWorkbench({
         ))}
         <div ref={bottom} />
       </div>
+      {transfer.dragging && <div className="terminal-drop-hint">Drop files to insert their paths</div>}
+      {transfer.busy && <div className="surface-note" role="status">Saving pasted file…</div>}
+      {transfer.error && <div className="editor-error" role="alert">{transfer.error}</div>}
       {error && (
         <div className="editor-error" role="alert">
           {error}

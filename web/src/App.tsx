@@ -4,7 +4,8 @@ import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, u
 import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type Project, type Thread, type ThreadStatus } from "./bindings";
+import { commands, type Project, type Thread, type ThreadStatus, type DiffFile } from "./bindings";
+import type { CodeOpenRequest } from "./codeOpen";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -127,6 +128,9 @@ export function App() {
   const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
   const [startupThreadLoaded, setStartupThreadLoaded] = useState(false);
   const onStartupThreadLoaded = useCallback(() => setStartupThreadLoaded(true), []);
+  const [booted, setBooted] = useState(false);
+  const [codeRequest, setCodeRequest] = useState<(CodeOpenRequest & { contextKey: string }) | null>(null);
+  const codeSequence = useRef(0);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
@@ -162,6 +166,12 @@ export function App() {
   const runInstallCommand = useCallback((command: string) => {
     setInstallCommand({ id: ++installSequence.current, command }); setWorkMode("terminal"); setShowSettings(false);
   }, []);
+  const openCodeFile = (path: string, diff?: DiffFile) => {
+    if (!workbenchContext) return;
+    setCodeRequest({ id: ++codeSequence.current, path, diff, contextKey: workbenchContext.key });
+    setWorkMode("code");
+    setShowSettings(false);
+  };
   useEffect(() => { try { localStorage.setItem("oxide:work-mode", workMode); } catch { /* A mode works without remembering it. */ } }, [workMode]);
   const diffThread = {
     board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
@@ -532,12 +542,13 @@ export function App() {
   }, [selected, rememberTerminalContext, createThreadIn]);
 
   const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
+  if (!starting && !booted) setBooted(true);
 
   useEffect(() => {
     if (!starting && (!selected || workMode !== "chat" || currentThreadId === null || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
   }, [starting, selected, workMode, currentThreadId, startupThreadLoaded]);
 
-  if (starting) {
+  if (starting && !booted) {
     return (
       <div className="startup-screen" aria-hidden="true">
         <div className="startup-content">
@@ -701,8 +712,10 @@ export function App() {
         </div>
         <div className="centre-column">
           {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
-          <div className="chat-workbench" hidden={workMode !== "chat" || showSettings}>
-          {selected && showBoard ? (
+          <div className="chat-workbench" hidden={(workMode !== "chat" && !starting) || showSettings}>
+          {selected && threads === null ? (
+            <main className="centre thread-loading" aria-label="Loading Project"><Skeleton kind="conversation" label="Loading Threads…" /></main>
+          ) : selected && showBoard ? (
             <BoardView
               key={selected.id}
               projectId={selected.id}
@@ -783,7 +796,7 @@ export function App() {
           )}
           </div>
           {workbenches.map((context) => <Suspense key={context.key} fallback={context.key === workbenchContext?.key && workMode !== "chat" ? <WorkbenchLoading mode={workMode}/> : null}>
-            {openedModes[context.key]?.code && <CodeWorkbench {...context} contextKey={context.key} visible={workMode === "code" && !showSettings && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} />}
+            {openedModes[context.key]?.code && <CodeWorkbench {...context} contextKey={context.key} visible={workMode === "code" && !showSettings && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} />}
             {openedModes[context.key]?.terminal && <TerminalWorkbench {...context} contextKey={context.key} visible={workMode === "terminal" && !showSettings && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} />}
           </Suspense>)}
           <div className="terminal-region" id="workspace-terminal" hidden={!showTerminal || showSettings || workMode === "terminal" || !currentTerminalContext}>
@@ -802,8 +815,7 @@ export function App() {
             ))}
           </div>
         </div>
-        {showTools && !showSettings && (
-          <aside className="tools" aria-label="Tools panel" id="workspace-tools">
+          <aside className="tools" aria-label="Tools panel" id="workspace-tools" hidden={!showTools || showSettings}>
             <ResizeHandle label="Resize Tools" controls="workspace-tools" axis="x" edge="start" direction={-1}
               {...layout.tools} onResize={toolsSize.resize} onCommit={toolsSize.commit} onReset={toolsSize.reset} onCancel={toolsSize.cancel} />
             <nav className="tabs" role="tablist" aria-label="Surfaces">
@@ -825,7 +837,7 @@ export function App() {
                 <XIcon size={14} />
               </button>
             </nav>
-            {activeTool === "Diff" && selected && (
+            {showTools && activeTool === "Diff" && selected && (
               <Suspense fallback={<Skeleton kind="diff" label="Loading changes…" />}>
                 <DiffPanel
                   projectId={selected.id}
@@ -841,10 +853,11 @@ export function App() {
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
+                  onOpenFile={(file) => openCodeFile(file.path, file)}
                 />
               </Suspense>
             )}
-            {activeTool === "Pull request" && selected && (
+            {showTools && activeTool === "Pull request" && selected && (
               <Suspense fallback={<Skeleton kind="list" label="Loading pull requests…" />}>
                 <PullRequestPanel
                   createRequest={createPrRequest}
@@ -856,12 +869,12 @@ export function App() {
                 />
               </Suspense>
             )}
-            {activeTool === "Files" && selected && (
+            {showTools && activeTool === "Files" && selected && (
               <Suspense fallback={<Skeleton kind="tree" label="Loading files…" />}>
-                <FilesPanel projectId={selected.id} threadId={currentThreadId} />
+                <FilesPanel projectId={selected.id} threadId={currentThreadId} onOpenFile={openCodeFile} />
               </Suspense>
             )}
-            {activeTool === "Issues" && selected && (
+            {showTools && activeTool === "Issues" && selected && (
               <Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
                 <IssuesSurface
                   projectId={selected.id}
@@ -872,7 +885,6 @@ export function App() {
               </Suspense>
             )}
           </aside>
-        )}
       </div>
     </div>
   );

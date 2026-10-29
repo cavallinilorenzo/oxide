@@ -54,7 +54,7 @@ pnpm --dir web install
 web/node_modules/.bin/tauri dev
 
 # Build the app bundle and .dmg into target/release/bundle/
-web/node_modules/.bin/tauri build
+pnpm --dir web build:app
 ```
 
 The Tauri CLI must run from the repository root: that is where it finds `crates/oxide-app/tauri.conf.json`.

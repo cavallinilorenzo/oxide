@@ -19,7 +19,41 @@ There is no CI. Run these locally before pushing:
 
 - Rust: `pnpm --dir web install && pnpm --dir web build` (Tauri embeds `web/dist`), then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `git diff --exit-code web/src/bindings.ts`
 - Web: `pnpm --dir web typecheck`, `pnpm --dir web lint`, `pnpm --dir web test`
-- App bundle: `web/node_modules/.bin/tauri build` from the repo root
+- App bundle: `pnpm --dir web build:app` from the repo root (keeps final outputs, cleans its compiler cache)
+
+### Local build disk usage
+
+Development builds and tests use line-table debug information and disable
+incremental compilation to keep `target/` manageable. Backtraces retain file and
+line information; inspecting local variables in a native debugger requires full
+debug information. Dependency builds remain cached, while rebuilding a changed
+workspace crate can take longer. Release settings are unchanged.
+
+Use `cargo clean` to remove accumulated build artifacts. Close a locally built
+Oxide first if Windows reports that its release executable is in use. For a
+debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
+`CARGO_INCREMENTAL=1` opts back into incremental compilation.
+
+The local check runner (`node tools/checks/run.mjs pr`) checks the build-artifact
+budget before and after each Rust compilation or Tauri bundle. It stops further
+checks above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
+This is a checkpoint between commands, not a filesystem quota: one command can
+exceed the budget before returning.
+
+Both the check runner and `pnpm --dir web build:app` use a temporary target
+directory for Rust compilation. Extra Tauri build flags can follow `build:app`.
+All checks in one run share it; it is automatically deleted when the run finishes, including
+test failures and budget errors. An explicit `CARGO_TARGET_DIR` is used as the
+parent of this scratch directory, leaving existing outputs intact. The runner
+never stops an app or cleans another build's files. Separate runs rebuild their
+dependencies and can take longer, in exchange for leaving no compiler cache.
+
+Successful Tauri builds retain the final app binary and bundles under
+`target/check-artifacts/run-<id>/` (or the configured Cargo target), and print the
+exact location. If saving an output fails, the scratch directory is retained
+with an error instead of losing the only copy. A forced process kill or power
+loss can also leave scratch files; `cargo clean` removes those leftovers.
+Direct Cargo/Tauri invocations bypass this automatic cleanup.
 
 ### Regenerating the TypeScript bindings
 

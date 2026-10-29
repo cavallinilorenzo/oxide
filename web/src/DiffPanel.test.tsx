@@ -33,6 +33,7 @@ const render = (scope: "uncommitted" | "branch" = "uncommitted") =>
     root.render(
       <DiffPanel
         projectId={1}
+        onOpenFile={() => {}}
         threadId={null}
         board={false}
         scope={scope}
@@ -45,6 +46,14 @@ const render = (scope: "uncommitted" | "branch" = "uncommitted") =>
       />,
     ),
   );
+
+it("opens the selected Git patch in Code with the keyboard and removes the small viewer", async () => {
+  const open = vi.fn();
+  await act(async () => root.render(<DiffPanel projectId={1} threadId={null} board={false} scope="branch" reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} onOpenFile={open} />));
+  await act(async () => host.querySelector('[role="option"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ path: "src/first.rs" }));
+  expect(host.querySelector(".diff-body")).toBeNull();
+});
 
 it("shows the last diff of the scope at once when coming back, then refreshes it", async () => {
   await render();

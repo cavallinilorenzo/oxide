@@ -3,7 +3,11 @@ use crate::{
     TurnStatus,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+/// Numbers each run's scratch folder: the contract tests share a process and run in parallel.
+static RUNS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
     let mut provider = factory();
@@ -122,7 +126,11 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
         .expect("set_permission_mode must succeed");
 
     // 6. A prompt with an Attachment: the Turn names it in place, however it was delivered.
-    let folder = std::env::temp_dir().join(format!("oxide-contract-{}", std::process::id()));
+    let folder = std::env::temp_dir().join(format!(
+        "oxide-contract-{}-{}",
+        std::process::id(),
+        RUNS.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&folder).expect("temp dir");
     let path = folder.join("note.txt");
     std::fs::write(&path, "hello").expect("write attachment");

@@ -23,12 +23,13 @@ test("publishes the signed native packages with correct updater platform keys", 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("refuses a manifest with a missing platform or signature", () => {
+test("refuses unsigned or missing packages, and allows a release for one platform", () => {
   const dir = mkdtempSync(join(tmpdir(), "oxide-feed-"));
   try {
+    assert.throws(() => updateManifest(dir, { repository: "cavallinilorenzo/oxide", tag: "v1.2.3" }), /No supported/);
     writeFileSync(join(dir, "Oxide.app.tar.gz"), "package");
     assert.throws(() => updateManifest(dir, { repository: "cavallinilorenzo/oxide", tag: "v1.2.3" }), /Missing signature/);
     writeFileSync(join(dir, "Oxide.app.tar.gz.sig"), "test-signature");
-    assert.throws(() => updateManifest(dir, { repository: "cavallinilorenzo/oxide", tag: "v1.2.3" }), /windows-x86_64/);
+    assert.deepEqual(Object.keys(updateManifest(dir, { repository: "cavallinilorenzo/oxide", tag: "v1.2.3" }).platforms), ["darwin-aarch64"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

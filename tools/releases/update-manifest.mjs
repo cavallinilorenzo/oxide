@@ -8,6 +8,7 @@ export function updateManifest(directory, { repository, tag, date = new Date().t
   const platforms = {};
   for (const [target, pattern] of [["darwin-aarch64", /\.app\.tar\.gz$/], ["windows-x86_64", /_x64-setup\.exe$/]]) {
     const files = readdirSync(directory).filter((file) => pattern.test(file));
+    if (files.length === 0) continue;
     if (files.length !== 1) throw new Error(`${target}: expected exactly one updater package.`);
     const file = files[0];
     const signaturePath = join(directory, `${file}.sig`);
@@ -16,10 +17,11 @@ export function updateManifest(directory, { repository, tag, date = new Date().t
     if (!signature) throw new Error(`Empty signature for ${file}.`);
     platforms[target] = { signature, url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(file)}` };
   }
+  if (!Object.keys(platforms).length) throw new Error("No supported updater packages found.");
   return { version: tag.slice(1), notes: `Oxide ${tag.slice(1)}\nRelease notes: https://github.com/${repository}/releases/tag/${tag}`, pub_date: date, platforms };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const directory = process.argv[2] ?? "release-artifacts";
-  writeFileSync(join(directory, "latest.json"), JSON.stringify(updateManifest(directory, { repository: process.env.GITHUB_REPOSITORY, tag: process.env.TAG }), null, 2) + "\n");
+  writeFileSync(join(directory, "latest.json"), JSON.stringify(updateManifest(directory, { repository: process.argv[4] ?? "cavallinilorenzo/oxide", tag: process.argv[3] ?? "" }), null, 2) + "\n");
 }

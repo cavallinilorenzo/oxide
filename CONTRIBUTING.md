@@ -1,6 +1,6 @@
 # Contributing to Oxide
 
-Thanks for your interest! This guide covers how changes flow into the repo, how to get CI green locally, and how releases are cut. Build prerequisites are in the [README](README.md#build-from-source). The domain language (Project, Thread, Turn, Provider…) is in [GLOSSARY.md](GLOSSARY.md): please use it in code, issues and PRs.
+Thanks for your interest! This guide covers how changes flow into the repo, and how to run the checks locally. Build prerequisites are in the [README](README.md#build-from-source). The domain language (Project, Thread, Turn, Provider…) is in [GLOSSARY.md](GLOSSARY.md): please use it in code, issues and PRs.
 
 By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -13,22 +13,13 @@ The full rules are in [docs/agents/git-workflow.md](docs/agents/git-workflow.md)
 - **Open PRs against `main`** (`gh pr create --base main`). PRs are squash-merged.
 - Put `Closes #<id>` in the PR body. `main` is the default branch, so the issue closes when the PR merges.
 
-Dependabot branches (`dependabot/...`) are the one exception to the `<type>/<slug>` naming rule.
-
 ## Local checks
 
-These are the checks CI runs on every PR. Get them green locally before pushing. The ruleset on `main` lists which jobs are required to merge (see [docs/agents/git-workflow.md](docs/agents/git-workflow.md)).
+There is no CI. Run these locally before pushing:
 
-| CI job | Run locally |
-| --- | --- |
-| `rust` | `pnpm --dir web install && pnpm --dir web build` (Tauri embeds `web/dist`), then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `git diff --exit-code web/src/bindings.ts` |
-| `web` | `pnpm --dir web typecheck`, `pnpm --dir web lint`, `pnpm --dir web test` |
-| `supply-chain` | `node .github/scripts/tauri-alignment.mjs`, `cargo deny --locked check bans licenses sources` ([cargo-deny](https://github.com/EmbarkStudios/cargo-deny)). On PRs, GitHub's dependency review also rejects newly added dependencies with high or critical advisories. |
-| `repo-config` | `actionlint`, `zizmor .`, `node --test .github/scripts/*.test.mjs`, and schema validation with [check-jsonschema](https://github.com/python-jsonschema/check-jsonschema) (`uvx check-jsonschema==0.38.2 …`; the exact invocations are in the `repo-config` job of [ci.yml](.github/workflows/ci.yml)) |
-
-PRs into `main` also run the `bundle` job of the [Release workflow](.github/workflows/release.yml), which builds the real app bundle. Run a local app build with `pnpm --dir web build:app` from the repo root; it preserves final outputs and cleans its compiler cache automatically.
-
-`cargo deny check advisories` runs daily in the [Advisories workflow](.github/workflows/advisories.yml), not on PRs, so a new advisory against an untouched crate doesn't block unrelated work.
+- Rust: `pnpm --dir web install && pnpm --dir web build` (Tauri embeds `web/dist`), then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `git diff --exit-code web/src/bindings.ts`
+- Web: `pnpm --dir web typecheck`, `pnpm --dir web lint`, `pnpm --dir web test`
+- App bundle: `pnpm --dir web build:app` from the repo root (keeps final outputs, cleans its compiler cache)
 
 ### Local build disk usage
 
@@ -43,9 +34,9 @@ Oxide first if Windows reports that its release executable is in use. For a
 debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
 `CARGO_INCREMENTAL=1` opts back into incremental compilation.
 
-The local check runner (`node tools/checks/run.mjs pr`) checks the build-artifact
+The local build (`pnpm --dir web build:app`) checks the build-artifact
 budget before and after each Rust compilation or Tauri bundle. It stops further
-checks above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
+builds above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
 This is a checkpoint between commands, not a filesystem quota: one command can
 exceed the budget before returning.
 
@@ -72,7 +63,7 @@ Direct Cargo/Tauri invocations bypass this automatic cleanup.
 cargo test -p oxide-app --test bindings_and_capabilities
 ```
 
-Running the app in development mode regenerates it too. CI fails if the committed file is stale.
+Running the app in development mode regenerates it too. Commit it whenever it changes.
 
 ### Live Provider smoke tests
 
@@ -92,83 +83,51 @@ Use the issue forms ([bug report](https://github.com/cavallinilorenzo/oxide/issu
 
 Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single source of instructions for them (Claude Code, Codex, Antigravity). `CLAUDE.md` and `GEMINI.md` just point to it. The agent docs live in [docs/agents/](docs/agents/), and the skills agents use are in `.agents/skills/`. Human contributors follow the same branch model and checks.
 
-## Dependencies and Dependabot
 
-[Dependabot](.github/dependabot.yml) watches Cargo, the pnpm web app (`web/`), GitHub Actions and the Rust toolchain:
+## Publishing application updates manually
 
-- **Version updates** open weekly, on Monday morning (Europe/Rome), against `main`. They only open after a cooldown (3 days for patch, 7 for minor, 14 for major releases; 7 days flat for GitHub Actions and the Rust toolchain), so a compromised or broken release is usually pulled before it reaches us. Minor and patch updates share one grouped PR per ecosystem. Related packages move together in named groups: `tauri`, `specta`, `react`, `lint`, `build-test`, `xterm` and `actions`. Every other major update gets its own PR.
-- **Security updates** open as soon as an advisory affects us, without the cooldown, against the default branch (`main`).
-- PRs are labelled `dependencies` plus `rust`, `javascript` or `github-actions`, with commit messages prefixed `chore(deps)` (`chore(deps-dev)` for dev dependencies).
+Settings → Updates checks the latest published stable GitHub release. Publishing
+stays a human action; this repository has no CI/CD release workflows.
 
-The [auto-merge workflow](.github/workflows/dependabot-auto-merge.yml) applies this policy:
+The updater public key and feed URL are in `crates/oxide-app/tauri.conf.json`.
+The corresponding private key is kept outside the checkout in the user's
+`.oxide/release-keys/oxide-updater.key`, with access restricted to that user.
+Keep a secure backup: installed versions need future packages signed by that
+same key. Never commit it or replace the public key casually.
 
-- **Auto-merges (squash) once required checks pass:** patch updates, and minor updates of packages at 1.0 or later. This also applies to grouped and GitHub Actions PRs.
-- **Waits for the maintainer, labelled `manual-review`:** major updates, minor updates of 0.x packages (and patch updates of 0.0.x packages), anything in the `tauri` or `specta` groups, and any update whose versions Dependabot can't report.
+1. Bump the version in `Cargo.toml`, the Tauri config and `web/package.json` through
+   a PR into `main`. Only a human tags a release.
+2. Build on the platform being released. Set `TAURI_SIGNING_PRIVATE_KEY` to the
+   private-key file path, then run Tauri from the repository root with
+   `--config crates/oxide-app/tauri.updater.conf.json`. For example, on Windows:
 
-A `specta` bump usually changes the generated bindings, so the `rust` job fails until someone regenerates them. That's intended. The Rust and web `tauri` groups open separately on the same day. The `supply-chain` job fails until both halves are on the same `major.minor`, so check out one branch, merge the other into it, and land them together.
-
-Some versions are not managed by Dependabot and stay manual:
-
-- the Node.js version used in CI (`node-version` in the workflows)
-- the pnpm version (`packageManager` in `web/package.json`). Dependabot officially supports pnpm up to v10, while we pin pnpm 11, whose lockfile format is the same v9 format. If Dependabot fails to parse `web/pnpm-lock.yaml`, its security alerts still work from the lockfile.
-- the tool versions pinned in `.github/workflows/` (actionlint, zizmor, cargo-deny, check-jsonschema)
-
-Third-party actions are pinned to full commit SHAs, with the version as a trailing comment. Dependabot updates both.
-
-## Releasing
-
-Releases are tagged on `main` by the maintainer:
-
-1. **Bump the version** in a normal PR into `main`. Three places must agree: `version` in `[workspace.package]` of `Cargo.toml`, `version` in `crates/oxide-app/tauri.conf.json`, and `version` in `web/package.json`. Run `cargo check` so `Cargo.lock` picks up the new version.
-2. **Wait for the `bundle` job** to pass on the merged commit.
-3. **Tag** that commit on `main` and push the tag:
-   ```sh
-   git fetch origin && git tag -a vX.Y.Z origin/main -m "Oxide vX.Y.Z" && git push origin vX.Y.Z
+   ```powershell
+   $env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $env:USERPROFILE '.oxide/release-keys/oxide-updater.key'
+   web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.updater.conf.json
+   Remove-Item Env:/TAURI_SIGNING_PRIVATE_KEY
    ```
-   A tag with a pre-release suffix (`vX.Y.Z-rc.1`) creates a pre-release. The release workflow refuses a tag that doesn't match the three declared versions.
-4. **Review and publish** the draft release. It contains the macOS `.dmg` and `.app` archive, Windows x64 NSIS installer, updater signatures, `latest.json`, `SHA256SUMS.txt`, build-provenance attestations and generated notes. Publishing a stable release makes its signed packages available to **Settings → Updates → Check for updates**. Drafts and prereleases do not become the stable feed.
 
-To test the pipeline without tagging, run the Release workflow manually (**Actions → Release → Run workflow**). It builds the bundle and uploads it as a workflow artifact only.
+   On macOS Apple Silicon, use `--target aarch64-apple-darwin --bundles app,dmg`.
+   Set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
+   Normal local builds do not need the signing key or the extra config.
+3. Collect the updater packages and their `.sig` files in a release directory:
+   Windows `Oxide_X.Y.Z_x64-setup.exe`, macOS `Oxide.app.tar.gz`. Each included
+   package must have a signature; platforms can be released independently.
+4. Generate the feed locally, for example:
 
-### Application updater signing
+   ```sh
+   node tools/releases/update-manifest.mjs release-artifacts v0.2.0
+   node --test tools/releases/update-manifest.test.mjs
+   ```
 
-The updater's public key and stable feed URL are in `crates/oxide-app/tauri.conf.json`.
-The release build merges `tauri.updater.conf.json` to produce signed packages.
-Normal PR and local builds do not need the private key. Native commands own the
-updater; the webview has no generic updater, process or filesystem permissions.
+   An optional fourth argument overrides `cavallinilorenzo/oxide` for a fork.
+5. Upload the packages, signatures and generated `latest.json` to the matching
+   draft GitHub release, then review and publish it. The human-created tag must
+   match the package version. Do not upload debug builds as releases.
 
-| Repository secret | Value |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the updater private key corresponding to the committed public key |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Optional password, only for a password-protected key |
-
-The initial key is configured in the repository secret. Its local backup is
-outside the checkout, in the user's `.oxide/release-keys/oxide-updater.key`, with
-access restricted to that user. Keep a secure backup: future updates must use
-the same key. Never commit the private key or replace the public key casually.
-
-For a local updater package build, point `TAURI_SIGNING_PRIVATE_KEY` at that key
-and run Tauri with `--config crates/oxide-app/tauri.updater.conf.json`.
-The release pipeline requires the secret, builds both supported packages, and
-generates a feed only when each package has a signature. An unpublished/missing
-feed or a network failure is reported as a check failure, never as “up to date”.
-The first published stable release from this pipeline enables the feed; there
-is no update to download until a newer version is published. macOS Intel and
-Linux packages are not currently built by the release workflow.
-
-The package/feed format follows [Tauri's updater contract](https://v2.tauri.app/plugin/updater/).
-
-### Signing and notarization
-
-The release build signs and notarizes the app automatically when these repository secrets exist. Without them, it produces an ad-hoc-signed build and the release says it is unsigned.
-
-| Secret | Value |
-| --- | --- |
-| `APPLE_CERTIFICATE` | Base64 of the exported Developer ID Application `.p12` |
-| `APPLE_CERTIFICATE_PASSWORD` | Password of that `.p12` |
-| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
-| `APPLE_API_ISSUER` | App Store Connect API issuer ID (notarization) |
-| `APPLE_API_KEY` | App Store Connect API key ID (notarization) |
-| `APPLE_API_PRIVATE_KEY` | Contents of the `AuthKey_<id>.p8` file (notarization) |
-
-See [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/macos/) for how to create them.
+Drafts and prereleases do not become the stable feed. The first published signed
+stable release enables the feed; an update appears only when it is newer than
+an installed app. A missing feed or connection failure is reported as a failed
+check, never as “up to date”. The local manifest helper supports Windows x64 and
+macOS Apple Silicon packages. OS signing/notarization is separate from the
+updater signature; see [Tauri's updater guide](https://v2.tauri.app/plugin/updater/).

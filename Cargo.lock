@@ -3065,6 +3065,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
  "whisper-rs",
  "windows-sys 0.61.2",
  "zip",

@@ -3,14 +3,26 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelId {
+    Tiny,
+    Base,
     #[default]
     Small,
+    Medium,
+    #[serde(rename = "large-v3")]
+    LargeV3,
+    #[serde(rename = "large-v3-turbo")]
+    LargeV3Turbo,
 }
 
 impl std::fmt::Display for ModelId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Tiny => write!(f, "tiny"),
+            Self::Base => write!(f, "base"),
             Self::Small => write!(f, "small"),
+            Self::Medium => write!(f, "medium"),
+            Self::LargeV3 => write!(f, "large-v3"),
+            Self::LargeV3Turbo => write!(f, "large-v3-turbo"),
         }
     }
 }

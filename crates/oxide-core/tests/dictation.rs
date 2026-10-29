@@ -9,6 +9,71 @@ use std::sync::{
 };
 
 #[test]
+fn legacy_settings_preserve_dictation_and_default_to_small() {
+    let settings: DictationSettings =
+        serde_json::from_str(r#"{"enabled":true,"language":"it","device":"gpu"}"#).unwrap();
+    let value = serde_json::to_value(&settings).unwrap();
+    assert_eq!(value["model"], "small");
+    assert!(settings.enabled);
+    assert_eq!(settings.language, "it");
+    assert_eq!(settings.device, Device::Gpu);
+}
+
+#[test]
+fn catalogue_exposes_six_pinned_multilingual_models() {
+    let catalogue = oxide_core::dictation::models::catalogue();
+    assert_eq!(catalogue.version, 1);
+    assert_eq!(catalogue.models.len(), 6);
+    let ids: Vec<_> = catalogue.models.iter().map(|m| m.id.to_string()).collect();
+    assert_eq!(
+        ids,
+        [
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large-v3",
+            "large-v3-turbo"
+        ]
+    );
+    for entry in &catalogue.models {
+        assert_eq!(entry.language_coverage, "multilingual");
+        assert!(entry.url.contains(&entry.revision));
+        assert_ne!(entry.revision, "main");
+        assert_eq!(entry.sha256.len(), 64);
+        assert_eq!(entry.license, "MIT");
+        assert_eq!(entry.estimated_peak_bytes.len(), 4);
+    }
+    assert_eq!(catalogue.models[0].expected_bytes, 77_691_713);
+    assert_eq!(
+        catalogue.models[2].sha256,
+        "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+    );
+}
+
+#[test]
+fn missing_model_selection_does_not_overwrite_saved_settings() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join("settings.json"), r#"{"dictation":{"enabled":true,"language":"it","device":"cpu"},"shortcuts":{"dictation":"Mod+Alt+R"}}"#).unwrap();
+    let core = oxide_core::Core::open(home.path()).unwrap();
+    let original = core.settings().settings;
+    assert_eq!(original.dictation.model, ModelId::Small);
+    assert_eq!(original.shortcuts.dictation, "Mod+Alt+R");
+    let mut next = original.clone();
+    next.dictation.model = ModelId::Tiny;
+    assert!(core.save_settings(&next).is_err());
+    assert_eq!(core.settings().settings, original);
+    drop(core);
+    assert_eq!(
+        oxide_core::Core::open(home.path())
+            .unwrap()
+            .settings()
+            .settings,
+        original
+    );
+}
+
+#[test]
 fn unified_memory_topology_and_budget_signals_serialize_as_shared_pool() {
     let pool = MemoryPool {
         unified: true,
@@ -215,6 +280,7 @@ fn auto_mode_refuses_cpu_fallback_when_memory_insufficient() {
         enabled: true,
         language: "auto".into(),
         device: Device::Auto,
+        model: ModelId::Small,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -244,6 +310,7 @@ fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
     {
         let runtime = oxide_core::dictation::MetalRuntime;
         let missing_request = TranscriptionRequest {
+            cancelled: Default::default(),
             model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
             language: None,
             samples: vec![0.0; 16000],
@@ -267,6 +334,7 @@ fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
         std::fs::write(&corrupt_path, b"not a valid ggml model file").unwrap();
 
         let corrupt_request = TranscriptionRequest {
+            cancelled: Default::default(),
             model_path: corrupt_path,
             language: None,
             samples: vec![0.0; 16000],
@@ -289,6 +357,7 @@ fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
     {
         let runtime = oxide_core::dictation::MetalRuntime;
         let dummy_request = TranscriptionRequest {
+            cancelled: Default::default(),
             model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
             language: None,
             samples: vec![0.0; 16000],
@@ -411,6 +480,7 @@ fn auto_retries_cpu_once_on_gpu_failure_and_records_why() {
         enabled: true,
         language: "auto".into(),
         device: Device::Auto,
+        model: ModelId::Small,
     };
 
     let result = dictation.stop(home.path(), &settings);
@@ -452,6 +522,7 @@ fn explicit_gpu_request_with_cpu_runtime_fails_without_silent_substitution() {
         enabled: true,
         language: "auto".into(),
         device: Device::Gpu,
+        model: ModelId::Small,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -484,6 +555,7 @@ fn explicit_gpu_failure_never_silently_substitutes_cpu() {
         enabled: true,
         language: "auto".into(),
         device: Device::Gpu,
+        model: ModelId::Small,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -521,6 +593,7 @@ fn settings_changes_during_recording_do_not_alter_in_flight_session() {
         enabled: true,
         language: "en".into(),
         device: Device::Cpu,
+        model: ModelId::Small,
     };
 
     let text = dictation.stop(home.path(), &changed_settings).unwrap();
@@ -552,6 +625,7 @@ fn disabling_dictation_during_recording_discards_audio() {
         enabled: false,
         language: "auto".into(),
         device: Device::Cpu,
+        model: ModelId::Small,
     };
 
     let err = dictation.stop(home.path(), &disabled_settings).unwrap_err();
@@ -580,8 +654,72 @@ fn cancellation_clears_active_recording_and_subsequent_stop_fails() {
         enabled: true,
         language: "auto".into(),
         device: Device::Cpu,
+        model: ModelId::Small,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
     assert!(err.to_string().contains("No recording is active"));
+}
+
+#[test]
+fn disable_cancels_in_flight_inference_and_discards_late_result() {
+    use std::sync::mpsc;
+    struct BlockingRuntime {
+        entered: mpsc::Sender<()>,
+    }
+    impl WhisperBackendRuntime for BlockingRuntime {
+        fn backend_id(&self) -> BackendId {
+            BackendId::Vulkan
+        }
+        fn probe(&self) -> BackendProbe {
+            MockSuccessfulGpuRuntime.probe()
+        }
+        fn transcribe(
+            &self,
+            request: &TranscriptionRequest,
+        ) -> Result<TranscriptionOutcome, BackendError> {
+            assert!(request.model_path.ends_with("ggml-tiny.bin"));
+            assert_eq!(request.language.as_deref(), Some("it"));
+            self.entered.send(()).unwrap();
+            while !request.cancelled.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            MockSuccessfulGpuRuntime.transcribe(request)
+        }
+    }
+    let (entered, ready) = mpsc::channel();
+    let dictation = Arc::new(Dictation::with_runtime(Arc::new(BlockingRuntime {
+        entered,
+    })));
+    dictation.inject_recording_for_test(
+        RecordingSnapshot {
+            language: "it".into(),
+            device: Device::Gpu,
+            model: ModelId::Tiny,
+        },
+        vec![0.1; 16000],
+        16000,
+    );
+    let home = tempfile::tempdir().unwrap();
+    std::thread::scope(|scope| {
+        let task = scope.spawn(|| {
+            dictation.stop(
+                home.path(),
+                &DictationSettings {
+                    enabled: true,
+                    language: "en".into(),
+                    model: ModelId::Medium,
+                    ..Default::default()
+                },
+            )
+        });
+        ready
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        dictation
+            .configure(home.path(), &DictationSettings::default())
+            .unwrap();
+        assert!(task.join().unwrap().is_err());
+    });
+    assert!(dictation.last_execution().is_none());
 }

@@ -1,5 +1,11 @@
 # Local dictation
 
+The backend now supports six multilingual models through a versioned catalogue
+and explicit lifecycle APIs. See [model catalogue and lifecycle](dictation-models.md)
+for migration, API usage, verification evidence and the hardware-validation handoff.
+The current settings interface continues to expose the original Small download;
+the detailed model-selection interface is tracked in #233.
+
 In Settings, download Whisper small (466 MiB), enable dictation, choose a language
 (`auto`, `it`, `en`, or another Whisper language code), and save. CPU is the default.
 The shortcut is Ctrl+Shift+R on Windows/Linux or Cmd+Shift+R on macOS, rebindable

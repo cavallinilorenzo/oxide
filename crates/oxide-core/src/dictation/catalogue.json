@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "tiny",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 77691713,
+      "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 536870912,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 536870912,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 536870912,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 536870912,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Fastest, lowest accuracy"
+    },
+    {
+      "id": "base",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 147951465,
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 805306368,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 805306368,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 805306368,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 805306368,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Fast, improved accuracy"
+    },
+    {
+      "id": "small",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 487601967,
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 2147483648,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 2147483648,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 2147483648,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 2147483648,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Balanced speed and accuracy"
+    },
+    {
+      "id": "medium",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 1533763059,
+      "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 5368709120,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 5368709120,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 5368709120,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 5368709120,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Higher accuracy, slower"
+    },
+    {
+      "id": "large-v3",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 3095033483,
+      "sha256": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 10737418240,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 10737418240,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 10737418240,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 10737418240,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Highest accuracy, slowest"
+    },
+    {
+      "id": "large-v3-turbo",
+      "languageCoverage": "multilingual",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "expectedBytes": 1624555275,
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+      "format": "ggml",
+      "quantization": "f16",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openai/whisper/blob/v20240930/LICENSE",
+      "nativeRevision": "whisper.cpp 1.8.3 / whisper-rs 0.16.0 / whisper-rs-sys 0.15.0 (7558e1b72f54f2f22a53589afb77e65681834c36)",
+      "estimatedPeakBytes": [
+        {
+          "backend": "cpu",
+          "bytes": 6442450944,
+          "measured": false
+        },
+        {
+          "backend": "cuda",
+          "bytes": 6442450944,
+          "measured": false
+        },
+        {
+          "backend": "vulkan",
+          "bytes": 6442450944,
+          "measured": false
+        },
+        {
+          "backend": "metal",
+          "bytes": 6442450944,
+          "measured": false
+        }
+      ],
+      "tradeoff": "Large accuracy with faster decoding"
+    }
+  ]
+}

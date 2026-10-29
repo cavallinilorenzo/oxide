@@ -1,10 +1,15 @@
 use super::types::{BackendId, BackendProbe, BuildManifest, CapabilityState, ExecutionDetails};
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use thiserror::Error;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionRequest {
+    pub cancelled: Arc<AtomicBool>,
     pub model_path: PathBuf,
     pub language: Option<String>,
     pub samples: Vec<f32>,
@@ -57,7 +62,22 @@ pub fn run_whisper_inference(
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
     let available = sys.available_memory();
-    let required = 500 * 1024 * 1024;
+    let required = super::models::catalogue()
+        .models
+        .iter()
+        .find(|entry| {
+            request
+                .model_path
+                .file_name()
+                .is_some_and(|name| name == format!("ggml-{}.bin", entry.id).as_str())
+        })
+        .and_then(|entry| {
+            entry
+                .estimated_peak_bytes
+                .iter()
+                .find(|estimate| estimate.backend == BackendId::Cpu)
+        })
+        .map_or(500 * 1024 * 1024, |estimate| estimate.bytes);
     if available < required {
         return Err(BackendError::InsufficientMemory {
             required_bytes: required,
@@ -92,6 +112,17 @@ pub fn run_whisper_inference(
         .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    unsafe extern "C" fn abort_cancelled(data: *mut std::ffi::c_void) -> bool {
+        // SAFETY: installed below from the request's Arc, alive throughout synchronous full().
+        unsafe { &*data.cast::<AtomicBool>() }.load(Ordering::SeqCst)
+    }
+    // SAFETY: whisper.cpp only calls this during synchronous inference; the request owns
+    // the stable AtomicBool allocation until full() returns. The callback never unwinds.
+    // Avoid 0.16.0's safe helper: it double-boxes a closure but casts its pointer as F.
+    unsafe {
+        params.set_abort_callback(Some(abort_cancelled));
+        params.set_abort_callback_user_data(Arc::as_ptr(&request.cancelled).cast_mut().cast());
+    }
     params.set_language(request.language.as_deref());
     params.set_translate(false);
     params.set_no_context(true);

@@ -8,6 +8,13 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 export const commands = {
 	dictationStatus: () => typedError<DictationStatus_Serialize, AppError>(__TAURI_INVOKE("dictation_status")),
 	dictationInstall: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_install")),
+	dictationModelCatalogue: () => __TAURI_INVOKE<DictationModelCatalogue>("dictation_model_catalogue"),
+	dictationModels: () => typedError<DictationModelStatus[], AppError>(__TAURI_INVOKE("dictation_models")),
+	dictationModelStatus: (model: DictationModelId) => typedError<DictationModelStatus, AppError>(__TAURI_INVOKE("dictation_model_status", { model })),
+	dictationModelInstall: (model: DictationModelId) => typedError<null, AppError>(__TAURI_INVOKE("dictation_model_install", { model })),
+	dictationModelRetry: (model: DictationModelId) => typedError<null, AppError>(__TAURI_INVOKE("dictation_model_retry", { model })),
+	dictationModelCancel: (model: DictationModelId) => __TAURI_INVOKE<void>("dictation_model_cancel", { model }),
+	dictationModelDelete: (model: DictationModelId) => typedError<null, AppError>(__TAURI_INVOKE("dictation_model_delete", { model })),
 	dictationStart: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_start")),
 	dictationStop: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_stop")),
 	dictationCancel: () => __TAURI_INVOKE<void>("dictation_cancel"),
@@ -407,10 +414,50 @@ export type DeveloperTool_Serialize = {
 
 export type DictationDevice = "cpu" | "gpu" | "auto";
 
-export type DictationSettings = {
+export type DictationModelCatalogue = {
+	version: number,
+	models: DictationModelEntry[],
+};
+
+export type DictationModelEntry = {
+	id: DictationModelId,
+	languageCoverage: string,
+	url: string,
+	revision: string,
+	expectedBytes: number | null,
+	sha256: string,
+	format: string,
+	quantization: string,
+	license: string,
+	licenseUrl: string,
+	nativeRevision: string,
+	estimatedPeakBytes: ModelMemoryEstimate[],
+	tradeoff: string,
+};
+
+export type DictationModelId = "tiny" | "base" | "small" | "medium" | "large-v3" | "large-v3-turbo";
+
+export type DictationModelState = { status: "missing" } | { status: "installed" } | { status: "installing"; received: number | null; total: number | null } | { status: "cancelled" } | { status: "error"; message: string };
+
+export type DictationModelStatus = {
+	id: DictationModelId,
+	state: DictationModelState,
+};
+
+export type DictationSettings = DictationSettings_Serialize | DictationSettings_Deserialize;
+
+export type DictationSettings_Deserialize = {
 	enabled: boolean,
 	language: string,
 	device: DictationDevice,
+	model?: DictationModelId,
+};
+
+export type DictationSettings_Serialize = {
+	enabled: boolean,
+	language: string,
+	device: DictationDevice,
+	model: DictationModelId,
 };
 
 export type DictationStatus = DictationStatus_Serialize | DictationStatus_Deserialize;
@@ -790,6 +837,12 @@ export type ModelInfo_Serialize = {
 	isLegacy: boolean,
 };
 
+export type ModelMemoryEstimate = {
+	backend: BackendId,
+	bytes: number | null,
+	measured: boolean,
+};
+
 /**  An Approval the Provider is still waiting on. */
 export type PendingApproval = PendingApproval_Serialize | PendingApproval_Deserialize;
 
@@ -1064,7 +1117,7 @@ export type SettingsState_Serialize = {
 };
 
 export type Settings_Deserialize = {
-	dictation: DictationSettings,
+	dictation: DictationSettings_Deserialize,
 	defaultProvider: Provider,
 	providers: Providers_Deserialize,
 	confirmQuit: boolean,
@@ -1074,7 +1127,7 @@ export type Settings_Deserialize = {
 };
 
 export type Settings_Serialize = {
-	dictation: DictationSettings,
+	dictation: DictationSettings_Serialize,
 	defaultProvider: Provider,
 	providers: Providers_Serialize,
 	confirmQuit: boolean,

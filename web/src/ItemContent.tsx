@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { parseSegments } from "./codeSegments";
 import { highlighter } from "./highlighter";
 import { useTypewriter } from "./typewriter";
@@ -6,16 +7,23 @@ import { useTypewriter } from "./typewriter";
 /**
  * An Item's text with its code blocks highlighted. Memoized on `content`, so
  * finalized Items never re-render or re-parse; only the streaming one does.
- * Text that streams in is typed out one character at a time.
+ * Text that streams in is typed out one character at a time. With `markdown`
+ * the prose between code blocks is formatted; otherwise it stays as written.
  */
-export const ItemContent = memo(function ItemContent({ content }: { content: string }) {
+export const ItemContent = memo(function ItemContent({
+  content,
+  markdown = false,
+}: {
+  content: string;
+  markdown?: boolean;
+}) {
   const typed = useTypewriter(content);
   const segments = useMemo(() => parseSegments(typed), [typed]);
   return (
     <div className="message-content">
       {segments.map((s, i) =>
         s.kind === "text" ? (
-          <span key={i}>{s.text}</span>
+          markdown ? <ChatMarkdown key={i} text={s.text} /> : <span key={i}>{s.text}</span>
         ) : (
           <CodeBlock key={i} code={s.code} lang={s.lang} closed={s.closed} />
         )

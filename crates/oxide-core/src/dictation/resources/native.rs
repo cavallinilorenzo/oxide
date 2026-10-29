@@ -85,6 +85,12 @@ fn native_instruction_compatibility() -> Option<bool> {
     #[cfg(target_arch = "aarch64")]
     {
         use whisper_rs::whisper_rs_sys::*;
+        // Stable Rust cannot detect SME yet. A build requiring it stays unknown,
+        // rather than assuming compatibility or requiring a nightly compiler.
+        // SAFETY: the pinned native getter returns a compile-time feature flag.
+        if unsafe { ggml_cpu_has_sme() } != 0 {
+            return None;
+        }
         // SAFETY: pinned native getters return compile-time feature flags.
         Some(unsafe {
             (ggml_cpu_has_neon() == 0 || std::arch::is_aarch64_feature_detected!("neon"))
@@ -94,7 +100,6 @@ fn native_instruction_compatibility() -> Option<bool> {
                 && (ggml_cpu_has_matmul_int8() == 0
                     || std::arch::is_aarch64_feature_detected!("i8mm"))
                 && (ggml_cpu_has_sve() == 0 || std::arch::is_aarch64_feature_detected!("sve"))
-                && (ggml_cpu_has_sme() == 0 || std::arch::is_aarch64_feature_detected!("sme"))
         })
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]

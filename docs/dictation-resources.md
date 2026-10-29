@@ -22,7 +22,8 @@ candidate, never imply a latency or prove Small is recommended. Unmeasured
 Small/CPU decisions below four usable cores require a performance check.
 - Native CPU instruction requirements come from the pinned GGML compile-time
   feature getters, compared with Rust's OS-aware feature detection. Unverifiable
-  AMX permissions or architectures remain unknown and require a compatible build.
+  AMX permissions, SME detection on stable Rust, or architectures remain unknown
+  and require a compatible build.
   Each isolated worker checks its own native build before allocation as well.
 - RAM total/available and the current process resident memory (the Oxide baseline)
   come from sysinfo. OS available memory already excludes the running app and

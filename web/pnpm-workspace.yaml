@@ -1,2 +1,17 @@
 overrides:
   dompurify: 3.4.17
+
+# Refuse versions younger than the Dependabot minor cooldown (7 days, in
+# minutes). Dependabot's cooldown only covers Dependabot's own updates; this
+# also covers `pnpm add` and `pnpm update`.
+minimumReleaseAge: 10080
+
+# Install scripts run only for packages listed here, and no dependency needs
+# one today. A package that gains an install script fails the install until
+# someone reviews it and adds it (`<name>: true`).
+allowBuilds: {}
+
+# Already locked when the age rule was introduced, and younger than 7 days
+# until 2026-10-30. Delete this entry after that date.
+minimumReleaseAgeExclude:
+  - "@asamuzakjp/dom-selector@10.0.5"

@@ -15,11 +15,20 @@ The full rules are in [docs/agents/git-workflow.md](docs/agents/git-workflow.md)
 
 ## Local checks
 
-There is no CI. Run these locally before pushing:
+One cross-platform command runs what the pull request lanes of CI run on your OS, with the same commands (it works in PowerShell too). The CI workflow that runs these lanes is being added ([#224](https://github.com/cavallinilorenzo/oxide/issues/224)); until it lands, this command is the only check.
 
-- Rust: `pnpm --dir web install && pnpm --dir web build` (Tauri embeds `web/dist`), then `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `git diff --exit-code web/src/bindings.ts`
-- Web: `pnpm --dir web typecheck`, `pnpm --dir web lint`, `pnpm --dir web test`
-- App bundle: `pnpm --dir web build:app` from the repo root (keeps final outputs, cleans its compiler cache)
+```sh
+node tools/check.mjs        # everything the PR lanes run on this OS
+node tools/check.mjs fast   # rustfmt, ESLint and TypeScript, in seconds
+```
+
+The full tier installs the web dependencies from the lockfile, then runs formatting, ESLint, TypeScript, Vitest, the production web build, the tooling tests, the Tauri alignment check, Clippy, the Rust tests, the committed-bindings check and this OS's app bundle. It prints what it can't run here and why (for example the macOS bundle on Windows, or cargo-deny, which CI installs), and lists every failed command at the end so you can rerun it directly.
+
+The Rust tests run with [cargo-nextest](https://nexte.st), as in CI. Install it once with `cargo install --locked cargo-nextest`. Every Rust check also builds the dictation engine, which needs CMake, a C/C++ compiler and libclang (see [docs/dictation.md](docs/dictation.md)).
+
+Before every commit, `node tools/check.mjs fast` is enough. To run it automatically, add it to `.git/hooks/pre-commit` yourself; the repository doesn't install hooks, and CI is the authority.
+
+The pipeline's decisions (which lanes a change needs, the merge gate, PR titles, release versions, release notes, Dependabot auto-merge, the updater feed) live as pure functions in `tools/ci/policy.mjs`, with a command-line wrapper in `tools/ci/cli.mjs`. `node --test "tools/**/*.test.mjs"` runs all the tooling tests.
 
 ### Local build disk usage
 
@@ -34,9 +43,9 @@ Oxide first if Windows reports that its release executable is in use. For a
 debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
 `CARGO_INCREMENTAL=1` opts back into incremental compilation.
 
-The local build (`pnpm --dir web build:app`) checks the build-artifact
-budget before and after each Rust compilation or Tauri bundle. It stops further
-builds above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
+The local check runner (`node tools/check.mjs`) and the local build
+(`pnpm --dir web build:app`) check the build-artifact budget before and after
+each Rust compilation or Tauri bundle. They stop further builds above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
 This is a checkpoint between commands, not a filesystem quota: one command can
 exceed the budget before returning.
 
@@ -95,8 +104,11 @@ The corresponding private key is kept outside the checkout in the user's
 Keep a secure backup: installed versions need future packages signed by that
 same key. Never commit it or replace the public key casually.
 
-1. Bump the version in `Cargo.toml`, the Tauri config and `web/package.json` through
-   a PR into `main`. Only a human tags a release.
+1. Bump the version through a PR into `main` titled `chore(release): vX.Y.Z`.
+   `node tools/ci/cli.mjs bump X.Y.Z` writes it to `Cargo.toml`, the Tauri config
+   and `web/package.json`, and updates the workspace entries of `Cargo.lock`.
+   `node tools/ci/cli.mjs release-version vX.Y.Z` confirms the tag will match.
+   Only a human tags a release.
 2. Build on the platform being released. Set `TAURI_SIGNING_PRIVATE_KEY` to the
    private-key file path, then run Tauri from the repository root with
    `--config crates/oxide-app/tauri.updater.conf.json`. For example, on Windows:
@@ -116,8 +128,7 @@ same key. Never commit it or replace the public key casually.
 4. Generate the feed locally, for example:
 
    ```sh
-   node tools/releases/update-manifest.mjs release-artifacts v0.2.0
-   node --test tools/releases/update-manifest.test.mjs
+   node tools/ci/cli.mjs update-manifest release-artifacts v0.2.0
    ```
 
    An optional fourth argument overrides `cavallinilorenzo/oxide` for a fork.

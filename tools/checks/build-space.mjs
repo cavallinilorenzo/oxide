@@ -21,7 +21,7 @@ export function buildBytes(directory, limitBytes = Infinity) {
 }
 
 export function compilesRust(command) {
-  return (command[0] === "cargo" && ["build", "check", "clippy", "test", "rustc"].includes(command[1])) ||
+  return (command[0] === "cargo" && ["build", "check", "clippy", "test", "nextest", "rustc"].includes(command[1])) ||
     /(?:^|[/\\])tauri(?:\.cmd)?$/.test(command[0]) && command.includes("build");
 }
 

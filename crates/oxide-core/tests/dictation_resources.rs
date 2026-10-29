@@ -160,6 +160,15 @@ fn unknown_stale_unsupported_and_disk_constrained_options_explain_the_next_actio
         limited.decisions[limited.selected.unwrap()].model,
         ModelId::Tiny
     );
+    assert_eq!(
+        limited
+            .decisions
+            .iter()
+            .find(|d| d.model == ModelId::Small)
+            .unwrap()
+            .status,
+        AdviceStatus::InsufficientData
+    );
 }
 
 #[test]
@@ -167,7 +176,7 @@ fn measured_advice_uses_three_warm_runs_and_rejects_stale_or_mismatched_identity
     let snapshot = resources();
     let candidates = vec![BackendCandidate::cpu()];
     let sample = MeasuredPerformance {
-        key: PerformanceKey::for_candidate(ModelId::Small, &candidates[0]),
+        key: PerformanceKey::for_candidate(ModelId::Small, &candidates[0], &snapshot.cpu),
         recorded_at_secs: 100,
         audio_duration_ms: 10_000,
         warm_inference_ms: [9_000, 4_000, 3_000],
@@ -257,4 +266,34 @@ fn inspecting_resources_is_read_only_and_replaces_the_legacy_latency_claim() {
             || status.recommendation.contains("Free")
             || status.recommendation.contains("Refresh")
     );
+}
+
+#[test]
+fn cpu_hardware_or_parallelism_changes_invalidate_measured_advice() {
+    let original = resources();
+    let candidates = vec![BackendCandidate::cpu()];
+    let sample = MeasuredPerformance {
+        key: PerformanceKey::for_candidate(ModelId::Small, &candidates[0], &original.cpu),
+        recorded_at_secs: 100,
+        audio_duration_ms: 10_000,
+        warm_inference_ms: [3_000, 4_000, 5_000],
+        cold_load_ms: 1_000,
+    };
+    for change in ["model", "architecture", "cores"] {
+        let mut changed = original.clone();
+        match change {
+            "model" => changed.cpu.model = "Replacement CPU".into(),
+            "architecture" => changed.cpu.architecture = "aarch64".into(),
+            _ => changed.cpu.usable_cores = 2,
+        }
+        let result = recommend(
+            &changed,
+            &candidates,
+            &[],
+            Preference::Balanced,
+            std::slice::from_ref(&sample),
+            100,
+        );
+        assert!(result.decisions.iter().all(|d| d.provisional), "{change}");
+    }
 }

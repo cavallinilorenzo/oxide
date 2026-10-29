@@ -21,10 +21,11 @@ No provider credentials, Python runtime, transcription subscription or API key i
 Silence and very short recordings are ignored. As with other speech recognition,
 review names, paths and commands before submitting.
 
-The resource advice uses current available RAM and logical CPU count, not a speed
-benchmark. Below 2 GiB free RAM it recommends freeing memory. Below four CPU threads
-it warns that transcription may be slow. Whisper small inference needs roughly 1 GiB;
-other programs and GPU backend allocations require additional headroom.
+Resource advice uses current CPU compatibility, RAM, GPU budgets/topology and disk.
+Small has a provisional 2 GiB peak estimate, plus a RAM reserve of at least 1 GiB
+or 20% of total RAM. Discrete GPUs keep 20% budget headroom. Advice without a local
+benchmark remains provisional; it never changes the selected model or starts a
+download. See [resource policy and examples](dictation-resources.md).
 
 ## GPU and building
 

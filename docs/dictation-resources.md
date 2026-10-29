@@ -18,7 +18,8 @@ provisional flag and `safeToLoad` separately from its recommendation status.
 
 - CPU architecture comes from the Rust target; brand from sysinfo; usable logical
   cores from OS-aware `available_parallelism`. Cores only bound the provisional
-  candidate, never imply a latency or prove Small is recommended.
+candidate, never imply a latency or prove Small is recommended. Unmeasured
+Small/CPU decisions below four usable cores require a performance check.
 - Native CPU instruction requirements come from the pinned GGML compile-time
   feature getters, compared with Rust's OS-aware feature detection. Unverifiable
   AMX permissions or architectures remain unknown and require a compatible build.
@@ -132,7 +133,9 @@ The producer must warm up first and time the same licensed fixture without
 opening the microphone. Store no audio or transcript in this input.
 
 The key includes model SHA-256, backend, stable adapter ID, driver version,
-runtime version, catalogue version and policy version. Unknown GPU identity or
+runtime version, catalogue version, policy version and host CPU configuration
+(architecture, model, usable cores and instruction compatibility). CPU or
+parallelism changes invalidate measurements as well. Unknown GPU identity or
 driver cannot establish a cache match. Results older than 30 days, future-dated,
 zero duration or with a mismatched key are ignored. Current resource safety
 always takes precedence over a cached result.

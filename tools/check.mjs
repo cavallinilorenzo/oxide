@@ -42,6 +42,7 @@ const runChecks = (session) => {
     console.log(`\n> ${id}: ${commandLine(command)}`);
     // All checks share one scratch target, including Tauri and the generated bindings.
     const result = exec(command, session?.env);
+    if (result.error) console.error(`Cannot start ${command[0]}: ${result.error.message}`);
     completed++;
     if (result.status !== 0) failures.push({ id, command });
     else session?.preserve(command);

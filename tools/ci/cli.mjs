@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, dependabotDecision, evaluateGate, lanesFor,
-  releaseNotes, updateManifest,
+  previousReleaseTag, releaseNotes, updateManifest,
 } from "./policy.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -30,7 +30,7 @@ const MANIFESTS = {
 
 function output(values) {
   if (!process.env.GITHUB_OUTPUT) return;
-  appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(values).map(([key, value]) => `${key}=${String(value).replace(/\n/g, " ")}\n`).join(""));
+  appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(values).map(([key, value]) => `${key}=${String(value).replace(/\r?\n|\r/g, " ")}\n`).join(""));
 }
 
 function report({ ok, message }) {
@@ -43,10 +43,8 @@ function git(...args) {
   return execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" });
 }
 
-function previousTag(tag) {
-  // A stable release is compared with the previous stable one, skipping its release candidates.
-  const exclude = tag.includes("-") ? [] : ["--exclude", "v*-*"];
-  try { return git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", ...exclude, `${tag}^`).trim(); } catch { return undefined; }
+function earlierTags(tag) {
+  try { return git("tag", "--list", "v*", "--merged", `${tag}^`, "--sort=-v:refname").split(/\r?\n/).filter(Boolean); } catch { return []; }
 }
 
 function workspaceMembers() {
@@ -66,9 +64,7 @@ const commands = {
   },
   gate() {
     const needs = JSON.parse(process.env.NEEDS_JSON || "{}");
-    // A lane is off only when `changes` said so; without its outputs every lane is on.
-    const lanes = Object.fromEntries(Object.entries(needs.changes?.outputs ?? {}).map(([lane, value]) => [lane, value !== "false"]));
-    report(evaluateGate(needs, lanes, process.env.GITHUB_EVENT_NAME));
+    report(evaluateGate(needs, needs.changes?.outputs, process.env.GITHUB_EVENT_NAME));
   },
   "pr-title"() {
     report(checkPrTitle(process.env.PR_TITLE));
@@ -77,9 +73,9 @@ const commands = {
     report(checkReleaseVersion({ tag, cargoToml: read(MANIFESTS.cargoToml), tauriConf: read(MANIFESTS.tauriConf), webPackage: read(MANIFESTS.webPackage) }));
   },
   "tauri-alignment"() {
-    report(checkTauriAlignment({ cargoLock: read("Cargo.lock"), pnpmLock: read("web/pnpm-lock.yaml") }));
+    report(checkTauriAlignment({ cargoLock: read(MANIFESTS.cargoLock), pnpmLock: read("web/pnpm-lock.yaml") }));
   },
-  "release-notes"([tag, previous = previousTag(tag)]) {
+  "release-notes"([tag, previous = previousReleaseTag(tag, earlierTags(tag))]) {
     const range = previous ? `${previous}..${tag}` : tag;
     const commits = git("log", "--format=%s%x1f%b%x1e", range).split("\x1e").map((entry) => entry.trim()).filter(Boolean)
       .map((entry) => { const [subject, body = ""] = entry.split("\x1f"); return { subject, body }; });

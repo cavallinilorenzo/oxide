@@ -15,7 +15,7 @@ The full rules are in [docs/agents/git-workflow.md](docs/agents/git-workflow.md)
 
 ## Local checks
 
-One cross-platform command runs what the pull request lanes run on your OS, with the same commands (it works in PowerShell too):
+One cross-platform command runs what the pull request lanes of CI run on your OS, with the same commands (it works in PowerShell too). The CI workflow that runs these lanes is being added ([#224](https://github.com/cavallinilorenzo/oxide/issues/224)); until it lands, this command is the only check.
 
 ```sh
 node tools/check.mjs        # everything the PR lanes run on this OS
@@ -24,7 +24,7 @@ node tools/check.mjs fast   # rustfmt, ESLint and TypeScript, in seconds
 
 The full tier installs the web dependencies from the lockfile, then runs formatting, ESLint, TypeScript, Vitest, the production web build, the tooling tests, the Tauri alignment check, Clippy, the Rust tests, the committed-bindings check and this OS's app bundle. It prints what it can't run here and why (for example the macOS bundle on Windows, or cargo-deny, which CI installs), and lists every failed command at the end so you can rerun it directly.
 
-The Rust tests run with [cargo-nextest](https://nexte.st), as in CI. Install it once with `cargo install --locked cargo-nextest`.
+The Rust tests run with [cargo-nextest](https://nexte.st), as in CI. Install it once with `cargo install --locked cargo-nextest`. Every Rust check also builds the dictation engine, which needs CMake, a C/C++ compiler and libclang (see [docs/dictation.md](docs/dictation.md)).
 
 Before every commit, `node tools/check.mjs fast` is enough. To run it automatically, add it to `.git/hooks/pre-commit` yourself; the repository doesn't install hooks, and CI is the authority.
 

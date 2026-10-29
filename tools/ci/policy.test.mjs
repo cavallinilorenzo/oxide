@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, commandLine, dependabotDecision, evaluateGate, lanesFor,
-  localPlan, releaseNotes, updateManifest,
+  localPlan, previousReleaseTag, releaseNotes, updateManifest,
 } from "./policy.mjs";
 
 const ALL_ON = { web: true, rust: true, bundle: true, supplyChain: true, automation: true };
@@ -95,6 +95,12 @@ describe("evaluateGate", () => {
     assert.equal(evaluateGate({ ...passing, "new-job": "skipped" }, ALL_OFF, "pull_request").ok, false);
   });
 
+  test("reads lanes written as step outputs, where only \"false\" turns a lane off", () => {
+    assert.equal(evaluateGate({ ...passing, rust: "skipped" }, { rust: "false" }, "pull_request").ok, true);
+    assert.equal(evaluateGate({ ...passing, rust: "skipped" }, { rust: "true" }, "pull_request").ok, false);
+    assert.equal(evaluateGate({ ...passing, rust: "skipped" }, {}, "pull_request").ok, false);
+  });
+
   test("accepts the shape of the workflow's needs context", () => {
     const needs = Object.fromEntries(Object.entries(passing).map(([job, result]) => [job, { result, outputs: {} }]));
     assert.equal(evaluateGate(needs, ALL_ON, "pull_request").ok, true);
@@ -148,10 +154,11 @@ describe("checkReleaseVersion", () => {
     assert.match(result.message, /tauri\.conf\.json 0\.1\.0/);
     assert.match(result.message, /web\/package\.json 0\.1\.9/);
     assert.doesNotMatch(result.message, /Cargo\.toml/);
+    assert.match(checkReleaseVersion({ tag: "v0.2.0", ...manifests("0.1.5", "0.2.0", "0.2.0") }).message, /Cargo\.toml 0\.1\.5/);
   });
 
   test("a malformed tag fails", () => {
-    for (const tag of ["0.2.0", "v0.2", "release-0.2.0", "v0.2.0 "]) {
+    for (const tag of ["0.2.0", "v0.2", "release-0.2.0", "v0.2.0 ", "v0.2.0-beta", "v0.2.0-rc"]) {
       const result = checkReleaseVersion({ tag, ...manifests("0.2.0", "0.2.0", "0.2.0") });
       assert.equal(result.ok, false, tag);
       assert.match(result.message, /vX\.Y\.Z/);
@@ -190,8 +197,10 @@ describe("bumpVersion", () => {
     assert.equal(checkReleaseVersion({ tag: "v0.2.0-rc.1", ...bumped }).ok, true);
   });
 
-  test("refuses a version that is not SemVer", () => {
-    assert.throws(() => bumpVersion({ ...manifests("0.1.0", "0.1.0", "0.1.0"), cargoLock }, "0.2", { members: ["oxide-core"] }), /X\.Y\.Z/);
+  test("refuses a version that is not X.Y.Z or a release candidate", () => {
+    for (const version of ["0.2", "0.2.0-beta"]) {
+      assert.throws(() => bumpVersion({ ...manifests("0.1.0", "0.1.0", "0.1.0"), cargoLock }, version, { members: ["oxide-core"] }), /X\.Y\.Z/);
+    }
   });
 
   test("refuses a workspace member missing from Cargo.lock", () => {
@@ -285,6 +294,13 @@ describe("releaseNotes", () => {
     assert.match(releaseNotes([], { ...identity, previousTag: undefined }), /No changes\./);
   });
 
+  test("a stable release is compared with the previous stable tag, a candidate with any earlier tag", () => {
+    const earlier = ["v0.2.0-rc.2", "v0.2.0-rc.1", "v0.1.1", "v0.1.0"];
+    assert.equal(previousReleaseTag("v0.2.0", earlier), "v0.1.1");
+    assert.equal(previousReleaseTag("v0.2.0-rc.3", earlier), "v0.2.0-rc.2");
+    assert.equal(previousReleaseTag("v0.1.0", []), undefined);
+  });
+
   test("the first release links to the tag's history instead of a comparison", () => {
     assert.match(releaseNotes([{ subject: "feat: first" }], { ...identity, previousTag: undefined }), /commits\/v0\.2\.0/);
   });
@@ -375,6 +391,11 @@ describe("updateManifest", () => {
   test("a release-candidate tag is accepted", () => {
     assert.equal(updateManifest(artifacts, signatures, { ...release, tag: "v1.2.3-rc.1" }).version, "1.2.3-rc.1");
   });
+
+  test("a release can ship one platform", () => {
+    const macOnly = updateManifest(["Oxide_1.2.3_aarch64.app.tar.gz"], { "Oxide_1.2.3_aarch64.app.tar.gz": "mac-signature" }, release);
+    assert.deepEqual(Object.keys(macOnly.platforms), ["darwin-aarch64"]);
+  });
 });
 
 describe("localPlan", () => {
@@ -419,6 +440,7 @@ describe("localPlan", () => {
 
   test("an unknown platform or tier fails", () => {
     assert.throws(() => localPlan("aix"), /platform/);
+    assert.throws(() => localPlan("toString"), /platform/);
     assert.throws(() => localPlan("darwin", "slow"), /tier/);
   });
 

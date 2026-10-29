@@ -91,11 +91,13 @@ pub struct BuildManifest {
 
 impl BuildManifest {
     pub fn current() -> Self {
-        let mut included_backends = vec![BackendId::Cpu];
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        included_backends.push(BackendId::Metal);
-        #[cfg(feature = "dictation-vulkan")]
-        included_backends.push(BackendId::Vulkan);
+        let included_backends = vec![
+            BackendId::Cpu,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            BackendId::Metal,
+            #[cfg(feature = "dictation-vulkan")]
+            BackendId::Vulkan,
+        ];
 
         Self {
             whisper_rs_version: "0.16.0".into(),

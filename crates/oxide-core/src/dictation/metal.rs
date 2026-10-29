@@ -7,7 +7,9 @@ use super::runtime::{
     BackendError, TranscriptionOutcome, TranscriptionRequest, WhisperBackendRuntime,
 };
 use super::types::{BackendId, BackendProbe, CapabilityState, ExecutionDetails, MemoryPool};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use std::ffi::CStr;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use std::os::raw::{c_char, c_void};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

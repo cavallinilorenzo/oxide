@@ -3,7 +3,7 @@ import { act } from "react";
 import { clearQueryCache } from "./queryCache";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { commands, type PullRequestDetail } from "./bindings";
+import { commands, type PullRequestDetail_Serialize } from "./bindings";
 import { CHECKS_REFRESH_MS, PullRequestReview } from "./PullRequestBrowser";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -12,7 +12,7 @@ let root: Root;
 const onChanged = vi.fn();
 const onBack = vi.fn();
 
-function detail(overrides: Partial<PullRequestDetail> = {}): PullRequestDetail {
+function detail(overrides: Partial<PullRequestDetail_Serialize> = {}): PullRequestDetail_Serialize {
   return {
     pullRequest: {
       number: 174,
@@ -27,7 +27,7 @@ function detail(overrides: Partial<PullRequestDetail> = {}): PullRequestDetail {
     phase: "open",
     body: "Bumps react-virtual.\n\nUpdates from 3.14.21 to 3.14.22",
     checks: [
-      { name: "web", state: "failure", url: "https://github.com/me/oxide/actions/runs/1" },
+      { name: "web", state: "failure", url: "https://github.com/me/oxide/actions/runs/1", required: true },
       { name: "rust", state: "success", url: null, required: false },
     ],
     comments: [

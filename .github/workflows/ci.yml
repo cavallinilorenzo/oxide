@@ -44,6 +44,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: List the changed files
         if: github.event_name == 'pull_request'
         env:
@@ -76,6 +77,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web typecheck
       - run: pnpm --dir web lint
@@ -162,6 +164,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - run: node tools/ci/cli.mjs tauri-alignment
       - name: Dependency review
         if: github.event_name == 'pull_request'
@@ -186,6 +189,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: zizmor@1.31.1
@@ -221,6 +225,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Check the title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -239,6 +244,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Evaluate the gate
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}

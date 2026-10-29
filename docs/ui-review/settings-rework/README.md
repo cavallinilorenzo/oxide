@@ -59,6 +59,6 @@ platform validation.
 The Updates section checks the latest published stable release on request.
 Core blocks installation while files are unsaved or Threads are active, including
 pending approvals; the Tauri updater verifies the package signature. Windows
-installs through NSIS; macOS replaces the app bundle and restarts. Release
-publishing remains a manual human action, with no CI/CD workflows. See
-CONTRIBUTING.md for local signing and feed preparation.
+installs through NSIS; macOS replaces the app bundle and restarts. The Release
+workflow builds and signs the packages and drafts the release; publishing stays a
+human click. See docs/devops.md for the release runbook.

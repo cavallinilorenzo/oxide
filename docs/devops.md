@@ -146,7 +146,7 @@ The local runner is `node tools/check.mjs` (everything the PR lanes run on this 
 | `supplyChain` | any manifest or lockfile, `web/pnpm-workspace.yaml`, `deny.toml` |
 | `automation` | `.github/`, `tools/` |
 
-Docs, research and UI-review screenshots match no lane, so a docs-only PR runs `changes`, `pr-title` and `gate` only.
+Docs, research and UI-review screenshots match no lane, so a docs-only PR runs `changes`, `pr-title` and `gate` only. The exception is `docs/licenses/`, which is bundled as app resources and turns on `bundle`.
 
 ## Test layers
 
@@ -210,7 +210,7 @@ Trigger: a `v*.*.*` tag. Concurrency is per tag and never cancelled.
 
 - **What:** acts only on PRs *authored* by `dependabot[bot]` into `main` (the author, not the actor, so a human re-run still qualifies and a human PR never does). `dependabotDecision` picks: **auto** (patches, and minors of packages at 1.0 or later) enables squash auto-merge, and `gate` stays the only judge; **manual** (majors, 0.x minors, 0.0.x patches, the `tauri` and `specta` groups, anything unreadable) applies the `manual-review` label and a comment.
 - **Why a GitHub App token:** a merge made with `GITHUB_TOKEN` triggers no `push` workflow, so the merge commit would never get a `gate` result and could never be released. The App credentials are the Dependabot secrets `AUTOMERGE_APP_ID` and `AUTOMERGE_APP_PRIVATE_KEY`. Without them the workflow only labels and comments.
-- **Config:** [`.github/dependabot.yml`](../.github/dependabot.yml) covers Cargo, the pnpm web app, GitHub Actions and the Rust toolchain, weekly on Monday at 07:00 Europe/Rome, with cooldowns (3 days patch, 7 minor, 14 major; security updates are not delayed) and groups for packages that break when moved alone. The `supply-chain` job rejects Tauri drift if only half of a bump lands. [CONTRIBUTING](../CONTRIBUTING.md#dependencies-and-supply-chain-policy) has the details.
+- **Config:** [`.github/dependabot.yml`](../.github/dependabot.yml) covers Cargo, the pnpm web app, GitHub Actions and the Rust toolchain, weekly on Monday at 07:00 Europe/Rome, with cooldowns (Cargo: 3 days patch, 7 minor, 14 major; pnpm: 7, 7, 14, to match `minimumReleaseAge`; Actions and the toolchain: 7; security updates are not delayed) and groups for packages that break when moved alone. The `supply-chain` job rejects Tauri drift if only half of a bump lands. [CONTRIBUTING](../CONTRIBUTING.md#dependencies-and-supply-chain-policy) has the details.
 - **pnpm:** `web/pnpm-workspace.yaml` sets `minimumReleaseAge` (7 days) and an explicit `allowBuilds` list, because Dependabot's cooldown only protects the updates Dependabot makes.
 
 ## Release runbook
@@ -249,7 +249,7 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
 - **The updater key** is the root of trust for every installed app: apps accept only packages signed by it, and the matching public key is in `crates/oxide-app/tauri.conf.json`. Keep an encrypted offline backup. If it is lost, installed apps can never be updated again. Never commit it or replace the public key casually.
 - **Fork PRs** run on `pull_request` with a read-only token and no secrets. Actions settings require approval for first-time contributors.
 - **No `pull_request_target` workflow checks out PR code.** Untrusted code never gets a write token.
-- **Every workflow starts from `contents: read`** and grants more per job: `publish` alone writes releases and attestations, `verify-release` and `advisories` alone write issues.
+- **Every workflow starts from `contents: read`** (auto-merge from none) and grants more per job: `publish` alone writes releases and attestations, `verify-release` and `advisories` alone write issues, and the auto-merge job alone writes pull requests. Auto-merge also mints a short-lived GitHub App token, scoped to contents, pull requests and workflows, only for low-risk Dependabot PRs.
 - **Checkouts don't persist credentials,** so later steps can't push with the token.
 - **Third-party actions are pinned to a full commit SHA** with a version comment, so a moved tag can't inject code. Dependabot keeps the pins current.
 - **Release builds are clean:** no cache is restored or saved, so a poisoned cache can't reach a shipped binary.
@@ -267,7 +267,7 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
 | Node (22) | `.node-version` | by hand |
 | pnpm | `packageManager` in `web/package.json` | by hand |
 | cargo-nextest | `ci.yml` (`taiki-e/install-action` input) | by hand |
-| cargo-deny | `advisories.yml` | by hand |
+| cargo-deny | `ci.yml` (`supply-chain`) and `advisories.yml` | by hand |
 | zizmor | `ci.yml` (`taiki-e/install-action` input) | by hand |
 | actionlint (version and SHA-256) | `ci.yml`, `automation` job | by hand |
 | check-jsonschema | `ci.yml`, `automation` job | by hand |

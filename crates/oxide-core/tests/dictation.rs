@@ -1,12 +1,53 @@
 use oxide_core::dictation::{
     BackendError, BackendId, BackendProbe, BuildManifest, CapabilityState, Device, Dictation,
-    DictationSettings, ExecutionDetails, ModelId, RecordingSnapshot, TranscriptionOutcome,
-    TranscriptionRequest, WhisperBackendRuntime,
+    DictationSettings, ExecutionDetails, MemoryPool, ModelId, RecordingSnapshot,
+    TranscriptionOutcome, TranscriptionRequest, WhisperBackendRuntime,
 };
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+
+#[test]
+fn unified_memory_topology_and_budget_signals_serialize_as_shared_pool() {
+    let pool = MemoryPool {
+        unified: true,
+        total_bytes: 16 * 1024 * 1024 * 1024,
+        available_bytes: Some(10 * 1024 * 1024 * 1024),
+        max_working_set_bytes: Some(12 * 1024 * 1024 * 1024),
+    };
+
+    let probe = BackendProbe {
+        backend: BackendId::Metal,
+        state: CapabilityState::Available,
+        adapter: Some("Apple M1 Pro".into()),
+        memory_pool: Some(pool.clone()),
+    };
+
+    let json = serde_json::to_string(&probe).expect("serialize BackendProbe with MemoryPool");
+    assert!(json.contains("\"unified\":true"));
+    assert!(json.contains("\"totalBytes\":17179869184"));
+    assert!(json.contains("\"maxWorkingSetBytes\":12884901888"));
+
+    let decoded: BackendProbe =
+        serde_json::from_str(&json).expect("deserialize BackendProbe with MemoryPool");
+    assert_eq!(decoded.memory_pool, Some(pool));
+
+    // Missing signals remain unknown (None), not invented
+    let unknown_pool = MemoryPool {
+        unified: true,
+        total_bytes: 8 * 1024 * 1024 * 1024,
+        available_bytes: None,
+        max_working_set_bytes: None,
+    };
+    let json_unknown = serde_json::to_string(&unknown_pool).expect("serialize unknown pool");
+    assert!(!json_unknown.contains("availableBytes"));
+    assert!(!json_unknown.contains("maxWorkingSetBytes"));
+    let decoded_unknown: MemoryPool =
+        serde_json::from_str(&json_unknown).expect("deserialize unknown pool");
+    assert_eq!(decoded_unknown.available_bytes, None);
+    assert_eq!(decoded_unknown.max_working_set_bytes, None);
+}
 
 #[test]
 fn capability_states_survive_serialization_without_losing_failure_reasons() {
@@ -28,6 +69,44 @@ fn capability_states_survive_serialization_without_losing_failure_reasons() {
         let decoded: CapabilityState =
             serde_json::from_str(&json).expect("deserialize capability state");
         assert_eq!(state, decoded);
+    }
+}
+
+#[test]
+fn apple_silicon_metal_probe_enumerates_adapter_and_unified_memory() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let probe_results = oxide_core::dictation::probe_backends();
+        let metal_probe = probe_results
+            .into_iter()
+            .find(|p| p.backend == BackendId::Metal)
+            .expect("Metal probe should be present in Apple Silicon builds");
+
+        assert_eq!(metal_probe.state, CapabilityState::Available);
+        let adapter = metal_probe
+            .adapter
+            .expect("adapter name should be populated");
+        assert!(
+            adapter.contains("Apple"),
+            "Expected Apple adapter, got: {adapter}"
+        );
+
+        let pool = metal_probe
+            .memory_pool
+            .expect("memory pool should be populated");
+        assert!(
+            pool.unified,
+            "Apple Silicon memory must be reported as unified"
+        );
+        assert!(pool.total_bytes > 0, "Total memory must be > 0");
+        assert!(
+            pool.available_bytes.is_some(),
+            "Available memory must be populated"
+        );
+        assert!(
+            pool.max_working_set_bytes.is_some(),
+            "Max working set bytes must be populated from Metal API"
+        );
     }
 }
 
@@ -62,6 +141,7 @@ impl WhisperBackendRuntime for MockFailingGpuRuntime {
             backend: BackendId::Vulkan,
             state: CapabilityState::Available,
             adapter: Some("Fake Vulkan GPU".into()),
+            memory_pool: None,
         }
     }
 
@@ -88,6 +168,12 @@ impl WhisperBackendRuntime for MockSuccessfulGpuRuntime {
             backend: BackendId::Metal,
             state: CapabilityState::Available,
             adapter: Some("Apple M3 Max".into()),
+            memory_pool: Some(MemoryPool {
+                unified: true,
+                total_bytes: 36 * 1024 * 1024 * 1024,
+                available_bytes: Some(24 * 1024 * 1024 * 1024),
+                max_working_set_bytes: Some(28 * 1024 * 1024 * 1024),
+            }),
         }
     }
 
@@ -153,6 +239,155 @@ fn cpu_mode_never_requests_offload() {
 }
 
 #[test]
+fn metal_runtime_reports_initialization_failure_on_missing_or_corrupt_model() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let runtime = oxide_core::dictation::MetalRuntime;
+        let missing_request = TranscriptionRequest {
+            model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err = runtime.transcribe(&missing_request).unwrap_err();
+        match err {
+            BackendError::InitializationFailed(msg) => {
+                assert!(
+                    msg.contains("Model file not found") || msg.contains("not found"),
+                    "Expected file not found message, got: {msg}"
+                );
+            }
+            other => panic!("Expected InitializationFailed, got: {other:?}"),
+        }
+
+        // Corrupt / invalid model file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let corrupt_path = temp_dir.path().join("corrupt.bin");
+        std::fs::write(&corrupt_path, b"not a valid ggml model file").unwrap();
+
+        let corrupt_request = TranscriptionRequest {
+            model_path: corrupt_path,
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err2 = runtime.transcribe(&corrupt_request).unwrap_err();
+        match err2 {
+            BackendError::InitializationFailed(msg) => {
+                assert!(
+                    msg.contains("Metal initialization failed"),
+                    "Expected Metal initialization failure, got: {msg}"
+                );
+            }
+            other => panic!("Expected InitializationFailed, got: {other:?}"),
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let runtime = oxide_core::dictation::MetalRuntime;
+        let dummy_request = TranscriptionRequest {
+            model_path: std::path::PathBuf::from("/non/existent/whisper-model.bin"),
+            language: None,
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+            threads: 4,
+        };
+        let err = runtime.transcribe(&dummy_request).unwrap_err();
+        assert_eq!(
+            err,
+            BackendError::Unavailable(CapabilityState::NoCompatibleDevice)
+        );
+    }
+}
+
+#[test]
+fn auto_mode_recovers_from_metal_failure_with_fallback_evidence() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        // Dictation::default() uses default_runtime() which is MetalRuntime on macOS Apple Silicon
+        let dictation = Dictation::default();
+        let snapshot = RecordingSnapshot {
+            language: "auto".into(),
+            device: Device::Auto,
+            model: ModelId::Small,
+        };
+
+        let samples = vec![0.1f32; 16000];
+        dictation.inject_recording_for_test(snapshot, samples, 16000);
+
+        let home = tempfile::tempdir().unwrap();
+        let settings = DictationSettings {
+            enabled: true,
+            language: "auto".into(),
+            device: Device::Auto,
+        };
+
+        // Model file is missing in home, so Metal fails initialization and Auto attempts CPU
+        // which also discovers missing model and fails gracefully without panic
+        let err = dictation.stop(home.path(), &settings).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Primary backend failed")
+                || msg.contains("CPU retry was refused")
+                || msg.contains("failed"),
+            "Expected failure message documenting attempt, got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn explicit_gpu_mode_with_metal_runtime_reports_actionable_error_on_failure() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let dictation = Dictation::default();
+        let snapshot = RecordingSnapshot {
+            language: "auto".into(),
+            device: Device::Gpu,
+            model: ModelId::Small,
+        };
+
+        let samples = vec![0.1f32; 16000];
+        dictation.inject_recording_for_test(snapshot, samples, 16000);
+
+        let home = tempfile::tempdir().unwrap();
+        let settings = DictationSettings {
+            enabled: true,
+            language: "auto".into(),
+            device: Device::Gpu,
+        };
+
+        let err = dictation.stop(home.path(), &settings).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("GPU transcription failed"),
+            "Expected GPU transcription failed message, got: {msg}"
+        );
+        assert!(
+            msg.contains("Choose CPU in Settings to transcribe on CPU"),
+            "Expected advice to choose CPU, got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn build_manifest_pins_whisper_and_backends() {
+    let manifest = BuildManifest::current();
+    assert_eq!(manifest.whisper_rs_version, "0.16.0");
+    assert!(manifest.whisper_cpp_pinned.contains("0.16.0"));
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        assert!(manifest.included_backends.contains(&BackendId::Metal));
+    }
+    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+    {
+        assert!(!manifest.included_backends.contains(&BackendId::Metal));
+    }
+}
+
+#[test]
 fn auto_retries_cpu_once_on_gpu_failure_and_records_why() {
     let mock = Arc::new(MockFailingGpuRuntime {
         calls: AtomicUsize::new(0),
@@ -201,7 +436,7 @@ fn auto_retries_cpu_once_on_gpu_failure_and_records_why() {
 
 #[test]
 fn explicit_gpu_request_with_cpu_runtime_fails_without_silent_substitution() {
-    let dictation = Dictation::default(); // Uses CpuRuntime
+    let dictation = Dictation::with_runtime(Arc::new(oxide_core::dictation::CpuRuntime));
 
     let snapshot = RecordingSnapshot {
         language: "auto".into(),

@@ -263,12 +263,14 @@ export type BackendProbe_Deserialize = {
 	backend: BackendId,
 	state: CapabilityState_Deserialize,
 	adapter?: string | null,
+	memoryPool?: MemoryPool_Deserialize | null,
 };
 
 export type BackendProbe_Serialize = {
 	backend: BackendId,
 	state: CapabilityState_Serialize,
 	adapter: string | null,
+	memoryPool?: MemoryPool_Serialize,
 };
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
@@ -422,6 +424,7 @@ export type DictationStatus_Deserialize = {
 	manifest: BuildManifest,
 	probes: BackendProbe_Deserialize[],
 	lastExecution?: ExecutionDetails_Deserialize | null,
+	memoryPool?: MemoryPool_Deserialize | null,
 };
 
 export type DictationStatus_Serialize = {
@@ -433,6 +436,7 @@ export type DictationStatus_Serialize = {
 	manifest: BuildManifest,
 	probes: BackendProbe_Serialize[],
 	lastExecution: ExecutionDetails_Serialize | null,
+	memoryPool?: MemoryPool_Serialize,
 };
 
 export type Diff = Diff_Serialize | Diff_Deserialize;
@@ -744,6 +748,22 @@ export type LanguageTool_Serialize = {
 	resolvedPath: string | null,
 	installCommand: string,
 	documentation: string,
+};
+
+export type MemoryPool = MemoryPool_Serialize | MemoryPool_Deserialize;
+
+export type MemoryPool_Deserialize = {
+	unified: boolean,
+	totalBytes: number | null,
+	availableBytes?: number | null,
+	maxWorkingSetBytes?: number | null,
+};
+
+export type MemoryPool_Serialize = {
+	unified: boolean,
+	totalBytes: number | null,
+	availableBytes?: number | null,
+	maxWorkingSetBytes?: number | null,
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";

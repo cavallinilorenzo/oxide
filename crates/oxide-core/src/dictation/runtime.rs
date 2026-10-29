@@ -42,6 +42,81 @@ pub trait WhisperBackendRuntime: Send + Sync {
     ) -> Result<TranscriptionOutcome, BackendError>;
 }
 
+/// Shared whisper inference execution for CPU and native GPU backends.
+pub fn run_whisper_inference(
+    request: &TranscriptionRequest,
+    use_gpu: bool,
+) -> Result<(String, bool, Option<String>), BackendError> {
+    if !request.model_path.is_file() {
+        return Err(BackendError::InitializationFailed(format!(
+            "Model file not found at: {}",
+            request.model_path.display()
+        )));
+    }
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let available = sys.available_memory();
+    let required = 500 * 1024 * 1024;
+    if available < required {
+        return Err(BackendError::InsufficientMemory {
+            required_bytes: required,
+            available_bytes: Some(available),
+        });
+    }
+
+    let mut context_params = WhisperContextParameters::default();
+    context_params.use_gpu(use_gpu);
+
+    let path_str = request
+        .model_path
+        .to_str()
+        .ok_or_else(|| BackendError::InitializationFailed("Invalid model path".into()))?;
+
+    let context = WhisperContext::new_with_params(path_str, context_params).map_err(|e| {
+        let err_msg = e.to_string();
+        if err_msg.to_lowercase().contains("out of memory")
+            || err_msg.to_lowercase().contains("cannot allocate")
+        {
+            BackendError::InsufficientMemory {
+                required_bytes: required,
+                available_bytes: Some(available),
+            }
+        } else {
+            BackendError::InitializationFailed(err_msg)
+        }
+    })?;
+
+    let mut state = context
+        .create_state()
+        .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
+
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    params.set_language(request.language.as_deref());
+    params.set_translate(false);
+    params.set_no_context(true);
+    params.set_suppress_blank(true);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    params.set_print_special(false);
+    params.set_n_threads(request.threads.clamp(1, 8) as i32);
+
+    let resampled = super::resample(&request.samples, request.sample_rate);
+    state
+        .full(params, &resampled)
+        .map_err(|e| BackendError::InferenceFailed(e.to_string()))?;
+
+    let text = state
+        .as_iter()
+        .map(|s| s.to_string())
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    Ok((text, use_gpu, None))
+}
+
 /// Native CPU execution runtime. Never requests offload.
 #[derive(Default)]
 pub struct CpuRuntime;
@@ -57,6 +132,7 @@ impl WhisperBackendRuntime for CpuRuntime {
             backend: BackendId::Cpu,
             state: CapabilityState::Available,
             adapter: Some("CPU".into()),
+            memory_pool: None,
         }
     }
 
@@ -64,44 +140,7 @@ impl WhisperBackendRuntime for CpuRuntime {
         &self,
         request: &TranscriptionRequest,
     ) -> Result<TranscriptionOutcome, BackendError> {
-        let mut context_params = WhisperContextParameters::default();
-        // CPU mode explicitly never requests offload
-        context_params.use_gpu(false);
-
-        let path_str = request
-            .model_path
-            .to_str()
-            .ok_or_else(|| BackendError::InitializationFailed("Invalid model path".into()))?;
-
-        let context = WhisperContext::new_with_params(path_str, context_params)
-            .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
-
-        let mut state = context
-            .create_state()
-            .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
-
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(request.language.as_deref());
-        params.set_translate(false);
-        params.set_no_context(true);
-        params.set_suppress_blank(true);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_print_special(false);
-        params.set_n_threads(request.threads.clamp(1, 8) as i32);
-
-        let resampled = super::resample(&request.samples, request.sample_rate);
-        state
-            .full(params, &resampled)
-            .map_err(|e| BackendError::InferenceFailed(e.to_string()))?;
-
-        let text = state
-            .as_iter()
-            .map(|s| s.to_string())
-            .collect::<String>()
-            .trim()
-            .to_string();
+        let (text, _, _) = run_whisper_inference(request, false)?;
 
         Ok(TranscriptionOutcome {
             text,
@@ -126,33 +165,21 @@ pub fn probe_backends() -> Vec<BackendProbe> {
         backend: BackendId::Cpu,
         state: CapabilityState::Available,
         adapter: Some("CPU".into()),
+        memory_pool: None,
     });
 
     // 2. Metal
-    if manifest.included_backends.contains(&BackendId::Metal) {
-        #[cfg(target_os = "macos")]
-        {
-            // Pinned whisper-rs on macOS Apple Silicon has Metal embedded.
-            // Probes report Available (never VerifiedByInference).
-            probes.push(BackendProbe {
-                backend: BackendId::Metal,
-                state: CapabilityState::Available,
-                adapter: Some("Apple Silicon Metal".into()),
-            });
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            probes.push(BackendProbe {
-                backend: BackendId::Metal,
-                state: CapabilityState::OmittedFromBuild,
-                adapter: None,
-            });
-        }
-    } else {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        probes.push(super::metal::MetalRuntime.probe());
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
         probes.push(BackendProbe {
             backend: BackendId::Metal,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 
@@ -162,12 +189,14 @@ pub fn probe_backends() -> Vec<BackendProbe> {
             backend: BackendId::Vulkan,
             state: CapabilityState::Available,
             adapter: Some("Vulkan Adapter".into()),
+            memory_pool: None,
         });
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Vulkan,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 
@@ -177,12 +206,14 @@ pub fn probe_backends() -> Vec<BackendProbe> {
             backend: BackendId::Cuda,
             state: CapabilityState::Available,
             adapter: Some("NVIDIA CUDA Adapter".into()),
+            memory_pool: None,
         });
     } else {
         probes.push(BackendProbe {
             backend: BackendId::Cuda,
             state: CapabilityState::OmittedFromBuild,
             adapter: None,
+            memory_pool: None,
         });
     }
 

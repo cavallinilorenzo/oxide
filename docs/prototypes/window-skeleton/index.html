@@ -1,0 +1,257 @@
+<!doctype html>
+<!--
+PROTOTYPE, THROWAWAY (wayfinder ticket "Which window skeleton should Oxide adopt?").
+Question: which main-window skeleton should Oxide adopt, do Work modes survive, and is Code reached
+from a header toggle or by opening a file?
+Three structurally different variants of the same window, same fixture content, switchable with
+the bottom bar, ←/→, or ?variant=A|B|C. Open the file directly; no build, no persistence, no backend.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE: Oxide window skeleton</title>
+<style>
+:root{--bg:#0f1115;--bg2:#151820;--bg3:#1b1f29;--bg4:#232836;--line:#2a3040;--fg:#d7dbe4;--fgb:#f1f4f9;--dim:#a0a8ba;--faint:#8994a9;--acc:#1f6ad5;--acc2:#58a6ff;--green:#4cc38a;--red:#f06a6a;--yellow:#e6b450;--purple:#a98bff;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:#06070a;color:var(--fg);font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+button{font:inherit;color:var(--fg);background:#212830;border:1px solid #3d444d;border-radius:6px;padding:3px 9px;cursor:pointer;height:26px}
+button:hover{background:#262c36}button.on{background:var(--bg4);border-color:var(--acc2);color:var(--fgb)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.ghost{background:none;border-color:transparent}button.ghost:hover{background:var(--bg3)}
+button:focus-visible{outline:2px solid #1f6feb;outline-offset:-2px}
+#stagewrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+#stage{background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden;display:flex;flex-direction:column;transform-origin:center;flex:none}
+.hdr{height:40px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--line);background:var(--bg);flex:none;white-space:nowrap}
+.sp{flex:1}.seg{display:flex;border:1px solid #3d444d;border-radius:6px;overflow:hidden}.seg button{border:0;border-radius:0;height:24px}.seg button+button{border-left:1px solid #3d444d}
+.body{flex:1;display:flex;min-height:0}
+.side{width:208px;flex:none;border-right:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
+.side.rail{width:44px}.side.rail .lbl{display:none}
+.side h6{margin:10px 10px 4px;font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.row{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:pointer;color:var(--dim);white-space:nowrap;overflow:hidden}
+.row:hover{background:var(--bg3)}.row.sel{background:var(--bg4);color:var(--fgb)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}.dot.working{background:var(--acc2);animation:p 1.4s infinite}.dot.needs{background:var(--yellow)}.dot.done{background:var(--green)}
+@keyframes p{50%{opacity:.3}}
+.centre{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.centre.squeezed{outline:2px dashed var(--red);outline-offset:-2px}
+.scroll{flex:1;overflow:auto;padding:14px 18px;min-height:0}
+.msg{margin:0 0 12px;max-width:720px}.user{background:var(--bg3);border-radius:10px;padding:8px 12px;margin-left:auto;width:fit-content;max-width:80%}
+.act{color:var(--faint);font-size:12px;margin:0 0 10px;cursor:pointer}.act b{color:var(--dim)}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--bg2);padding:10px 12px;margin:0 0 12px;max-width:720px}
+.card.warn{border-color:#6b5a2a;background:#1d1a12}
+code,.mono{font-family:var(--mono);font-size:12px}pre{margin:6px 0 0;font:12px/1.5 var(--mono);white-space:pre-wrap}
+.composer{border-top:1px solid var(--line);padding:8px 12px;flex:none}.composer .in{background:var(--bg2);border:1px solid #3d444d;border-radius:10px;padding:8px 10px;color:var(--faint)}
+.tools{border-left:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;flex:none;min-width:0}
+.tabs{display:flex;align-items:center;gap:2px;height:36px;border-bottom:1px solid var(--line);padding:0 6px;flex:none;overflow:hidden;white-space:nowrap}
+.tab{padding:6px 10px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center;height:100%}
+.tab:hover{color:var(--fg)}.tab.sel{color:var(--fgb);border-bottom-color:var(--acc2)}.tab .x{color:var(--faint)}
+.pane{flex:1;overflow:auto;min-height:0}
+.hunk{font:12px/1.5 var(--mono);margin:8px 0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.hunk div{padding:0 10px;white-space:pre}.hunk .h{background:var(--bg3);color:var(--faint)}.hunk .a{background:#12261c;color:#9be0bd}.hunk .d{background:#2a1517;color:#f3a3a3}
+.ed{font:12px/1.55 var(--mono);padding:8px 0}.ed div{display:flex;white-space:pre}.ed i{width:42px;text-align:right;padding-right:12px;color:#5b6477;font-style:normal;flex:none}.ed .mk{background:#12261c}
+.term{background:#0b0d11;font:12px/1.5 var(--mono);padding:8px 12px;overflow:auto}
+.blk{border-left:3px solid var(--green);padding:2px 10px;margin:0 0 10px;background:#10131a;border-radius:0 6px 6px 0}.blk.fail{border-color:var(--red)}.blk.run{border-color:var(--acc2)}
+.blk .p{color:var(--acc2)}.blk .m{color:var(--faint);font-size:11px;float:right}
+.chip{display:inline-flex;gap:6px;align-items:center;padding:1px 8px;border-radius:99px;background:#3a2f12;color:var(--yellow);border:1px solid #6b5a2a;cursor:pointer;height:24px}
+.badge{font-size:11px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.tree .row{padding-left:calc(10px + var(--d,0)*14px)}
+.dim{color:var(--dim)}.faint{color:var(--faint)}
+#bar{height:44px;flex:none;display:flex;align-items:center;justify-content:center;gap:10px;background:#000;border-top:1px solid #333;color:#fff}
+#bar button{background:#fff;color:#000;border-color:#fff;font-weight:600}
+#bar .sizes button{background:#222;color:#fff;border-color:#555}#bar .sizes button.on{background:#444;border-color:#fff}
+#judge{position:fixed;top:0;right:0;bottom:44px;width:520px;background:#0c0e13;border-left:1px solid #444;overflow:auto;padding:14px 16px;display:none;z-index:9}
+#judge.open{display:block}#judge table{border-collapse:collapse;width:100%;font-size:12px}#judge td,#judge th{border-bottom:1px solid #222;padding:5px 4px;vertical-align:top;text-align:left}
+.ok{color:var(--green)}.mid{color:var(--yellow)}.no{color:var(--red)}
+.split{display:flex;flex:1;min-height:0}.split>div{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}.split>div.focus{box-shadow:inset 0 2px 0 var(--acc2)}
+.tip{position:absolute;bottom:8px;left:8px;background:#000c;border:1px solid #444;border-radius:6px;padding:4px 8px;font-size:11px;color:#ccc;max-width:60%}
+</style>
+</head>
+<body>
+<div id="stagewrap"><div id="stage"></div></div>
+<div id="judge"></div>
+<div id="bar">
+  <button id="prev">←</button><span id="vlabel" style="min-width:330px;text-align:center"></span><button id="next">→</button>
+  <span class="sizes"><button data-size="1440x900">1440×900</button><button data-size="900x560">900×560</button></span>
+  <button id="jbtn" style="background:#222;color:#fff;border-color:#555">Principles scorecard</button>
+</div>
+<script>
+// ---------- fixture ----------
+const THREADS=[
+ {id:'t1',proj:'oxide',title:'Fix ConPTY resize on Windows',status:'working',board:true,branch:'oxide/conpty-resize',prov:'Claude Code'},
+ {id:'t2',proj:'oxide',title:'Slash command catalog',status:'needs',board:false,branch:'main',prov:'Codex'},
+ {id:'t3',proj:'oxide',title:'Dictation Metal benchmark',status:'done',board:false,branch:'main',prov:'Claude Code'},
+ {id:'t4',proj:'compiler',title:'Parser error recovery',status:'done',board:false,branch:'main',prov:'Claude Code'}];
+const FILES=[['crates',0,1],['oxide-provider',1,1],['claude.rs',2,0],['codex.rs',2,0],['catalog.rs',2,0],['web',0,1],['src',1,1],['CodeWorkbench.tsx',2,0],['App.tsx',2,0]];
+const CODE=`pub fn build_catalog(init: &Initialize) -> Catalog {
+    let mut entries = Vec::new();
+    for cmd in &init.commands {
+        entries.push(Entry {
+            name: cmd.name.clone(),
+            route: route_for(cmd),
+        });
+    }
+    // oxide-owned commands are always present
+    entries.extend(oxide_commands());
+    Catalog { entries }
+}
+
+fn route_for(cmd: &Command) -> Route {
+    match cmd.kind {
+        Kind::Native => Route::Native,
+        Kind::Prompt => Route::Passthrough,
+        _ => Route::Hidden,
+    }
+}`.split('\n');
+const BLOCKS=[
+ {cmd:'git status -sb',out:'## oxide/conpty-resize...origin/main [ahead 2]\n M crates/oxide-pty/src/resize.rs',code:0,t:'0.1s'},
+ {cmd:'cargo nextest run -p oxide-pty',out:'    Starting 14 tests across 2 binaries\n        PASS [0.031s] resize::shrinks_cols\n        FAIL [0.044s] resize::reflows_wrapped_lines\n   Summary 14 run: 13 passed, 1 failed',code:1,t:'3.2s'},
+ {cmd:'cargo nextest run -p oxide-pty',out:'   Compiling oxide-pty v0.1.0\n        PASS [0.031s] resize::shrinks_cols',code:null,t:'running'}];
+
+const S={v:'A',size:'1440x900',tid:'t1',approved:false,
+ A:{mode:'chat',tool:'diff',bottom:true,file:'claude.rs'},
+ B:{dock:true,tab:'diff',wide:false,files:[],side:true,maxT:false},
+ C:{tabs:[{k:'thread',id:'t1'},{k:'term',id:'term'},{k:'diff',id:'diff'}],L:0,R:null,focus:'L',split:false}};
+const th=id=>THREADS.find(t=>t.id===id), cur=()=>th(S.tid);
+const small=()=>S.size==='900x560';
+const needsAny=()=>THREADS.filter(t=>t.status==='needs'&&!(t.id==='t2'&&S.approved));
+const stat=t=>t.id==='t2'&&S.approved?'working':t.status;
+
+// ---------- shared pieces ----------
+const dotf=t=>`<span class="dot ${({working:'working',needs:'needs',done:'done'})[stat(t)]}"></span>`;
+function sidebar(rail){
+ const projs=['oxide','compiler'];
+ return `<div class="side ${rail?'rail':''}">
+  <div style="padding:8px 8px 4px;display:flex;gap:6px"><button class="primary lbl" style="flex:1">＋ New Thread</button><button data-a="board" title="Thread Board">▦</button></div>
+  ${projs.map(p=>`<h6 class="lbl">▾ ${p}</h6>${THREADS.filter(t=>t.proj===p).map(t=>`<div class="row ${t.id===S.tid?'sel':''}" data-a="thread" data-id="${t.id}" title="${t.title} · ${stat(t)}">${dotf(t)}<span class="lbl" style="overflow:hidden;text-overflow:ellipsis">${t.board?'⑂ ':''}${t.title}</span></div>`).join('')}`).join('')}
+  <div class="sp"></div>${S.v==='C'?'':''}<div class="row lbl">⚙ Settings</div></div>`;
+}
+function transcript(t){
+ const pend=t.id==='t2'&&!S.approved, run=stat(t)==='working';
+ return `<div class="scroll">
+  <div class="msg user">${t.id==='t2'?'Wire the Codex catalog and run the provider tests':'Terminal shrinks and wrapped lines duplicate when the window is resized. Fix it.'}</div>
+  <div class="act">▸ <b>Explored 4 files · Edited 2 files</b> · ran 2 commands</div>
+  <div class="msg">I traced it to <code>resize.rs</code>: the rewrap happens before the PTY size is applied, so wrapped lines are counted twice. I changed the order and added a regression test.</div>
+  ${pend?`<div class="card warn"><b style="color:var(--yellow)">Approval needed</b> · Run a command<pre>cargo nextest run -p oxide-provider</pre><div style="margin-top:8px;display:flex;gap:6px"><button class="primary" data-a="approve">Allow once</button><button>Deny</button><span class="faint" style="align-self:center">Target: crates/oxide-provider/src/catalog.rs</span></div></div>`:''}
+  ${run?`<div class="act"><span class="dot working" style="display:inline-block"></span> <b>Running</b> cargo nextest run -p oxide-pty · 12s</div>`:''}
+  ${t.id==='t2'&&S.approved?`<div class="act"><span class="dot working" style="display:inline-block"></span> <b>Running</b> cargo nextest run -p oxide-provider</div>`:''}
+ </div><div class="composer"><div class="in">Reply to ${t.prov}…  <span style="float:right" class="badge">Opus 5.5 · High</span></div></div>`;
+}
+const diffView=()=>`<div style="padding:8px 12px"><div class="seg" style="width:fit-content"><button class="on">Turn</button><button>Uncommitted</button><button>Branch</button></div>
+ <div class="faint" style="margin:8px 0 2px" >crates/oxide-pty/src/resize.rs <span class="badge">+6 −3</span> <button class="ghost" data-a="openfile" data-f="claude.rs" title="Open in Code">Open in Code ↗</button></div>
+ <div class="hunk"><div class="h">@@ -41,9 +41,12 @@ fn apply_resize</div><div class="d">-    rewrap(&mut grid, cols);</div><div class="d">-    pty.resize(rows, cols)?;</div><div class="a">+    pty.resize(rows, cols)?;</div><div class="a">+    // size first: rewrap counts wrapped rows from the new width</div><div class="a">+    rewrap(&mut grid, cols);</div><div> </div></div>
+ <div class="faint">crates/oxide-pty/tests/resize.rs <span class="badge">+14 −0</span></div>
+ <div class="hunk"><div class="h">@@ -0,0 +1,14 @@</div><div class="a">+#[test]</div><div class="a">+fn reflows_wrapped_lines() {</div></div></div>`;
+const fileTree=()=>`<div class="tree" style="padding:4px 0">${FILES.map(([n,d,dir])=>`<div class="row" style="--d:${d}" data-a="openfile" data-f="${n}">${dir?'▾ ':'  '}${n}</div>`).join('')}</div>`;
+const editor=(f)=>`<div class="ed"><div style="padding:0 12px 6px;color:var(--faint);font-family:system-ui">${f||'claude.rs'} · crates/oxide-provider/src · <span class="badge">Rust</span></div>${CODE.map((l,i)=>`<div class="${i>=3&&i<=6?'mk':''}"><i>${i+1}</i>${l.replace(/</g,'&lt;')}</div>`).join('')}</div>`;
+const termView=(scope)=>`<div class="term" style="flex:1"><div class="faint" style="margin-bottom:8px">${scope||'Terminal · checkout oxide/conpty-resize · opened by “Fix ConPTY resize”'}</div>${BLOCKS.map(b=>`<div class="blk ${b.code===1?'fail':b.code===null?'run':''}"><span class="m">${b.code===null?'running…':(b.code?'exit 1':'exit 0')} · ${b.t}</span><div class="p">❯ ${b.cmd}</div><pre>${b.out}</pre></div>`).join('')}<div class="p" style="color:var(--acc2)">❯ <span class="faint">▌ shell input, not a prompt</span></div></div>`;
+const prView=()=>`<div style="padding:12px"><b>#271 Which window skeleton should Oxide adopt?</b><div class="faint">Open · 2 checks passing</div></div>`;
+const issuesView=()=>`<div style="padding:12px"><div class="row">○ #271 Which window skeleton…</div><div class="row">○ #266 Command blocks follow-up</div></div>`;
+const toolBody=(k,f)=>({diff:diffView,files:fileTree,pr:prView,issues:issuesView,term:()=>termView(),code:()=>editor(f)})[k]();
+
+// ---------- Variant A: today's Work modes ----------
+function viewA(){
+ const a=S.A,t=cur();
+ const hdr=`<div class="hdr"><b>${t.proj}</b><span class="dim">⑂ ${t.branch} ▾</span><span class="sp"></span>
+  <div class="seg" title="Work mode">${['chat','terminal','code'].map(m=>`<button class="${a.mode===m?'on':''}" data-a="mode" data-m="${m}">${{chat:'Chat',terminal:'Terminal',code:'Code'}[m]}</button>`).join('')}</div>
+  <button class="primary">Commit &amp; Push ▾</button>
+  ${['files','diff','pr','issues'].map(k=>`<button class="${a.tool===k?'on':''}" data-a="tool" data-k="${k}" title="${k}">${{files:'▤',diff:'±',pr:'⑃',issues:'◎'}[k]}</button>`).join('')}
+  <button class="${a.bottom?'on':''}" data-a="bottom" title="Terminal panel">▭_</button></div>`;
+ const toolsW=small()?0:496;
+ let centre;
+ if(a.mode==='chat') centre=`<div class="centre ${small()&&a.tool?'squeezed':''}" style="flex:1;min-width:0">${transcript(t)}${a.bottom?`<div style="height:170px;display:flex;flex-direction:column;border-top:1px solid var(--line)"><div class="tabs"><div class="tab sel">Terminal · ${t.title.slice(0,16)}…</div></div>${termView('Terminal panel · keyed to this Thread')}</div>`:''}</div>`;
+ else if(a.mode==='terminal') centre=`<div class="centre">${termView('Terminal mode · keyed to the checkout (a different shell from the panel)')}</div>`;
+ else centre=`<div class="centre" style="flex-direction:row"><div style="width:190px;border-right:1px solid var(--line)">${fileTree()}</div><div class="pane">${editor(a.file)}</div></div>`;
+ const tools=a.mode!=='terminal'&&a.tool?`<div class="tools" style="width:${small()?'min(496px,100%)':'496px'}"><div class="tabs">${['files','diff','pr','issues'].map(k=>`<div class="tab ${a.tool===k?'sel':''}" data-a="tool" data-k="${k}">${k}</div>`).join('')}<span class="sp"></span><span class="tab x" data-a="tool" data-k="">✕</span></div><div class="pane">${toolBody(a.tool)}</div></div>`:'';
+ const w=small()&&tools?`<div class="body">${sidebar(false)}${centre.replace('class="centre','style="flex:0 0 196px" class="centre')}${tools}</div>`:`<div class="body">${sidebar(false)}${centre}${tools}</div>`;
+ return hdr+w+`<div class="tip">A · Work modes. At 900×560 the centre is ≈196 px (red outline) · Needs-input is shown only in the sidebar · two Terminals exist (panel and mode) · Code hides the Thread and the Approval.</div>`;
+}
+
+// ---------- Variant B: no modes, Surfaces dock ----------
+function viewB(){
+ const b=S.B,t=cur(),n=needsAny();
+ const hasFile=b.files.length>0;
+ const hdr=`<div class="hdr"><button class="ghost" data-a="side" title="Toggle sidebar">☰</button><b>${t.proj}</b><span class="dim">⑂ ${t.branch} ▾</span>
+  ${n.length?`<span class="chip" data-a="thread" data-id="${n[0].id}" title="Go to the Thread waiting on you">● ${n.length} needs input · ${n[0].title}</span>`:''}
+  <span class="sp"></span><button class="primary">Commit &amp; Push ▾</button><button class="${b.dock?'on':''}" data-a="dock" title="Surfaces dock (⌘J)">▥</button></div>`;
+ const tabsList=[['diff','± Diff'],['files','▤ Files'],['term','▭ Terminal'],['pr','⑃ Pull request'],['issues','◎ Issues']];
+ const ftabs=b.files.map(f=>[ 'f:'+f,'‹› '+f]);
+ const all=[...tabsList.slice(0,3),...ftabs,...tabsList.slice(3)];
+ const showSide=small()?(b.side&&!b.dock):b.side;
+ const dockW=!b.dock?0:b.maxT?'100%':(b.wide||hasFile&&b.tab.startsWith('f:'))?(small()?'100%':'62%'):(small()?'100%':'42%');
+ const showCentre=!(b.dock&&small()&&(b.wide||b.maxT||b.tab.startsWith('f:')))&&!b.maxT;
+ const centre=showCentre?`<div class="centre">${small()&&b.dock?'':''}${transcript(t)}</div>`:`<div style="width:44px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:8px">${THREADS.filter(x=>x.proj==='oxide').map(x=>`<div data-a="thread" data-id="${x.id}" style="cursor:pointer" title="${x.title} · ${stat(x)}">${dotf(x)}</div>`).join('')}<button class="ghost" data-a="restore" title="Restore Thread">⇤</button></div>`;
+ const dock=b.dock?`<div class="tools" style="width:${dockW};flex:${showCentre?'none':'1'}"><div class="tabs">${all.map(([k,l])=>`<div class="tab ${b.tab===k?'sel':''}" data-a="btab" data-k="${k}">${l}${k.startsWith('f:')?`<span class="x" data-a="closef" data-f="${k.slice(2)}">✕</span>`:''}</div>`).join('')}<span class="sp"></span><button class="ghost" data-a="maxdock" title="Maximize dock (full-attention Terminal or Code)">⤢</button></div><div class="pane" style="display:flex;flex-direction:column">${b.tab.startsWith('f:')?`<div style="display:flex;flex:1;min-height:0">${small()?'':`<div style="width:170px;border-right:1px solid var(--line);overflow:auto">${fileTree()}</div>`}<div class="pane">${editor(b.tab.slice(2))}</div></div>`:toolBody(b.tab)}</div></div>`:'';
+ return hdr+`<div class="body">${sidebar(!showSide)}${centre}${dock}</div><div class="tip">B · No Work modes. Needs-input chip stays in the header · opening a file promotes the editor into the dock (wider, Thread stays beside it) · ⤢ maximizes Terminal or Code · at 900×560 the sidebar and dock are exclusive.</div>`;
+}
+
+// ---------- Variant C: tabbed centre ----------
+function viewC(){
+ const c=S.C,n=needsAny();
+ const tabLabel=(x)=>x.k==='thread'?`${dotf(th(x.id))}${th(x.id).title.slice(0,18)}`:x.k==='term'?'▭ Terminal':x.k==='diff'?'± Diff':'‹› '+x.id;
+ const paneBody=(x)=>x.k==='thread'?`<div style="display:flex;flex-direction:column;flex:1;min-height:0">${transcript(th(x.id))}</div>`:x.k==='term'?termView():x.k==='diff'?`<div class="pane">${diffView()}</div>`:`<div class="pane">${editor(x.id)}</div>`;
+ const hdr=`<div class="hdr"><b>oxide</b><span class="dim">⑂ ${cur().branch} ▾</span>${n.length?`<span class="chip" data-a="thread" data-id="${n[0].id}">● ${n.length} needs input</span>`:''}<span class="sp"></span><button class="${c.split?'on':''}" data-a="csplit" title="Split">⫼ Split</button><button class="primary">Commit &amp; Push ▾</button></div>`;
+ const strip=`<div class="tabs" style="height:38px">${c.tabs.map((x,i)=>`<div class="tab ${i===c.L||i===c.R?'sel':''}" data-a="ctab" data-i="${i}">${tabLabel(x)}${x.k==='file'?`<span class="x" data-a="cclose" data-i="${i}">✕</span>`:''}</div>`).join('')}<button class="ghost" data-a="cnew" title="New Thread or terminal">＋</button></div>`;
+ const pane=(i,side)=>`<div data-a="cfocus" data-s="${side}" class="${c.focus===side&&c.split?'focus':''}">${paneBody(c.tabs[i])}</div>`;
+ const centre=`<div class="centre">${strip}${c.split&&c.R!=null?`<div class="split">${pane(c.L,'L')}${pane(c.R,'R')}</div>`:`<div style="display:flex;flex-direction:column;flex:1;min-height:0">${paneBody(c.tabs[c.L])}</div>`}</div>`;
+ const side=`<div class="side ${small()?'rail':''}" >${sidebar(small()).replace(/^<div class="side[^"]*">/,'').replace(/<\/div>$/,'')}${small()?'':`<h6>Files</h6><div class="tree" style="overflow:auto;max-height:200px">${fileTree()}</div>`}</div>`;
+ return hdr+`<div class="body">${side}${centre}</div><div class="tip">C · Tabbed centre: Threads, files, terminals and Diff are peers; Files tree lives in the sidebar · side-by-side is an explicit Split · Approvals only show inside their Thread tab (chip + dot signal them).</div>`;
+}
+
+// ---------- scorecard ----------
+const SCORE=[
+ ['1 Status ambient','mid','Sidebar only; blank in Terminal/Code if sidebar hidden','ok','Sidebar + header chip, both always on','ok','Sidebar + chip + tab dot'],
+ ['2 Signal, don’t seize','ok','No modal','ok','No modal','ok','No modal'],
+ ['3 Keeps working set','mid','Modes keep state only if built to; two Terminals','ok','One dock, tabs persist','ok','Tabs persist'],
+ ['4 One stable home','no','Terminal ×2, Files ×2 (tools + Code tree)','ok','Each tool is one dock tab','mid','Files in sidebar and as tabs; Terminal as tab'],
+ ['5 Co-use shown together','mid','Thread+Diff/Terminal yes; file+hunk and Approval+file no (Code hides Thread)','ok','Thread beside Diff, Terminal, editor','mid','One at a time unless Split'],
+ ['6 Mode announces itself','no','Terminal mode: shell input looks like the composer','ok','No modes; shell input lives in Terminal tab','ok','Tab kind icon'],
+ ['7 Switchers vs toggles','no','Chat/Terminal/Code switcher beside pane toggles; Code is a co-use view','ok','One dock toggle + tabs','ok','Tabs only'],
+ ['8 Small window','no','Centre 196 px, below the 360 floor','ok','Sidebar and dock exclusive; centre keeps width','mid','Sidebar rail; tabs overflow, no collapse order yet']];
+function judge(){return `<h3 style="margin:0 0 8px;color:#fff">Judged against the 8 principles (#269)</h3><table><tr><th>Principle</th><th>A Work modes</th><th>B Dock, no modes</th><th>C Tabbed centre</th></tr>${SCORE.map(r=>`<tr><td>${r[0]}</td>${[1,3,5].map(i=>`<td class="${r[i]}">${{ok:'✔',mid:'◐',no:'✘'}[r[i]]} ${r[i+1]}</td>`).join('')}</tr>`).join('')}</table>
+<h3 style="color:#fff;margin:16px 0 6px">Recommendation: B</h3><div class="dim">No Work modes. Thread stays central; Terminal, Code, Files, Diff, PR, Issues are dock Surfaces. Opening a file (from Files or a Diff hunk) promotes the editor in the dock; ⤢ maximizes the dock for a full-attention Terminal or Code view. Terminal-only and Code “modes” survive as maximized Surfaces, not as a switch of the whole skeleton. Borrow C’s ideas later: file tabs in the dock, an explicit split of two Threads.</div>`;}
+
+// ---------- engine ----------
+function render(){
+ const [w,h]=S.size.split('x').map(Number);const st=document.getElementById('stage');
+ st.style.width=w+'px';st.style.height=h+'px';
+ const k=Math.min(1,(innerWidth-8)/w,(innerHeight-52)/h);st.style.transform=`scale(${k})`;st.style.margin=`${-(h*(1-k))/2}px ${-(w*(1-k))/2}px`;
+ st.innerHTML=({A:viewA,B:viewB,C:viewC})[S.v]();
+ document.getElementById('vlabel').textContent={A:'A · Work modes in header, Tools right, Terminal bottom',B:'B · No modes: Thread + Surfaces dock',C:'C · Tabbed centre, peers'}[S.v];
+ document.querySelectorAll('[data-size]').forEach(b=>b.classList.toggle('on',b.dataset.size===S.size));
+ document.getElementById('judge').innerHTML=judge();
+ history.replaceState(null,'','?variant='+S.v);
+}
+function openFile(f){
+ if(S.v==='A'){S.A.mode='code';S.A.file=f}
+ else if(S.v==='B'){if(!S.B.files.includes(f))S.B.files.push(f);S.B.tab='f:'+f;S.B.dock=true}
+ else{let i=S.C.tabs.findIndex(x=>x.k==='file'&&x.id===f);if(i<0){S.C.tabs.push({k:'file',id:f});i=S.C.tabs.length-1}S.C[S.C.focus==='R'&&S.C.split?'R':'L']=i}
+}
+document.addEventListener('click',e=>{
+ const el=e.target.closest('[data-a]');if(!el)return;const d=el.dataset,a=d.a;e.stopPropagation();
+ if(a==='thread'){S.tid=d.id;if(S.v==='C'){let i=S.C.tabs.findIndex(x=>x.k==='thread'&&x.id===d.id);if(i<0){S.C.tabs.unshift({k:'thread',id:d.id});i=0;S.C.R=S.C.R!=null?S.C.R+1:null}S.C.L=i}if(S.v==='A')S.A.mode='chat'}
+ else if(a==='approve')S.approved=true;
+ else if(a==='mode')S.A.mode=d.m;
+ else if(a==='tool')S.A.tool=d.k;
+ else if(a==='bottom')S.A.bottom=!S.A.bottom;
+ else if(a==='openfile')openFile(d.f);
+ else if(a==='side')S.B.side=!S.B.side;
+ else if(a==='dock'){S.B.dock=!S.B.dock;S.B.maxT=false}
+ else if(a==='btab'){S.B.tab=d.k;S.B.dock=true;S.B.maxT=false}
+ else if(a==='closef'){S.B.files=S.B.files.filter(f=>f!==d.f);S.B.tab='files'}
+ else if(a==='maxdock')S.B.maxT=!S.B.maxT;
+ else if(a==='restore'){S.B.maxT=false;S.B.wide=false;S.B.tab='diff'}
+ else if(a==='csplit'){S.C.split=!S.C.split;if(S.C.split&&S.C.R==null)S.C.R=S.C.tabs.findIndex(x=>x.k==='diff')}
+ else if(a==='ctab'){const i=+d.i;if(S.C.split&&S.C.focus==='R')S.C.R=i;else S.C.L=i}
+ else if(a==='cclose'){const i=+d.i;S.C.tabs.splice(i,1);S.C.L=0;S.C.R=S.C.split?1:null}
+ else if(a==='cfocus')S.C.focus=d.s;
+ render();
+});
+const go=n=>{S.v='ABC'[('ABC'.indexOf(S.v)+n+3)%3];render()};
+prev.onclick=()=>go(-1);next.onclick=()=>go(1);jbtn.onclick=()=>judgeEl.classList.toggle('open');
+const judgeEl=document.getElementById('judge');
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{S.size=b.dataset.size;render()});
+addEventListener('keydown',e=>{if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1)});
+addEventListener('resize',render);
+S.v=(new URLSearchParams(location.search).get('variant')||'A').toUpperCase();render();
+</script>
+</body>
+</html>

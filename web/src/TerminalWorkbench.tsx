@@ -426,6 +426,7 @@ export function TerminalWorkbench({
           cwd={cwd}
           disabled={closed || sessionId === null}
           visible={visible}
+          fresh={blocks.length === 0}
           onRun={run}
         />
       )}

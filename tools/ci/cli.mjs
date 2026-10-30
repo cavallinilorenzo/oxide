@@ -2,6 +2,7 @@
 // the decision, write step outputs, exit non-zero on a failed check.
 //
 //   node tools/ci/cli.mjs lanes <changed-files.txt>    env GITHUB_EVENT_NAME, CHANGED_FILES_TOTAL
+//   node tools/ci/cli.mjs dictation-cache              env PLATFORM, RELEASE, ImageVersion
 //   node tools/ci/cli.mjs gate                          env NEEDS_JSON (toJSON(needs)), GITHUB_EVENT_NAME
 //   node tools/ci/cli.mjs pr-title                      env PR_TITLE
 //   node tools/ci/cli.mjs release-version <tag>
@@ -15,12 +16,13 @@
 // Untrusted values (titles, file lists) arrive through files and environment
 // variables, never through workflow expressions in a shell script.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   bumpVersion, checkPrTitle, checkReleaseVersion, checkTauriAlignment, checkUpdateFeed, dependabotDecision, evaluateGate, lanesFor,
-  previousReleaseTag, releaseNotes, updateManifest,
+  dictationBuildCache, GPU_BUILD_SDKS, previousReleaseTag, releaseNotes, updateManifest,
 } from "./policy.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -54,6 +56,25 @@ function workspaceMembers() {
 }
 
 const commands = {
+  "dictation-cache"() {
+    const hash = createHash("sha256");
+    // Cargo checks project source changes after restore. Pin the expensive native
+    // dependency build to its locks, toolchain, SDKs and compiler settings.
+    for (const path of [
+      "rust-toolchain.toml", ".cargo/config.toml", "Cargo.toml", "Cargo.lock",
+      "crates/oxide-core/Cargo.toml", "crates/oxide-core/build.rs",
+      "crates/oxide-vulkan-worker/Cargo.toml", "crates/oxide-vulkan-worker/Cargo.lock",
+      "crates/oxide-cuda-worker/Cargo.toml", "crates/oxide-cuda-worker/Cargo.lock", "crates/oxide-cuda-worker/build.rs",
+      "tools/dictation-build.mjs", "tools/checks/msvc-env.mjs",
+    ]) hash.update(path).update("\0").update(read(path)).update("\0");
+    hash.update(JSON.stringify(GPU_BUILD_SDKS));
+    const decision = dictationBuildCache({
+      platform: process.env.PLATFORM, release: process.env.RELEASE !== "false",
+      fingerprint: hash.digest("hex"), imageVersion: process.env.ImageVersion,
+    });
+    output(decision);
+    console.log(decision.enabled ? `Native worker cache: ${decision.key}` : "Native worker cache disabled.");
+  },
   lanes([listFile]) {
     const files = listFile && existsSync(listFile)
       ? readFileSync(listFile, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)

@@ -50,7 +50,9 @@ export function releaseWorker(backend, inherited = process.env) {
   const { worker } = dictationBuild(backend, inherited);
   const name = `oxide-${backend}-worker`;
   return {
-    args: ["build", "--locked", "--release", "--manifest-path", `crates/${name}/Cargo.toml`],
+    // Cargo otherwise buffers CMake/nvcc output until the entire native build
+    // finishes, leaving the longest part of packaging silent for many minutes.
+    args: ["build", "--locked", "--release", ...(backend === "cuda" ? ["-vv"] : []), "--manifest-path", `crates/${name}/Cargo.toml`],
     env: { ...worker.env, GGML_NATIVE: "OFF" },
     exe: join(worker.env.CARGO_TARGET_DIR, "release", `${name}.exe`),
   };

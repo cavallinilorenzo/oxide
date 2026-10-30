@@ -371,6 +371,11 @@ node tools/dictation-package.mjs smoke
 `stage` builds both workers in release mode (in `CARGO_TARGET_DIR`'s `vw` and `cw`),
 then stages them, the DLLs they import (found by reading their import tables) and
 the manifest in `target/dictation-runtime/windows-x64/`.
+CUDA builds log the native compiler commands as they run. The full architecture
+list can take a long time on a hosted runner. CI caches the worker build
+directories after staging, keyed by native build inputs and the runner image;
+the first build or a cache miss still compiles everything. Release builds use
+no cache. See [the build workflow guide](devops.md#buildyml-shared-build).
 `tauri.windows-gpu.conf.json` adds that folder and the extra notices to the installer;
 without staging, the bundle fails with a missing resource. `verify` and `smoke` check
 the built tree; pass an install folder to check an installation instead. Omit

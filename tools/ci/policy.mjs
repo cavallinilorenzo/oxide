@@ -8,6 +8,14 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 // The shared build workflow, called by CI for bundles and by Release.
 const BUILD_WORKFLOW = ".github/workflows/build.yml";
 
+/** Reuse native workers in CI; publication always starts with a clean build. */
+export function dictationBuildCache({ platform, release, fingerprint, imageVersion }) {
+  if (platform !== "windows-x64" || release !== false) return { enabled: false, key: "" };
+  if (!fingerprint) throw new Error("A native build fingerprint is required for the worker cache.");
+  if (!imageVersion) throw new Error("The runner image version is required for the worker cache.");
+  return { enabled: true, key: `dictation-workers-v1-${imageVersion}-${fingerprint}` };
+}
+
 // Each rule names the lanes a path can affect. A path must match at least one
 // rule; `[]` marks paths that affect no lane (docs, research, screenshots).
 const PATH_RULES = [

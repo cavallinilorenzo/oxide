@@ -181,6 +181,17 @@ nextest runs each test in its own process with the settings in [`.config/nextest
 - **Bundles:** macOS `app,dmg` (CPU and Metal dictation); Windows `nsis` only (the updater's Windows package is the NSIS setup) with CPU, Vulkan and CUDA dictation. On Windows the job installs the pinned Vulkan SDK and CUDA Toolkit (`node tools/dictation-package.mjs setup`), stages the release workers and their runtime (loading and checking the MSVC 14.44 environment with `vcvars64.bat -vcvars_ver=14.44` to avoid CUDA 12.9 frontend crashes with MSVC 14.51), and bundles with `crates/oxide-app/tauri.windows-gpu.conf.json`. `GGML_NATIVE=OFF` keeps native code portable instead of tuned to the runner. The Windows job has 180 minutes because it compiles CUDA kernels for every supported architecture.
 - **Local:** `node tools/check.mjs` builds an unsigned bundle for your OS. Signed builds are never made locally.
 
+Windows CI keeps a separate cache of `target/vw` and `target/cw`, including the
+CMake intermediates. Its key covers the runner image, Rust toolchain, Cargo
+manifests and locks, SDK pins and native compiler settings
+(`node tools/ci/cli.mjs dictation-cache`, policy in `dictationBuildCache`). It is
+saved immediately after staging, before installer and smoke checks, so a later
+packaging failure can reuse the completed GPU compilation. GitHub scopes PR
+caches to that PR; after the first successful worker build, subsequent attempts
+can reuse it. A cache miss still requires the full CUDA compilation. Both restore
+and save are disabled for releases. The CUDA worker uses Cargo's very verbose
+output so the underlying CMake/nvcc progress is visible during long builds.
+
 ### `release.yml` (Release)
 
 Trigger: a `v*.*.*` tag. Concurrency is per tag and never cancelled.

@@ -69,7 +69,7 @@ test("packaged workers are release builds tuned for any x64 CPU and CUDA GPU, no
   const inherited = { CARGO_TARGET_DIR: "short-root", CMAKE_GENERATOR_INSTANCE: "old-vs", GGML_NATIVE: "ON", GGML_CUDA: "ON" };
   for (const backend of ["vulkan", "cuda"]) {
     const worker = releaseWorker(backend, inherited);
-    assert.deepEqual(worker.args, ["build", "--locked", "--release", "--manifest-path", `crates/oxide-${backend}-worker/Cargo.toml`]);
+    assert.deepEqual(worker.args, ["build", "--locked", "--release", ...(backend === "cuda" ? ["-vv"] : []), "--manifest-path", `crates/oxide-${backend}-worker/Cargo.toml`]);
     // GGML_NATIVE=OFF selects ggml's portable AVX2 baseline and its CUDA architecture list.
     assert.equal(worker.env.GGML_NATIVE, "OFF");
     assert.equal(worker.env.GGML_CUDA, undefined);

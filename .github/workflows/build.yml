@@ -155,10 +155,39 @@ jobs:
         # CUDA Toolkit and Vulkan SDK, pinned with SHA-256 in tools/ci/policy.mjs. Users never install them.
         run: node tools/dictation-package.mjs setup
 
+      - name: Decide the native worker cache
+        id: worker-cache-policy
+        if: inputs.platform == 'windows-x64'
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          RELEASE: ${{ inputs.release }}
+        run: node tools/ci/cli.mjs dictation-cache
+
+      - name: Restore the native worker builds
+        id: worker-cache
+        if: steps.worker-cache-policy.outputs.enabled == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.worker-cache-policy.outputs.key }}
+          path: |
+            target/vw
+            target/cw
+
       - name: Build and stage the Vulkan and CUDA workers (Windows)
         if: inputs.platform == 'windows-x64'
         # stage loads the x64 MSVC environment (vcvars64.bat) itself.
         run: node tools/dictation-package.mjs stage
+
+      # Save before the installer and smoke checks: a packaging failure should
+      # not throw away a completed CUDA compilation. Releases never use this cache.
+      - name: Save the native worker builds
+        if: steps.worker-cache-policy.outputs.enabled == 'true' && steps.worker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.worker-cache-policy.outputs.key }}
+          path: |
+            target/vw
+            target/cw
 
       - name: Build the Windows installer
         if: inputs.platform == 'windows-x64'

@@ -5,11 +5,36 @@ import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   bumpVersion, checkDictationPackage, checkPrTitle, checkUpdateFeed, checkWorkerProbe, checkReleaseVersion, checkTauriAlignment, commandLine, dependabotDecision, evaluateGate, lanesFor,
-  checkAppLaunch, GPU_BUILD_SDKS, localPlan, previousReleaseTag, releaseNotes, runtimeManifestProblems, updateManifest,
+  checkAppLaunch, dictationBuildCache, GPU_BUILD_SDKS, localPlan, previousReleaseTag, releaseNotes, runtimeManifestProblems, updateManifest,
 } from "./policy.mjs";
 
 const ALL_ON = { web: true, rust: true, bundle: true, supplyChain: true, automation: true };
 const ALL_OFF = { web: false, rust: false, bundle: false, supplyChain: false, automation: false };
+
+describe("dictationBuildCache", () => {
+  const inputs = { platform: "windows-x64", release: false, fingerprint: "native-inputs", imageVersion: "20261021.278.1" };
+
+  test("Windows CI can reuse its native worker builds", () => {
+    assert.equal(dictationBuildCache(inputs).enabled, true);
+    assert.ok(dictationBuildCache(inputs).key.includes(inputs.fingerprint));
+  });
+
+  test("release builds and macOS never use this cache", () => {
+    for (const platform of ["windows-x64", "macos-aarch64"]) {
+      assert.deepEqual(dictationBuildCache({ platform, release: true }), { enabled: false, key: "" });
+    }
+    assert.deepEqual(dictationBuildCache({ platform: "macos-aarch64", release: false }), { enabled: false, key: "" });
+    assert.deepEqual(dictationBuildCache({ platform: "windows-x64" }), { enabled: false, key: "" });
+  });
+
+  test("a compiler image or native input change invalidates the cache", () => {
+    const key = dictationBuildCache(inputs).key;
+    assert.notEqual(dictationBuildCache({ ...inputs, fingerprint: "changed-lockfile-or-flags" }).key, key);
+    assert.notEqual(dictationBuildCache({ ...inputs, imageVersion: "20261028.1" }).key, key);
+    assert.throws(() => dictationBuildCache({ ...inputs, fingerprint: "" }), /fingerprint/);
+    assert.throws(() => dictationBuildCache({ ...inputs, imageVersion: "" }), /image/);
+  });
+});
 
 describe("lanesFor", () => {
   test("a docs-only change turns every lane off", () => {

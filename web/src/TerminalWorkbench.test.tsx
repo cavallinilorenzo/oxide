@@ -79,10 +79,11 @@ async function openShell() {
 function blocks() {
   return Array.from(container.querySelectorAll<HTMLElement>('[aria-label^="Command:"]'));
 }
-/** What a screen reader reads: the text outside aria-hidden subtrees. */
+/** What a screen reader reads: text outside aria-hidden subtrees, and images by their label. */
 function spoken(element: Element) {
   const copy = element.cloneNode(true) as Element;
   copy.querySelectorAll('[aria-hidden="true"]').forEach((hidden) => hidden.remove());
+  copy.querySelectorAll('[role="img"][aria-label]').forEach((image) => image.replaceWith(image.getAttribute("aria-label")!));
   return copy.textContent;
 }
 
@@ -124,7 +125,7 @@ it("shows a Running indicator while a command runs and only its duration once it
   await shell.submit("ls");
   await shell.start();
   const [block] = blocks();
-  expect(spoken(block)).toContain("Running");
+  expect(block.querySelector('[role="img"][aria-label="Running"]')).not.toBeNull();
   expect(block.textContent).not.toMatch(/\d\s?ms|\d\s?s\b/);
   now = 1_017;
   await shell.output("a.txt\r\n");
@@ -174,6 +175,14 @@ it("keeps the header to the shell and its current directory, updated after every
   await shell.start();
   await shell.end(1, "/test/sub");
   expect(header().textContent).toContain("/test/sub");
+  // A new shell starts at the root again.
+  await shell.close();
+  expect(header().textContent).toContain("/test/sub");
+  await act(async () => Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Start a new shell")!.click());
+  await settle();
+  expect(header().textContent).not.toContain("/test/sub");
+  expect(header().textContent).toContain("/test");
+  expect(shell.calls.filter((c) => c === "start_block_terminal")).toHaveLength(2);
 });
 
 it("renders only the command and its status: no cwd, Copy, Reuse or Collapse", async () => {

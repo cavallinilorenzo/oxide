@@ -8,8 +8,6 @@ export interface TerminalBlock {
   command: string;
   output: string;
   outputOffset: number;
-  /** Where the command ran. Kept for the record; the Terminal header shows the live cwd. */
-  cwd: string;
   at: number;
   completedAt?: number;
   exitCode: number | null;
@@ -204,25 +202,34 @@ export function TerminalCommandBlock(props: Props) {
 
 /** One status at the right of the header: a spinner while running, then how long it took. */
 function BlockStatus({ block, running }: { block: TerminalBlock; running: boolean }) {
-  if (running)
-    return (
-      <span className="terminal-block-status" role="status">
-        <span className="terminal-block-spinner" aria-hidden="true" />
-        <span className="sr-only">Running</span>
-      </span>
-    );
-  const duration = formatDuration(Math.max(0, (block.completedAt ?? block.at) - block.at));
-  const [shown, said] =
-    block.exitCode === 0
-      ? [duration, `Command duration: ${duration}`]
-      : block.exitCode === null
-        ? [`shell exited · ${duration}`, `Shell exited after ${duration}`]
-        : [`exit ${block.exitCode} · ${duration}`, `Exit ${block.exitCode} after ${duration}`];
+  // One live region per block: the spinner is mounted with it, so only the outcome is announced.
   return (
-    <span className={`terminal-block-status${block.exitCode === 0 ? "" : " error"}`} role="status">
-      <span aria-hidden="true">{shown}</span>
-      <span className="sr-only">{said}</span>
+    <span className={`terminal-block-status${!running && block.exitCode !== 0 ? " error" : ""}`} role="status">
+      {running ? (
+        <span className="terminal-block-spinner" role="img" aria-label="Running" />
+      ) : (
+        <BlockOutcome block={block} />
+      )}
     </span>
+  );
+}
+
+function BlockOutcome({ block }: { block: TerminalBlock }) {
+  const duration = formatDuration(Math.max(0, (block.completedAt ?? block.at) - block.at));
+  let visibleText = duration;
+  let spokenText = `Command duration: ${duration}`;
+  if (block.exitCode === null) {
+    visibleText = `shell exited · ${duration}`;
+    spokenText = `Shell exited after ${duration}`;
+  } else if (block.exitCode !== 0) {
+    visibleText = `exit ${block.exitCode} · ${duration}`;
+    spokenText = `Exit ${block.exitCode} after ${duration}`;
+  }
+  return (
+    <>
+      <span aria-hidden="true">{visibleText}</span>
+      <span className="sr-only">{spokenText}</span>
+    </>
   );
 }
 

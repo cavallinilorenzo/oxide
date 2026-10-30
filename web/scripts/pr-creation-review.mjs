@@ -22,12 +22,12 @@ try {
     const callbacks = new Map();
     const project = { id: 1, name: "oxide", path: "C:/projects/oxide", hidden: false, open: true, missing: false };
     const provider = { model: null, effort: null, permissionMode: "auto-edit" };
-    const settings = { defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {},
+    const settings = { defaultProvider: "claude", confirmQuit: true, claudeCustomizations: {},
       providers: { claude: provider, codex: provider, antigravity: provider } };
     const original = async (command) => {
       if (["list_projects", "rescan_projects"].includes(command)) return [project];
       if (command === "last_selection") return { projectId: 1, threadId: null };
-      if (["list_threads", "list_slash_commands", "get_model_catalog", "get_favourite_models", "detected_editors", "list_dir"].includes(command)) return [];
+      if (["list_threads", "list_slash_commands", "get_model_catalog", "get_favourite_models", "list_dir"].includes(command)) return [];
       if (command === "get_settings") return { settings, errors: [], scanRoots: [] };
       if (command === "get_provider_capabilities") return { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true, slashCommandPassthrough: false };
       if (command === "provider_capabilities") return { reasoningText: true, imageAttachments: true };

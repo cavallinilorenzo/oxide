@@ -260,7 +260,6 @@ export function TerminalWorkbench({
     const block: Block = {
       token,
       command,
-      cwd,
       output: "",
       outputOffset: 0,
       at: Date.now(),

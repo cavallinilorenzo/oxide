@@ -30,9 +30,9 @@ async function open(before = false) {
       async invoke(command) {
         if (command === "list_projects") return new Promise((resolve) => pending.push(resolve));
         if (command === "last_selection") return null;
-        if (["rescan_projects", "detected_editors"].includes(command)) return [];
+        if (command === "rescan_projects") return [];
         if (command === "plugin:event|listen") return ++callbackId;
-        if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {}, confirmQuit: true, editor: "" }, errors: [], scanRoots: [] };
+        if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {}, confirmQuit: true }, errors: [], scanRoots: [] };
         if (["plugin:event|unlisten", "remember_selection"].includes(command)) return null;
         throw new Error(`Missing startup fixture: ${command}`);
       },

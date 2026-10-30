@@ -20,12 +20,15 @@ exit status together. `cd` and shell variables carry over between commands.
 - Up opens the history picker; Up/Down navigate it, Enter inserts a command, and
   Escape dismisses it. Ctrl+R focuses its search field.
 - Interact with a running program directly in its output terminal; Ctrl+C
-  interrupts it. A shell that exits can be restarted from the toolbar.
+  interrupts it. A shell that exits offers "Start a new shell".
 - Cursor-addressed and alternate-screen applications use the central viewport.
   Output redraws do not resize the PTY. On Windows a command finishes at the next
   PowerShell prompt, so Ctrl+C leaves the shell usable.
-- Block actions collapse output, copy output and put a command back in the
-  composer. Reuse does not immediately execute the command.
+- The Terminal header shows the shell and its current directory, which follows
+  every `cd`. A Command block shows only its command and one status: a spinner
+  while it runs, then its duration, or `exit N` beside the duration when it
+  fails. Output is always shown; select it to copy. `clear` or Ctrl+L clears
+  the blocks.
 
 History retains up to 300 commands per checkout in local application storage.
 Output is session-only: the latest 24 blocks retain up to 256 KiB each, with an

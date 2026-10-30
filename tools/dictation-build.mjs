@@ -38,6 +38,23 @@ export function dictationBuild(backend, inherited = process.env) {
   };
 }
 
+/**
+ * The release build of a GPU worker for packaging. ggml otherwise tunes code to
+ * the build machine (GGML_NATIVE): AVX-512 on a CI runner, or only the CUDA
+ * architectures it can see. OFF selects its portable x64 baseline (AVX2, FMA,
+ * F16C) and CUDA architecture list (5.0 to Blackwell on CUDA 12).
+ */
+export function releaseWorker(backend, inherited = process.env) {
+  if (!["vulkan", "cuda"].includes(backend)) throw new Error("Expected worker backend: vulkan or cuda");
+  const { worker } = dictationBuild(backend, inherited);
+  const name = `oxide-${backend}-worker`;
+  return {
+    args: ["build", "--locked", "--release", "--manifest-path", `crates/${name}/Cargo.toml`],
+    env: { ...worker.env, GGML_NATIVE: "OFF" },
+    exe: join(worker.env.CARGO_TARGET_DIR, "release", `${name}.exe`),
+  };
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.platform !== "win32") throw new Error("This build entry point requires Windows x64");

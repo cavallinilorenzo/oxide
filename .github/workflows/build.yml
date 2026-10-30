@@ -36,12 +36,16 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUST_BACKTRACE: "1"
+  # Whisper's native code targets every supported CPU (and, on Windows, every CUDA
+  # GPU from compute capability 5.0), not just this runner's. See docs/dictation.md.
+  GGML_NATIVE: "OFF"
 
 jobs:
   build:
     name: build (${{ inputs.platform }})
     runs-on: ${{ inputs.platform == 'macos-aarch64' && 'macos-15' || 'windows-2025' }}
-    timeout-minutes: 75
+    # Windows also compiles the CUDA kernels for every supported GPU architecture.
+    timeout-minutes: ${{ inputs.platform == 'windows-x64' && 180 || 75 }}
     environment: ${{ inputs.release && 'release' || '' }}
     outputs:
       artifact: ${{ steps.name.outputs.artifact }}
@@ -141,6 +145,25 @@ jobs:
           if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
           web/node_modules/.bin/tauri build --ci --bundles app,dmg "${extra[@]}" -- --locked
 
+      - name: Verify the app's dictation backends (macOS)
+        if: inputs.platform == 'macos-aarch64'
+        # System-only linkage, the embedded Metal library, the notices and the microphone description.
+        run: node tools/dictation-package.mjs verify macos-aarch64
+
+      - name: Install the GPU build SDKs (Windows)
+        if: inputs.platform == 'windows-x64'
+        # CUDA Toolkit and Vulkan SDK, pinned with SHA-256 in tools/ci/policy.mjs. Users never install them.
+        run: node tools/dictation-package.mjs setup
+
+      - name: Build and stage the Vulkan and CUDA workers (Windows)
+        if: inputs.platform == 'windows-x64'
+        shell: cmd
+        # The x64 MSVC environment (cl, Ninja, VCToolsRedistDir), as in the documented Native Tools prompt.
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find VC\Auxiliary\Build\vcvars64.bat`) do call "%%i"
+          if not defined VCToolsRedistDir exit /b 1
+          node tools/dictation-package.mjs stage
+
       - name: Build the Windows installer
         if: inputs.platform == 'windows-x64'
         env:
@@ -150,7 +173,26 @@ jobs:
         run: |
           extra=()
           if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
-          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis "${extra[@]}" -- --locked
+          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json "${extra[@]}" -- --locked
+
+      - name: Install the setup into a scratch folder (Windows)
+        if: inputs.platform == 'windows-x64'
+        shell: pwsh
+        # What a user gets, not the build tree. The runner has no GPU and no NVIDIA driver.
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "oxide-installed"
+          # /D must be the last argument and unquoted.
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList "/S", "/D=$dir" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "The setup exited $($install.ExitCode)." }
+          "OXIDE_INSTALLED=$dir" >> $env:GITHUB_ENV
+
+      - name: Verify and probe the installed dictation backends (Windows)
+        if: inputs.platform == 'windows-x64'
+        # Files, imports and notices; then each worker and the app start with no SDK on PATH.
+        run: |
+          node tools/dictation-package.mjs verify windows-x64 "$OXIDE_INSTALLED"
+          node tools/dictation-package.mjs smoke "$OXIDE_INSTALLED" --launch
 
       - name: Name the artifact
         id: name

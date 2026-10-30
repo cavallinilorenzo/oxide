@@ -22,6 +22,9 @@ const PATH_RULES = [
   [/^docs\/licenses\//, ["bundle"]], // bundled as app resources
   [/^(Cargo\.toml|Cargo\.lock|crates\/[^/]+\/Cargo\.toml|web\/package\.json|web\/pnpm-lock\.yaml)$/, ["bundle", "supplyChain"]],
   [/^(crates\/[^/]+\/build\.rs|tools\/build\.mjs|tools\/checks\/.*)$/, ["bundle"]],
+  // The GPU workers are outside the workspace: only Windows packaging builds them.
+  [/^(crates\/oxide-(vulkan|cuda)-worker\/|tools\/dictation-(build|package)\.mjs$)/, ["bundle"]],
+  [/^crates\/oxide-(vulkan|cuda)-worker\/Cargo\.lock$/, ["supplyChain"]],
   [new RegExp(`^${escapeRegExp(BUILD_WORKFLOW)}$`), ["bundle"]],
   [/^(web\/pnpm-workspace\.yaml|deny\.toml)$/, ["supplyChain"]],
   [/^(\.github|tools)\//, ["automation"]],
@@ -330,6 +333,169 @@ export function checkUpdateFeed(feed, tag) {
   return { ok: true, message: `The update feed serves ${tag} for ${platforms.map(([platform]) => platform).join(", ")}.`, urls };
 }
 
+// The SDKs that build the Windows GPU workers, for CI and `dictation-package.mjs setup`.
+// End users never install them. CUDA stays on 12.x: 13 drops compute capability
+// below 7.5. The runtime DLL names below carry the CUDA major version.
+export const GPU_BUILD_SDKS = {
+  cuda: {
+    version: "12.9.1",
+    url: "https://developer.download.nvidia.com/compute/cuda/12.9.1/network_installers/cuda_12.9.1_windows_network.exe",
+    sha256: "de45c336ab4e9825018b546357dc9de5ded9f89c4f5200ef52b8eeac3b1b4072",
+    // Silent install of the compiler, runtime, cuBLAS and CCCL headers. No display driver.
+    components: ["nvcc_12.9", "cudart_12.9", "cublas_12.9", "cublas_dev_12.9", "thrust_12.9", "visual_studio_integration_12.9"],
+  },
+  vulkan: {
+    version: "1.4.363.0",
+    url: "https://sdk.lunarg.com/sdk/download/1.4.363.0/windows/vulkansdk-windows-X64-1.4.363.0.exe",
+    sha256: "94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141",
+  },
+};
+
+// Dictation packaging: what an installed package must contain and what its
+// executables may load. The host links CPU Whisper only; each GPU backend is an
+// isolated worker beside it, with its redistributable runtime next to it.
+const CUDA_RUNTIME = ["cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"];
+const DICTATION_WORKERS = {
+  "oxide-vulkan-worker.exe": { drivers: ["vulkan-1.dll"], runtime: [] },
+  "oxide-cuda-worker.exe": { drivers: ["nvcuda.dll"], runtime: CUDA_RUNTIME },
+};
+const GRAPHICS_DRIVERS = Object.values(DICTATION_WORKERS).flatMap(({ drivers }) => drivers);
+const GPU_LIBRARIES = new Set([...GRAPHICS_DRIVERS, ...CUDA_RUNTIME.map((dll) => dll.toLowerCase())]);
+// The Visual C++ runtime is a separate redistributable; the Universal CRT
+// (api-ms-win-crt-*) is part of Windows 10 and later.
+const VC_RUNTIME = /^(vcruntime|msvcp|concrt|vcomp)\d+(_\w+)?\.dll$/;
+// DLLs every supported Windows (10 1803 and later) has. Anything else a worker
+// imports must ship beside it, or be added here with a reason.
+const WINDOWS_SYSTEM_DLLS = new Set([
+  "kernel32.dll", "kernelbase.dll", "ntdll.dll", "user32.dll", "gdi32.dll", "advapi32.dll", "shell32.dll", "ole32.dll",
+  "oleaut32.dll", "shlwapi.dll", "ws2_32.dll", "bcrypt.dll", "bcryptprimitives.dll", "crypt32.dll", "secur32.dll",
+  "userenv.dll", "dbghelp.dll", "psapi.dll", "version.dll", "winmm.dll", "setupapi.dll", "cfgmgr32.dll", "iphlpapi.dll",
+  "powrprof.dll", "ncrypt.dll", "rpcrt4.dll", "comctl32.dll", "dxgi.dll", "ucrtbase.dll",
+]);
+const isWindowsSystemDll = (dll) => WINDOWS_SYSTEM_DLLS.has(dll) || /^(api|ext)-ms-win-[\w-]+\.dll$/.test(dll);
+const DICTATION_NOTICES = ["licenses/whisper.txt", "licenses/dictation-fixture.txt"];
+const DICTATION_PACKAGES = {
+  "windows-x64": {
+    required: [
+      ...Object.keys(DICTATION_WORKERS), ...CUDA_RUNTIME, "dictation-runtime.json",
+      ...DICTATION_NOTICES, "licenses/cuda.txt", "licenses/msvc-runtime.txt",
+    ],
+    problems: windowsPackageProblems,
+  },
+  // Paths relative to Oxide.app/Contents.
+  "macos-aarch64": {
+    required: ["Info.plist", ...DICTATION_NOTICES.map((file) => `Resources/${file}`)],
+    problems: macosPackageProblems,
+  },
+};
+
+/**
+ * Whether an installed package can run every dictation backend it ships, with
+ * only a graphics driver on the machine. `files` are paths relative to the
+ * install folder (Windows) or Oxide.app/Contents (macOS). `imports` maps each
+ * executable to the DLLs or dylibs it loads; on macOS `sections` maps it to its
+ * Mach-O `segment,section` names and `infoPlist` is the Info.plist text.
+ */
+export function checkDictationPackage(platform, inventory = {}) {
+  const spec = Object.hasOwn(DICTATION_PACKAGES, platform) ? DICTATION_PACKAGES[platform] : undefined;
+  if (!spec) throw new Error(`Unknown package platform "${platform}": use windows-x64 or macos-aarch64.`);
+  const files = (inventory.files ?? []).map((file) => file.replaceAll("\\", "/"));
+  const present = new Set(files.map((file) => file.toLowerCase()));
+  const problems = spec.required.filter((file) => !present.has(file.toLowerCase())).map((file) => `${file} is missing`);
+  problems.push(...spec.problems({ ...inventory, files, present }));
+  if (problems.length > 0) return { ok: false, problems, message: `The ${platform} package is incomplete: ${problems.join("; ")}.` };
+  return { ok: true, problems, message: `The ${platform} package has every dictation backend, its runtime and its notices.` };
+}
+
+function windowsPackageProblems({ files, present, imports = {} }) {
+  const problems = [];
+  for (const driver of GRAPHICS_DRIVERS) {
+    // A bundled copy would shadow the installed driver and break it on other hardware.
+    if (present.has(driver)) problems.push(`${driver} is a graphics driver: remove it, the GPU vendor's driver provides it`);
+  }
+  // Every executable, and every DLL beside them (the workers' runtime).
+  const modules = files.filter((file) => /^[^/]+\.(exe|dll)$/i.test(file));
+  for (const module of modules) {
+    const dlls = imports[module] ?? Object.entries(imports).find(([name]) => name.toLowerCase() === module.toLowerCase())?.[1];
+    if (!Array.isArray(dlls)) {
+      problems.push(`${module}: imports were not read`);
+      continue;
+    }
+    const host = /\.exe$/i.test(module) && !DICTATION_WORKERS[module.toLowerCase()];
+    // Bundled DLLs are loaded only by workers, so they may need any driver.
+    const drivers = DICTATION_WORKERS[module.toLowerCase()]?.drivers ?? GRAPHICS_DRIVERS;
+    for (const dll of dlls.map((name) => name.toLowerCase())) {
+      if (host) {
+        if (GPU_LIBRARIES.has(dll)) problems.push(`${module} imports ${dll}; only a GPU worker may load it, so the app starts without that driver`);
+      } else if (GRAPHICS_DRIVERS.includes(dll)) {
+        if (!drivers.includes(dll)) problems.push(`${module} imports ${dll}, another backend's driver`);
+      } else if (present.has(dll) || isWindowsSystemDll(dll)) {
+        continue;
+      } else if (VC_RUNTIME.test(dll)) {
+        problems.push(`${module} imports ${dll}, the Visual C++ runtime: stage it beside the worker (app-local deployment)`);
+      } else {
+        problems.push(`${module} imports ${dll}, which is neither a Windows system DLL nor bundled beside it`);
+      }
+    }
+  }
+  return problems;
+}
+
+// Metal is linked into the app. Its shaders are compiled into the binary
+// (GGML_METAL_EMBED_LIBRARY), so nothing outside the bundle is needed.
+const METAL_LIBRARY_SECTION = "__DATA,__ggml_metallib";
+const MACOS_SYSTEM_LIBRARY = /^\/(System\/Library|usr\/lib)\//;
+
+function macosPackageProblems({ files, imports = {}, sections = {}, infoPlist = "" }) {
+  const problems = [];
+  const executables = files.filter((file) => /^MacOS\/[^/]+$/.test(file));
+  if (executables.length === 0) problems.push("MacOS/ has no executable");
+  for (const exe of executables) {
+    if (!Array.isArray(imports[exe])) problems.push(`${exe}: linked libraries were not read`);
+    for (const library of imports[exe] ?? []) {
+      if (!MACOS_SYSTEM_LIBRARY.test(library)) problems.push(`${exe} links ${library}, which is outside macOS`);
+    }
+  }
+  if (!executables.some((exe) => sections[exe]?.includes(METAL_LIBRARY_SECTION))) {
+    problems.push(`no executable has the embedded Metal library (${METAL_LIBRARY_SECTION})`);
+  }
+  if (!infoPlist.includes("NSMicrophoneUsageDescription")) problems.push("Info.plist has no NSMicrophoneUsageDescription");
+  return problems;
+}
+
+// STATUS_DLL_NOT_FOUND: Windows refused to start the process because an imported
+// DLL is absent. checkDictationPackage proves every non-driver import ships.
+const DLL_NOT_FOUND = 0xc0000135;
+const WORKER_PROTOCOL = 1;
+
+/**
+ * Whether an installed GPU worker started and answered a probe, on a machine
+ * whose driver may be missing. Any typed answer proves the worker and its
+ * bundled runtime load; `status` is the exit code (null if it was killed) and
+ * `response` the parsed frame, if any.
+ */
+export function checkWorkerProbe({ worker, status, response, engineVersion }) {
+  const fail = (message) => ({ ok: false, message: `${worker}: ${message}` });
+  if (status === null || status === undefined) return fail("the probe did not finish in time");
+  if (status >>> 0 === DLL_NOT_FOUND) {
+    return { ok: true, message: `${worker}: the graphics driver is not installed, so only this backend is unavailable` };
+  }
+  if (status !== 0) return fail(`exited with 0x${(status >>> 0).toString(16)} instead of answering`);
+  const { protocol_version: protocol, engine_version: engine, result } = response ?? {};
+  if (!result || (!result.Ok && !result.Err)) return fail("no valid answer to the probe");
+  if (protocol !== WORKER_PROTOCOL) return fail(`protocol ${protocol}, expected ${WORKER_PROTOCOL}`);
+  if (engine !== engineVersion) return fail(`engine ${engine}, expected ${engineVersion}`);
+  if (result.Err) {
+    // BackendError is externally tagged; CapabilityState is `{ status, details }`.
+    const [kind, detail] = typeof result.Err === "string" ? [result.Err] : Object.entries(result.Err)[0] ?? [];
+    return { ok: true, message: `${worker} started and reported ${detail?.status ?? kind}` };
+  }
+  const adapters = Array.isArray(result.Ok.Adapters) ? result.Ok.Adapters : [];
+  if (adapters.length === 0) return { ok: true, message: `${worker} started and found no adapter` };
+  const list = adapters.map(({ name, capability }) => `${name} (${capability?.status ?? "unknown"})`).join(", ");
+  return { ok: true, message: `${worker} started and found ${adapters.length} adapter${adapters.length > 1 ? "s" : ""}: ${list}` };
+}
+
 // Node platform names and how the plan names them.
 const OS_NAMES = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 const EVERY_OS = Object.keys(OS_NAMES);
@@ -352,7 +518,16 @@ const CHECKS = [
   // The Rust tests regenerate the bindings; a diff means they were not committed.
   { id: "bindings", tiers: ["pr"], platforms: RUST_OS, command: ["git", "diff", "--exit-code", "web/src/bindings.ts"] },
   { id: "bundle-macos", tiers: ["pr"], platforms: ["darwin"], command: ["web/node_modules/.bin/tauri", "build", "--ci", "--bundles", "app,dmg"] },
-  { id: "bundle-windows", tiers: ["pr"], platforms: ["win32"], command: ["web/node_modules/.bin/tauri.cmd", "build", "--ci", "--bundles", "nsis"] },
+  { id: "dictation-package-macos", tiers: ["pr"], platforms: ["darwin"], command: ["node", "tools/dictation-package.mjs", "verify", "macos-aarch64"] },
+  // The Vulkan and CUDA workers and their runtime, staged for the installer.
+  { id: "dictation-runtime", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "stage"] },
+  {
+    id: "bundle-windows", tiers: ["pr"], platforms: ["win32"],
+    command: ["web/node_modules/.bin/tauri.cmd", "build", "--ci", "--bundles", "nsis", "--config", "crates/oxide-app/tauri.windows-gpu.conf.json"],
+  },
+  { id: "dictation-package-windows", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "verify", "windows-x64"] },
+  { id: "dictation-smoke", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "smoke"] },
+  { id: "dictation-install", tiers: ["pr"], platforms: ["win32"], ci: CI_JOB_ONLY("bundle (windows)", "installs the setup silently into a scratch folder, then verifies and probes the installed copy") },
   { id: "cargo-deny", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("supply-chain", "installs cargo-deny and checks bans, licences and sources") },
   { id: "dependency-review", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("supply-chain", "asks GitHub to review dependencies the PR adds") },
   { id: "actionlint", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("automation", "installs actionlint") },

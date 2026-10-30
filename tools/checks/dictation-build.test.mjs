@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dictationBuild } from "../dictation-build.mjs";
+import { dictationBuild, releaseWorker } from "../dictation-build.mjs";
 
 test("CPU, Vulkan and CUDA builds isolate inherited Cargo and CMake state", () => {
   const inherited = {
@@ -53,4 +53,20 @@ test("Vulkan and CUDA build separate locked workers without sharing the host nat
   assert.notEqual(cuda.worker.env.CARGO_TARGET_DIR, cuda.env.CARGO_TARGET_DIR);
 
   assert.equal(dictationBuild("cpu", {}).worker, undefined);
+});
+
+test("packaged workers are release builds tuned for any x64 CPU and CUDA GPU, not the build machine", () => {
+  const inherited = { CARGO_TARGET_DIR: "short-root", CMAKE_GENERATOR_INSTANCE: "old-vs", GGML_NATIVE: "ON", GGML_CUDA: "ON" };
+  for (const backend of ["vulkan", "cuda"]) {
+    const worker = releaseWorker(backend, inherited);
+    assert.deepEqual(worker.args, ["build", "--locked", "--release", "--manifest-path", `crates/oxide-${backend}-worker/Cargo.toml`]);
+    // GGML_NATIVE=OFF selects ggml's portable AVX2 baseline and its CUDA architecture list.
+    assert.equal(worker.env.GGML_NATIVE, "OFF");
+    assert.equal(worker.env.GGML_CUDA, undefined);
+    assert.equal(worker.env.CMAKE_GENERATOR_INSTANCE, undefined);
+    assert.equal(worker.env.CMAKE_GENERATOR, "Ninja");
+    assert.equal(worker.env.CARGO_TARGET_DIR, dictationBuild(backend, inherited).worker.env.CARGO_TARGET_DIR);
+    assert.match(worker.exe.replaceAll("\\", "/"), new RegExp(`/release/oxide-${backend}-worker\\.exe$`));
+  }
+  assert.throws(() => releaseWorker("cpu", {}), /vulkan or cuda/);
 });

@@ -1316,6 +1316,7 @@ dependencies = [
  "serde_json",
  "whisper-rs",
  "whisper-rs-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -42,8 +42,10 @@ download. See [resource policy and examples](dictation-resources.md).
 ## GPU and building
 
 CPU works on all supported desktop platforms. macOS builds include Metal.
-Windows x64 uses an optional `oxide-vulkan-worker.exe` for Vulkan, the shared
-AMD/NVIDIA path without ROCm/HIP. RX 5600 XT inference is physically validated;
+The Windows x64 installer ships `oxide-vulkan-worker.exe` for Vulkan, the shared
+AMD/NVIDIA path without ROCm/HIP, and `oxide-cuda-worker.exe` for NVIDIA CUDA,
+with their runtime; see [Packaging and distribution](#packaging-and-distribution).
+RX 5600 XT inference is physically validated (development build);
 NVIDIA inference remains unvalidated. The application itself links CPU Whisper only:
 a missing Vulkan loader, incompatible driver or worker crash leaves CPU usable.
 Explicit GPU mode rejects inference without native GPU execution evidence.
@@ -89,10 +91,11 @@ check runner keep their existing temporary-build behavior.
 
 The worker has an independent Cargo workspace/lockfile so its Vulkan feature
 cannot unify into the CPU host during a workspace build. The legacy
-`dictation-vulkan` app feature is a compatibility marker; enabling it alone
-does not build or package the worker. Installer integration belongs to the
-packaging ticket in #225. End users of a packaged worker need a compatible
-graphics driver, not a developer SDK or shader compiler.
+`dictation-vulkan` and `dictation-cuda` app features are compatibility markers;
+enabling them alone does not build or package a worker. Installers get the
+workers from `node tools/dictation-package.mjs stage` (see
+[Packaging and distribution](#packaging-and-distribution)). End users of a packaged
+worker need a compatible graphics driver, not a developer SDK or shader compiler.
 
 Use a short `CARGO_TARGET_DIR` as shown: the shader generator's deeply nested
 compiler checks can exceed MSVC's object/PDB path limit, producing misleading
@@ -280,10 +283,125 @@ back to CPU or Vulkan dictation without crashing.
   checks. Verification on physical NVIDIA hardware remains an explicit validation gap
   carried to the final acceptance ticket #235.
 - **Redistribution and packaging**:
-  End users must not be required to install the CUDA Toolkit. The packaging ticket (#234)
-  owns bundling the required runtime libraries (`cudart64_*.dll`, `cublas64_*.dll`,
-  `cublasLt64_*.dll`) alongside `oxide-cuda-worker.exe` with retained NVIDIA redistribution
-  notices.
+  End users do not install the CUDA Toolkit. The installer places `cudart64_12.dll`,
+  `cublas64_12.dll` and `cublasLt64_12.dll` beside `oxide-cuda-worker.exe`, with the
+  NVIDIA notice in `licenses/cuda.txt`. See [Packaging and distribution](#packaging-and-distribution).
+
+## Packaging and distribution
+
+Installers contain every dictation backend of their platform. End users install
+only a graphics driver: never Visual Studio, CMake, Python, the Vulkan SDK, the
+CUDA Toolkit or a Cargo feature. Model weights are not bundled.
+
+| Package | Backends | Beside the app | The user needs |
+| --- | --- | --- | --- |
+| Windows x64 setup (NSIS) | CPU (in the app), Vulkan (`oxide-vulkan-worker.exe`), CUDA (`oxide-cuda-worker.exe`) | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, any Visual C++ runtime DLL a worker imports, `dictation-runtime.json`, `licenses/` | Windows 10 1803 or later. Vulkan: the GPU vendor's driver with Vulkan 1.2. CUDA: an NVIDIA driver that supports CUDA 12.9 (see [NVIDIA's CUDA 12.9 release notes](https://docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/)) and compute capability 5.0 or later |
+| macOS Apple Silicon (`.app`, `.dmg`) | CPU and Metal, both in the app | `Resources/licenses/` | macOS 11 or later on Apple Silicon. Nothing to install |
+
+### Runtime discovery
+
+- **Workers** are found beside the app executable (`current_exe()`), never through
+  `PATH`. `OXIDE_VULKAN_WORKER` and `OXIDE_CUDA_WORKER` are development overrides.
+- **Runtime DLLs** sit beside the workers. Windows loads a process's imports from
+  its own folder first, so the bundled CUDA runtime is used whatever CUDA Toolkit
+  or `PATH` the machine has.
+- **Drivers** (`vulkan-1.dll`, `nvcuda.dll`) always come from the installed graphics
+  driver; packages never contain them. Without one, its worker cannot start (or
+  reports *driver/runtime unavailable*) and only that backend is unavailable. The
+  app itself imports no GPU library, so it and CPU dictation start on any machine.
+- **Metal** is linked into the app. Its shaders are compiled into the binary
+  (`GGML_METAL_EMBED_LIBRARY`, section `__DATA,__ggml_metallib`), so no `.metallib`
+  or developer tool is looked up at run time.
+- **`dictation-runtime.json`**, beside `oxide-app.exe` on Windows, is the diagnostic
+  build manifest: whisper-rs, whisper-rs-sys and whisper.cpp versions, build
+  settings (portable native code, CUDA Toolkit and Vulkan SDK versions), each
+  backend and what it requires, and every staged file with its size and SHA-256.
+  `BuildManifest::current()` lists the backends the running app found.
+
+Packaged native code is built with `GGML_NATIVE=OFF`. ggml then targets a portable
+x64 baseline (AVX2, FMA, F16C) and compiles CUDA kernels for compute capability 5.0
+and later (prebuilt for 8.6, 8.9 and Blackwell; other GPUs JIT-compile on first
+use, which the driver caches). Without it, a CI runner's AVX-512 or the build
+machine's GPU would leak into the installer.
+
+### Build prerequisites and commands
+
+| Building | Build machine needs |
+| --- | --- |
+| macOS app | Xcode Command Line Tools, CMake, rustup, Node.js and pnpm |
+| Windows app (CPU) | Visual Studio Build Tools (Desktop development with C++, CMake, Ninja), LLVM/libclang, rustup, Node.js and pnpm |
+| Windows Vulkan and CUDA workers | Also Vulkan SDK 1.4.363.0 (glslc) and CUDA Toolkit 12.9.1 (nvcc, runtime, cuBLAS, CCCL) |
+
+`node tools/dictation-package.mjs setup` installs the pinned Vulkan SDK and CUDA
+Toolkit after checking their SHA-256 (pins in `GPU_BUILD_SDKS`, `tools/ci/policy.mjs`).
+Run it once from an elevated prompt; it installs no display driver. Then, from the
+repository root in a new **x64 Native Tools Command Prompt**:
+
+```bat
+set LIBCLANG_PATH=C:\Program Files\LLVM\bin
+set CARGO_TARGET_DIR=C:\oxide-build
+set GGML_NATIVE=OFF
+pnpm --dir web install --frozen-lockfile
+node tools/dictation-package.mjs stage
+web\node_modules\.bin\tauri.cmd build --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json
+node tools/dictation-package.mjs verify windows-x64
+node tools/dictation-package.mjs smoke
+```
+
+`stage` builds both workers in release mode (in `CARGO_TARGET_DIR`'s `vw` and `cw`),
+then stages them, the DLLs they import (found by reading their import tables) and
+the manifest in `target/dictation-runtime/windows-x64/`.
+`tauri.windows-gpu.conf.json` adds that folder and the extra notices to the installer;
+without staging, the bundle fails with a missing resource. `verify` and `smoke` check
+the built tree; pass an install folder to check an installation instead. Omit
+`GGML_NATIVE=OFF` only for a build you run on the same machine.
+`node tools/check.mjs` runs `stage`, the bundle, `verify` and `smoke` on Windows,
+so the full local tier there needs these SDKs.
+
+For development, `tauri dev` and `node tools/dictation-build.mjs <cpu|vulkan|cuda>`
+(above) need no staging. On macOS, `pnpm --dir web build:app` builds the app; check
+it with `node tools/dictation-package.mjs verify macos-aarch64 <path to Oxide.app>`.
+
+### Checks and what each prevents
+
+| Check | Runs in | Prevents |
+| --- | --- | --- |
+| `verify windows-x64` | local runner (built tree); `bundle (windows)` CI job (installed copy) | a missing worker, runtime DLL, notice or manifest; a bundled driver DLL; the app importing a GPU library (it would not start without that driver); a worker or DLL import that is neither a Windows system DLL nor bundled (it would fail on a clean machine); a staged file changing before packaging |
+| `smoke` | local runner; CI on the installed copy | a worker that crashes, cannot load its bundled runtime, or speaks another protocol or engine version once SDK variables and developer `PATH` are gone. A missing driver passes: it only disables that backend |
+| `smoke --launch` | CI only (no GPU, no NVIDIA driver) | the installed app failing to start without a usable GPU runtime |
+| `verify macos-aarch64` | local runner; `bundle (macos)` CI job | linking a library outside macOS (such as Homebrew's), a missing embedded Metal library, missing notices or microphone description |
+| `cargo deny` on both worker lockfiles | `supply-chain` CI job | a worker dependency under a licence or from a source `deny.toml` does not allow |
+| `releaseWorker` tests | tooling suite | packaged workers tuned to the build machine's CPU or GPU |
+
+These checks prove packaging, loading and CPU startup. They do not prove GPU
+offload or performance: hosted runners have no GPU. Hardware validation of
+installed packages (NVIDIA CUDA and Vulkan, AMD Vulkan, Apple Silicon Metal) is a
+release gate tracked in #235; packaging success alone does not claim it.
+
+### Troubleshooting
+
+- **`stage` reports a missing `glslc.exe`, `nvcc.exe` or `VCToolsRedistDir`**: run
+  `setup`, then open a new x64 Native Tools Command Prompt.
+- **`verify` reports "imports X, which is neither a Windows system DLL nor bundled"**:
+  a dependency changed. If X is redistributable, stage it and add its notice; if it
+  is part of every supported Windows, add it to `WINDOWS_SYSTEM_DLLS` with a reason.
+- **Settings shows Vulkan or CUDA as driver/runtime unavailable**: install or update
+  the GPU vendor's driver. The Vulkan SDK and CUDA Toolkit do not help end users.
+- **CUDA is unavailable on an NVIDIA GPU**: update to a driver that supports CUDA
+  12.9. GPUs below compute capability 5.0 are not supported.
+- **The first CUDA dictation on a GPU other than RTX 30, 40 or 50 series is slow**:
+  the driver is compiling kernels once; later runs reuse its cache.
+- **Settings reports CPU instructions incompatible**: the CPU lacks AVX2, FMA or
+  F16C, which every packaged backend needs.
+
+### Support limits
+
+- Windows x64 and macOS Apple Silicon are the packaged platforms. Intel Macs get
+  no Metal claim; Linux builds from source with CPU only; Windows on ARM has no package.
+- cuBLAS dominates the Windows installer's size, and updates download the whole
+  installer. Check the size of the CI artifact when changing CUDA.
+- Physical results so far are from development builds: RX 5600 XT Vulkan and
+  Apple M1 Pro Metal (above). No NVIDIA or installed-package result is recorded yet (#235).
 
 ## Licenses
 
@@ -291,14 +409,18 @@ Oxide is MIT. whisper.cpp and the original OpenAI model weights are MIT; whisper
 is Unlicense; CPAL is Apache-2.0; sysinfo is MIT. Their licenses permit commercial
 redistribution. The MIT notices for whisper.cpp and the model are retained in
 `docs/licenses/whisper.txt`. The model download URL follows whisper.cpp's official
-download script; its LFS SHA-256 is pinned in Core. Review license terms when
-adding or redistributing native GPU dependencies. The CI removal on main also
-removed the cargo-deny configuration; restoring automated license checks is
-tracked separately in issue #224.
+download script; its LFS SHA-256 is pinned in Core. Model weights are never bundled:
+each is downloaded only when Download is pressed. Review license terms when
+adding or redistributing native GPU dependencies. `deny.toml` is the Rust licence
+policy (including the Unlicense allowance for whisper-rs); the `supply-chain` CI job
+applies it to the workspace and to both worker lockfiles.
 
 The worker's ash binding is MIT/Apache-2.0. The diagnostic WAV reader (hound) is
-Apache-2.0. The local build does not redistribute the Vulkan SDK or a driver;
-packaged runtime dependencies and their retained notices are owned by #234.
+Apache-2.0. Packages never redistribute the Vulkan SDK, the Vulkan loader or a
+driver. The Windows installer redistributes the CUDA runtime and cuBLAS
+(`licenses/cuda.txt`) and, when a worker imports it, the Visual C++ runtime
+(`licenses/msvc-runtime.txt`); every package carries `licenses/whisper.txt` and
+`licenses/dictation-fixture.txt`.
 
 ## Settings status and recovery
 

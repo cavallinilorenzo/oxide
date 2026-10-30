@@ -11,6 +11,10 @@ whisper-rs = { version = "=0.16.0", features = ["cuda"] }
 whisper-rs-sys = "=0.15.0"
 serde_json = "1"
 
+# Loads nvcuda.dll at run time, so a machine without the NVIDIA driver gets a typed answer.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+
 [profile.dev]
 debug = "line-tables-only"
 incremental = false

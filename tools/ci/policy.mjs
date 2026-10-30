@@ -354,11 +354,14 @@ export const GPU_BUILD_SDKS = {
 // Dictation packaging: what an installed package must contain and what its
 // executables may load. The host links CPU Whisper only; each GPU backend is an
 // isolated worker beside it, with its redistributable runtime next to it.
-const CUDA_RUNTIME = ["cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"];
+export const CUDA_RUNTIME = ["cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"];
+// The CUDA worker delay-loads its driver (its build.rs), so without one it still
+// starts, loads its bundled runtime and answers the probe itself.
 const DICTATION_WORKERS = {
-  "oxide-vulkan-worker.exe": { drivers: ["vulkan-1.dll"], runtime: [] },
-  "oxide-cuda-worker.exe": { drivers: ["nvcuda.dll"], runtime: CUDA_RUNTIME },
+  "oxide-vulkan-worker.exe": { drivers: ["vulkan-1.dll"], delayLoaded: [] },
+  "oxide-cuda-worker.exe": { drivers: ["nvcuda.dll"], delayLoaded: ["nvcuda.dll"] },
 };
+export const DICTATION_WORKER_NAMES = Object.keys(DICTATION_WORKERS);
 const GRAPHICS_DRIVERS = Object.values(DICTATION_WORKERS).flatMap(({ drivers }) => drivers);
 const GPU_LIBRARIES = new Set([...GRAPHICS_DRIVERS, ...CUDA_RUNTIME.map((dll) => dll.toLowerCase())]);
 // The Visual C++ runtime is a separate redistributable; the Universal CRT
@@ -423,12 +426,16 @@ function windowsPackageProblems({ files, present, imports = {} }) {
     }
     const host = /\.exe$/i.test(module) && !DICTATION_WORKERS[module.toLowerCase()];
     // Bundled DLLs are loaded only by workers, so they may need any driver.
-    const drivers = DICTATION_WORKERS[module.toLowerCase()]?.drivers ?? GRAPHICS_DRIVERS;
+    const worker = DICTATION_WORKERS[module.toLowerCase()];
+    const drivers = worker?.drivers ?? GRAPHICS_DRIVERS;
     for (const dll of dlls.map((name) => name.toLowerCase())) {
       if (host) {
         if (GPU_LIBRARIES.has(dll)) problems.push(`${module} imports ${dll}; only a GPU worker may load it, so the app starts without that driver`);
       } else if (GRAPHICS_DRIVERS.includes(dll)) {
         if (!drivers.includes(dll)) problems.push(`${module} imports ${dll}, another backend's driver`);
+        else if (worker?.delayLoaded.includes(dll)) {
+          problems.push(`${module} imports ${dll} directly: delay-load it, so the worker can report a missing driver`);
+        }
       } else if (present.has(dll) || isWindowsSystemDll(dll)) {
         continue;
       } else if (VC_RUNTIME.test(dll)) {
@@ -478,6 +485,8 @@ export function checkWorkerProbe({ worker, status, response, engineVersion }) {
   const fail = (message) => ({ ok: false, message: `${worker}: ${message}` });
   if (status === null || status === undefined) return fail("the probe did not finish in time");
   if (status >>> 0 === DLL_NOT_FOUND) {
+    // A worker that delay-loads its driver can only miss a DLL it was meant to ship.
+    if (DICTATION_WORKERS[String(worker).toLowerCase()]?.delayLoaded.length) return fail("a bundled DLL failed to load");
     return { ok: true, message: `${worker}: the graphics driver is not installed, so only this backend is unavailable` };
   }
   if (status !== 0) return fail(`exited with 0x${(status >>> 0).toString(16)} instead of answering`);
@@ -494,6 +503,33 @@ export function checkWorkerProbe({ worker, status, response, engineVersion }) {
   if (adapters.length === 0) return { ok: true, message: `${worker} started and found no adapter` };
   const list = adapters.map(({ name, capability }) => `${name} (${capability?.status ?? "unknown"})`).join(", ");
   return { ok: true, message: `${worker} started and found ${adapters.length} adapter${adapters.length > 1 ? "s" : ""}: ${list}` };
+}
+
+const RUNTIME_MANIFEST = "dictation-runtime.json";
+
+/**
+ * What changed between staging the Windows runtime and checking a package.
+ * `hashes` maps each file present in the package to its SHA-256.
+ */
+export function runtimeManifestProblems(manifest, hashes) {
+  if (!Array.isArray(manifest?.files)) return [`${RUNTIME_MANIFEST} is missing or unreadable`];
+  return manifest.files.flatMap(({ path, sha256 }) => {
+    if (!(path in hashes)) return [`${path} is listed in ${RUNTIME_MANIFEST} but missing`];
+    return hashes[path] === sha256 ? [] : [`${path} differs from the staged build`];
+  });
+}
+
+/**
+ * Whether the installed app started on a machine with no usable GPU runtime.
+ * `running` means it was still up after `seconds`; otherwise `exitCode` or
+ * `error` says how it ended.
+ */
+export function checkAppLaunch({ app, running, exitCode, error, seconds }) {
+  if (!app) return { ok: false, message: "There is no app executable to launch." };
+  if (running) return { ok: true, message: `${app} started and was still running after ${seconds} s` };
+  if (error) return { ok: false, message: `${app} could not start: ${error}` };
+  if (exitCode === 0) return { ok: true, message: `${app} started and exited normally` };
+  return { ok: false, message: `${app} exited 0x${(exitCode >>> 0).toString(16)} during startup` };
 }
 
 // Node platform names and how the plan names them.

@@ -298,6 +298,11 @@ CUDA Toolkit or a Cargo feature. Model weights are not bundled.
 | Windows x64 setup (NSIS) | CPU (in the app), Vulkan (`oxide-vulkan-worker.exe`), CUDA (`oxide-cuda-worker.exe`) | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, any Visual C++ runtime DLL a worker imports, `dictation-runtime.json`, `licenses/` | Windows 10 1803 or later. Vulkan: the GPU vendor's driver with Vulkan 1.2. CUDA: an NVIDIA driver that supports CUDA 12.9 (see [NVIDIA's CUDA 12.9 release notes](https://docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/)) and compute capability 5.0 or later |
 | macOS Apple Silicon (`.app`, `.dmg`) | CPU and Metal, both in the app | `Resources/licenses/` | macOS 11 or later on Apple Silicon. Nothing to install |
 
+**The user needs** column lists what the packages are built to require, not tested
+results. Installed packages have not yet been tested on any physical GPU (#235), so
+compatibility beyond the [Support limits](#support-limits) below is unknown; Settings
+shows each backend's actual state on the user's machine.
+
 ### Runtime discovery
 
 - **Workers** are found beside the app executable (`current_exe()`), never through
@@ -306,16 +311,20 @@ CUDA Toolkit or a Cargo feature. Model weights are not bundled.
   its own folder first, so the bundled CUDA runtime is used whatever CUDA Toolkit
   or `PATH` the machine has.
 - **Drivers** (`vulkan-1.dll`, `nvcuda.dll`) always come from the installed graphics
-  driver; packages never contain them. Without one, its worker cannot start (or
-  reports *driver/runtime unavailable*) and only that backend is unavailable. The
-  app itself imports no GPU library, so it and CPU dictation start on any machine.
+  driver; packages never contain them. Without `vulkan-1.dll`, Windows refuses to
+  start the Vulkan worker and Oxide reports *driver/runtime unavailable*. The CUDA
+  worker delay-loads `nvcuda.dll` (its `build.rs`): without the driver it still
+  starts, loads its bundled runtime and reports *driver/runtime unavailable* itself.
+  Either way only that backend is unavailable. The app itself imports no GPU
+  library, so it starts on any machine with CPU dictation available.
 - **Metal** is linked into the app. Its shaders are compiled into the binary
   (`GGML_METAL_EMBED_LIBRARY`, section `__DATA,__ggml_metallib`), so no `.metallib`
   or developer tool is looked up at run time.
-- **`dictation-runtime.json`**, beside `oxide-app.exe` on Windows, is the diagnostic
-  build manifest: whisper-rs, whisper-rs-sys and whisper.cpp versions, build
-  settings (portable native code, CUDA Toolkit and Vulkan SDK versions), each
-  backend and what it requires, and every staged file with its size and SHA-256.
+- **`dictation-runtime.json`**, beside the app executable on Windows, is the
+  diagnostic build manifest for support and the package checks: whisper-rs,
+  whisper-rs-sys and whisper.cpp versions, build settings (portable native code,
+  CUDA Toolkit and Vulkan SDK versions), each backend and what it requires, and
+  every staged file with its size and SHA-256. The app does not read it;
   `BuildManifest::current()` lists the backends the running app found.
 
 Packaged native code is built with `GGML_NATIVE=OFF`. ggml then targets a portable
@@ -334,7 +343,9 @@ machine's GPU would leak into the installer.
 
 `node tools/dictation-package.mjs setup` installs the pinned Vulkan SDK and CUDA
 Toolkit after checking their SHA-256 (pins in `GPU_BUILD_SDKS`, `tools/ci/policy.mjs`).
-Run it once from an elevated prompt; it installs no display driver. Then, from the
+Run it once from an elevated prompt; it installs no display driver. The CUDA pin
+covers NVIDIA's network installer, which then downloads the selected components
+itself; Oxide does not hash those components separately. Then, from the
 repository root in a new **x64 Native Tools Command Prompt**:
 
 ```bat
@@ -367,8 +378,8 @@ it with `node tools/dictation-package.mjs verify macos-aarch64 <path to Oxide.ap
 | Check | Runs in | Prevents |
 | --- | --- | --- |
 | `verify windows-x64` | local runner (built tree); `bundle (windows)` CI job (installed copy) | a missing worker, runtime DLL, notice or manifest; a bundled driver DLL; the app importing a GPU library (it would not start without that driver); a worker or DLL import that is neither a Windows system DLL nor bundled (it would fail on a clean machine); a staged file changing before packaging |
-| `smoke` | local runner; CI on the installed copy | a worker that crashes, cannot load its bundled runtime, or speaks another protocol or engine version once SDK variables and developer `PATH` are gone. A missing driver passes: it only disables that backend |
-| `smoke --launch` | CI only (no GPU, no NVIDIA driver) | the installed app failing to start without a usable GPU runtime |
+| `smoke` | local runner; CI on the installed copy | a worker that crashes or speaks another protocol or engine version once SDK variables and developer `PATH` are gone; for CUDA, which starts without a driver, a bundled runtime DLL that fails to load. A missing driver passes: it only disables that backend. The SDKs stay installed on the machine, so a Vulkan loader the SDK placed in the system folder may still be found |
+| `smoke --launch` | CI only (no GPU, no NVIDIA driver) | the installed app failing to start without a usable GPU runtime. It proves startup only: new installations have dictation disabled, and CPU transcription without workers is covered by the Rust dictation tests |
 | `verify macos-aarch64` | local runner; `bundle (macos)` CI job | linking a library outside macOS (such as Homebrew's), a missing embedded Metal library, missing notices or microphone description |
 | `cargo deny` on both worker lockfiles | `supply-chain` CI job | a worker dependency under a licence or from a source `deny.toml` does not allow |
 | `releaseWorker` tests | tooling suite | packaged workers tuned to the build machine's CPU or GPU |

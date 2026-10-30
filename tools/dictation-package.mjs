@@ -20,16 +20,17 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { assertBuildSpace } from "./checks/build-space.mjs";
 import { peImports } from "./checks/pe-imports.mjs";
-import { checkDictationPackage, checkWorkerProbe, GPU_BUILD_SDKS } from "./ci/policy.mjs";
+import {
+  checkAppLaunch, checkDictationPackage, checkWorkerProbe, CUDA_RUNTIME, DICTATION_WORKER_NAMES, GPU_BUILD_SDKS, runtimeManifestProblems,
+} from "./ci/policy.mjs";
 import { releaseWorker } from "./dictation-build.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 // Fixed, so tauri.windows-gpu.conf.json can name each staged file.
 export const STAGING = join(repoRoot, "target", "dictation-runtime", "windows-x64");
 const MANIFEST = "dictation-runtime.json";
-const WORKERS = { vulkan: "oxide-vulkan-worker.exe", cuda: "oxide-cuda-worker.exe" };
 // Redistributable per the NVIDIA CUDA EULA (Attachment A); see docs/licenses/cuda.txt.
-const CUDA_REDISTRIBUTABLE = /^(cudart|cublas|cublasLt)64_\d+\.dll$/i;
+const CUDA_REDISTRIBUTABLE = new Set(CUDA_RUNTIME.map((dll) => dll.toLowerCase()));
 
 /**
  * The redistributable DLLs `roots` load, directly or through each other.
@@ -50,17 +51,14 @@ export function runtimeFiles(roots, sources, importsOf) {
   return [...staged.values()];
 }
 
-/** What changed between staging and packaging. `hashes` maps each present file to its SHA-256. */
-export function manifestProblems(manifest, hashes) {
-  if (!Array.isArray(manifest?.files)) return [`${MANIFEST} is missing or unreadable`];
-  return manifest.files.flatMap(({ path, sha256 }) => {
-    if (!(path in hashes)) return [`${path} is listed in ${MANIFEST} but missing`];
-    return hashes[path] === sha256 ? [] : [`${path} differs from the staged build`];
-  });
-}
-
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const targetDir = () => resolve(repoRoot, process.env.CARGO_TARGET_DIR ?? "target");
+// An install folder, or the built layout tauri-build mirrors into <target>/release.
+const windowsDir = (location) => resolve(location ?? join(targetDir(), "release"));
+
+function readManifest(dir) {
+  try { return JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")); } catch { return undefined; }
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", ...options });
@@ -116,7 +114,7 @@ function runtimeSources(env) {
   const sources = new Map();
   const cudaBin = join(env.CUDA_PATH, "bin");
   for (const name of readdirSync(cudaBin)) {
-    if (CUDA_REDISTRIBUTABLE.test(name)) sources.set(name.toLowerCase(), join(cudaBin, name));
+    if (CUDA_REDISTRIBUTABLE.has(name.toLowerCase())) sources.set(name.toLowerCase(), join(cudaBin, name));
   }
   // vcvars sets VCToolsRedistDir; Microsoft permits app-local copies of these DLLs.
   const redist = join(env.VCToolsRedistDir, "x64");
@@ -146,12 +144,12 @@ function stage() {
   for (const tool of ["cl.exe", "cmake.exe", "ninja.exe", "glslc.exe", "nvcc.exe"]) {
     if (spawnSync("where.exe", [tool], { stdio: "ignore" }).status !== 0) throw new Error(`Missing ${tool}: see docs/dictation.md#packaging-and-distribution`);
   }
-  const built = Object.keys(WORKERS).map((backend) => {
-    const worker = releaseWorker(backend);
+  const workers = ["vulkan", "cuda"].map((backend) => releaseWorker(backend));
+  for (const worker of workers) {
     assertBuildSpace(repoRoot);
     run("cargo", worker.args, { cwd: repoRoot, env: worker.env });
-    return worker.exe;
-  });
+  }
+  const built = workers.map(({ exe }) => exe);
   assertBuildSpace(repoRoot);
 
   rmSync(STAGING, { recursive: true, force: true });
@@ -165,11 +163,11 @@ function stage() {
     schema: 1,
     platform: "windows-x64",
     native: nativeVersions(),
-    build: { ggmlNative: "OFF", cudaToolkit: basename(process.env.CUDA_PATH), vulkanSdk: basename(process.env.VULKAN_SDK) },
+    build: { ggmlNative: workers[0].env.GGML_NATIVE, cudaToolkit: basename(process.env.CUDA_PATH), vulkanSdk: basename(process.env.VULKAN_SDK) },
     backends: [
-      { id: "cpu", in: "oxide-app.exe", requires: "an x64 CPU with AVX2, FMA and F16C" },
-      { id: "vulkan", worker: WORKERS.vulkan, requires: "a Vulkan 1.2 driver with 16-bit storage and timestamp queries" },
-      { id: "cuda", worker: WORKERS.cuda, requires: `an NVIDIA driver for CUDA ${GPU_BUILD_SDKS.cuda.version} and compute capability 5.0 or later` },
+      { id: "cpu", in: "the app", requires: "an x64 CPU with AVX2, FMA and F16C" },
+      { id: "vulkan", worker: basename(built[0]), requires: "a Vulkan 1.2 driver with 16-bit storage and timestamp queries" },
+      { id: "cuda", worker: basename(built[1]), requires: `an NVIDIA driver for CUDA ${GPU_BUILD_SDKS.cuda.version} and compute capability 5.0 or later` },
     ],
     files,
   };
@@ -216,13 +214,11 @@ function macosInventory(app) {
 
 function verify(platform, location) {
   if (platform === "windows-x64") {
-    const dir = resolve(location ?? join(targetDir(), "release"));
-    const inventory = windowsInventory(dir);
-    const result = checkDictationPackage(platform, inventory);
-    let manifest;
-    try { manifest = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")); } catch { manifest = undefined; }
+    const dir = windowsDir(location);
+    const result = checkDictationPackage(platform, windowsInventory(dir));
+    const manifest = readManifest(dir);
     const hashes = Object.fromEntries((manifest?.files ?? []).filter(({ path }) => existsSync(join(dir, path))).map(({ path }) => [path, sha256(join(dir, path))]));
-    const problems = [...result.problems, ...manifestProblems(manifest, hashes)];
+    const problems = [...result.problems, ...runtimeManifestProblems(manifest, hashes)];
     return report(problems, result.message, dir);
   }
   if (platform === "macos-aarch64") {
@@ -265,27 +261,19 @@ function endUserEnv() {
 
 const LAUNCH_SECONDS = 15;
 
-// The installed app must start, and stay up, with no GPU runtime it could load.
-async function launchHost(dir, env) {
-  const host = readdirSync(dir).find((name) => /\.exe$/i.test(name) && !/^(uninstall|oxide-\w+-worker)\.exe$/i.test(name));
-  if (!host) return `no app executable in ${dir}`;
-  const child = spawn(join(dir, host), [], { cwd: dir, env, stdio: "ignore", windowsHide: true });
-  const exited = await Promise.race([
-    new Promise((done) => child.once("exit", (code) => done({ code }))),
-    new Promise((done) => child.once("error", (error) => done({ error }))),
+// Start the installed app with no GPU runtime it could load, and see whether it stays up.
+async function launchApp(dir, env) {
+  const workers = new Set(DICTATION_WORKER_NAMES);
+  const app = readdirSync(dir).find((name) => /\.exe$/i.test(name) && name.toLowerCase() !== "uninstall.exe" && !workers.has(name.toLowerCase()));
+  if (!app) return checkAppLaunch({ running: false, seconds: LAUNCH_SECONDS });
+  const child = spawn(join(dir, app), [], { cwd: dir, env, stdio: "ignore", windowsHide: true });
+  const ended = await Promise.race([
+    new Promise((done) => child.once("exit", (exitCode) => done({ exitCode }))),
+    new Promise((done) => child.once("error", (error) => done({ error: error.message }))),
     new Promise((done) => setTimeout(() => done(undefined), LAUNCH_SECONDS * 1000)),
   ]);
-  if (!exited) {
-    child.kill();
-    console.log(`${host} started and was still running after ${LAUNCH_SECONDS} s`);
-    return undefined;
-  }
-  if (exited.error) return `${host} could not start: ${exited.error.message}`;
-  if (exited.code === 0) {
-    console.log(`${host} started and exited normally`);
-    return undefined;
-  }
-  return `${host} exited 0x${(exited.code >>> 0).toString(16)} during startup`;
+  if (!ended) child.kill();
+  return checkAppLaunch({ app, running: !ended, ...ended, seconds: LAUNCH_SECONDS });
 }
 
 /**
@@ -294,13 +282,12 @@ async function launchHost(dir, env) {
  */
 async function smoke(location, { launch = false } = {}) {
   requireWindows("smoke");
-  const dir = resolve(location ?? join(targetDir(), "release"));
-  let engineVersion;
-  try { engineVersion = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")).native.whisperCpp; } catch { /* checked below */ }
+  const dir = windowsDir(location);
+  const engineVersion = readManifest(dir)?.native?.whisperCpp;
   if (!engineVersion) return report([`${MANIFEST} is missing or names no whisper.cpp version`], "", dir);
   const env = endUserEnv();
   let failed = 0;
-  for (const worker of Object.values(WORKERS)) {
+  for (const worker of DICTATION_WORKER_NAMES) {
     const path = join(dir, worker);
     if (!existsSync(path)) {
       console.error(`${worker}: missing from ${dir}`);
@@ -316,9 +303,10 @@ async function smoke(location, { launch = false } = {}) {
     }
   }
   if (launch) {
-    const problem = await launchHost(dir, env);
-    if (problem) {
-      console.error(problem);
+    const verdict = await launchApp(dir, env);
+    if (verdict.ok) console.log(verdict.message);
+    else {
+      console.error(verdict.message);
       failed++;
     }
   }

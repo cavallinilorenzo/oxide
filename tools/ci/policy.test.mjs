@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   bumpVersion, checkDictationPackage, checkPrTitle, checkUpdateFeed, checkWorkerProbe, checkReleaseVersion, checkTauriAlignment, commandLine, dependabotDecision, evaluateGate, lanesFor,
-  GPU_BUILD_SDKS, localPlan, previousReleaseTag, releaseNotes, updateManifest,
+  checkAppLaunch, GPU_BUILD_SDKS, localPlan, previousReleaseTag, releaseNotes, runtimeManifestProblems, updateManifest,
 } from "./policy.mjs";
 
 const ALL_ON = { web: true, rust: true, bundle: true, supplyChain: true, automation: true };
@@ -531,7 +531,8 @@ describe("checkDictationPackage", () => {
       "oxide-app.exe": ["KERNEL32.dll", "USER32.dll", "ole32.dll", "api-ms-win-core-synch-l1-2-0.dll"],
       "uninstall.exe": ["KERNEL32.dll", "SHELL32.dll"],
       "oxide-vulkan-worker.exe": ["vulkan-1.dll", "KERNEL32.dll", "ntdll.dll", "bcryptprimitives.dll"],
-      "oxide-cuda-worker.exe": ["cudart64_12.dll", "cublas64_12.dll", "nvcuda.dll", "KERNEL32.dll", "ADVAPI32.dll"],
+      // nvcuda.dll is delay-loaded, so it is not in the import table.
+      "oxide-cuda-worker.exe": ["cudart64_12.dll", "cublas64_12.dll", "KERNEL32.dll", "ADVAPI32.dll"],
       "cudart64_12.dll": ["KERNEL32.dll"],
       "cublas64_12.dll": ["cublasLt64_12.dll", "KERNEL32.dll"],
       "cublasLt64_12.dll": ["KERNEL32.dll", "ADVAPI32.dll"],
@@ -573,6 +574,12 @@ describe("checkDictationPackage", () => {
     const result = checkDictationPackage("windows-x64", importing("oxide-vulkan-worker.exe", "nvcuda.dll"));
     assert.equal(result.ok, false);
     assert.match(result.message, /oxide-vulkan-worker\.exe imports nvcuda\.dll/);
+  });
+
+  test("the CUDA worker must delay-load nvcuda.dll, so it can answer on a machine without the driver", () => {
+    const result = checkDictationPackage("windows-x64", importing("oxide-cuda-worker.exe", "nvcuda.dll"));
+    assert.equal(result.ok, false);
+    assert.match(result.message, /oxide-cuda-worker\.exe imports nvcuda\.dll directly: delay-load it/);
   });
 
   test("a worker's non-system import must be bundled beside it", () => {
@@ -664,10 +671,16 @@ describe("checkWorkerProbe", () => {
 
   test("the Windows loader refusing a missing driver DLL leaves only that backend unavailable", () => {
     for (const status of [0xc0000135, -1073741515]) {
-      const result = checkWorkerProbe({ worker: "oxide-cuda-worker.exe", status, engineVersion: "1.8.3" });
+      const result = checkWorkerProbe({ worker: "oxide-vulkan-worker.exe", status, engineVersion: "1.8.3" });
       assert.equal(result.ok, true);
-      assert.match(result.message, /oxide-cuda-worker\.exe: the graphics driver is not installed/);
+      assert.match(result.message, /oxide-vulkan-worker\.exe: the graphics driver is not installed/);
     }
+  });
+
+  test("the CUDA worker delay-loads its driver, so a DLL it cannot find is a bundled one", () => {
+    const result = checkWorkerProbe({ worker: "oxide-cuda-worker.exe", status: 0xc0000135, engineVersion: "1.8.3" });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /a bundled DLL failed to load/);
   });
 
   test("a crash, a timeout, a malformed answer or a different engine fails", () => {
@@ -676,6 +689,32 @@ describe("checkWorkerProbe", () => {
     assert.match(checkWorkerProbe(probe(undefined, { response: undefined })).message, /no valid answer/);
     assert.match(checkWorkerProbe(probe({ Ok: { Adapters: [] } }, { engineVersion: "1.8.4" })).message, /engine 1\.8\.3, expected 1\.8\.4/);
     assert.match(checkWorkerProbe(probe({ Ok: { Adapters: [] } }, { response: { protocol_version: 2, engine_version: "1.8.3", result: { Ok: { Adapters: [] } } } })).message, /protocol 2/);
+  });
+});
+
+describe("runtimeManifestProblems", () => {
+  test("catches a staged file that changed or disappeared before packaging", () => {
+    const manifest = { files: [{ path: "oxide-cuda-worker.exe", sha256: "a".repeat(64) }, { path: "cudart64_12.dll", sha256: "b".repeat(64) }] };
+    assert.deepEqual(runtimeManifestProblems(manifest, { "oxide-cuda-worker.exe": "a".repeat(64), "cudart64_12.dll": "b".repeat(64) }), []);
+    assert.deepEqual(runtimeManifestProblems(manifest, { "oxide-cuda-worker.exe": "c".repeat(64) }), [
+      "oxide-cuda-worker.exe differs from the staged build",
+      "cudart64_12.dll is listed in dictation-runtime.json but missing",
+    ]);
+    assert.deepEqual(runtimeManifestProblems(undefined, {}), ["dictation-runtime.json is missing or unreadable"]);
+  });
+});
+
+describe("checkAppLaunch", () => {
+  test("an app still running, or closed normally, started", () => {
+    assert.equal(checkAppLaunch({ app: "oxide-app.exe", running: true, seconds: 15 }).ok, true);
+    assert.match(checkAppLaunch({ app: "oxide-app.exe", running: true, seconds: 15 }).message, /still running after 15 s/);
+    assert.equal(checkAppLaunch({ app: "oxide-app.exe", running: false, exitCode: 0, seconds: 15 }).ok, true);
+  });
+
+  test("an app that could not start, or died during startup, fails with the reason", () => {
+    assert.match(checkAppLaunch({ app: "oxide-app.exe", running: false, exitCode: 0xc0000135, seconds: 15 }).message, /exited 0xc0000135 during startup/);
+    assert.match(checkAppLaunch({ app: "oxide-app.exe", running: false, error: "spawn EACCES", seconds: 15 }).message, /could not start: spawn EACCES/);
+    assert.match(checkAppLaunch({ running: false, seconds: 15 }).message, /no app executable/);
   });
 });
 

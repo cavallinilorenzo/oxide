@@ -1,0 +1,12 @@
+[
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\mbena\\.codex\\worktrees\\276-thread-board\\oxide\\docs\\prototypes\\thread-board\\index.html",
+    "line": 0,
+    "snippet": "11px body text"
+  }
+]

@@ -482,10 +482,14 @@
 .terminal-block-scroll {
   display: flex;
   flex-direction: column;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 4px 20px 8px;
+}
+/* Anchor Command blocks to the bottom like Warp; margin (not justify-content) keeps overflow scrollable. */
+.terminal-block-scroll > :first-child {
+  margin-top: auto;
 }
 .terminal-command-block {
   flex: none;

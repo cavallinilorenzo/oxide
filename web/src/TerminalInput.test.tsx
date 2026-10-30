@@ -72,6 +72,7 @@ it("Right accepts the latest matching history entry, while Tab requests real she
         cwd="C:\\project"
         disabled={false}
         visible
+        fresh
         onRun={() => {
           throw new Error("must not execute suggestions");
         }}
@@ -98,6 +99,7 @@ it("Up opens searchable history and navigates older commands without executing t
         cwd="/project"
         disabled={false}
         visible
+        fresh
         onRun={run}
       />,
     ),

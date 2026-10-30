@@ -27,6 +27,7 @@ interface Props {
   ref: Ref<TerminalInputHandle>;
   history: CommandHistory[];
   sessionId: number | null;
+  /** Where shell completion resolves paths. */
   cwd: string;
   disabled: boolean;
   visible: boolean;
@@ -329,9 +330,6 @@ export function TerminalInput({
           </footer>
         </div>
       )}
-      <div className="terminal-prompt-path" title={cwd}>
-        {cwd}
-      </div>
       <div className="terminal-command-entry">
         <span className="terminal-prompt-symbol" aria-hidden="true">{ /Windows/i.test(navigator.userAgent) ? "PS>" : "$" }</span>
         <div className="terminal-input-editor">

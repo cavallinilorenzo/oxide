@@ -246,6 +246,26 @@ mod settings {
         assert!(on_disk.contains('\n'), "file should be pretty-printed");
     }
 
+    #[test]
+    fn a_file_from_before_open_in_editor_was_removed_still_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "confirmQuit": false, "editor": "dev.zed.Zed" }"#,
+        )
+        .unwrap();
+
+        let core = Core::open(tmp.path()).unwrap();
+
+        let state = core.settings();
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert!(!state.settings.confirm_quit);
+        core.save_settings(&state.settings).unwrap();
+        let on_disk = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+        assert!(!on_disk.contains("\"editor\""), "{on_disk}");
+        assert!(on_disk.contains("\"confirmQuit\": false"), "{on_disk}");
+    }
+
     fn watch(core: &Core) -> std::sync::mpsc::Receiver<SettingsState> {
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = std::sync::Mutex::new(tx);
@@ -398,7 +418,7 @@ mod settings {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::open(tmp.path()).unwrap();
         let mut settings = core.settings().settings;
-        settings.editor = "zed".into();
+        settings.confirm_quit = false;
         settings.providers.claude.effort = Some("high".into());
 
         core.save_settings(&settings).unwrap();
@@ -417,7 +437,7 @@ mod settings {
         let file = tmp.path().join("settings.json");
         let core = Core::open(tmp.path()).unwrap();
         let mut settings = core.settings().settings;
-        settings.editor = "zed".into();
+        settings.confirm_quit = false;
         core.save_settings(&settings).unwrap();
 
         std::fs::remove_file(&file).unwrap();
@@ -429,7 +449,7 @@ mod settings {
         assert!(
             std::fs::read_to_string(&file)
                 .unwrap()
-                .contains("\"editor\": \"zed\"")
+                .contains("\"confirmQuit\": false")
         );
     }
 }

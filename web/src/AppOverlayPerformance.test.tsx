@@ -27,7 +27,6 @@ it("keeps the app frame mounted and uses a local skeleton while another Project'
     if (command === "last_selection") return { projectId: 1, threadId: 2 };
     if (command === "list_threads") return (args as { projectId: number }).projectId === 1 ? [thread] : new Promise((resolve) => { finish = resolve; });
     if (command === "get_settings") return { settings: { providers: {} }, errors: [] };
-    if (command === "detected_editors") return [];
     if (command === "plugin:event|listen") return 1;
     return null;
   });
@@ -44,13 +43,12 @@ it("keeps the app frame mounted and uses a local skeleton while another Project'
 it("opens the delete confirmation and project palette without rerendering the Transcript", async () => {
   const project = { id: 1, name: "Project", path: "/test", hidden: false, open: true, missing: false };
   const thread = { id: 2, projectId: 1, title: "Thread", status: "completed", provider: "codex", updatedAt: "2026-01-01T00:00:00Z" };
-  const settings = { defaultProvider: "codex", editor: "", providers: {} };
+  const settings = { defaultProvider: "codex", providers: {} };
   mockIPC((command) => {
     if (command === "list_projects" || command === "rescan_projects") return [project];
     if (command === "last_selection") return { projectId: 1, threadId: 2 };
     if (command === "list_threads") return [thread];
     if (command === "get_settings") return { settings, errors: [] };
-    if (command === "detected_editors") return [];
     if (command === "plugin:event|listen") return 1;
     return null;
   });
@@ -68,6 +66,28 @@ it("opens the delete confirmation and project palette without rerendering the Tr
   expect(renders.thread).toBe(beforePalette);
 });
 
+it("offers Reveal in Finder for the checkout and no external editor", async () => {
+  const project = { id: 1, name: "Project", path: "/test", hidden: false, open: true, missing: false };
+  const thread = { id: 2, projectId: 1, title: "Thread", status: "completed", provider: "codex" };
+  const calls: string[] = [];
+  mockIPC((command) => {
+    calls.push(command);
+    if (command === "list_projects" || command === "rescan_projects") return [project];
+    if (command === "last_selection") return { projectId: 1, threadId: 2 };
+    if (command === "list_threads") return [thread];
+    if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {} }, errors: [] };
+    if (command === "plugin:event|listen") return 1;
+    return null;
+  });
+  await act(async () => root.render(<App />));
+  const header = container.querySelector(".header")!;
+  const reveal = header.querySelector<HTMLButtonElement>('button[aria-label="Reveal in Finder"]');
+  expect(reveal).not.toBeNull();
+  expect(header.querySelector('button[aria-label="Open in editor"]')).toBeNull();
+  await act(async () => reveal!.click());
+  expect(calls).toContain("reveal_in_finder");
+});
+
 it("shows the Project overview after deleting its last Thread and starts a real new Thread", async () => {
   const project = { id: 1, name: "Project", path: "/test", hidden: false, open: true, missing: false };
   const thread = { id: 2, projectId: 1, title: "Thread", status: "completed", provider: "codex", updatedAt: "2026-01-01T00:00:00Z" };
@@ -75,8 +95,7 @@ it("shows the Project overview after deleting its last Thread and starts a real 
     if (command === "list_projects" || command === "rescan_projects") return [project];
     if (command === "last_selection") return { projectId: 1, threadId: 2 };
     if (command === "list_threads") return [thread];
-    if (command === "get_settings") return { settings: { defaultProvider: "codex", editor: "", providers: {} }, errors: [] };
-    if (command === "detected_editors") return [];
+    if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {} }, errors: [] };
     if (command === "delete_thread") return "deleted";
     if (command === "create_thread") return { ...thread, id: 3, title: null };
     if (command === "plugin:event|listen") return 1;

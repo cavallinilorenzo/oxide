@@ -102,6 +102,8 @@ it("Up opens searchable history and navigates older commands without executing t
       />,
     ),
   );
+  // The prompt is the symbol and the input; the directory lives in the Terminal header.
+  expect(container.querySelector("form")?.textContent).not.toContain("/project");
   await key("ArrowUp");
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   expect(

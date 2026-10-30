@@ -44,7 +44,6 @@ import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
 import { readablePath } from "./headerLines";
-import { EditorMark } from "./EditorMark";
 import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
@@ -108,7 +107,6 @@ export function App() {
   const layout = workspaceLayout(bodySize.width, bodySize.height, {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: terminalSize.preferred,
   }, showTools && !showSettings);
-  const [editorBundleId, setEditorBundleId] = useState("");
   const [openError, setOpenError] = useState<string | null>(null);
   const overlays = useRef<WorkspaceOverlaysHandle>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
@@ -391,23 +389,9 @@ export function App() {
     openProject(project);
   }, [selectedId, startNewThread, openProject]);
 
-  // The editor "Open in editor" uses: the configured one if detected, else the first detected.
-  useEffect(() => {
-    if (showSettings) return;
-    void (async () => {
-      const settingsRes = await commands.getSettings();
-      const editorsRes = await commands.detectedEditors();
-      const detected = editorsRes.status === "ok" ? editorsRes.data : [];
-      const chosen = detected.find((e) => e.bundleId === settingsRes.settings.editor) ?? detected[0];
-      setEditorBundleId(chosen?.bundleId ?? "");
-    })();
-  }, [showSettings]);
-
-  const openCheckout = useCallback(async (how: "editor" | "finder") => {
+  const revealCheckout = useCallback(async () => {
     if (!selected) return;
-    const res = how === "editor"
-      ? await commands.openInEditor(selected.id, currentThreadId)
-      : await commands.revealInFinder(selected.id, currentThreadId);
+    const res = await commands.revealInFinder(selected.id, currentThreadId);
     setOpenError(res.status === "error" ? res.error.message : null);
   }, [selected, currentThreadId]);
 
@@ -601,14 +585,9 @@ export function App() {
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
         {selected && !selected.missing && (
-          <>
-            <button className="icon-btn" title={`Open in editor`} aria-label="Open in editor" onClick={() => void openCheckout("editor")}>
-              <EditorMark bundleId={editorBundleId} />
-            </button>
-            <button className="icon-btn" title={`Reveal in Finder`} aria-label="Reveal in Finder" onClick={() => void openCheckout("finder")}>
-              <FileDirectoryIcon size={16} />
-            </button>
-          </>
+          <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
+            <FileDirectoryIcon size={16} />
+          </button>
         )}
         {selected && (
           <span role="group" aria-label="Work mode" className="seg work-mode-switch">

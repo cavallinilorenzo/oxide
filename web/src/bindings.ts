@@ -36,10 +36,6 @@ export const commands = {
 	searchGithubRepositories: (query: string) => typedError<GithubRepository[], AppError>(__TAURI_INVOKE("search_github_repositories", { query })),
 	/**  Clones one of the user's GitHub repositories into `parent` and registers it as a Project. */
 	cloneGithubRepository: (nameWithOwner: string, parent: string) => typedError<Project, AppError>(__TAURI_INVOKE("clone_github_repository", { nameWithOwner, parent })),
-	/**  The known editors installed on this machine. */
-	detectedEditors: () => typedError<Editor[], AppError>(__TAURI_INVOKE("detected_editors")),
-	/**  Opens the Project's checkout (or the Thread's) in the editor chosen in Settings. */
-	openInEditor: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("open_in_editor", { projectId, threadId })),
 	revealInFinder: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("reveal_in_finder", { projectId, threadId })),
 	setProjectHidden: (id: number, hidden: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_hidden", { id, hidden })),
 	/**  Lists the Project in the sidebar, or takes it out (it stays in the Project palette). */
@@ -680,11 +676,6 @@ export type DispatchRequest_Serialize = {
 	baseBranch: string | null,
 	issueNumber: number | null,
 	issueTitle: string | null,
-};
-
-export type Editor = {
-	name: string,
-	bundleId: string,
 };
 
 export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
@@ -1348,7 +1339,6 @@ export type Settings_Deserialize = {
 	defaultProvider: Provider,
 	providers: Providers_Deserialize,
 	confirmQuit: boolean,
-	editor: string,
 	claudeCustomizations: ClaudeCustomizations,
 	shortcuts: Shortcuts,
 };
@@ -1358,7 +1348,6 @@ export type Settings_Serialize = {
 	defaultProvider: Provider,
 	providers: Providers_Serialize,
 	confirmQuit: boolean,
-	editor: string,
 	claudeCustomizations: ClaudeCustomizations,
 	shortcuts: Shortcuts,
 };

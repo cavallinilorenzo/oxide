@@ -33,18 +33,6 @@ pub trait System: Send + Sync + 'static {
     fn set_badge(&self, count: u32);
     /// Opens a web page in the user's browser.
     fn open_url(&self, _url: &str) {}
-    /// Whether the app with this bundle identifier is installed.
-    fn is_app_installed(&self, _bundle_id: &str) -> bool {
-        #[cfg(windows)]
-        return crate::editor::is_installed_windows(_bundle_id);
-        #[cfg(not(windows))]
-        false
-    }
-    /// Opens a folder in the app with this bundle identifier.
-    fn open_with_app(&self, _bundle_id: &str, _path: &Path) {
-        #[cfg(windows)]
-        let _ = crate::editor::open_windows(_bundle_id, _path);
-    }
     /// Shows a file or folder in Finder or File Explorer.
     fn reveal_in_finder(&self, _path: &Path) {}
 }

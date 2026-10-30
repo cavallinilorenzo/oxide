@@ -1,7 +1,6 @@
 import { DictationController } from "./dictation";
 import { Skeleton } from "./Skeleton";
-import { WorkbenchLoading } from "./WorkbenchLoading";
-import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -10,8 +9,6 @@ import type { CodeOpenRequest } from "./codeOpen";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
-  CommentDiscussionIcon,
-  CodeIcon,
   FileDiffIcon,
   FileDirectoryIcon,
   FileIcon,
@@ -49,53 +46,50 @@ import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { createDefaultThread } from "./createDefaultThread";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
-import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
+
 
 const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
 
 const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
-const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 const TerminalWorkbench = lazy(() => import("./TerminalWorkbench").then((module) => ({ default: module.TerminalWorkbench })));
 const CodeWorkbench = lazy(() => import("./CodeWorkbench").then((module) => ({ default: module.CodeWorkbench })));
-type WorkMode = "chat" | "terminal" | "code";
 type WorkbenchContext = { key: string; projectId: number; threadId: number | null; rootPath: string };
-
-type TerminalContext = { key: string; projectId: number; threadId: number | null };
-const terminalContextKey = (projectId: number, threadId: number | null) =>
-  `${projectId}:${threadId ?? "draft"}`;
 
 const DiffPanel = lazy(() => import("./DiffPanel").then((module) => ({ default: module.DiffPanel })));
 const PullRequestPanel = lazy(() =>
   import("./PullRequestPanel").then((module) => ({ default: module.PullRequestPanel })),
 );
-const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
 const IssuesSurface = lazy(() =>
   import("./IssuesSurface").then((module) => ({ default: module.IssuesSurface })),
 );
 const TOOL_TABS: { name: string; Icon: Icon }[] = [
-  { name: "Files", Icon: FileIcon },
   { name: "Diff", Icon: FileDiffIcon },
+  { name: "Files", Icon: FileIcon },
+  { name: "Terminal", Icon: TerminalIcon },
   { name: "Pull request", Icon: GitPullRequestIcon },
   { name: "Issues", Icon: IssueOpenedIcon },
 ];
 
 const TOOL_TAB_ACTION: Record<string, ShortcutAction> = {
-  Files: "files", Diff: "diff", "Pull request": "pullRequests", Issues: "issues",
+  Files: "files", Diff: "diff", Terminal: "terminal", "Pull request": "pullRequests", Issues: "issues",
 };
 
 export function App() {
-  const [workMode, setWorkMode] = useState<WorkMode>(() => {
-    try { const mode = localStorage.getItem("oxide:work-mode"); return mode === "code" || mode === "terminal" ? mode : "chat"; } catch { return "chat"; }
-  });
+  const legacySurface = useRef<string | null>((() => {
+    try { const mode = localStorage.getItem("oxide:work-mode"); return mode === "code" ? "Files" : mode === "terminal" ? "Terminal" : null; }
+    catch { return null; }
+  })());
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [regionPriority, setRegionPriority] = useState<"sidebar" | "tools">("tools");
+  const [maximized, setMaximized] = useState(false);
   const [workbenches, setWorkbenches] = useState<WorkbenchContext[]>([]);
   const [installCommand, setInstallCommand] = useState<{ id: number; command: string } | null>(null);
   const installSequence = useRef(0);
   const shortcuts = useShortcuts();
   const keys = (action: ShortcutAction) => formatAccelerator(shortcuts[action]);
   const [showTools, setShowTools] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [activeTool, setActiveTool] = useState<string | null>("Files");
+  const [activeTool, setActiveTool] = useState<string | null>("Diff");
   // The user's pick, for the Thread it was made in: elsewhere that Thread's default applies.
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
@@ -104,10 +98,6 @@ export function App() {
   const bodySize = useElementSize(bodyRef, { width: window.innerWidth, height: window.innerHeight - 44 });
   const sidebarSize = usePanelSize("sidebar");
   const toolsSize = usePanelSize("tools");
-  const terminalSize = usePanelSize("terminal");
-  const layout = workspaceLayout(bodySize.width, bodySize.height, {
-    sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: terminalSize.preferred,
-  }, showTools && !showSettings);
   const [openError, setOpenError] = useState<string | null>(null);
   const overlays = useRef<WorkspaceOverlaysHandle>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
@@ -126,9 +116,8 @@ export function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [lastSelectionLoaded, setLastSelectionLoaded] = useState(false);
-  const [startupThreadLoaded, setStartupThreadLoaded] = useState(false);
-  const onStartupThreadLoaded = useCallback(() => setStartupThreadLoaded(true), []);
-  const [booted, setBooted] = useState(false);
+  const [threadLoadError, setThreadLoadError] = useState<{ projectId: number; message: string } | null>(null);
+  const [threadReload, setThreadReload] = useState(0);
   const [codeRequest, setCodeRequest] = useState<(CodeOpenRequest & { contextKey: string }) | null>(null);
   const codeSequence = useRef(0);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
@@ -136,14 +125,6 @@ export function App() {
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   // The Project and Thread of the last session: `undefined` until read, `null` once applied.
   const restore = useRef<{ projectId: number; threadId: number | null } | null | undefined>(undefined);
-  const [terminalContexts, setTerminalContexts] = useState<TerminalContext[]>([]);
-  const rememberTerminalContext = useCallback((projectId: number, threadId: number | null) => {
-    const context = { key: terminalContextKey(projectId, threadId), projectId, threadId };
-    setTerminalContexts((previous) => previous.some((item) => item.key === context.key)
-      ? previous
-      : [...previous, context]);
-  }, []);
-
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
@@ -151,28 +132,46 @@ export function App() {
     ? selectedThreadId
     : null;
   const selectedThread = threads?.find((thread) => thread.id === currentThreadId);
-  const workbenchContext: WorkbenchContext | null = selected && threads !== null ? {
+  const workbenchContext = useMemo<WorkbenchContext | null>(() => selected && currentThreadId !== null ? {
     key: `${selected.id}:${selectedThread?.worktreePath ? currentThreadId : "main"}`,
     projectId: selected.id, threadId: selectedThread?.worktreePath ? currentThreadId : null,
     rootPath: selectedThread?.worktreePath ?? selected.path,
-  } : null;
-  if (workMode !== "chat" && workbenchContext && !workbenches.some((context) => context.key === workbenchContext.key)) {
+  } : null, [selected, currentThreadId, selectedThread?.worktreePath]);
+  const dockRequested = showTools && !showSettings && !showBoard;
+  const layout = workspaceLayout(bodySize.width, bodySize.height, {
+    sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: null,
+  }, dockRequested, { sidebarVisible: showSidebar, priority: regionPriority, maximized });
+  const dockVisible = layout.toolsVisible;
+  const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean; terminal?: boolean }>>({});
+  const [visitedTools, setVisitedTools] = useState<Record<string, boolean>>({});
+  if (dockRequested && activeTool && selected && !visitedTools[`${selected.id}:${activeTool}`]) {
+    setVisitedTools({ ...visitedTools, [`${selected.id}:${activeTool}`]: true });
+  }
+  if (dockRequested && activeTool === "Files" && workbenchContext && !openedSurfaces[workbenchContext.key]?.files) {
+    setOpenedSurfaces({ ...openedSurfaces, [workbenchContext.key]: { ...openedSurfaces[workbenchContext.key], files: true } });
+  }
+  if (workbenchContext && openedSurfaces[workbenchContext.key] && !workbenches.some((context) => context.key === workbenchContext.key)) {
     setWorkbenches([...workbenches, workbenchContext]);
   }
-  const [openedModes, setOpenedModes] = useState<Record<string, { code?: boolean; terminal?: boolean }>>({});
-  if (workMode !== "chat" && workbenchContext && !openedModes[workbenchContext.key]?.[workMode]) {
-    setOpenedModes({ ...openedModes, [workbenchContext.key]: { ...openedModes[workbenchContext.key], [workMode]: true } });
-  }
-  const runInstallCommand = useCallback((command: string) => {
-    setInstallCommand({ id: ++installSequence.current, command }); setWorkMode("terminal"); setShowSettings(false);
-  }, []);
+  const selectSurface = useCallback((name: string, explicit = true) => {
+    setActiveTool(name); setShowTools(true); setShowSettings(false); setShowBoard(false); setRegionPriority("tools");
+    if (name === "Terminal" && explicit && workbenchContext && currentThreadId !== null) {
+      setOpenedSurfaces((previous) => ({ ...previous, [workbenchContext.key]: { ...previous[workbenchContext.key], terminal: true } }));
+    }
+  }, [workbenchContext, currentThreadId]);
+  const runInstallCommand = (command: string) => {
+    setInstallCommand({ id: ++installSequence.current, command }); selectSurface("Terminal");
+  };
   const openCodeFile = (path: string, diff?: DiffFile) => {
     if (!workbenchContext) return;
     setCodeRequest({ id: ++codeSequence.current, path, diff, contextKey: workbenchContext.key });
-    setWorkMode("code");
-    setShowSettings(false);
+    selectSurface("Files");
   };
-  useEffect(() => { try { localStorage.setItem("oxide:work-mode", workMode); } catch { /* A mode works without remembering it. */ } }, [workMode]);
+  useEffect(() => {
+    if (!selected || threads === null) return;
+    if (legacySurface.current) { setActiveTool(legacySurface.current); setShowTools(true); legacySurface.current = null; }
+    try { localStorage.removeItem("oxide:work-mode"); } catch { /* Presentation still migrates without storage. */ }
+  }, [selected, threads]);
   const diffThread = {
     board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
   };
@@ -187,21 +186,6 @@ export function App() {
     currentThreadRef.current = currentThreadId;
     currentProjectRef.current = selectedId;
   });
-  const currentTerminalContext = useMemo<TerminalContext | null>(
-    () => selected && threads !== null
-      ? {
-          key: terminalContextKey(selected.id, currentThreadId),
-          projectId: selected.id,
-          threadId: currentThreadId,
-        }
-      : null,
-    [selected, threads, currentThreadId],
-  );
-  const terminalContextsToRender = currentTerminalContext &&
-      !terminalContexts.some((context) => context.key === currentTerminalContext.key)
-    ? [...terminalContexts, currentTerminalContext]
-    : terminalContexts;
-
   useEffect(() => {
     void (async () => {
       try {
@@ -244,6 +228,7 @@ export function App() {
   // Stable: it reaches memoized TurnViews through context.
   const openDiff = useCallback((hint?: string) => {
     setShowTools(true);
+    setRegionPriority("tools");
     setActiveTool("Diff");
     setChosenDiffScope({ threadId: currentThreadRef.current, scope: "uncommitted" });
     setDiffFocus(hint ?? null);
@@ -254,6 +239,7 @@ export function App() {
   const reviewPullRequestFiles = useCallback((projectId: number, number: number) => {
     setReviewedPr({ projectId, number });
     setShowTools(true);
+    setRegionPriority("tools");
     setActiveTool("Diff");
     setChosenDiffScope({ threadId: currentThreadRef.current, scope: "pr" });
     setDiffFocus(null);
@@ -262,6 +248,7 @@ export function App() {
   const openPullRequest = useCallback(() => {
     setShowSettings(false);
     setShowTools(true);
+    setRegionPriority("tools");
     setActiveTool("Pull request");
     setCreatePrRequest((n) => n + 1);
   }, []);
@@ -339,8 +326,8 @@ export function App() {
       if (currentProjectRef.current === projectId) {
         setThreads((prev) => [thread, ...(prev ?? [])]);
         setSelectedThreadId(thread.id);
-        rememberTerminalContext(projectId, thread.id);
-        setWorkMode("chat");
+
+        setMaximized(false);
         setShowBoard(false);
       }
     }
@@ -349,7 +336,7 @@ export function App() {
   // Only one empty Thread (no Turn yet) at a time: asking for another reopens it.
   const startNewThread = useCallback(async () => {
     if (!selected) return;
-    setWorkMode("chat");
+    setMaximized(false);
     const counts = await Promise.all((threads ?? []).map((t) => commands.listTurns(t.id, 0, 1)));
     const empty = threads?.find((_, i) => {
       const r = counts[i];
@@ -358,18 +345,18 @@ export function App() {
     if (empty) {
       setShowBoard(false);
       setSelectedThreadId(empty.id);
-      rememberTerminalContext(selected.id, empty.id);
+
       return;
     }
     const created = await createThreadIn(selected.id);
     if (created) {
-      setWorkMode("chat");
+      setMaximized(false);
       setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
-      rememberTerminalContext(selected.id, created.id);
+
     }
-  }, [selected, threads, createThreadIn, rememberTerminalContext]);
+  }, [selected, threads, createThreadIn]);
 
   // The native menu follows the same creation path as the sidebar and shortcut.
   useEffect(() => {
@@ -457,24 +444,19 @@ export function App() {
         if (next === null || next === currentThreadId) return;
         setShowSettings(false);
         setShowBoard(false);
-        setWorkMode("chat");
+        setMaximized(false);
         setSelectedThreadId(next);
-        if (selected) rememberTerminalContext(selected.id, next);
-      } else if (action === "files" || action === "diff" || action === "pullRequests" || action === "issues") {
-        // Pressing a panel's shortcut again closes the tools panel.
-        const tool = { files: "Files", diff: "Diff", pullRequests: "Pull request", issues: "Issues" }[action];
-        const alreadyShown = showTools && !showSettings && activeTool === tool;
-        setShowSettings(false);
-        setShowTools(!alreadyShown);
-        setActiveTool(tool);
+
+      } else if (action === "files" || action === "diff" || action === "pullRequests" || action === "issues" || action === "terminal") {
+        const tool = { files: "Files", diff: "Diff", pullRequests: "Pull request", issues: "Issues", terminal: "Terminal" }[action];
+        selectSurface(tool);
       } else if (action === "toggleTools") {
         setShowTools(showSettings || !showTools);
-        setShowSettings(false);
-      } else if (action === "terminal") {
-        setShowTerminal(showSettings || !showTerminal);
+        setRegionPriority("tools");
+        setShowBoard(false);
         setShowSettings(false);
       } else if (action === "toggleBoard") {
-        setWorkMode("chat");
+        setMaximized(false);
         setShowBoard((v) => !v);
         setShowSettings(false);
       } else {
@@ -483,7 +465,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, showTerminal, activeTool, currentThreadId, rememberTerminalContext, threads, workMode]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -515,7 +497,8 @@ export function App() {
         return;
       }
 
-      const res = await commands.listThreads(selected.id);
+      const res = await commands.listThreads(selected.id).catch((cause: unknown) => ({ status: "error" as const, error: { message: cause instanceof Error ? cause.message : String(cause) } }));
+      if (active) setThreadLoadError(res.status === "error" ? { projectId: selected.id, message: res.error.message } : null);
       if (active && res.status === "ok" && pendingNewThread.current === selected.id) {
         const created = await createThreadIn(selected.id);
         // Cleared only once applied: a re-run mid-await must still start the Thread.
@@ -524,7 +507,7 @@ export function App() {
         setThreads(created ? [created, ...res.data] : res.data);
         const initialThreadId = created?.id ?? res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
-        rememberTerminalContext(selected.id, initialThreadId);
+
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
@@ -532,39 +515,20 @@ export function App() {
           ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
           : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
-        rememberTerminalContext(selected.id, initialThreadId);
+
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [selected, rememberTerminalContext, createThreadIn]);
+  }, [selected, createThreadIn, threadReload]);
 
   const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
-  if (!starting && !booted) setBooted(true);
 
   useEffect(() => {
-    if (!starting && (!selected || workMode !== "chat" || currentThreadId === null || startupThreadLoaded)) document.documentElement.dataset.appReady = "true";
-  }, [starting, selected, workMode, currentThreadId, startupThreadLoaded]);
-
-  if (starting && !booted) {
-    return (
-      <div className="startup-screen" aria-hidden="true">
-        <div className="startup-content">
-          <div className="startup-emblem" aria-hidden="true">
-            <span className="startup-orbit"><svg viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="40" pathLength="360" /></svg></span>
-            <img src={oxideMark} alt="" />
-          </div>
-          <div className="startup-copy">
-            <span className="startup-wordmark">Oxide</span>
-            <p>Preparing your workspace</p>
-            <span className="startup-detail">Loading Projects and Threads</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
+    document.documentElement.dataset.appReady = "true";
+  }, []);
 
   return (
     <div className={`window ${isMac ? "macos" : "windows"}`}>
@@ -575,6 +539,9 @@ export function App() {
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); void startNewThread(); }} />}
+        <button className="icon-btn" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={layout.sidebarVisible}
+          onClick={() => { setShowSidebar(!layout.sidebarVisible); setRegionPriority("sidebar"); setMaximized(false); }}><RepoIcon size={16} /></button>
+        <button className="icon-btn" aria-label="Open a Project" title={`Open a Project (${keys("openProject")})`} onClick={() => overlays.current?.openPalette()}><PlusIcon size={16} /></button>
         <div className="header-project" data-tauri-drag-region>
         {selected ? (
           <span className="title" data-tauri-drag-region>
@@ -586,7 +553,7 @@ export function App() {
             <strong>Oxide</strong>
           </span>
         ) : null}
-        {selected && !selected.missing && (
+        {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <GitHeader
             projectId={selected.id}
             threadsKey={threadsKey}
@@ -599,43 +566,19 @@ export function App() {
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
-        {selected && !selected.missing && (
+        {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
             <FileDirectoryIcon size={16} />
           </button>
         )}
-        {selected && (
-          <span role="group" aria-label="Work mode" className="seg work-mode-switch">
-            <button aria-pressed={workMode === "chat" && !showSettings} title="Chat" onClick={() => { setWorkMode("chat"); setShowBoard(false); setShowSettings(false); }}>
-              <CommentDiscussionIcon size={14} /> Chat
-            </button>
-            <button aria-pressed={workMode === "terminal" && !showSettings} title="Terminal" onClick={() => { setWorkMode("terminal"); setShowSettings(false); }}>
-              <TerminalIcon size={14} /> Terminal
-            </button>
-            <button aria-pressed={workMode === "code" && !showSettings} title="Code editor" onClick={() => { setWorkMode("code"); setShowSettings(false); }}>
-              <CodeIcon size={14} /> Code
-            </button>
-          </span>
-        )}
-        {selected && <button className="icon-btn" aria-label="Thread Board" title={`Thread Board (${keys("toggleBoard")})`} aria-pressed={workMode === "chat" && showBoard && !showSettings} onClick={() => { setWorkMode("chat"); setShowBoard((v) => !v); setShowSettings(false); }}><ProjectIcon size={16} /></button>}
         <button
           className="icon-btn"
-          aria-pressed={showTools && !showSettings}
-          title={`Tools: Files, Diff, Pull request, Issues (${keys("toggleTools")})`}
+          aria-pressed={dockVisible}
+          title={`Surfaces: Diff, Files, Terminal, Pull request, Issues (${keys("toggleTools")})`}
           aria-label="Toggle tools panel"
-          onClick={() => { setShowTools(showSettings || !showTools); setShowSettings(false); }}
+          onClick={() => { setShowTools(!dockVisible); setRegionPriority("tools"); setShowSettings(false); setShowBoard(false); }}
         >
           <ToolsIcon size={16} />
-        </button>
-        <button
-          className="icon-btn"
-          aria-pressed={showTerminal && !showSettings}
-          hidden={workMode === "terminal"}
-          title={`Terminal (${keys("terminal")})`}
-          aria-label="Toggle Terminal"
-          onClick={() => { setShowTerminal(showSettings || !showTerminal); setShowSettings(false); }}
-        >
-          <TerminalIcon size={16} />
         </button>
         {isWindows && <WindowControls />}
         </div>
@@ -643,9 +586,8 @@ export function App() {
       <div className="body" ref={bodyRef} style={{
         "--sidebar-width": `${layout.sidebar.value}px`,
         "--tools-width": `${layout.tools.value}px`,
-        "--terminal-height": `${layout.terminal.value}px`,
       } as CSSProperties}>
-        <div className="sidebar-region" id="workspace-sidebar">
+        <div className="sidebar-region" id="workspace-sidebar" hidden={!layout.sidebarVisible}>
           <Sidebar
             projects={projects}
             selected={selected}
@@ -677,11 +619,11 @@ export function App() {
             threads={threads}
             selectedThreadId={selectedThreadId}
             onSelectThread={(threadId) => {
-              setWorkMode("chat");
+              setMaximized(false);
               setShowSettings(false);
               setShowBoard(false);
               setSelectedThreadId(threadId);
-              if (selected) rememberTerminalContext(selected.id, threadId);
+
             }}
             onDeleteThread={(threadId) => void deleteThread(threadId)}
             onNewThread={() => {
@@ -690,7 +632,7 @@ export function App() {
             onRenameThread={onThreadTitleChange}
             onOpenPalette={() => overlays.current?.openPalette()}
             onOpenBoard={(p) => {
-              setWorkMode("chat");
+              setMaximized(false);
               if (p.id !== selected?.id) {
                 restore.current = null;
                 setSelectedId(p.id);
@@ -706,10 +648,13 @@ export function App() {
           <ResizeHandle label="Resize sidebar" controls="workspace-sidebar" axis="x" edge="end"
             {...layout.sidebar} onResize={sidebarSize.resize} onCommit={sidebarSize.commit} onReset={sidebarSize.reset} onCancel={sidebarSize.cancel} />
         </div>
-        <div className="centre-column">
+        {maximized && dockVisible && <button className="thread-restore-handle" aria-label="Restore Thread" title="Restore Thread" onClick={() => setMaximized(false)}><ChevronRightIcon size={16} /></button>}
+        <div className="centre-column" hidden={maximized && dockVisible}>
           {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
-          <div className="chat-workbench" hidden={(workMode !== "chat" && !starting) || showSettings}>
-          {selected && threads === null ? (
+          <div className="chat-workbench" hidden={showSettings}>
+          {threadLoadError && threadLoadError.projectId === selected?.id ? (
+            <main className="centre empty-thread" aria-label="Project load error"><p className="error" role="alert">Could not load Threads for {selected?.name}: {threadLoadError.message}</p><button className="btn" onClick={() => { setThreadLoadError(null); setThreadReload((value) => value + 1); }}>Retry</button></main>
+          ) : starting ? (
             <main className="centre thread-loading" aria-label="Loading Project"><Skeleton kind="conversation" label="Loading Threads…" /></main>
           ) : selected && showBoard ? (
             <BoardView
@@ -718,7 +663,7 @@ export function App() {
               onOpenThread={(id) => {
                 setShowBoard(false);
                 setSelectedThreadId(id);
-                rememberTerminalContext(selected.id, id);
+
               }}
               onDeleteThread={(id) => void deleteThread(id)}
               onDispatched={(thread) =>
@@ -728,21 +673,20 @@ export function App() {
           ) : selected && currentThreadId === null ? (
             <ProjectOverview project={selected} threads={threads ?? []}
               onNewThread={() => void startNewThread()}
-              onOpenThread={(id) => { setSelectedThreadId(id); rememberTerminalContext(selected.id, id); }}
+              onOpenThread={(id) => { setSelectedThreadId(id); }}
               onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
               onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
-                  visible={workMode === "chat" && !showSettings}
+                  visible={!showSettings && !showBoard && !(maximized && dockVisible)}
                   onOpenDefaultDiff={() => {
                     setShowTools(true);
                     setActiveTool("Diff");
                     setChosenDiffScope(null);
                     setDiffFocus(null);
                   }}
-                  onInitialLoad={onStartupThreadLoaded}
                   threadId={selectedThreadId}
                   projectId={selected.id}
                   projectPath={selected.path}
@@ -756,7 +700,7 @@ export function App() {
                   onThreadCreated={(newThread) => {
                     setThreads((prev) => [newThread, ...(prev || [])]);
                     setSelectedThreadId(newThread.id);
-                    rememberTerminalContext(selected.id, newThread.id);
+
                   }}
                   onThreadUpdated={onThreadUpdated}
                   onStatusChange={onThreadStatusChange}
@@ -765,7 +709,7 @@ export function App() {
                   onPrefillUsed={() => setPrefill(null)}
                   onOpenThread={(id) => {
                     setSelectedThreadId(id);
-                    rememberTerminalContext(selected.id, id);
+
                   }}
                   onThreadContinued={(continued, from) => {
                     setThreads((prev) => [
@@ -774,7 +718,7 @@ export function App() {
                     ]);
                     setPrefill({ threadId: continued.thread.id, text: continued.recap });
                     setSelectedThreadId(continued.thread.id);
-                    rememberTerminalContext(selected.id, continued.thread.id);
+
                   }}
                 />
               </DiffOpenContext.Provider>
@@ -791,29 +735,10 @@ export function App() {
             </main>
           )}
           </div>
-          {workbenches.map((context) => <Suspense key={context.key} fallback={context.key === workbenchContext?.key && workMode !== "chat" ? <WorkbenchLoading mode={workMode}/> : null}>
-            {openedModes[context.key]?.code && <CodeWorkbench {...context} contextKey={context.key} visible={workMode === "code" && !showSettings && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} />}
-            {openedModes[context.key]?.terminal && <TerminalWorkbench {...context} contextKey={context.key} visible={workMode === "terminal" && !showSettings && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} />}
-          </Suspense>)}
-          <div className="terminal-region" id="workspace-terminal" hidden={!showTerminal || showSettings || workMode === "terminal" || !currentTerminalContext}>
-            {showTerminal && !showSettings && currentTerminalContext && <ResizeHandle label="Resize Terminal" controls="workspace-terminal" axis="y" edge="start" direction={-1}
-              {...layout.terminal} onResize={terminalSize.resize} onCommit={terminalSize.commit} onReset={terminalSize.reset} onCancel={terminalSize.cancel} />}
-            {terminalContextsToRender.map((context) => (
-              <Suspense key={context.key} fallback={context.key === currentTerminalContext?.key && showTerminal && !showSettings ? <section className="terminal" aria-label="Terminal" /> : null}>
-                <TerminalPanel
-                  projectId={context.projectId}
-                  threadId={context.threadId}
-                  contextKey={context.key}
-                  visible={showTerminal && !showSettings && context.key === currentTerminalContext?.key}
-                  onClose={() => setShowTerminal(false)}
-                />
-              </Suspense>
-            ))}
-          </div>
         </div>
-          <aside className="tools" aria-label="Tools panel" id="workspace-tools" hidden={!showTools || showSettings}>
-            <ResizeHandle label="Resize Tools" controls="workspace-tools" axis="x" edge="start" direction={-1}
-              {...layout.tools} onResize={toolsSize.resize} onCommit={toolsSize.commit} onReset={toolsSize.reset} onCancel={toolsSize.cancel} />
+          <aside className="tools" aria-label="Tools panel" id="workspace-tools" hidden={!dockVisible}>
+            {!maximized && <ResizeHandle label="Resize Tools" controls="workspace-tools" axis="x" edge="start" direction={-1}
+              {...layout.tools} onResize={toolsSize.resize} onCommit={toolsSize.commit} onReset={toolsSize.reset} onCancel={toolsSize.cancel} />}
             <nav className="tabs" role="tablist" aria-label="Surfaces">
               {TOOL_TABS.map(({ name, Icon }) => (
                 <button
@@ -823,18 +748,19 @@ export function App() {
                   aria-label={name}
                   title={`${name} (${keys(TOOL_TAB_ACTION[name])})`}
                   aria-selected={activeTool === name}
-                  onClick={() => setActiveTool(name)}
+                  onClick={() => selectSurface(name)}
                 >
                   <Icon size={14} /> <span className="tool-tab-label">{name}</span>
                 </button>
               ))}
               <span className="grow" />
+              <button className="icon-btn sm" title={maximized ? "Restore Surface" : "Maximize Surface"} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => setMaximized(!maximized)}><ProjectIcon size={14} /></button>
               <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
                 <XIcon size={14} />
               </button>
             </nav>
-            {showTools && activeTool === "Diff" && selected && (
-              <Suspense fallback={<Skeleton kind="diff" label="Loading changes…" />}>
+            {selected && visitedTools[`${selected.id}:Diff`] && (
+              <div className="surface-content" hidden={activeTool !== "Diff"}><Suspense fallback={<Skeleton kind="diff" label="Loading changes…" />}>
                 <DiffPanel
                   projectId={selected.id}
                   threadId={currentThreadId}
@@ -851,10 +777,10 @@ export function App() {
                   onOpenPullRequest={openPullRequest}
                   onOpenFile={(file) => openCodeFile(file.path, file)}
                 />
-              </Suspense>
+              </Suspense></div>
             )}
-            {showTools && activeTool === "Pull request" && selected && (
-              <Suspense fallback={<Skeleton kind="list" label="Loading pull requests…" />}>
+            {selected && visitedTools[`${selected.id}:Pull request`] && (
+              <div className="surface-content" hidden={activeTool !== "Pull request"}><Suspense fallback={<Skeleton kind="list" label="Loading pull requests…" />}>
                 <PullRequestPanel
                   createRequest={createPrRequest}
                   onCreateHandled={() => setCreatePrRequest(0)}
@@ -864,22 +790,24 @@ export function App() {
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
                   onFixPullRequest={(prompt) => fixPullRequest(selected.id, prompt)}
                 />
-              </Suspense>
+              </Suspense></div>
             )}
-            {showTools && activeTool === "Files" && selected && (
-              <Suspense fallback={<Skeleton kind="tree" label="Loading files…" />}>
-                <FilesPanel projectId={selected.id} threadId={currentThreadId} onOpenFile={openCodeFile} />
-              </Suspense>
-            )}
-            {showTools && activeTool === "Issues" && selected && (
-              <Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
+            {workbenches.map((context) => <Fragment key={context.key}>
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
+              {openedSurfaces[context.key]?.terminal && <Suspense fallback={dockVisible && activeTool === "Terminal" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Terminal…" /> : null}><TerminalWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Terminal" && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} /></Suspense>}
+            </Fragment>)}
+            {activeTool === "Terminal" && !openedSurfaces[workbenchContext?.key ?? ""]?.terminal && <section className="empty-state surface-empty"><TerminalIcon size={24} /><p>{currentThreadId === null ? "Select a Thread to open a terminal in its checkout." : "Open a terminal in the selected Thread’s checkout."}</p><button className="btn" disabled={currentThreadId === null} onClick={() => selectSurface("Terminal")}>Open terminal</button></section>}
+            {selected && currentThreadId === null && activeTool === "Files" && <section className="empty-state surface-empty"><p>Select a Thread to open files in its checkout.</p><button className="btn primary" onClick={() => void startNewThread()}>New Thread</button></section>}
+            {!selected && <section className="empty-state surface-empty"><p>Open a Project to use its tools.</p><button className="btn primary" onClick={() => overlays.current?.openPalette()}>Open a Project</button></section>}
+            {selected && visitedTools[`${selected.id}:Issues`] && (
+              <div className="surface-content" hidden={activeTool !== "Issues"}><Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
                 <IssuesSurface
                   projectId={selected.id}
                   onDispatched={(thread) =>
                     setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
                   }
                 />
-              </Suspense>
+              </Suspense></div>
             )}
           </aside>
       </div>

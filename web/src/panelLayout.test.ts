@@ -7,7 +7,7 @@ it("reserves a readable Thread with both panels visible at every supported width
       for (const tools of [null, 496, 800, 9000]) {
         const layout = workspaceLayout(width, 516, { sidebar, tools, terminal: 9000 }, true);
         expect(width - layout.sidebar.value - layout.tools.value).toBeGreaterThanOrEqual(360);
-        for (const panel of Object.values(layout)) {
+        for (const panel of [layout.sidebar, layout.tools, layout.terminal]) {
           expect(panel.value).toBeGreaterThanOrEqual(panel.min);
           expect(panel.value).toBeLessThanOrEqual(panel.max);
         }
@@ -50,4 +50,23 @@ it("keeps room for the file viewer at both file tree limits", () => {
   expect(600 - columns.value).toBeGreaterThanOrEqual(200);
   const rows = fileTreeLayout(288, 476, { width: null, height: 9000 });
   expect(476 - rows.value).toBeGreaterThanOrEqual(120);
+});
+
+
+it("collapses the sidebar before the Thread shrinks below 360px at the minimum window", () => {
+  const fit = workspaceLayout(900, 516, { sidebar: 300, tools: 700, terminal: null }, true);
+  expect(fit.sidebarVisible).toBe(false);
+  expect(fit.toolsVisible).toBe(true);
+  expect(900 - fit.tools.value).toBeGreaterThanOrEqual(360);
+});
+
+it("gives an explicitly opened sidebar priority at compact widths without losing requested tools", () => {
+  const preferred = { sidebar: 300, tools: 700, terminal: null };
+  const fit = workspaceLayout(900, 516, preferred, true, { priority: "sidebar" });
+  expect(fit.sidebarVisible).toBe(true);
+  expect(fit.toolsVisible).toBe(false);
+  const wide = workspaceLayout(1440, 856, preferred, true, { priority: "sidebar" });
+  expect(wide.sidebarVisible).toBe(true);
+  expect(wide.toolsVisible).toBe(true);
+  expect(preferred).toEqual({ sidebar: 300, tools: 700, terminal: null });
 });

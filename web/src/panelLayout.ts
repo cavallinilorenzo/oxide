@@ -13,20 +13,27 @@ export function workspaceLayout(
   width: number,
   height: number,
   preferred: { sidebar: number | null; tools: number | null; terminal: number | null },
-  toolsVisible: boolean,
+  toolsRequested: boolean,
+  options: { sidebarVisible?: boolean; priority?: "sidebar" | "tools"; maximized?: boolean } = {},
 ) {
   const centreMin = 360;
   const sidebarMin = 208;
-  const toolsMin = toolsVisible ? TOOLS_MIN : 0;
+  const compact = width < sidebarMin + TOOLS_MIN + centreMin;
+  const maximized = toolsRequested && options.maximized === true;
+  const sidebarRequested = options.sidebarVisible !== false;
+  const toolsVisible = toolsRequested && !(compact && sidebarRequested && options.priority === "sidebar") || maximized;
+  const sidebarVisible = sidebarRequested && !maximized && !(compact && toolsVisible);
+  const toolsMin = toolsVisible && !maximized ? TOOLS_MIN : 0;
   const sidebar = panelBounds(preferred.sidebar, width <= 1100 ? 208 : 240, sidebarMin,
     Math.min(400, width - toolsMin - centreMin));
   const tools = panelBounds(preferred.tools, Math.min(600, Math.max(TOOLS_MIN, width * 0.32)), TOOLS_MIN,
-    Math.min(800, width - sidebar.value - centreMin));
+    Math.min(800, width - (sidebarVisible ? sidebar.value : 0) - (maximized ? 32 : centreMin)));
   // During drag each panel must also respect the other panel's current size.
   sidebar.max = Math.floor(Math.max(sidebarMin, Math.min(400, width - (toolsVisible ? tools.value : 0) - centreMin)));
   const terminal = panelBounds(preferred.terminal, Math.min(220, Math.max(140, (height + 44) * 0.25)),
     140, Math.min(600, height - 280));
-  return { sidebar, tools, terminal };
+  if (maximized) tools.value = tools.max = Math.max(TOOLS_MIN, width - 32);
+  return { sidebar, tools, terminal, sidebarVisible, toolsVisible };
 }
 
 export function fileTreeLayout(width: number, height: number, preferred: { width: number | null; height: number | null }) {

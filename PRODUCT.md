@@ -12,15 +12,14 @@ Core, never to a webview filesystem or shell permission.
 
 ## Workflows
 
-The user requested three ways to use the central area:
+The Thread and its Transcript stay in the centre. A collapsible sidebar holds
+Projects and recent Threads. One right dock holds Diff, Files, Terminal,
+Pull request and Issues; each Surface can be maximized and restored.
+Work modes are removed. Files contains the editor, and Project terminal tabs
+retain their own checkout. Switching tools or their presentation keeps open files,
+unsaved changes and shell sessions. The Project's sidebar Board button opens its
+Thread Board in the centre and suspends the dock without clearing its state.
 
-- Chat: the existing Provider conversations and Thread Board.
-- Terminal: a full central terminal, with command blocks, searchable history and
-  suggestions, taking Warp's terminal workflow as a functional reference.
-- Code: a capable editor with a restrained Zed-like layout, including language
-  intelligence, automatic indentation, file tabs, navigation and syntax errors.
-
-Switching modes preserves open files, unsaved changes and shell sessions.
 Python, C/C++, JavaScript/TypeScript and Rust are the first supported languages.
 Opening the first file of a language offers to download its support, as in Zed.
 Downloads happen only after Install is pressed. Advanced settings retain custom

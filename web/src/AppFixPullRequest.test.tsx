@@ -38,6 +38,7 @@ beforeEach(() => {
   mockIPC((command, args) => {
     calls.push({ command, args });
     if (command === "list_projects" || command === "rescan_projects") return [project];
+    if (command === "git_diff" || command === "git_turn_diff") return { base: "main", files: [] };
     if (command === "last_selection") return { projectId: 1, threadId: 2 };
     if (command === "list_threads") return [oldThread];
     if (command === "get_settings") return { settings: { defaultProvider: "codex", providers: {

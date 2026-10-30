@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyFileSync } from "node:fs";
 import { assertBuildSpace } from "./checks/build-space.mjs";
+import { msvcEnv } from "./checks/msvc-env.mjs";
 
 export function dictationBuild(backend, inherited = process.env) {
   if (!["cpu", "vulkan", "cuda"].includes(backend)) {
@@ -22,11 +23,6 @@ export function dictationBuild(backend, inherited = process.env) {
     // object/PDB limit even in an ordinary checkout. Keep these names short.
     CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", backend === "cpu" ? "dc" : (backend === "cuda" ? "dcu" : "dv"))),
   });
-  if (backend === "cuda") {
-    // CUDA 12.9's nvcc rejects the runner's newer MSVC (Visual Studio 18, 14.51)
-    // as an unsupported host compiler, even while CMake identifies it.
-    env.NVCC_APPEND_FLAGS = [inherited.NVCC_APPEND_FLAGS, "-allow-unsupported-compiler"].filter(Boolean).join(" ");
-  }
   return {
     env,
     args: ["build", "--locked", "-p", "oxide-app",
@@ -63,7 +59,7 @@ export function releaseWorker(backend, inherited = process.env) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.platform !== "win32") throw new Error("This build entry point requires Windows x64");
-    const build = dictationBuild(process.argv[2]);
+    const build = dictationBuild(process.argv[2], process.argv[2] === "cuda" ? msvcEnv() : process.env);
     for (const command of ["cl.exe", "cmake.exe", "ninja.exe", ...(process.argv[2] === "vulkan" ? ["glslc.exe"] : []), ...(process.argv[2] === "cuda" ? ["nvcc.exe"] : [])]) {
       if (spawnSync("where.exe", [command], { env: build.env }).status !== 0) {
         throw new Error(`Missing ${command}: use an x64 Native Tools prompt; see docs/dictation.md`);

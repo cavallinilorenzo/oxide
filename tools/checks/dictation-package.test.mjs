@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runtimeFiles, withVcvars } from "../dictation-package.mjs";
+import { runtimeFiles } from "../dictation-package.mjs";
+import { withVcvars } from "./msvc-env.mjs";
 
 test("the MSVC environment from vcvars replaces variables whatever their case, and keeps the rest", () => {
   const base = { PATH: "C:\\Windows", CUDA_PATH: "C:\\cuda", Lib: "old" };

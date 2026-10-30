@@ -61,11 +61,16 @@ does not import `vulkan-1.dll`, while the isolated worker does.
 
 Install Visual Studio Build Tools with the Desktop development with C++ workload,
 Windows SDK and CMake/Ninja tools; LLVM/libclang 18.1.1; and Vulkan SDK 1.4.363.0
-(including glslc). The validated native toolchain is MSVC 14.51.36231 from Build
+(including glslc). The validated CPU/Vulkan native toolchain is MSVC 14.51.36231 from Build
 Tools 18.10.2, CMake 4.3.1-msvc1 and shaderc 2026.4. Binding/native versions are
 pinned by the committed lockfiles: whisper-rs 0.16.0, whisper-rs-sys 0.15.0,
 bundled whisper.cpp 1.8.3. These are the tested versions, not a claim that other
 toolchains or every Vulkan GPU work.
+
+CUDA builds additionally need the MSVC 14.44 x64 toolset (the Visual Studio 2022
+v143 component, also installable alongside Visual Studio 2026). The CUDA build
+command loads this toolset automatically. CUDA 12.9's frontend crashes with
+MSVC 14.51 even when `-allow-unsupported-compiler` bypasses its version check.
 
 From the repository root in an **x64 Native Tools Command Prompt**:
 
@@ -341,7 +346,7 @@ machine's GPU would leak into the installer.
 | --- | --- |
 | macOS app | Xcode Command Line Tools, CMake, rustup, Node.js and pnpm |
 | Windows app (CPU) | Visual Studio Build Tools (Desktop development with C++, CMake, Ninja), LLVM/libclang, rustup, Node.js and pnpm |
-| Windows Vulkan and CUDA workers | Also Vulkan SDK 1.4.363.0 (glslc) and CUDA Toolkit 12.9.1 (nvcc, runtime, cuBLAS, CCCL) |
+| Windows Vulkan and CUDA workers | Also MSVC 14.44 x64 (VS 2022 v143 toolset), Vulkan SDK 1.4.363.0 (glslc) and CUDA Toolkit 12.9.1 (nvcc, runtime, cuBLAS, CCCL) |
 
 `node tools/dictation-package.mjs setup` installs the pinned Vulkan SDK and CUDA
 Toolkit after checking their SHA-256 (pins in `GPU_BUILD_SDKS`, `tools/ci/policy.mjs`).
@@ -349,7 +354,8 @@ Run it once from an elevated prompt; it installs no display driver. The CUDA pin
 covers NVIDIA's network installer, which then downloads the selected components
 itself; Oxide does not hash those components separately. Then, from the
 repository root in a new Command Prompt (`stage` finds Visual Studio with
-`vswhere` and loads its x64 environment from `vcvars64.bat` itself):
+`vswhere` and loads its x64 environment from `vcvars64.bat -vcvars_ver=14.44`
+itself, checking `VCToolsVersion` even when started from a Native Tools prompt):
 
 ```bat
 set LIBCLANG_PATH=C:\Program Files\LLVM\bin
@@ -386,6 +392,7 @@ it with `node tools/dictation-package.mjs verify macos-aarch64 <path to Oxide.ap
 | `verify macos-aarch64` | local runner; `bundle (macos)` CI job | linking a library outside macOS (such as Homebrew's), a missing embedded Metal library, missing notices or microphone description |
 | `cargo deny` on both worker lockfiles | `supply-chain` CI job | a worker dependency under a licence or from a source `deny.toml` does not allow |
 | `releaseWorker` tests | tooling suite | packaged workers tuned to the build machine's CPU or GPU |
+| MSVC environment tests | tooling suite | silently inheriting an incompatible compiler, omitting the 14.44 selection, or accepting a failed toolset switch |
 
 These checks prove packaging, loading and CPU startup. They do not prove GPU
 offload or performance: hosted runners have no GPU. Hardware validation of
@@ -397,7 +404,13 @@ release gate tracked in #235; packaging success alone does not claim it.
 - **`stage` reports a missing `glslc.exe`, `nvcc.exe`, `CUDA_PATH` or `VULKAN_SDK`**: run
   `setup`, then open a new prompt so `CUDA_PATH`, `VULKAN_SDK` and `PATH` are current.
 - **`stage` cannot find Visual Studio Build Tools**: install them with the Desktop
-  development with C++ workload (x64 tools, CMake and Ninja).
+  development with C++ workload (x64 tools, CMake and Ninja), including the
+  MSVC 14.44 x64/x86 build tools component.
+- **CUDA reports `cudafe++` `ACCESS_VIOLATION` during compiler identification**:
+  check that the logged worker toolset is MSVC 14.44. `stage` and the direct CUDA
+  build select it explicitly; install it through Visual Studio Installer if it
+  is missing. Forcing MSVC 14.51 with `-allow-unsupported-compiler` does not fix
+  this crash.
 - **`verify` reports "imports X, which is neither a Windows system DLL nor bundled"**:
   a dependency changed. If X is redistributable, stage it and add its notice; if it
   is part of every supported Windows, add it to `WINDOWS_SYSTEM_DLLS` with a reason.

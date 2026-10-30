@@ -20,6 +20,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { assertBuildSpace } from "./checks/build-space.mjs";
 import { peImports } from "./checks/pe-imports.mjs";
+import { msvcEnv } from "./checks/msvc-env.mjs";
 import {
   checkAppLaunch, checkDictationPackage, checkWorkerProbe, CUDA_RUNTIME, DICTATION_WORKER_NAMES, GPU_BUILD_SDKS, runtimeManifestProblems,
 } from "./ci/policy.mjs";
@@ -49,35 +50,6 @@ export function runtimeFiles(roots, sources, importsOf) {
     }
   }
   return [...staged.values()];
-}
-
-/**
- * `base` with the variables vcvars64.bat set, given `set`'s output after it ran.
- * Windows variable names are case-insensitive, so a `Path` replaces a `PATH`.
- */
-export function withVcvars(base, setOutput) {
-  const set = Object.fromEntries(setOutput.split(/\r?\n/).map((line) => line.match(/^([^=]+)=(.*)$/)).filter(Boolean).map(([, key, value]) => [key, value]));
-  const replaced = new Set(Object.keys(set).map((key) => key.toLowerCase()));
-  return { ...Object.fromEntries(Object.entries(base).filter(([key]) => !replaced.has(key.toLowerCase()))), ...set };
-}
-
-// The x64 MSVC environment of a Native Tools prompt: cl, Ninja and VCToolsRedistDir.
-function msvcEnv(env = process.env) {
-  if (env.VCToolsRedistDir) return env;
-  const vswhere = join(env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft Visual Studio", "Installer", "vswhere.exe");
-  const found = spawnSync(vswhere, [
-    "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-    "-find", "VC\\Auxiliary\\Build\\vcvars64.bat",
-  ], { encoding: "utf8" });
-  const vcvars = found.stdout?.split(/\r?\n/).find(Boolean);
-  if (found.status !== 0 || !vcvars) {
-    throw new Error("Visual Studio Build Tools with the x64 C++ tools were not found: see docs/dictation.md#packaging-and-distribution");
-  }
-  const result = spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${vcvars}" >nul && set"`], {
-    encoding: "utf8", env, windowsVerbatimArguments: true, maxBuffer: 16 * 1024 * 1024,
-  });
-  if (result.status !== 0) throw new Error(`${vcvars} failed: ${result.stderr}`);
-  return withVcvars(env, result.stdout);
 }
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -171,6 +143,7 @@ function stage() {
     }
   }
   const env = msvcEnv();
+  console.log(`Building GPU workers with MSVC ${env.VCToolsVersion}`);
   for (const tool of ["cl.exe", "cmake.exe", "ninja.exe", "glslc.exe", "nvcc.exe"]) {
     if (spawnSync("where.exe", [tool], { stdio: "ignore", env }).status !== 0) throw new Error(`Missing ${tool}: see docs/dictation.md#packaging-and-distribution`);
   }

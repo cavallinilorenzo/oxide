@@ -176,6 +176,7 @@ impl WhisperBackendRuntime for MetalRuntime {
         Ok(TranscriptionOutcome {
             text,
             execution: ExecutionDetails {
+                fallback_reason: None,
                 backend: BackendId::Metal,
                 adapter: Some(device_info.name.clone()),
                 offloaded,

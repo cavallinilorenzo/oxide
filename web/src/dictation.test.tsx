@@ -3,7 +3,7 @@ import { act, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { commands } from "./bindings";
-import { DictationController, useDictationTarget, dictationLine } from "./dictation";
+import { DictationController, useDictationTarget, dictationLine, cancelDictation } from "./dictation";
 import { DEFAULT_SHORTCUTS } from "./shortcuts";
 vi.mock("./useShortcuts", () => ({ useShortcuts: () => DEFAULT_SHORTCUTS }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -60,4 +60,32 @@ it("displays start failure when dictation is disabled", async () => {
   await key();
   expect(insert).not.toHaveBeenCalled();
   expect(host.textContent).toContain("Enable dictation in Settings first");
+});
+
+it("disabling during transcription discards even a late successful result", async () => {
+  await setup();
+  let complete!: (value: { status: "ok"; data: string }) => void;
+  vi.spyOn(commands, "dictationStop").mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  await key(); await key();
+  await act(async () => cancelDictation());
+  await act(async () => complete({ status: "ok", data: "must be discarded" }));
+  expect(insert).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain("Transcribing");
+});
+it("focus changes during recording retain the original target and never submit", async () => {
+  await setup(); await key();
+  const other = document.createElement("textarea"); document.body.append(other); other.focus();
+  const submit = vi.fn(); host.addEventListener("submit", submit);
+  await key(); await key("Escape");
+  expect(insert).toHaveBeenCalledExactlyOnceWith("ciao mondo");
+  expect(submit).not.toHaveBeenCalled();
+  expect(other.value).toBe("");
+  other.remove(); host.removeEventListener("submit", submit);
+});
+it("announces CPU fallback after inserting the transcript once", async () => {
+  await setup();
+  vi.spyOn(commands, "dictationStatus").mockResolvedValue({ status: "ok", data: { installed: true, gpuCompiled: true, availableMemoryGb: 8, cpuThreads: 8, recommendation: "", manifest: { whisperRsVersion: "test", whisperCppPinned: "test", includedBackends: ["cpu", "vulkan"] }, probes: [], lastExecution: { backend: "cpu", adapter: null, offloaded: false, offloadEvidence: "Fell back to CPU after primary backend failure: driver unavailable", fallbackReason: "driver unavailable" } } });
+  await key(); await key();
+  expect(insert).toHaveBeenCalledExactlyOnceWith("ciao mondo");
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("Fell back to CPU");
 });

@@ -241,6 +241,7 @@ impl PerformanceWorker for ProcessWorker {
                 cold_load_ms: observed.timing.cold_load_ms,
             },
             execution: ExecutionDetails {
+                fallback_reason: None,
                 backend,
                 adapter: observed.candidate.probe.adapter,
                 offloaded: backend != BackendId::Cpu,

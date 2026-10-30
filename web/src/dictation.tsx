@@ -8,7 +8,7 @@ export function dictationLine(text: string): string { return [...text].map((c) =
 type Target = { element: HTMLElement; insert: (text: string) => void };
 const targets = new Map<HTMLElement, Target>();
 const listeners = new Set<() => void>();
-type State = { phase: "idle" | "starting" | "recording" | "transcribing"; error: string | null };
+type State = { phase: "idle" | "starting" | "recording" | "transcribing"; error: string | null; notice?: string };
 let state: State = { phase: "idle", error: null };
 let destination: Target | undefined;
 let caret: Range | undefined;
@@ -50,6 +50,13 @@ async function toggle(element: Element | null) {
         destination.insert(result.data);
       }
       update({ phase: "idle", error: null });
+      void commands.dictationStatus().then(result => {
+        if (version !== generation || state.phase !== "idle" || result.status !== "ok") return;
+        const execution = result.data.lastExecution;
+        if (execution?.backend === "cpu" && execution.fallbackReason) {
+          update({ phase: "idle", error: null, notice: `Fell back to CPU: ${execution.fallbackReason}` });
+        }
+      }).catch(() => {});
     } catch (error) { if (version === generation) update({ phase: "idle", error: message(error) }); }
     destination = undefined;
     return;
@@ -68,7 +75,7 @@ async function toggle(element: Element | null) {
     timer = setTimeout(() => { void toggle(null); }, 119_000);
   } catch (error) { if (version === generation) update({ phase: "idle", error: message(error) }); }
 }
-function cancel() {
+export function cancelDictation() {
   generation++; clearTimeout(timer); destination = undefined;
   void commands.dictationCancel(); update({ phase: "idle", error: null });
 }
@@ -79,15 +86,15 @@ export function DictationController() {
       if (actionForKey(event, shortcuts) === "dictation") {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) toggleDictation();
-      } else if (event.key === "Escape" && state.phase !== "idle") { event.preventDefault(); event.stopImmediatePropagation(); cancel(); }
+      } else if (event.key === "Escape" && state.phase !== "idle") { event.preventDefault(); event.stopImmediatePropagation(); cancelDictation(); }
     };
-    const visibility = () => { if (document.hidden && state.phase !== "idle") cancel(); };
+    const visibility = () => { if (document.hidden && state.phase !== "idle") cancelDictation(); };
     document.addEventListener("keydown", key, true); document.addEventListener("visibilitychange", visibility);
-    return () => { document.removeEventListener("keydown", key, true); document.removeEventListener("visibilitychange", visibility); cancel(); };
+    return () => { document.removeEventListener("keydown", key, true); document.removeEventListener("visibilitychange", visibility); cancelDictation(); };
   }, [shortcuts]);
-  if (current.phase === "idle" && !current.error) return null;
+  if (current.phase === "idle" && !current.error && !current.notice) return null;
   return <aside className="dictation-status" aria-label="Dictation">
-    <span role={current.error ? "alert" : "status"}>{current.error ?? (current.phase === "recording" ? `Listening — ${formatAccelerator(shortcuts.dictation)} to insert, Esc to cancel` : current.phase === "starting" ? "Opening microphone…" : "Transcribing locally…")}</span>
-    <button type="button" onClick={cancel}>{current.phase === "idle" ? "Dismiss" : "Cancel"}</button>
+    <span role={current.error ? "alert" : "status"}>{current.error ?? current.notice ?? (current.phase === "recording" ? `Listening — ${formatAccelerator(shortcuts.dictation)} to insert, Esc to cancel` : current.phase === "starting" ? "Preparing model and microphone…" : "Transcribing locally…")}</span>
+    <button type="button" onClick={cancelDictation}>{current.phase === "idle" ? "Dismiss" : "Cancel"}</button>
   </aside>;
 }

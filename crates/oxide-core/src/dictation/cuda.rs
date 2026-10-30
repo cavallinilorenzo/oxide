@@ -8,7 +8,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -150,6 +150,7 @@ impl CudaRuntime {
         &self,
         request: WorkerRequest,
         generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
     ) -> Result<(WorkerResult, String), BackendError> {
         if !self.path.is_file() {
             return Err(BackendError::Unavailable(CapabilityState::OmittedFromBuild));
@@ -189,8 +190,8 @@ impl CudaRuntime {
         let start = Instant::now();
         let timeout = Duration::from_secs(180);
         let status = loop {
-            if let Some(target) = generation
-                && self.generation.load(Ordering::Acquire) != target
+            if generation.is_some_and(|target| self.generation.load(Ordering::Acquire) != target)
+                || cancelled.is_some_and(|c| c.load(Ordering::SeqCst))
             {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -260,11 +261,18 @@ impl CudaRuntime {
     }
 
     pub fn adapters(&self) -> Result<Vec<CudaAdapter>, BackendError> {
-        self.adapters_at(None)
+        self.adapters_at(None, None)
     }
 
-    fn adapters_at(&self, generation: Option<u64>) -> Result<Vec<CudaAdapter>, BackendError> {
-        match self.exchange(WorkerRequest::Probe, generation)?.0 {
+    fn adapters_at(
+        &self,
+        generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<Vec<CudaAdapter>, BackendError> {
+        match self
+            .exchange(WorkerRequest::Probe, generation, cancelled)?
+            .0
+        {
             WorkerResult::Adapters(devices) => Ok(devices),
             _ => Err(BackendError::InitializationFailed(
                 "Unexpected probe response".into(),
@@ -272,8 +280,12 @@ impl CudaRuntime {
         }
     }
 
-    fn selected(&self, generation: Option<u64>) -> Result<CudaAdapter, BackendError> {
-        let devices = self.adapters_at(generation)?;
+    fn selected(
+        &self,
+        generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<CudaAdapter, BackendError> {
+        let devices = self.adapters_at(generation, cancelled)?;
         let selected = match &self.adapter_id {
             Some(id) => devices.iter().find(|d| &d.id == id),
             None => devices
@@ -295,7 +307,7 @@ impl WhisperBackendRuntime for CudaRuntime {
         BackendId::Cuda
     }
     fn probe(&self) -> BackendProbe {
-        let state = match self.selected(None) {
+        let state = match self.selected(None, None) {
             Ok(device) => {
                 return BackendProbe {
                     backend: BackendId::Cuda,
@@ -329,7 +341,7 @@ impl WhisperBackendRuntime for CudaRuntime {
         if request.cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
         }
-        let device = self.selected(Some(generation))?;
+        let device = self.selected(Some(generation), Some(&request.cancelled))?;
         if device.capability != CapabilityState::Available {
             return Err(BackendError::Unavailable(device.capability));
         }
@@ -338,6 +350,7 @@ impl WhisperBackendRuntime for CudaRuntime {
             &request.model_path,
             self.resource_provider.as_ref(),
         )?;
+        let cancellation = request.cancelled.clone();
         let mut request = request.clone();
         request.samples = super::resample(&request.samples, request.sample_rate);
         request.sample_rate = 16000;
@@ -347,6 +360,7 @@ impl WhisperBackendRuntime for CudaRuntime {
                 adapter_id: device.id.clone(),
             },
             Some(generation),
+            Some(&cancellation),
         )?;
         if self.generation.load(Ordering::Acquire) != generation {
             return Err(BackendError::Cancelled);
@@ -383,6 +397,7 @@ impl WhisperBackendRuntime for CudaRuntime {
                 Ok(TranscriptionOutcome {
                     text,
                     execution: super::ExecutionDetails {
+                        fallback_reason: None,
                         backend: BackendId::Cuda,
                         adapter: Some(device.name),
                         offloaded: true,

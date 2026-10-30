@@ -8,7 +8,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -152,9 +152,12 @@ impl VulkanRuntime {
         &self,
         request: WorkerRequest,
         generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
     ) -> Result<(WorkerResult, String), BackendError> {
         let generation = generation.unwrap_or_else(|| self.generation.load(Ordering::Acquire));
-        if self.generation.load(Ordering::Acquire) != generation {
+        if self.generation.load(Ordering::Acquire) != generation
+            || cancelled.is_some_and(|c| c.load(Ordering::SeqCst))
+        {
             return Err(BackendError::Cancelled);
         }
         let timeout = if matches!(request, WorkerRequest::Probe) {
@@ -207,7 +210,9 @@ impl VulkanRuntime {
         });
         let start = Instant::now();
         let status = loop {
-            if self.generation.load(Ordering::Acquire) != generation {
+            if self.generation.load(Ordering::Acquire) != generation
+                || cancelled.is_some_and(|c| c.load(Ordering::SeqCst))
+            {
                 let _ = child.kill();
                 let _ = child.wait();
                 break Err(BackendError::Cancelled);
@@ -276,11 +281,18 @@ impl VulkanRuntime {
     }
 
     pub fn adapters(&self) -> Result<Vec<VulkanAdapter>, BackendError> {
-        self.adapters_at(None)
+        self.adapters_at(None, None)
     }
 
-    fn adapters_at(&self, generation: Option<u64>) -> Result<Vec<VulkanAdapter>, BackendError> {
-        match self.exchange(WorkerRequest::Probe, generation)?.0 {
+    fn adapters_at(
+        &self,
+        generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<Vec<VulkanAdapter>, BackendError> {
+        match self
+            .exchange(WorkerRequest::Probe, generation, cancelled)?
+            .0
+        {
             WorkerResult::Adapters(devices) => Ok(devices),
             _ => Err(BackendError::InitializationFailed(
                 "Unexpected probe response".into(),
@@ -288,8 +300,12 @@ impl VulkanRuntime {
         }
     }
 
-    fn selected(&self, generation: Option<u64>) -> Result<VulkanAdapter, BackendError> {
-        let devices = self.adapters_at(generation)?;
+    fn selected(
+        &self,
+        generation: Option<u64>,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<VulkanAdapter, BackendError> {
+        let devices = self.adapters_at(generation, cancelled)?;
         let selected = match &self.adapter_id {
             Some(id) => devices.iter().find(|d| &d.id == id),
             None => devices
@@ -311,7 +327,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
         BackendId::Vulkan
     }
     fn probe(&self) -> BackendProbe {
-        let state = match self.selected(None) {
+        let state = match self.selected(None, None) {
             Ok(device) => {
                 return BackendProbe {
                     backend: BackendId::Vulkan,
@@ -345,7 +361,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
         if request.cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
         }
-        let device = self.selected(Some(generation))?;
+        let device = self.selected(Some(generation), Some(&request.cancelled))?;
         if device.capability != CapabilityState::Available {
             return Err(BackendError::Unavailable(device.capability));
         }
@@ -354,6 +370,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
             &request.model_path,
             self.resource_provider.as_ref(),
         )?;
+        let cancellation = request.cancelled.clone();
         let mut request = request.clone();
         request.samples = super::resample(&request.samples, request.sample_rate);
         request.sample_rate = 16000;
@@ -363,6 +380,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
                 adapter_id: device.id.clone(),
             },
             Some(generation),
+            Some(&cancellation),
         )?;
         if self.generation.load(Ordering::Acquire) != generation {
             return Err(BackendError::Cancelled);
@@ -398,6 +416,7 @@ impl WhisperBackendRuntime for VulkanRuntime {
                 Ok(TranscriptionOutcome {
                     text,
                     execution: super::ExecutionDetails {
+                        fallback_reason: None,
                         backend: BackendId::Vulkan,
                         adapter: Some(device.name),
                         offloaded: true,

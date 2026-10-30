@@ -409,6 +409,8 @@ pub struct ExecutionDetails {
     pub adapter: Option<String>,
     pub offloaded: bool,
     pub offload_evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -427,6 +429,10 @@ pub struct DictationSettings {
     device: DictationDevice,
     #[serde(default)]
     model: DictationModelId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backend: Option<BackendId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    adapter_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -460,6 +466,33 @@ async fn dictation_status(
             .map_err(|e| oxide_core::Error::Dictation(e.to_string()))?,
     )
 }
+#[tauri::command]
+#[specta::specta]
+async fn dictation_advice(
+    core: State<'_, Arc<Core>>,
+    dictation: State<'_, Arc<oxide_core::dictation::Dictation>>,
+    preference: dictation_advice::AdvicePreference,
+) -> Result<DictationStatus, AppError> {
+    let core = core.inner().clone();
+    let dictation = dictation.inner().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        let status = dictation.status_with_preference(
+            core.home(),
+            match preference {
+                dictation_advice::AdvicePreference::Balanced => {
+                    oxide_core::dictation::resources::Preference::Balanced
+                }
+                dictation_advice::AdvicePreference::Quality => {
+                    oxide_core::dictation::resources::Preference::Quality
+                }
+            },
+        );
+        convert(&status)
+    })
+    .await
+    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))?)
+}
+
 #[tauri::command]
 #[specta::specta]
 async fn dictation_install(
@@ -2909,6 +2942,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         dictation_status,
+        dictation_advice,
         dictation_check_performance,
         dictation_cancel_performance,
         dictation_install,

@@ -338,3 +338,31 @@ fn native_allocation_failure_is_reported_as_memory_pressure() {
         CapabilityState::InsufficientMemory { .. }
     ));
 }
+#[test]
+fn recording_token_cancels_an_independently_selected_worker() {
+    let dir = inference_fixture(
+        "whisper_backend_init_gpu: using Vulkan0 backend\nVulkan Timings:\nMUL_MAT: 1 x 500 us = 500 us\nTotal time: 500 us.\n",
+    );
+    std::fs::write(dir.path().join("delay-ms"), "1000").unwrap();
+    let runtime = std::sync::Arc::new(fixture_runtime(&dir, None));
+    let running = runtime.clone();
+    let req = request();
+    let cancelled = req.cancelled.clone();
+    let job = std::thread::spawn(move || running.transcribe(&req));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !dir.path().join("started").exists() {
+        assert!(
+            !job.is_finished(),
+            "Vulkan inference ended before the worker started"
+        );
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(
+        job.join().unwrap(),
+        Err(oxide_core::dictation::BackendError::Cancelled)
+    ));
+    std::fs::remove_file(dir.path().join("delay-ms")).unwrap();
+    assert!(runtime.transcribe(&request()).unwrap().execution.offloaded);
+}

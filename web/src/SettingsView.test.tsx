@@ -33,7 +33,7 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
     if (command === "detected_editors" || command === "get_model_catalog") return [];
     if (command === "detect_provider") return { installed: false, authenticated: false, available: false };
     if (command === "plugin:event|listen") return 1;
-    if (command === "plugin:event|unlisten") return null;
+    if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;
     throw new Error(`Unexpected command ${command}`);
   });
   await act(async () => root.render(<SettingsView onClose={() => {}} />));
@@ -60,7 +60,7 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
   await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Save")!.click());
   expect(getAppearance().typography?.terminal.size).toBe(18);
   expect(saved?.dictation).toEqual({ enabled: true, language: "auto", device: "cpu", model: "small" });
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("Settings saved.");
+  expect(container.querySelector('[aria-label="Settings save status"]')?.textContent).toBe("Settings saved.");
   expect(saved?.providers).toEqual({
     claude: { model: null, effort: null, permissionMode: "full-access" },
     codex: { model: null, effort: null, permissionMode: "full-access" },
@@ -75,7 +75,7 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
   act(() => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
   expect(saveButton.disabled).toBe(true);
   await act(async () => completeSave(null));
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("");
+  expect(container.querySelector('[aria-label="Settings save status"]')?.textContent).toBe("");
   expect(saveButton.disabled).toBe(false);
 });
 
@@ -104,7 +104,7 @@ it("groups model effort variants while keeping the saved effort selectable", asy
     if (command === "detected_editors") return [];
     if (command === "detect_provider") return { installed: false, authenticated: false, available: false };
     if (command === "plugin:event|listen") return 1;
-    if (command === "plugin:event|unlisten") return null;
+    if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;
     throw new Error(`Unexpected command ${command}`);
   });
   await act(async () => root.render(<SettingsView onClose={() => {}} />));

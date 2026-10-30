@@ -388,3 +388,39 @@ fn cuda_and_vulkan_coexist_without_mandatory_cuda_loading_at_startup() {
         std::env::remove_var("OXIDE_DICTATION_BACKEND");
     }
 }
+#[test]
+fn recording_token_cancels_an_independently_selected_worker() {
+    let dir = fixture(
+        response(serde_json::json!({"Ok":{"Transcription":{
+            "text":"ignored","adapter_id":"cuda:0000000010de","native_backend":"CUDA0"}}})),
+        "whisper_backend_init_gpu: using CUDA0 backend\nCUDA Timings: Total time: 1200 us.\n",
+    );
+    std::fs::write(dir.path().join("delay-ms"), "1000").unwrap();
+    std::fs::write(
+        dir.path().join("probe.json"),
+        response(serde_json::json!({"Ok":{"Adapters":[adapter()]}})).to_string(),
+    )
+    .unwrap();
+    let runtime = std::sync::Arc::new(fixture_runtime(&dir, None));
+    let worker_clone = runtime.clone();
+    let req = request();
+    let cancelled = req.cancelled.clone();
+    let handle = std::thread::spawn(move || worker_clone.transcribe(&req));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !dir.path().join("started").exists() {
+        assert!(
+            !handle.is_finished(),
+            "CUDA inference ended before the worker started"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "CUDA worker did not start"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(
+        handle.join().unwrap(),
+        Err(oxide_core::dictation::BackendError::Cancelled)
+    ));
+}

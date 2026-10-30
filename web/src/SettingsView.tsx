@@ -359,7 +359,7 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
           {saveStatus === "saving" ? "Saving…" : "Save"}
         </button>
         <button onClick={onClose}>Close</button>
-        <span className="settings-save-status" role="status">
+        <span className="settings-save-status" role="status" aria-label="Settings save status">
           {saveStatus === "saved" ? "Settings saved." : ""}
         </span>
       </div>

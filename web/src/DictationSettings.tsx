@@ -123,53 +123,366 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
     benchmark.current++;
     try { await commands.dictationCancelPerformance(); if (active.current) { setResults([]); setNotice("Performance check cancelled."); } } catch (cause) { fail(cause); }
   };
-  return <section className="settings-section" aria-labelledby="settings-dictation">
-    <header className="settings-section-header"><h2 id="settings-dictation">Dictation</h2><p>Whisper transcribes on this computer. Audio stays in memory and is discarded. Installed models work offline.</p></header>
-    <div className="settings-card dictation-settings">
-      <label className="inline"><input type="checkbox" checked={value.enabled} onChange={e => { if (!e.target.checked) { cancelDictation(); if (running.current) void cancelCheck(); } onChange({ ...value, enabled: e.target.checked }); }} />Enable dictation</label>
-      <p>Use the rebindable dictation shortcut or chat microphone. Text goes to the original live chat or terminal for review, without submitting. Escape cancels; recordings stop after two minutes. Configure the shortcut in Keyboard shortcuts below.</p>
-      <div className="settings-fields">
-        <label className="settings-field">Language code<input aria-label="Dictation language" value={value.language} placeholder="auto, it, en, fr…" onChange={e => onChange({ ...value, language: e.target.value.trim().toLowerCase() })} /><small>Use auto or a supported Whisper language code, such as it. All models below are multilingual; unsupported codes are rejected on save.</small></label>
-        <div className="settings-field"><span>Requested execution mode</span><Dropdown label="Dictation device" value={value.device} options={[{ value: "auto", label: "Auto" }, { value: "cpu", label: "CPU" }, { value: "gpu", label: "GPU" }]} onChange={device => onChange({ ...value, device })} /><small>Requested: {selectedModel} · {backendName(value.device)}{value.backend && value.device !== "cpu" ? ` · ${backendName(value.backend)} · ${value.adapterId ?? "default adapter"}` : ""}. Save Settings to apply.</small></div>
+  return (
+    <section className="settings-section" aria-labelledby="settings-dictation">
+      <header className="settings-section-header">
+        <h2 id="settings-dictation">Dictation</h2>
+        <p>Whisper transcribes privately on this computer. Audio stays in memory and is discarded. Installed models work offline.</p>
+      </header>
+
+      <div className="settings-card dictation-settings">
+        <div className="dictation-primary-toggle">
+          <label className="inline dictation-toggle-label">
+            <input
+              type="checkbox"
+              checked={value.enabled}
+              onChange={(e) => {
+                if (!e.target.checked) {
+                  cancelDictation();
+                  if (running.current) void cancelCheck();
+                }
+                onChange({ ...value, enabled: e.target.checked });
+              }}
+            />
+            <span className="toggle-title">Enable dictation</span>
+          </label>
+          <p className="dictation-helper-text">
+            Use the shortcut or chat microphone. Text goes to the original live chat or terminal for review, without submitting. Escape cancels; recordings stop after two minutes. Configure the shortcut in Keyboard shortcuts below.
+          </p>
+        </div>
+
+        <div className="settings-fields">
+          <label className="settings-field">
+            <span>Language code</span>
+            <input
+              aria-label="Dictation language"
+              value={value.language}
+              placeholder="auto, it, en, fr…"
+              onChange={(e) => onChange({ ...value, language: e.target.value.trim().toLowerCase() })}
+            />
+            <small>Use auto or a supported Whisper language code, such as it. All models below are multilingual; unsupported codes are rejected on save.</small>
+          </label>
+
+          <div className="settings-field">
+            <span>Requested execution mode</span>
+            <Dropdown
+              label="Dictation device"
+              value={value.device}
+              options={[
+                { value: "auto", label: "Auto (Recommended)" },
+                { value: "cpu", label: "CPU" },
+                { value: "gpu", label: "GPU" },
+              ]}
+              onChange={(device) => onChange({ ...value, device })}
+            />
+            <small>
+              Requested: {selectedModel} · {backendName(value.device)}
+              {value.backend && value.device !== "cpu" ? ` · ${backendName(value.backend)} · ${value.adapterId ?? "default adapter"}` : ""}. Save Settings to apply.
+            </small>
+          </div>
+        </div>
+
+        {recommended && (
+          <div className="dictation-hero-card" aria-label="Hardware recommendation banner">
+            <div className="dictation-hero-header">
+              <span className="dictation-badge-hero">Recommended for your hardware</span>
+              <h3 className="dictation-hero-title">{recommended.model.toUpperCase()}</h3>
+            </div>
+            <p className="dictation-hero-desc">
+              {recommended.model === "small"
+                ? "The recommended sweet spot: fast near-instant response with GPU acceleration, high accuracy for Italian and English, and light memory footprint (~1.2 GiB)."
+                : recommended.reason}
+            </p>
+            <div className="dictation-hero-meta">
+              <p>
+                {recommended.provisional ? "Provisional" : "Measured"}: {recommended.model} · {backendName(recommended.backend)} · {recommended.adapter ?? "CPU"}. Confidence: {recommended.confidence}. {recommended.reason}
+              </p>
+            </div>
+            <div className="dictation-hero-actions">
+              {models.some((m) => m.id === recommended.model && m.state.status === "installed") ? (
+                <button
+                  type="button"
+                  className="dictation-apply-btn"
+                  disabled={refreshing || !recommended.safeToLoad}
+                  onClick={() =>
+                    onChange({
+                      ...value,
+                      model: recommended.model,
+                      device: recommended.backend === "cpu" ? "cpu" : "gpu",
+                      backend: recommended.backend === "cpu" ? null : recommended.backend,
+                      adapterId: recommended.adapterId,
+                    })
+                  }
+                >
+                  Apply recommendation
+                </button>
+              ) : (
+                <p className="dictation-hero-notice">
+                  Download {recommended.model} explicitly below before applying advice.
+                </p>
+              )}
+            </div>
+            {selectedDecision && (
+              <p className="dictation-decision-status">
+                Selected combination:{" "}
+                {
+                  ({
+                    recommended: "Recommended",
+                    usableSlower: "Usable, slower",
+                    notRecommended: "Not recommended with current resources",
+                    insufficientData: "Insufficient data",
+                  } as const)[selectedDecision.status]
+                }
+                . {selectedDecision.reason}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="dictation-models-section">
+          <div className="dictation-models-header">
+            <h3>Whisper Models</h3>
+            <p className="dictation-models-subtitle">
+              Selected: <strong>{selectedModel}</strong>. Downloading never changes the selection. Select an installed model, then save Settings.
+            </p>
+          </div>
+
+          <div className="dictation-models">
+            {entries.map((entry) => {
+              const model = models.find((m) => m.id === entry.id);
+              const state = model?.state;
+              const busy = operations.has(entry.id);
+              const downloading = state?.status === "installing";
+              const isSelected = entry.id === selectedModel;
+              const isInstalled = state?.status === "installed";
+              const isRecommended = recommended?.model === entry.id;
+
+              return (
+                <article
+                  key={entry.id}
+                  className={`dictation-model ${isSelected ? "selected" : ""} ${isRecommended ? "recommended" : ""}`}
+                  aria-label={`Model ${entry.id}`}
+                >
+                  <div className="dictation-model-head">
+                    <h4>
+                      {entry.id}
+                      {isSelected ? " · selected" : ""}
+                      {isRecommended && !isSelected ? " · recommended" : ""}
+                    </h4>
+                    <span className={`status-pill status-${state?.status ?? "unknown"}`}>
+                      {state?.status === "installed" ? "Installed" : downloading ? "Downloading…" : state?.status === "error" ? "Error" : "Not installed"}
+                    </span>
+                  </div>
+
+                  <p className="dictation-model-tradeoff">{entry.tradeoff}</p>
+
+                  <div className="dictation-model-meta">
+                    <span>Download: {bytes(entry.expectedBytes)} · {entry.languageCoverage}</span>
+                    <span className="memory-estimate-line">
+                      Memory estimate:{" "}
+                      {entry.estimatedPeakBytes
+                        .map(
+                          (m) =>
+                            `${backendName(m.backend)} ${bytes(m.bytes)}${m.measured ? " measured" : " provisional"}`
+                        )
+                        .join(" · ")}
+                    </span>
+                  </div>
+
+                  <p role="status" className="dictation-state-desc">
+                    {state?.status ?? "Checking installation…"}
+                    {state?.status === "error" ? `: ${state.message}` : ""}
+                  </p>
+
+                  {downloading && (
+                    <progress
+                      aria-label={`${entry.id} download`}
+                      max={state.total ?? undefined}
+                      value={state.received ?? undefined}
+                    />
+                  )}
+
+                  <div className="dictation-actions">
+                    {isInstalled ? (
+                      <>
+                        <button
+                          type="button"
+                          className={isSelected ? "selected-action" : "primary-action"}
+                          disabled={busy || checking}
+                          onClick={() => onChange({ ...value, model: entry.id })}
+                        >
+                          Select {entry.id}
+                        </button>
+                        <button
+                          type="button"
+                          className="danger-action"
+                          disabled={busy || checking || (value.enabled && selectedModel === entry.id)}
+                          onClick={() => void operation(entry.id, "delete")}
+                        >
+                          Delete {entry.id}
+                        </button>
+                      </>
+                    ) : downloading || busy ? (
+                      <button type="button" onClick={() => void cancelDownload(entry.id)}>
+                        Cancel {entry.id} download
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="download-action"
+                        disabled={!state}
+                        onClick={() =>
+                          void operation(
+                            entry.id,
+                            state?.status === "error" || state?.status === "cancelled" ? "retry" : "install"
+                          )
+                        }
+                      >
+                        {state?.status === "error" || state?.status === "cancelled" ? "Retry" : "Download"} {entry.id}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        <details className="dictation-advanced-details">
+          <summary>Advanced diagnostics, GPU adapters and performance checks</summary>
+
+          <div className="dictation-advanced-content">
+            <div className="dictation-advanced-block">
+              <h4>Advanced GPU backend and adapter override</h4>
+              <p>Auto can retry once on CPU when memory permits. Explicit GPU reports failure and offers CPU.</p>
+              <div className="settings-field">
+                <span>GPU backend and adapter</span>
+                <Dropdown
+                  label="GPU backend and adapter"
+                  value={selectedCandidate ? String(candidates.indexOf(selectedCandidate)) : ""}
+                  options={[
+                    { value: "", label: "Automatic backend / default adapter" },
+                    ...gpuCandidates.filter(usable).map((c) => ({
+                      value: String(candidates.indexOf(c)),
+                      label: `${backendName(c.probe.backend)} · ${c.probe.adapter ?? "Unknown adapter"}`,
+                    })),
+                  ]}
+                  onChange={(id) => {
+                    const c = id === "" ? undefined : candidates[Number(id)];
+                    onChange({
+                      ...value,
+                      backend: c?.probe.backend ?? null,
+                      adapterId: c?.adapterId ?? null,
+                    });
+                  }}
+                />
+              </div>
+              {value.backend && !selectedCandidate && (
+                <p role="status" className="warning-text">
+                  Saved adapter is unavailable. Reconnect it, select another adapter or use CPU.
+                </p>
+              )}
+              <button type="button" onClick={() => onChange({ ...value, device: "cpu" })}>
+                Use CPU
+              </button>
+            </div>
+
+            <div className="dictation-advanced-block" aria-label="Runtime capability">
+              <h3>Runtime capability</h3>
+              {(candidates.length ? candidates.map((c) => c.probe) : status?.probes ?? []).map((probe, i) => (
+                <p key={i}>
+                  {backendName(probe.backend)} · {probe.adapter ?? "Default device"}: {capability(probe.state)}{" "}
+                  {probe.memoryPool &&
+                    `Memory ${bytes(probe.memoryPool.availableBytes)} available / ${bytes(probe.memoryPool.totalBytes)} total (${probe.memoryPool.unified ? "shared/unified pool" : "dedicated"}).`}
+                </p>
+              ))}
+              <p role="status">
+                Latest execution:{" "}
+                {status?.lastExecution
+                  ? `${backendName(status.lastExecution.backend)} · ${status.lastExecution.adapter ?? "CPU"} · ${status.lastExecution.offloaded ? "verified GPU offload" : "CPU, no GPU offload"}${status.lastExecution.offloadEvidence ? ` · ${status.lastExecution.offloadEvidence}` : ""}`
+                  : "No execution reported yet."}
+              </p>
+            </div>
+
+            <div className="dictation-advanced-block" aria-label="Resource advice">
+              <h3>Resources and recommendation</h3>
+              <p>
+                {advice
+                  ? `${advice.resources.cpu.model} · ${advice.resources.cpu.architecture} · ${advice.resources.cpu.usableCores} usable threads. RAM ${bytes(advice.resources.availableRamBytes)} available / ${bytes(advice.resources.totalRamBytes)} total. Free disk ${bytes(advice.resources.freeDiskBytes)}.`
+                  : `RAM ${bytes(status?.availableMemoryGb == null ? null : status.availableMemoryGb * 1073741824)} available. Resource details unknown; refresh to retry.`}
+              </p>
+              <div className="dictation-advice-preference-row">
+                <Dropdown
+                  label="Recommendation preference"
+                  value={preference}
+                  options={[
+                    { value: "balanced", label: "Balanced" },
+                    { value: "quality", label: "Quality" },
+                  ]}
+                  onChange={(choice) => {
+                    latestPreference.current = choice;
+                    setPreference(choice);
+                    void refresh(choice);
+                  }}
+                />
+                <button type="button" disabled={refreshing} onClick={() => void refresh()}>
+                  {refreshing ? "Refreshing resources…" : "Refresh resources"}
+                </button>
+              </div>
+              <small>
+                Estimates include inference buffers and headroom, not just download size. Shared GPU/RAM is one pool. Quality preference does not guarantee better recognition for every utterance.
+              </small>
+            </div>
+
+            <div className="dictation-advanced-block">
+              <h3>Check performance</h3>
+              <p>
+                Runs bundled local speech without the microphone or downloads. Checks the selected combination and at most one smaller installed candidate. Product targets: RTF ≤ 0.5 interactive; 0.5–1 usable with a wait; &gt;1 slow. CUDA/Metal checks need execution instrumentation; use CPU or Vulkan meanwhile.
+              </p>
+              <button
+                type="button"
+                disabled={
+                  checking ||
+                  !installed ||
+                  !benchmarkCandidate ||
+                  !usable(benchmarkCandidate) ||
+                  capture.phase !== "idle"
+                }
+                onClick={() => void check()}
+              >
+                Check performance
+              </button>
+              {!benchmarkCandidate && (
+                <p className="warning-text">Choose CPU or an explicit GPU backend/adapter to check this model.</p>
+              )}
+              {checking && (
+                <div className="dictation-check-progress">
+                  <p role="status">
+                    {progress
+                      ? `${progress.model} · ${backendName(progress.backend)} · ${progress.phase.phase === "measuring" ? `Measuring run ${progress.phase.run} of 3` : progress.phase.phase === "warmup" ? "Warming up" : "Loading model"}`
+                      : "Starting performance check…"}
+                  </p>
+                  <button type="button" onClick={() => void cancelCheck()}>
+                    Cancel performance check
+                  </button>
+                </div>
+              )}
+              {results.map((result) => (
+                <p key={`${result.model}:${result.execution.backend}`}>
+                  {result.model} · {backendName(result.execution.backend)} · {result.execution.adapter ?? "CPU"}: cold load {result.measurement.coldLoadMs ?? "Unknown"} ms; median inference {result.medianInferenceMs ?? "Unknown"} ms; RTF {result.medianRtfMilli == null ? "Unknown" : (result.medianRtfMilli / 1000).toFixed(3)}.
+                </p>
+              ))}
+            </div>
+          </div>
+        </details>
+
+        {notice && <p role="status" className="notice-text">{notice}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
-      <details><summary>Advanced GPU backend and adapter</summary>
-        <p>Auto can retry once on CPU when memory permits. Explicit GPU reports failure and offers CPU.</p>
-        <div className="settings-field"><span>GPU backend and adapter</span><Dropdown label="GPU backend and adapter" value={selectedCandidate ? String(candidates.indexOf(selectedCandidate)) : ""} options={[{ value: "", label: "Automatic backend / default adapter" }, ...gpuCandidates.filter(usable).map(c => ({ value: String(candidates.indexOf(c)), label: `${backendName(c.probe.backend)} · ${c.probe.adapter ?? "Unknown adapter"}` }))]} onChange={id => { const c = id === "" ? undefined : candidates[Number(id)]; onChange({ ...value, backend: c?.probe.backend ?? null, adapterId: c?.adapterId ?? null }); }} /></div>
-        {value.backend && !selectedCandidate && <p role="status">Saved adapter is unavailable. Reconnect it, select another adapter or use CPU.</p>}
-        <button type="button" onClick={() => onChange({ ...value, device: "cpu" })}>Use CPU</button>
-      </details>
-      <div aria-label="Runtime capability"><h3>Runtime capability</h3>{(candidates.length ? candidates.map(c => c.probe) : status?.probes ?? []).map((probe, i) => <p key={i}>{backendName(probe.backend)} · {probe.adapter ?? "Default device"}: {capability(probe.state)} {probe.memoryPool && `Memory ${bytes(probe.memoryPool.availableBytes)} available / ${bytes(probe.memoryPool.totalBytes)} total (${probe.memoryPool.unified ? "shared/unified pool" : "dedicated"}).`}</p>)}</div>
-      <p role="status">Latest execution: {status?.lastExecution ? `${backendName(status.lastExecution.backend)} · ${status.lastExecution.adapter ?? "CPU"} · ${status.lastExecution.offloaded ? "verified GPU offload" : "CPU, no GPU offload"}${status.lastExecution.offloadEvidence ? ` · ${status.lastExecution.offloadEvidence}` : ""}` : "No execution reported yet."}</p>
-      <div aria-label="Resource advice"><h3>Resources and recommendation</h3><p>{advice ? `${advice.resources.cpu.model} · ${advice.resources.cpu.architecture} · ${advice.resources.cpu.usableCores} usable threads. RAM ${bytes(advice.resources.availableRamBytes)} available / ${bytes(advice.resources.totalRamBytes)} total. Free disk ${bytes(advice.resources.freeDiskBytes)}.` : `RAM ${bytes(status?.availableMemoryGb == null ? null : status.availableMemoryGb * 1073741824)} available. Resource details unknown; refresh to retry.`}</p>
-        <Dropdown label="Recommendation preference" value={preference} options={[{ value: "balanced", label: "Balanced" }, { value: "quality", label: "Quality" }]} onChange={choice => { latestPreference.current = choice; setPreference(choice); void refresh(choice); }} />
-        <button type="button" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing resources…" : "Refresh resources"}</button>
-        <p>{recommended ? `${recommended.provisional ? "Provisional" : "Measured"}: ${recommended.model} · ${backendName(recommended.backend)} · ${recommended.adapter ?? "CPU"}. Confidence: ${recommended.confidence}. ${recommended.reason}` : status?.recommendation ?? "Loading resource advice…"}</p>
-        {recommended && <button type="button" disabled={refreshing || !recommended.safeToLoad || !models.some(m => m.id === recommended.model && m.state.status === "installed")} onClick={() => onChange({ ...value, model: recommended.model, device: recommended.backend === "cpu" ? "cpu" : "gpu", backend: recommended.backend === "cpu" ? null : recommended.backend, adapterId: recommended.adapterId })}>Apply recommendation</button>}
-        {recommended && !models.some(m => m.id === recommended.model && m.state.status === "installed") && <p>Download {recommended.model} explicitly below before applying advice.</p>}
-        {selectedDecision && <p>Selected combination: {({ recommended: "Recommended", usableSlower: "Usable, slower", notRecommended: "Not recommended with current resources", insufficientData: "Insufficient data" })[selectedDecision.status]}. {selectedDecision.reason}</p>}
-        <small>Estimates include inference buffers and headroom, not just download size. Shared GPU/RAM is one pool. Quality preference does not guarantee better recognition for every utterance.</small>
-      </div>
-      <h3>Models</h3><p>Selected: {selectedModel}. Downloading never changes the selection. Select an installed model, then save Settings.</p>
-      <div className="dictation-models">{entries.map(entry => {
-        const model = models.find(m => m.id === entry.id);
-        const state = model?.state;
-        const busy = operations.has(entry.id);
-        const downloading = state?.status === "installing";
-        return <article key={entry.id} className="dictation-model" aria-label={`Model ${entry.id}`}>
-          <h4>{entry.id}{entry.id === selectedModel ? " · selected" : ""}</h4><p>Download: {bytes(entry.expectedBytes)} · {entry.languageCoverage}</p><p>{entry.tradeoff}</p>
-          <p>Memory estimate: {entry.estimatedPeakBytes.map(m => `${backendName(m.backend)} ${bytes(m.bytes)}${m.measured ? " measured" : " provisional"}`).join(" · ")}</p>
-          <p role="status">{state?.status ?? "Checking installation…"}{state?.status === "error" ? `: ${state.message}` : ""}</p>
-          {downloading && <progress aria-label={`${entry.id} download`} max={state.total ?? undefined} value={state.received ?? undefined} />}
-          <div className="dictation-actions">{state?.status === "installed" ? <><button type="button" disabled={busy || checking} onClick={() => onChange({ ...value, model: entry.id })}>Select {entry.id}</button><button type="button" disabled={busy || checking || (value.enabled && selectedModel === entry.id)} onClick={() => void operation(entry.id, "delete")}>Delete {entry.id}</button></> : downloading || busy ? <button type="button" onClick={() => void cancelDownload(entry.id)}>Cancel {entry.id} download</button> : <button type="button" disabled={!state} onClick={() => void operation(entry.id, state?.status === "error" || state?.status === "cancelled" ? "retry" : "install")}>{state?.status === "error" || state?.status === "cancelled" ? "Retry" : "Download"} {entry.id}</button>}</div>
-        </article>;
-      })}</div>
-      <div><h3>Check performance</h3><p>Runs bundled local speech without the microphone or downloads. Checks the selected combination and at most one smaller installed candidate. Product targets: RTF ≤ 0.5 interactive; 0.5–1 usable with a wait; &gt;1 slow. CUDA/Metal checks need execution instrumentation; use CPU or Vulkan meanwhile.</p>
-        <button type="button" disabled={checking || !installed || !benchmarkCandidate || !usable(benchmarkCandidate) || capture.phase !== "idle"} onClick={() => void check()}>Check performance</button>
-        {!benchmarkCandidate && <p>Choose CPU or an explicit GPU backend/adapter to check this model.</p>}
-        {checking && <><p role="status">{progress ? `${progress.model} · ${backendName(progress.backend)} · ${progress.phase.phase === "measuring" ? `Measuring run ${progress.phase.run} of 3` : progress.phase.phase === "warmup" ? "Warming up" : "Loading model"}` : "Starting performance check…"}</p><button type="button" onClick={() => void cancelCheck()}>Cancel performance check</button></>}
-        {results.map(result => <p key={`${result.model}:${result.execution.backend}`}>{result.model} · {backendName(result.execution.backend)} · {result.execution.adapter ?? "CPU"}: cold load {result.measurement.coldLoadMs ?? "Unknown"} ms; median inference {result.medianInferenceMs ?? "Unknown"} ms; RTF {result.medianRtfMilli == null ? "Unknown" : (result.medianRtfMilli / 1000).toFixed(3)}.</p>)}
-      </div>
-      <p role="status">{notice}</p>{error && <p className="error" role="alert">{error}</p>}
-    </div>
-  </section>;
+    </section>
+  );
 }

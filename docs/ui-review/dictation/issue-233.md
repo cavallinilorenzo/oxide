@@ -1,6 +1,6 @@
 # Settings evidence — #233
 
-Automated browser run on macOS, Chromium, deterministic IPC fixtures (no real
+Automated browser runs on macOS, Chromium and WebKit, deterministic IPC fixtures (no real
 microphone, downloads or user settings):
 
 ```sh
@@ -12,6 +12,8 @@ It asserts no page overflow, advanced adapter focus, keyboard mode selection
 (ArrowDown/Home/Enter), Escape focus restoration, shortcut capture and insertion
 without `send_prompt`. No browser page errors. Screenshots: `settings.png`,
 `settings-1064.png`, `settings-600.png`, `models-600.png`, `performance-600.png`.
+The `webkit/` directory contains the equivalent WebKit captures; both engines
+passed the same assertions.
 
 Component tests use the IPC boundary and real controls. They cover legacy Small
 and Italian preservation, all six multilingual catalogue entries, unknown resources,
@@ -57,3 +59,29 @@ cache intact. Tauri's [pinned DMG bundler](https://github.com/tauri-apps/tauri/b
 uses this headless path to skip Finder decoration; it does not skip compilation
 or installer creation. The pre-existing ThreadView virtualizer lint warning
 remains; there are no new lint warnings.
+
+### Standards
+
+The backend/adapter picker uses the shared Dropdown, satisfying the documented
+control-reuse rule. Typed `fallbackReason` replaces parsing human-readable native
+evidence. Re-review found no consequential standards concerns.
+
+### Spec
+
+Re-review found no blockers: selected-worker cancellation, stale preference/status
+responses, and Auto benchmark/execution consistency are resolved. Direct testing
+of Auto decision ranking is an optional future coverage improvement; deterministic
+resource-policy decisions remain covered by the existing resource suite.
+
+Remaining findings: Standards **0** (worst: none); Spec **0 blockers** (worst: none).
+
+## Final local results
+
+`CI=true CARGO_TARGET_DIR=/tmp/oxide-233-checks node tools/check.mjs` completed:
+**12 passed, 0 failed, 7 CI/platform checks skipped, 0 not run**.
+Includes 475 web tests, 400 Rust tests (7 intentionally ignored tests), 79 tooling
+tests, formatting, ESLint, TypeScript, production web build, Tauri alignment,
+Clippy, generated bindings and macOS app/DMG creation. The headless DMG build
+passed; no Finder permission change was required. The unsigned local app and DMG
+are retained under `/tmp/oxide-233-checks/check-artifacts/run-sOZJgU/release`.
+GitHub CI is left for the maintainer to monitor.

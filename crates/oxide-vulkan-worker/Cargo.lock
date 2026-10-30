@@ -1292,6 +1292,7 @@ name = "oxide-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "cpal",
  "crossbeam-channel",
  "dunce",
@@ -1313,6 +1314,7 @@ dependencies = [
  "tokio",
  "thiserror 2.0.21",
  "whisper-rs",
+ "whisper-rs-sys",
  "windows-sys 0.61.2",
  "zip",
 ]

@@ -1283,6 +1283,7 @@ name = "oxide-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "cpal",
  "crossbeam-channel",
  "dunce",
@@ -1304,6 +1305,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "whisper-rs",
+ "whisper-rs-sys",
  "windows-sys 0.61.2",
  "zip",
 ]
@@ -1316,6 +1318,7 @@ dependencies = [
  "serde_json",
  "whisper-rs",
  "whisper-rs-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

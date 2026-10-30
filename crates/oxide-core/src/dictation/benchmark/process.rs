@@ -43,14 +43,18 @@ struct Observation {
     candidate: BackendCandidate,
     native_backend: String,
     timing: Timing,
+    #[serde(default)]
+    dispatch: Option<DispatchEvidence>,
     cpu: CpuResources,
 }
 
 /// Identity freshly enumerated inside the backend-specific worker.
+#[derive(Clone)]
 pub struct NativeDevice {
     pub candidate: BackendCandidate,
     pub native_index: i32,
     pub native_backend: String,
+    pub native_device_id: Option<String>,
 }
 
 pub struct ProcessWorker {
@@ -104,11 +108,6 @@ impl PerformanceWorker for ProcessWorker {
     ) -> Result<BenchmarkResult, BackendError> {
         if cancelled.load(Ordering::SeqCst) {
             return Err(BackendError::Cancelled);
-        }
-        if matches!(candidate.probe.backend, BackendId::Cuda | BackendId::Metal) {
-            return Err(BackendError::InferenceFailed(
-                "This native runtime does not expose CUDA/Metal execution counters for performance checks. Choose CPU or Vulkan; ordinary dictation remains available.".into()
-            ));
         }
         let executable = match candidate.probe.backend {
             BackendId::Cpu | BackendId::Metal => &self.host,
@@ -229,8 +228,25 @@ impl PerformanceWorker for ProcessWorker {
             ));
         }
         let backend = observed.candidate.probe.backend;
-        let evidence = execution_evidence(backend, &observed.native_backend, &logs)?;
+        let evidence = if matches!(backend, BackendId::Cuda | BackendId::Metal) {
+            let dispatch = observed.dispatch.as_ref().ok_or_else(dispatch::unproven)?;
+            dispatch.validate(
+                backend,
+                candidate.adapter_id.as_deref(),
+                observed.candidate.probe.adapter.as_deref(),
+            )?;
+            if dispatch.native_backend != observed.native_backend {
+                return Err(dispatch::unproven());
+            }
+            Some(format!(
+                "{}; completed GPU matrix graph dispatches in warmup and all three measured runs",
+                dispatch.revision
+            ))
+        } else {
+            execution_evidence(backend, &observed.native_backend, &logs)?
+        };
         let result = BenchmarkResult {
+            dispatch: observed.dispatch,
             fixture_version: FIXTURE_VERSION.into(),
             model,
             measurement: MeasuredPerformance {
@@ -273,9 +289,6 @@ fn execution_evidence(
                         .is_some_and(|n| n.is_finite() && n > 0.0)
                 })
         }
-        // The pinned CUDA/Metal integrations expose selection/allocation logs,
-        // not completed GPU dispatch counters. Those also appear on CPU fallback.
-        // Refuse measurements until those runtimes supply execution instrumentation.
         BackendId::Cuda | BackendId::Metal => false,
         BackendId::Cpu => false,
     };
@@ -283,13 +296,8 @@ fn execution_evidence(
         return Err(BackendError::InferenceFailed("GPU execution was not evidenced by the native runtime; no GPU measurement saved. Try CPU.".into()));
     }
     Ok(Some(format!(
-        "{}; {selected}; native compute{}",
+        "{}; {selected}; native compute kernel timestamps",
         crate::dictation::BuildManifest::current().whisper_cpp_pinned,
-        if backend == BackendId::Vulkan {
-            " kernel timestamps"
-        } else {
-            " buffer and completed inference"
-        }
     )))
 }
 
@@ -317,6 +325,7 @@ pub fn worker_main() {
         Ok(NativeDevice {
             candidate,
             native_index: 0,
+            native_device_id: None,
             native_backend: if backend == BackendId::Cpu {
                 "CPU"
             } else {
@@ -355,18 +364,15 @@ pub fn worker_main_with(
             sample_rate: 16000,
             threads: resources.cpu.usable_cores.clamp(1, 8),
         };
-        let timing = crate::dictation::runtime::benchmark_on_device(
-            &request,
-            job.backend,
-            device.native_index,
-            |phase| {
+        let (timing, dispatch) =
+            crate::dictation::runtime::benchmark_on_device(&request, &device, |phase| {
                 let _ = write_frame(&mut output, &Event::Progress(phase));
-            },
-        )?;
+            })?;
         Ok(Observation {
             candidate: device.candidate,
             native_backend: device.native_backend,
             timing,
+            dispatch,
             cpu: resources.cpu,
         })
     };

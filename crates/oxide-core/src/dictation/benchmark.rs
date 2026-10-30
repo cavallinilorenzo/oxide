@@ -12,7 +12,10 @@ use std::{
     path::Path,
 };
 
+mod dispatch;
 mod process;
+pub(crate) use dispatch::Recorder;
+pub use dispatch::{DISPATCH_REVISION, DispatchEvidence, DispatchRun};
 pub use process::{NativeDevice, ProcessWorker, worker_main, worker_main_with};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,17 +178,32 @@ pub struct BenchmarkResult {
     pub model: ModelId,
     pub measurement: MeasuredPerformance,
     pub execution: ExecutionDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<DispatchEvidence>,
 }
 
 impl BenchmarkResult {
     pub fn validate(&self) -> Result<(), BackendError> {
         let key = &self.measurement.key;
         let gpu = key.backend != BackendId::Cpu;
+        if matches!(key.backend, BackendId::Cuda | BackendId::Metal) {
+            self.dispatch
+                .as_ref()
+                .ok_or_else(dispatch::unproven)?
+                .validate(
+                    key.backend,
+                    key.adapter_id.as_deref(),
+                    self.execution.adapter.as_deref(),
+                )?;
+        } else if self.dispatch.is_some() {
+            return Err(dispatch::unproven());
+        }
         if self.fixture_version != FIXTURE_VERSION
             || self.measurement.audio_duration_ms != FIXTURE_DURATION_MS
             || self.measurement.warm_inference_ms.contains(&0)
             || self.execution.backend != key.backend
             || self.execution.offloaded != gpu
+            || (gpu && self.execution.fallback_reason.is_some())
             || (gpu
                 && (key.adapter_id.as_ref().is_none_or(|s| s.is_empty())
                     || key.driver_version.as_ref().is_none_or(|s| s.is_empty())

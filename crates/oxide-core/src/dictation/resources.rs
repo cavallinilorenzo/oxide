@@ -28,6 +28,10 @@ pub fn runtime_version(backend: BackendId) -> String {
             "release"
         }
     );
+    if matches!(backend, BackendId::Cuda | BackendId::Metal) {
+        identity.push_str("; ");
+        identity.push_str(super::benchmark::DISPATCH_REVISION);
+    }
     if backend == BackendId::Cpu {
         use whisper_rs::whisper_rs_sys::*;
         // SAFETY: pinned native getters return compile-time instruction flags,

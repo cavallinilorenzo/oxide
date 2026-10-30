@@ -1,4 +1,4 @@
-// One-shot local app build: retain final outputs, remove this run's compiler cache.
+// Local app build: reuse Cargo's cache and leave final outputs in place.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertBuildSpace } from "./checks/build-space.mjs";
@@ -13,7 +13,7 @@ try {
       cwd: repoRoot, stdio: "inherit", env: session.env, shell: process.platform === "win32",
     });
     if (result.error) throw result.error;
-    if (result.status === 0) session.preserve(command);
+    if (result.status === 0) session.reportOutputs(command);
     assertBuildSpace(repoRoot);
     return result.status ?? 1;
   });

@@ -34,37 +34,44 @@ The pipeline's decisions (which lanes a change needs, the merge gate, PR titles,
 
 ### Local build disk usage
 
-Development builds and tests use line-table debug information and disable
-incremental compilation to keep `target/` manageable. Backtraces retain file and
-line information; inspecting local variables in a native debugger requires full
-debug information. Dependency builds remain cached, while rebuilding a changed
-workspace crate can take longer. Release settings are unchanged.
+Development builds and tests omit debug information and enable incremental
+compilation. Cargo caches unchanged dependencies, while rustc can reuse work
+within changed workspace crates. This reduces repeated compilation without
+limiting worker counts. Release settings are unchanged; CI explicitly disables
+incremental compilation through its existing environment setting.
 
-Use `cargo clean` to remove accumulated build artifacts. Close a locally built
-Oxide first if Windows reports that its release executable is in use. For a
-debugging session, `CARGO_PROFILE_DEV_DEBUG=2` restores full debug information;
-`CARGO_INCREMENTAL=1` opts back into incremental compilation.
+The local check runner (`node tools/check.mjs`), app build
+(`pnpm --dir web build:app`) and direct Cargo commands share the persistent
+`target/` directory. Set `CARGO_TARGET_DIR` to use another location; the runners
+use that directory directly. Successful and failed runs retain their cache.
+Cargo coordinates concurrent compilations using its build-directory lock.
+Keep toolchain, feature and compiler settings consistent to maximize reuse.
+Development and release builds still require separate artifacts.
 
-The local check runner (`node tools/check.mjs`) and the local build
-(`pnpm --dir web build:app`) check the build-artifact budget before and after
-each Rust compilation or Tauri bundle. They stop further builds above 12 GiB. `OXIDE_BUILD_BUDGET_GIB` sets a different positive budget.
-This is a checkpoint between commands, not a filesystem quota: one command can
-exceed the budget before returning.
+App binaries and bundles remain in Cargo's standard output directories, such as
+`target/release/oxide-app` and `target/release/bundle/`. Extra Tauri build flags
+can follow `build:app`; `--debug`, `--profile` and `--target` determine the output
+directory. The runner prints its exact location and does not make per-run copies.
 
-Both the check runner and `pnpm --dir web build:app` use a temporary target
-directory for Rust compilation. Extra Tauri build flags can follow `build:app`.
-All checks in one run share it; it is automatically deleted when the run finishes, including
-test failures and budget errors. An explicit `CARGO_TARGET_DIR` is used as the
-parent of this scratch directory, leaving existing outputs intact. The runner
-never stops an app or cleans another build's files. Separate runs rebuild their
-dependencies and can take longer, in exchange for leaving no compiler cache.
+The runners check artifact size before and after each compilation or bundle.
+Above 12 GiB they warn once per run and retain the reusable cache. Set
+`OXIDE_BUILD_BUDGET_GIB` to a positive number to enforce an explicit hard limit
+instead. This is a checkpoint between commands, not a filesystem quota: one
+command can exceed the budget before returning. Hard-linked files count once.
 
-Successful Tauri builds retain the final app binary and bundles under
-`target/check-artifacts/run-<id>/` (or the configured Cargo target), and print the
-exact location. If saving an output fails, the scratch directory is retained
-with an error instead of losing the only copy. A forced process kill or power
-loss can also leave scratch files; `cargo clean` removes those leftovers.
-Direct Cargo/Tauri invocations bypass this automatic cleanup.
+A persistent incremental cache consumes disk in exchange for less compilation;
+these settings do not automatically shrink artifacts from older configurations.
+Use `cargo clean` only when deliberately discarding the entire cache and local
+build outputs: the next build must recompile dependencies. Close a locally built
+Oxide first if Windows reports that its executable is in use. Old
+`target/check-artifacts/` snapshots and `.oxide-checks-*` scratch directories
+from earlier runners are no longer created and are not automatically deleted.
+
+For a debugging session, `CARGO_PROFILE_DEV_DEBUG=line-tables-only` restores
+file and line information in backtraces, or `CARGO_PROFILE_DEV_DEBUG=2` restores
+full debugger information. `CARGO_INCREMENTAL=0` disables incremental caching.
+Changing these settings can require recompilation; debug builds normally omit
+source locations and local-variable information.
 
 ### Regenerating the TypeScript bindings
 

@@ -1,31 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
 <head>
 <meta charset="utf-8">
-<title>PROTOTYPE · Whom does a terminal belong to?</title>
+<title>PROTOTIPO · Di chi è un terminale?</title>
 <style>
-  :root { --accent:#2f6fed; --bg:#fafaf9; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e1dc; --warn:#b4560a; --bad:#b3261e; --ok:#1e7a46; }
+  :root { --accent:#2f6fed; --bg:#fafaf9; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e1dc; --warn:#b4560a; --ok:#1e7a46; }
   * { box-sizing:border-box; }
-  body { font:14px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:24px; max-width:1180px; margin-inline:auto; }
-  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:24px 0 8px; }
+  body { font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:24px; max-width:1180px; margin-inline:auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:28px 0 8px; }
   .tag { display:inline-block; background:#fff3cd; border:1px solid #e6d28a; padding:1px 8px; border-radius:99px; font-size:12px; }
-  .q { background:#fff; border:1px solid var(--line); border-left:3px solid var(--accent); padding:10px 14px; margin:12px 0; }
-  button { font:inherit; padding:5px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+  .box { background:#fff; border:1px solid var(--line); border-left:3px solid var(--accent); padding:10px 16px; margin:12px 0; }
+  .box ol, .box ul { margin:6px 0; padding-left:22px; } .box li { margin:3px 0; }
+  button { font:inherit; padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
   button:hover { border-color:var(--accent); } button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button[disabled] { opacity:.4; cursor:default; } button.next { border-color:var(--accent); box-shadow:0 0 0 2px #2f6fed33; }
+  button[disabled] { opacity:.4; cursor:default; } button.next { border-color:var(--accent); box-shadow:0 0 0 3px #2f6fed33; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .app { display:grid; grid-template-columns:230px 1fr; border:1px solid var(--line); background:#fff; border-radius:8px; overflow:hidden; min-height:430px; }
+  .app { display:grid; grid-template-columns:240px 1fr; border:1px solid var(--line); background:#fff; border-radius:8px; overflow:hidden; min-height:430px; }
   .side { border-right:1px solid var(--line); padding:10px; background:#f4f3ef; }
-  .side .th { padding:5px 8px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:6px; }
+  .side .th { padding:6px 8px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:6px; }
   .side .th.sel { background:#fff; outline:1px solid var(--accent); }
   .main { display:grid; grid-template-rows:1fr auto; }
-  .chat { padding:12px 14px; } .chat .cmd { font-family:ui-monospace,monospace; background:#f4f3ef; padding:3px 8px; border-radius:4px; display:block; margin:4px 0; }
-  .term { border-top:1px solid var(--line); background:#1d1f21; color:#d8d8d2; padding:8px 10px; font-family:ui-monospace,monospace; font-size:12.5px; min-height:150px; }
+  .chat { padding:12px 14px; } .cmd { font-family:ui-monospace,monospace; background:#f4f3ef; padding:3px 8px; border-radius:4px; display:block; margin:4px 0; }
+  .term { border-top:1px solid var(--line); background:#1d1f21; color:#d8d8d2; padding:8px 10px; font-family:ui-monospace,monospace; font-size:13px; min-height:150px; }
   .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
-  .tab { border:1px solid #444; border-radius:5px; padding:4px 8px; background:#2a2d30; }
-  .tab .lab { color:#9aa; font-size:11.5px; } .tab .stale { color:#f0a860; } .tab .proc { color:#6fd08c; }
-  .tab button { background:#333; color:#ddd; border-color:#555; padding:1px 6px; font-size:11.5px; margin-left:4px; }
-  .muted { color:var(--mute); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
+  .tab { border:1px solid #444; border-radius:5px; padding:5px 8px; background:#2a2d30; }
+  .tab .lab { color:#9aa; font-size:12px; } .tab .stale { color:#f0a860; } .tab .proc { color:#6fd08c; }
+  .tab button { background:#333; color:#ddd; border-color:#555; padding:1px 6px; font-size:12px; margin-left:4px; }
+  .muted { color:var(--mute); } .warn { color:var(--warn); } .ok { color:var(--ok); }
   table { border-collapse:collapse; width:100%; background:#fff; } th,td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; font-size:13px; }
   th { background:#f4f3ef; } tr.cur td { background:#eef3ff; }
   .changed { background:#fff; border:1px dashed var(--accent); padding:8px 12px; border-radius:6px; min-height:38px; }
@@ -34,46 +36,77 @@
 </style>
 </head>
 <body>
-<h1>Whom does a terminal belong to? <span class="tag">PROTOTYPE · throwaway · issue #272</span></h1>
-<div class="q"><b>Question.</b> Should a terminal belong to the <b>Thread</b>, to the <b>checkout</b> the Thread works in (main checkout shared by chat Threads, one per Board Thread worktree), or to the <b>Project</b> (tabs)? Push the same actions through each option and compare what the user sees when <i>switching Threads</i>, <i>creating a Board Thread</i>, <i>deleting a Thread</i>, and when a <i>Provider runs a command</i>.
-<br><span class="muted">Press buttons in free-play, or pick a walkthrough. The app mock below shows the <b>selected option</b>; the table at the bottom replays the <b>same history</b> under all four options.</span></div>
+<h1>Di chi è un terminale? <span class="tag">PROTOTIPO · da buttare · ticket #272</span></h1>
 
-<h2>Ownership option</h2>
+<div class="box">
+  <b>La domanda.</b> Quando apri il terminale in Oxide, quella shell appartiene a chi? Al <b>Thread</b> (la conversazione), alla <b>cartella di lavoro</b> (checkout: la cartella principale del progetto, oppure il worktree di un Board Thread) o al <b>Progetto</b>?
+  <br>Cambia cosa succede quando <i>cambi Thread</i>, <i>crei un Board Thread</i>, <i>cancelli un Thread</i> e quando <i>l'agente lancia un comando</i>.
+</div>
+
+<div class="box">
+  <b>Come usarlo (3 passi)</b>
+  <ol>
+    <li>Scegli un percorso guidato qui sotto (parti dal <b>3 · Cancellare un Thread</b>) e premi i pulsanti blu in ordine.</li>
+    <li>Guarda il riquadro <b>«Cosa è appena successo»</b> e il terminale nero dentro l'app finta.</li>
+    <li>Senza ricominciare, <b>cambia opzione</b> (A, B, C, D) nei pulsanti in alto: la stessa sequenza viene rigiocata con l'altra regola e vedi la differenza. La tabella in fondo li confronta tutti insieme.</li>
+  </ol>
+  Le <b>4 opzioni</b>:
+  <ul>
+    <li><b>A · per Thread</b> (com'è oggi il pannello in basso): ogni Thread ha la sua shell, anche se due Thread lavorano nella stessa cartella.</li>
+    <li><b>B · per cartella di lavoro</b>: una sola shell per cartella. Tutti i Thread della chat condividono quella della cartella principale; ogni Board Thread ha la sua nel proprio worktree.</li>
+    <li><b>D · come B ma con più tab</b>: ogni cartella può avere più tab; ogni tab riporta il nome del Thread che l'ha aperta.</li>
+    <li><b>C · per Progetto</b>: una sola barra di tab per tutto il progetto, a prescindere dal Thread.</li>
+  </ul>
+</div>
+
+<h2>1 · Regola di appartenenza</h2>
 <div class="row" id="policies"></div>
 <div class="muted" id="policyDesc" style="margin-top:6px"></div>
 
-<h2>What the user sees</h2>
+<h2>2 · Cosa vede l'utente (app finta)</h2>
 <div class="app">
   <div class="side" id="side"></div>
   <div class="main"><div class="chat" id="chat"></div><div class="term" id="term"></div></div>
 </div>
 
-<h2>What just changed</h2>
-<div class="changed" id="changed">Nothing yet.</div>
+<h2>Cosa è appena successo</h2>
+<div class="changed" id="changed">Ancora niente.</div>
 
-<h2>Free play</h2>
-<div class="row" id="free"></div>
-
-<h2>Guided walkthroughs</h2>
+<h2>3 · Percorsi guidati (consigliato)</h2>
 <div class="tabsbar" id="wtabs"></div>
 <div id="wbody" style="background:#fff;border:1px solid var(--line);padding:12px 14px"></div>
 
-<h2>Same history, all four options</h2>
+<h2>Prova libera</h2>
+<div class="row" id="free"></div>
+
+<h2>4 · Stessa sequenza, tutte e quattro le opzioni</h2>
 <div id="compare"></div>
 
+<div class="box" style="margin-top:28px">
+  <b>Come decidere: 4 domande</b>
+  <ol>
+    <li><b>Due chat sulla stessa cartella: vuoi la stessa shell o due diverse?</b> (percorso 1) Se un server di sviluppo avviato in una chat deve essere visibile nell'altra → B/D/C. Se vuoi isolamento totale → A.</li>
+    <li><b>Quando crei un Board Thread, il terminale deve già trovarsi nel suo worktree?</b> (percorso 2) A/B/D sì. C no: resti nella shell vecchia e serve un nuovo tab (compare l'avviso ⚠).</li>
+    <li><b>Cancellando un Thread, il server di sviluppo deve morire?</b> (percorso 3) A: sempre. B/D/C: solo se sparisce il worktree (Board Thread); per una chat la shell resta.</li>
+    <li><b>Un solo terminale per cartella, o più tab?</b> B è più semplice; D permette più shell nella stessa cartella (es. server + test).</li>
+  </ol>
+  I comandi dell'agente (percorso 4) sono uguali in tutte le opzioni: restano blocchi comando nella chat e non toccano mai le shell dell'utente.
+  <br><b>Consiglio di Claude:</b> D, partendo con un solo tab (cioè B). Se preferisci la versione più semplice, B.
+</div>
+
 <script>
-/* ============ PURE MODULE: terminal ownership (liftable) ============ */
+/* ============ MODULO PURO: appartenenza dei terminali (riutilizzabile) ============ */
 const POLICIES = {
-  thread:   { name:'A · per Thread',            tabs:false, desc:'Today\'s bottom panel. Each Thread has its own shell, even Threads sharing the main checkout.' },
-  checkout: { name:'B · per checkout',          tabs:false, desc:'One shell per checkout: all chat Threads share the main checkout\'s shell; each Board Thread has its worktree\'s shell. Same as Terminal Work mode today.' },
-  tabs:     { name:'D · per checkout + tabs',   tabs:true,  desc:'Like B, but a checkout can hold several tabs; each tab is labelled with the Thread that opened it. (Claude\'s recommendation: B growing into D.)' },
-  project:  { name:'C · per Project (tabs)',    tabs:true,  desc:'One tab strip for the whole Project. A new tab starts in the selected Thread\'s checkout and its folder never follows later Thread switches.' },
+  thread:   { name:'A · per Thread',          tabs:false, desc:'Com\'è oggi: ogni Thread ha la sua shell, anche se due Thread lavorano nella stessa cartella.' },
+  checkout: { name:'B · per cartella',        tabs:false, desc:'Una sola shell per cartella di lavoro: le chat condividono quella della cartella principale, ogni Board Thread ha quella del suo worktree.' },
+  tabs:     { name:'D · per cartella + tab',  tabs:true,  desc:'Come B, ma una cartella può avere più tab. Ogni tab dice quale Thread l\'ha aperta. (Consiglio di Claude: si parte da B e si arriva a D.)' },
+  project:  { name:'C · per Progetto',        tabs:true,  desc:'Una sola barra di tab per tutto il progetto. Un nuovo tab parte nella cartella del Thread selezionato e non la cambia più quando cambi Thread.' },
 };
 const MAIN = { id:'main', path:'~/oxide', kind:'main' };
 
 function initial() {
   return { next:10, selected:'t1',
-    threads:[{id:'t1',title:'Fix flaky test',kind:'chat',checkout:'main'},{id:'t2',title:'Refactor parser',kind:'chat',checkout:'main'}],
+    threads:[{id:'t1',title:'Sistema test instabile',kind:'chat',checkout:'main'},{id:'t2',title:'Rifattorizza parser',kind:'chat',checkout:'main'}],
     checkouts:[MAIN], terminals:[], transcripts:{t1:[],t2:[]}, spawned:0, killedProcs:0, killedShells:0, notes:[] };
 }
 const co = (s,id)=>s.checkouts.find(c=>c.id===id);
@@ -82,95 +115,93 @@ const scopeOf = (p,s,tid)=> p==='thread' ? 't:'+tid : p==='project' ? 'p' : 'c:'
 const visible = (p,s)=> s.terminals.filter(t=>t.scope===scopeOf(p,s,s.selected));
 function closeTerms(s, pred, why){
   const gone = s.terminals.filter(pred);
-  gone.forEach(t=>{ s.killedShells++; if(t.proc) s.killedProcs++; s.notes.push(`Closed a shell (${why})${t.proc?` and killed its running "${t.proc}"`:''}.`); });
+  gone.forEach(t=>{ s.killedShells++; if(t.proc) s.killedProcs++; s.notes.push(`Shell chiusa (${why})${t.proc?` e il suo processo «${t.proc}» è stato terminato`:''}.`); });
   s.terminals = s.terminals.filter(t=>!pred(t));
 }
 function reduce(state, a, p){
   const s = JSON.parse(JSON.stringify(state)); s.notes = [];
   const sel = th(s,s.selected);
+  const scopeName = p==='thread'?'del Thread':p==='project'?'del Progetto':'della cartella';
   switch(a.type){
-    case 'select': s.selected=a.id; { const v=visible(p,s); s.notes.push(`Switched to “${th(s,a.id).title}”. Terminal panel shows ${v.length?v.length+' shell(s) of its '+(p==='thread'?'Thread':p==='project'?'Project':'checkout'):'no shell yet (spawns on first open)'}.`);} break;
-    case 'newChat': { const id='t'+s.next++; s.threads.push({id,title:'New chat '+id,kind:'chat',checkout:'main'}); s.transcripts[id]=[]; s.selected=id; s.notes.push(`New chat Thread works in the main checkout. ${visible(p,s).length?'It sees the terminal already there.':'It has no shell yet.'}`);} break;
-    case 'newBoard': { const id='t'+s.next++, cid='w'+id; s.checkouts.push({id:cid,path:'~/.oxide/worktrees/oxide/'+id,kind:'worktree'}); s.threads.push({id,title:'Board: add search '+id,kind:'board',checkout:cid}); s.transcripts[id]=[]; s.selected=id; s.notes.push(`Board Thread gets its own worktree. ${visible(p,s).length?'A terminal for it already exists.':'No shell yet: nothing spawned until opened.'}`);} break;
+    case 'select': s.selected=a.id; { const v=visible(p,s); s.notes.push(`Passato a «${th(s,a.id).title}». Il pannello terminale mostra ${v.length?v.length+' shell '+scopeName:'nessuna shell (se ne crea una alla prima apertura)'}.`);} break;
+    case 'newChat': { const id='t'+s.next++; s.threads.push({id,title:'Nuova chat '+id,kind:'chat',checkout:'main'}); s.transcripts[id]=[]; s.selected=id; s.notes.push(`Nuovo Thread di chat nella cartella principale. ${visible(p,s).length?'Vede il terminale già esistente.':'Non ha ancora una shell.'}`);} break;
+    case 'newBoard': { const id='t'+s.next++, cid='w'+id; s.checkouts.push({id:cid,path:'~/.oxide/worktrees/oxide/'+id,kind:'worktree'}); s.threads.push({id,title:'Board: aggiungi ricerca '+id,kind:'board',checkout:cid}); s.transcripts[id]=[]; s.selected=id; s.notes.push(`Il Board Thread ha un worktree suo. ${visible(p,s).length?'Un terminale visibile c\'è già (guarda se la cartella è quella giusta).':'Ancora nessuna shell: se ne crea una solo quando la apri.'}`);} break;
     case 'openTerminal': { const v=visible(p,s);
-      if(v.length && !(a.extra && POLICIES[p].tabs)) { s.notes.push(v.length&&a.extra?`Option ${POLICIES[p].name} has no extra tabs: the one shell is reused.`:'Terminal already open: reused, nothing spawned.'); break; }
-      const tid='x'+s.next++; s.terminals.push({id:tid,scope:scopeOf(p,s,sel.id),opener:sel.id,checkout:sel.checkout,cwd:co(s,sel.checkout).path,proc:null,history:[]}); s.spawned++; s.notes.push(`Spawned a shell in ${co(s,sel.checkout).path}, opened by “${sel.title}”.`);} break;
-    case 'closeTab': closeTerms(s,t=>t.id===a.id,'closed by user'); break;
+      if(v.length && !(a.extra && POLICIES[p].tabs)) { s.notes.push(a.extra?`L'opzione ${POLICIES[p].name} non ha tab aggiuntivi: si riusa l'unica shell.`:'Terminale già aperto: riusato, nessuna nuova shell.'); break; }
+      const tid='x'+s.next++; s.terminals.push({id:tid,scope:scopeOf(p,s,sel.id),opener:sel.id,checkout:sel.checkout,cwd:co(s,sel.checkout).path,proc:null,history:[]}); s.spawned++; s.notes.push(`Nuova shell in ${co(s,sel.checkout).path}, aperta da «${sel.title}».`);} break;
+    case 'closeTab': closeTerms(s,t=>t.id===a.id,'chiusa dall\'utente'); break;
     case 'user': { const t=s.terminals.find(x=>x.id===a.term); if(!t) break;
-      if(a.cmd==='cd') { t.cwd=t.cwd.replace(/\/src$/,'')+'/src'; t.history.push('$ cd src'); s.notes.push(`Folder of that shell is now ${t.cwd}. Everyone who sees this shell sees the new folder.`); }
-      if(a.cmd==='dev') { t.proc='npm run dev'; t.history.push('$ npm run dev'); s.notes.push('Dev server started in that shell.'); }
-      if(a.cmd==='stop') { t.proc=null; t.history.push('^C'); s.notes.push('Dev server stopped.'); } } break;
+      if(a.cmd==='cd') { t.cwd=t.cwd.replace(/\/src$/,'')+'/src'; t.history.push('$ cd src'); s.notes.push(`La cartella di quella shell è ora ${t.cwd}. Chiunque veda quella shell la vede cambiata.`); }
+      if(a.cmd==='dev') { t.proc='npm run dev'; t.history.push('$ npm run dev'); s.notes.push('Server di sviluppo avviato in quella shell.'); }
+      if(a.cmd==='stop') { t.proc=null; t.history.push('^C'); s.notes.push('Server di sviluppo fermato.'); } } break;
     case 'provider': { const th2=th(s,a.thread); const dir=co(s,th2.checkout).path;
-      s.transcripts[th2.id].push(`ran \`${a.cmd}\` in ${dir}`); s.notes.push(`Provider ran \`${a.cmd}\` for “${th2.title}” as a Command block in its Transcript, in ${dir}. It used no terminal and left every shell's folder and process untouched.`);} break;
+      s.transcripts[th2.id].push(`ha eseguito \`${a.cmd}\` in ${dir}`); s.notes.push(`L'agente ha eseguito \`${a.cmd}\` per «${th2.title}» come blocco comando nella chat, in ${dir}. Non ha usato nessun terminale e non ha toccato cartella o processi di nessuna shell.`);} break;
     case 'delete': { const d=th(s,a.id); s.threads=s.threads.filter(x=>x.id!==a.id); delete s.transcripts[a.id];
-      if(p==='thread') closeTerms(s,t=>t.scope==='t:'+a.id,'its Thread was deleted');
-      if(d.kind==='board'){ s.checkouts=s.checkouts.filter(c=>c.id!==d.checkout); closeTerms(s,t=>t.checkout===d.checkout,'its worktree was removed'); }
-      else if(p!=='thread') { const orphans=s.terminals.filter(t=>t.opener===a.id).length; if(orphans) s.notes.push(`${orphans} tab(s) opened by the deleted Thread stay open: they belong to the ${p==='project'?'Project':'checkout'}, not the Thread.`); }
-      if(!s.notes.length) s.notes.push('No shell was affected.');
+      if(p==='thread') closeTerms(s,t=>t.scope==='t:'+a.id,'il suo Thread è stato cancellato');
+      if(d.kind==='board'){ s.checkouts=s.checkouts.filter(c=>c.id!==d.checkout); closeTerms(s,t=>t.checkout===d.checkout,'il suo worktree è stato rimosso'); }
+      else if(p!=='thread') { const orphans=s.terminals.filter(t=>t.opener===a.id).length; if(orphans) s.notes.push(`${orphans} tab aperti dal Thread cancellato restano aperti: appartengono ${p==='project'?'al Progetto':'alla cartella'}, non al Thread.`); }
+      if(!s.notes.length) s.notes.push('Nessuna shell è stata toccata.');
       if(s.selected===a.id) s.selected=s.threads[0].id; } break;
   }
   return s;
 }
 function replay(history,p){ return history.reduce((s,a)=>reduce(s,a,p), initial()); }
-function warnings(p,s){ // tabs whose folder isn't in the selected Thread's checkout
-  const cur=th(s,s.selected).checkout; return visible(p,s).filter(t=>t.checkout!==cur);
-}
-/* ============ end pure module ============ */
+function warnings(p,s){ const cur=th(s,s.selected).checkout; return visible(p,s).filter(t=>t.checkout!==cur); }
+/* ============ fine modulo puro ============ */
 
-/* ---------- thin shell ---------- */
+/* ---------- guscio sottile ---------- */
 let policy='tabs', history=[], walk=null, step=0;
 const $=id=>document.getElementById(id);
-const act=(a)=>{ const prev=replay(history,policy); history.push(a); render(replay(history,policy), prev); };
-const title=(s,id)=>th(s,id)?th(s,id).title:'(deleted)';
+const act=(a)=>{ history.push(a); render(replay(history,policy)); };
+const title=(s,id)=>th(s,id)?th(s,id).title:'(cancellato)';
 
 function render(s){
   $('policies').innerHTML=''; Object.entries(POLICIES).forEach(([k,v])=>{ const b=document.createElement('button'); b.textContent=v.name; if(k===policy) b.className='on'; b.onclick=()=>{policy=k; render(replay(history,policy));}; $('policies').append(b); });
   $('policyDesc').textContent=POLICIES[policy].desc;
-  $('side').innerHTML='<b>oxide</b> <span class="muted">Project</span><div style="height:6px"></div>'+s.threads.map(t=>`<div class="th ${t.id===s.selected?'sel':''}" data-id="${t.id}"><span>${t.kind==='board'?'⎇ ':''}${t.title}</span><span class="muted">${t.kind==='board'?'worktree':'main'}</span></div>`).join('');
+  $('side').innerHTML='<b>oxide</b> <span class="muted">Progetto</span><div style="height:6px"></div>'+s.threads.map(t=>`<div class="th ${t.id===s.selected?'sel':''}" data-id="${t.id}"><span>${t.kind==='board'?'⎇ ':''}${t.title}</span><span class="muted">${t.kind==='board'?'worktree':'principale'}</span></div>`).join('')+'<div class="muted" style="margin-top:10px;font-size:12px">Clicca un Thread per selezionarlo.</div>';
   $('side').querySelectorAll('.th').forEach(e=>e.onclick=()=>act({type:'select',id:e.dataset.id}));
   const sel=th(s,s.selected);
-  $('chat').innerHTML=`<b>${sel.title}</b> <span class="muted">works in ${co(s,sel.checkout).path}</span><div style="margin-top:8px">${s.transcripts[sel.id].map(l=>`<code class="cmd">▸ Command block: ${l}</code>`).join('')||'<span class="muted">No Command blocks yet.</span>'}</div>`;
-  const v=visible(policy,s), w=warnings(policy,s);
-  $('term').innerHTML=`<div class="muted" style="margin-bottom:4px">Terminal panel · scope: ${policy==='thread'?'this Thread':policy==='project'?'whole Project':'checkout '+co(s,sel.checkout).path}</div>`+
-    (v.length? `<div class="tabs">`+v.map(t=>`<div class="tab"><div>${t.cwd} ${t.proc?`<span class="proc">● ${t.proc}</span>`:''}</div><div class="lab">opened by ${title(s,t.opener)}${t.checkout!==sel.checkout?` · <span class="stale">⚠ in another checkout than this Thread</span>`:''}</div>
-      <button data-u="cd" data-t="${t.id}">cd src</button><button data-u="dev" data-t="${t.id}">npm run dev</button><button data-u="stop" data-t="${t.id}">^C</button><button data-close="${t.id}">×</button></div>`).join('')+`</div>`
-      : '<span class="muted">No shell spawned for this scope. Opening the panel spawns one.</span>');
+  $('chat').innerHTML=`<b>${sel.title}</b> <span class="muted">lavora in ${co(s,sel.checkout).path}</span><div style="margin-top:8px">${s.transcripts[sel.id].map(l=>`<code class="cmd">▸ Blocco comando: ${l}</code>`).join('')||'<span class="muted">Nessun blocco comando.</span>'}</div>`;
+  const v=visible(policy,s);
+  $('term').innerHTML=`<div class="muted" style="margin-bottom:4px">Pannello terminale · appartiene a: ${policy==='thread'?'questo Thread':policy==='project'?'tutto il Progetto':'cartella '+co(s,sel.checkout).path}</div>`+
+    (v.length? `<div class="tabs">`+v.map(t=>`<div class="tab"><div>${t.cwd} ${t.proc?`<span class="proc">● ${t.proc}</span>`:''}</div><div class="lab">aperta da «${title(s,t.opener)}»${t.checkout!==sel.checkout?` · <span class="stale">⚠ è in un'altra cartella rispetto a questo Thread</span>`:''}</div>
+      <button data-u="cd" data-t="${t.id}">cd src</button><button data-u="dev" data-t="${t.id}">npm run dev</button><button data-u="stop" data-t="${t.id}">^C</button><button data-close="${t.id}">× chiudi</button></div>`).join('')+`</div>`
+      : '<span class="muted">Nessuna shell per questo ambito. Premi «Apri terminale» per crearne una.</span>');
   $('term').querySelectorAll('[data-u]').forEach(b=>b.onclick=()=>act({type:'user',term:b.dataset.t,cmd:b.dataset.u}));
   $('term').querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>act({type:'closeTab',id:b.dataset.close}));
-  $('changed').innerHTML=s.notes.length?s.notes.map(n=>'• '+n).join('<br>'):'Nothing yet.';
-  // free play
+  $('changed').innerHTML=s.notes.length?s.notes.map(n=>'• '+n).join('<br>'):'Ancora niente.';
   $('free').innerHTML='';
   const btn=(label,a,dis)=>{const b=document.createElement('button');b.textContent=label;b.disabled=!!dis;b.onclick=()=>act(a);$('free').append(b);};
-  btn('Open terminal panel',{type:'openTerminal'}); btn('New tab',{type:'openTerminal',extra:true},!POLICIES[policy].tabs);
-  btn('New chat Thread',{type:'newChat'}); btn('New Board Thread (worktree)',{type:'newBoard'});
-  btn(`Provider runs “npm test” in “${sel.title}”`,{type:'provider',thread:sel.id,cmd:'npm test'});
-  btn(`Delete “${sel.title}”`,{type:'delete',id:sel.id},s.threads.length<2);
-  btn('Reset',{type:'__reset'});
+  btn('Apri terminale',{type:'openTerminal'}); btn('Nuovo tab',{type:'openTerminal',extra:true},!POLICIES[policy].tabs);
+  btn('Nuovo Thread di chat',{type:'newChat'}); btn('Nuovo Board Thread (worktree)',{type:'newBoard'});
+  btn(`L'agente esegue «npm test» in «${sel.title}»`,{type:'provider',thread:sel.id,cmd:'npm test'});
+  btn(`Cancella «${sel.title}»`,{type:'delete',id:sel.id},s.threads.length<2);
+  btn('Ricomincia da capo',{});
   $('free').lastChild.onclick=()=>{history=[];walk=null;render(replay([],policy));};
-  renderWalk(s); renderCompare();
+  renderWalk(); renderCompare();
 }
 function renderCompare(){
   const rows=Object.entries(POLICIES).map(([k,v])=>{ const s=replay(history,k), vis=visible(k,s), w=warnings(k,s);
-    return `<tr class="${k===policy?'cur':''}"><td><b>${v.name}</b></td><td>${s.terminals.length} open / ${s.spawned} spawned</td><td>${vis.length?vis.map(t=>t.cwd+(t.proc?' ●':'')).join('<br>'):'<span class="muted">none</span>'}</td><td>${s.killedShells} shell(s), ${s.killedProcs} running process(es)</td><td class="${w.length?'warn':'ok'}">${w.length?w.length+' shell(s) show a folder that isn\'t this Thread\'s':'none'}</td></tr>`; }).join('');
-  $('compare').innerHTML=`<table><tr><th>Option</th><th>Shells (whole app)</th><th>Visible for selected Thread</th><th>Killed by deletions</th><th>Mismatch for selected Thread</th></tr>${rows}</table><div class="muted" style="margin-top:6px">History: ${history.length} action(s). Provider commands never touch a terminal in any option.</div>`;
+    return `<tr class="${k===policy?'cur':''}"><td><b>${v.name}</b></td><td>${s.terminals.length} aperte / ${s.spawned} create in totale</td><td>${vis.length?vis.map(t=>t.cwd+(t.proc?' ●':'')).join('<br>'):'<span class="muted">nessuna</span>'}</td><td>${s.killedShells} shell, ${s.killedProcs} processi in esecuzione</td><td class="${w.length?'warn':'ok'}">${w.length?'⚠ '+w.length+' shell in una cartella diversa da quella del Thread':'nessuno'}</td></tr>`; }).join('');
+  $('compare').innerHTML=`<table><tr><th>Opzione</th><th>Shell nell'app</th><th>Visibili per il Thread selezionato</th><th>Terminate da cancellazioni</th><th>Cartella sbagliata?</th></tr>${rows}</table><div class="muted" style="margin-top:6px">Azioni fatte finora: ${history.length}. La riga evidenziata è l'opzione scelta in alto. ● = processo in esecuzione.</div>`;
 }
 
-/* ---------- walkthroughs ---------- */
+/* ---------- percorsi guidati ---------- */
 const WALKS=[
- { name:'1 · Switch Threads', blurb:'Two chat Threads share the main checkout. Start a dev server and change folder in one, then switch. Watch whether the other Thread sees it. A: separate shells, B/D: the same shell, C: the same tab strip.',
-   steps:[['Open terminal panel',{type:'openTerminal'}],['cd src in that shell',{type:'user',term:'x10',cmd:'cd'}],['Start npm run dev',{type:'user',term:'x10',cmd:'dev'}],['Switch to “Refactor parser”',{type:'select',id:'t2'}],['Open terminal panel here',{type:'openTerminal'}]] },
- { name:'2 · Create a Board Thread', blurb:'Dispatch a Board Thread: it gets a worktree. Does its terminal start in the worktree? Does C leave you looking at a shell in the wrong folder?',
-   steps:[['Open terminal panel (main)',{type:'openTerminal'}],['Create Board Thread',{type:'newBoard'}],['Open terminal panel here',{type:'openTerminal'}],['Switch back to “Fix flaky test”',{type:'select',id:'t1'}]] },
- { name:'3 · Delete a Thread', blurb:'Delete a chat Thread that had a dev server running, then a Board Thread whose worktree goes away. Compare what is killed. A kills the server with the Thread; B/D/C keep it until the worktree dies.',
-   steps:[['Open terminal panel',{type:'openTerminal'}],['Start npm run dev',{type:'user',term:'x10',cmd:'dev'}],['Delete “Fix flaky test”',{type:'delete',id:'t1'}],['Create Board Thread',{type:'newBoard'}],['Open terminal panel here',{type:'openTerminal'}],['Start npm run dev here',{type:'user',term:'x12',cmd:'dev'}],['Delete the Board Thread',{type:'delete',id:'t11'}]] },
- { name:'4 · Provider runs a command', blurb:'The Provider runs “npm test” while the user has a dev server open. The command is a Command block in the Thread\'s Transcript, in the Thread\'s checkout, and does not touch any shell, in every option.',
-   steps:[['Open terminal panel',{type:'openTerminal'}],['Start npm run dev',{type:'user',term:'x10',cmd:'dev'}],['Provider runs npm test in “Fix flaky test”',{type:'provider',thread:'t1',cmd:'npm test'}],['Switch to “Refactor parser”',{type:'select',id:'t2'}],['Provider runs npm test there',{type:'provider',thread:'t2',cmd:'npm test'}]] },
+ { name:'1 · Cambiare Thread', blurb:'Due chat lavorano nella stessa cartella. Avvia un server di sviluppo e cambia cartella in una, poi passa all\'altra.', watch:'Cosa guardare: l\'altro Thread vede il server e la cartella cambiata? In A no (shell separate), in B/D/C sì.',
+   steps:[['Apri terminale',{type:'openTerminal'}],['cd src',{type:'user',term:'x10',cmd:'cd'}],['npm run dev',{type:'user',term:'x10',cmd:'dev'}],['Passa a «Rifattorizza parser»',{type:'select',id:'t2'}],['Apri terminale qui',{type:'openTerminal'}]] },
+ { name:'2 · Creare un Board Thread', blurb:'Crei un Board Thread: ottiene un worktree tutto suo.', watch:'Cosa guardare: il terminale parte nel worktree del Board Thread? In C resti con la shell della cartella principale e compare ⚠: serve un nuovo tab.',
+   steps:[['Apri terminale (cartella principale)',{type:'openTerminal'}],['Crea Board Thread',{type:'newBoard'}],['Apri terminale qui',{type:'openTerminal'}],['Torna a «Sistema test instabile»',{type:'select',id:'t1'}]] },
+ { name:'3 · Cancellare un Thread (parti da qui)', blurb:'Cancelli prima una chat con un server in esecuzione, poi un Board Thread il cui worktree sparisce.', watch:'Cosa guardare: cosa viene terminato? In A il server muore con il Thread. In B/D/C sopravvive alla chat ma muore col worktree del Board Thread.',
+   steps:[['Apri terminale',{type:'openTerminal'}],['npm run dev',{type:'user',term:'x10',cmd:'dev'}],['Cancella «Sistema test instabile»',{type:'delete',id:'t1'}],['Crea Board Thread',{type:'newBoard'}],['Apri terminale qui',{type:'openTerminal'}],['npm run dev qui',{type:'user',term:'x12',cmd:'dev'}],['Cancella il Board Thread',{type:'delete',id:'t11'}]] },
+ { name:'4 · L\'agente lancia un comando', blurb:'L\'agente esegue «npm test» mentre hai un server aperto.', watch:'Cosa guardare: il comando appare come blocco nella chat, nella cartella del Thread, e nessuna shell cambia. È uguale in tutte le opzioni.',
+   steps:[['Apri terminale',{type:'openTerminal'}],['npm run dev',{type:'user',term:'x10',cmd:'dev'}],['L\'agente esegue npm test in «Sistema test instabile»',{type:'provider',thread:'t1',cmd:'npm test'}],['Passa a «Rifattorizza parser»',{type:'select',id:'t2'}],['L\'agente esegue npm test qui',{type:'provider',thread:'t2',cmd:'npm test'}]] },
 ];
 function renderWalk(){
   $('wtabs').innerHTML=''; WALKS.forEach((w,i)=>{const b=document.createElement('button'); if(walk===i) b.className='on'; b.textContent=w.name; b.onclick=()=>{walk=i;step=0;history=[];render(replay([],policy));}; $('wtabs').append(b);});
-  if(walk===null){ $('wbody').innerHTML='<span class="muted">Pick a walkthrough: it resets to a fresh Project, then you press the steps in order. Switch the ownership option at any time to replay the same history under it.</span>'; return; }
+  if(walk===null){ $('wbody').innerHTML='<span class="muted">Scegli un percorso: riparte da un progetto pulito, poi premi i passi in ordine (il pulsante blu è il prossimo). In qualsiasi momento cambia opzione in alto per rigiocare la stessa sequenza con un\'altra regola.</span>'; return; }
   const w=WALKS[walk];
-  $('wbody').innerHTML=`<p>${w.blurb}</p><div class="row" id="steps"></div>`;
+  $('wbody').innerHTML=`<p>${w.blurb}</p><p><b>${w.watch}</b></p><div class="row" id="steps"></div>`;
   w.steps.forEach(([l,a],i)=>{ const b=document.createElement('button'); b.textContent=`${i+1}. ${l}`; b.disabled=i!==step; if(i===step) b.className='next'; b.onclick=()=>{step++; act(a);}; $('steps').append(b); });
 }
 render(replay([],policy));

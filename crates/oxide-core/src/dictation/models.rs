@@ -127,6 +127,11 @@ impl Default for ModelManager {
     }
 }
 
+type VerifiedModelCache = HashMap<PathBuf, (u64, std::time::SystemTime, bool)>;
+
+static VERIFIED_CACHE: LazyLock<Mutex<VerifiedModelCache>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 impl ModelManager {
     /// The caller owns the trust boundary of this catalogue. Never accept it from user settings.
     pub fn with_source(catalogue: ModelCatalogue, source: Arc<dyn ModelSource>) -> Self {
@@ -163,10 +168,23 @@ impl ModelManager {
         if !path.exists() {
             return Ok(false);
         }
-        let mut file = File::open(path).map_err(err)?;
-        if file.metadata().map_err(err)?.len() != entry.expected_bytes {
+        let metadata = match fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => return Ok(false),
+        };
+        if metadata.len() != entry.expected_bytes {
             return Ok(false);
         }
+        let modified = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if let Some(&(len, mtime, valid)) = VERIFIED_CACHE.lock().unwrap().get(path)
+            && len == metadata.len()
+            && mtime == modified
+        {
+            return Ok(valid);
+        }
+        let mut file = File::open(path).map_err(err)?;
         let mut hash = Sha256::new();
         let mut buffer = [0; 262144];
         loop {
@@ -176,7 +194,12 @@ impl ModelManager {
             }
             hash.update(&buffer[..n]);
         }
-        Ok(format!("{:x}", hash.finalize()) == entry.sha256)
+        let valid = format!("{:x}", hash.finalize()) == entry.sha256;
+        VERIFIED_CACHE
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), (metadata.len(), modified, valid));
+        Ok(valid)
     }
 
     pub fn status(&self, home: &Path, id: ModelId) -> Result<ModelStatus> {

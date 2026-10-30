@@ -47,6 +47,7 @@ import { readablePath } from "./headerLines";
 import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
+import { createDefaultThread } from "./createDefaultThread";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
 import oxideMark from "../../assets/brand/oxide/oxide-mark.svg";
 
@@ -181,8 +182,10 @@ export function App() {
       : defaultDiffScope(diffThread);
   // Read by the stable `openDiff`.
   const currentThreadRef = useRef(currentThreadId);
+  const currentProjectRef = useRef(selectedId);
   useEffect(() => {
     currentThreadRef.current = currentThreadId;
+    currentProjectRef.current = selectedId;
   });
   const currentTerminalContext = useMemo<TerminalContext | null>(
     () => selected && threads !== null
@@ -317,19 +320,31 @@ export function App() {
 
   /** A new Thread in the Project with Settings defaults; `null` if it could not be created. */
   const createThreadIn = useCallback(async (projectId: number): Promise<Thread | null> => {
-    const settingsRes = await commands.getSettings();
-    const provider = settingsRes.settings.defaultProvider || "claude";
-    const provKey = provider as keyof typeof settingsRes.settings.providers;
-    const provSettings = settingsRes.settings.providers[provKey];
-    const created = await commands.createThread(
-      projectId,
-      provider,
-      provSettings?.model ?? null,
-      provSettings?.effort ?? null,
-      provSettings?.permissionMode ?? null
-    );
+    const created = await createDefaultThread(projectId);
     return created.status === "ok" ? created.data : null;
   }, []);
+
+  const fixPullRequest = async (projectId: number, prompt: string) => {
+    const created = await createDefaultThread(projectId);
+    if (created.status === "error") throw new Error(created.error.message);
+    const thread = created.data;
+    // Keep the request recoverable if sending fails, and open after sending so the
+    // Transcript's initial snapshot includes the Turn even if its events arrived early.
+    setDrafts((prev) => setDraft(prev, thread.id, prompt));
+    try {
+      const sent = await commands.sendPrompt(thread.id, [{ kind: "text", text: prompt }]);
+      if (sent.status === "error") throw new Error(sent.error.message);
+      setDrafts((prev) => setDraft(prev, thread.id, ""));
+    } finally {
+      if (currentProjectRef.current === projectId) {
+        setThreads((prev) => [thread, ...(prev ?? [])]);
+        setSelectedThreadId(thread.id);
+        rememberTerminalContext(projectId, thread.id);
+        setWorkMode("chat");
+        setShowBoard(false);
+      }
+    }
+  };
 
   // Only one empty Thread (no Turn yet) at a time: asking for another reopens it.
   const startNewThread = useCallback(async () => {
@@ -847,6 +862,7 @@ export function App() {
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
+                  onFixPullRequest={(prompt) => fixPullRequest(selected.id, prompt)}
                 />
               </Suspense>
             )}

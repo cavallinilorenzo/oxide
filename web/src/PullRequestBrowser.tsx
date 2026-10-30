@@ -15,6 +15,7 @@ import {
   GitPullRequestIcon,
   MarkGithubIcon,
   SearchIcon,
+  ToolsIcon,
 } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import {
@@ -34,6 +35,7 @@ import { Markdown } from "./PullRequestMarkdown";
 import { MergeFooter, MergeStatus, type Pending, Working } from "./PullRequestMerge";
 import { NO_EDIT, PullRequestPeople, ReviewStateIcon } from "./PullRequestPeople";
 import { defaultMergeMethod, mergeRequirements, readiness, relativeTime } from "./pullRequestReview";
+import { pullRequestFixPrompt } from "./fixPullRequest";
 
 interface PullRequestBrowserProps {
   projectId: number;
@@ -43,6 +45,7 @@ interface PullRequestBrowserProps {
   onChanged: () => void;
   /** Shows the pull request's changed files in the Diff Surface. */
   onReviewFiles: (number: number) => void;
+  onFixPullRequest: (prompt: string) => Promise<void>;
   createRequest?: number;
   onCreateHandled?: () => void;
 }
@@ -67,7 +70,7 @@ function Branches({ head, base }: { head: string; base: string }) {
 }
 
 /** Open pull requests of the repository: list, search, and one pull request to review. */
-export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
+export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles, onFixPullRequest, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
   const [creating, setCreating] = useState(createRequest > 0);
   const [seenCreateRequest, setSeenCreateRequest] = useState(createRequest);
   if (seenCreateRequest !== createRequest) {
@@ -112,6 +115,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
         }}
         onChanged={onChanged}
         onReviewFiles={onReviewFiles}
+        onFixPullRequest={onFixPullRequest}
       />
     );
   }
@@ -205,6 +209,7 @@ interface PullRequestReviewProps {
   onBack: (done?: "merged" | "closed") => void;
   onChanged: () => void;
   onReviewFiles: (number: number) => void;
+  onFixPullRequest: (prompt: string) => Promise<void>;
 }
 
 /** How often an open pull request reloads while some of its checks are still running. */
@@ -219,6 +224,7 @@ export function PullRequestReview({
   onBack,
   onChanged,
   onReviewFiles,
+  onFixPullRequest,
 }: PullRequestReviewProps) {
   const [reload, setReload] = useState(0);
   const query = useQuery(
@@ -237,7 +243,8 @@ export function PullRequestReview({
   const loaded: Loaded = query.state === "ready" ? { state: "ready", ...query.data } : query;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const busy = pending !== null;
+  const [fixing, setFixing] = useState(false);
+  const busy = pending !== null || fixing;
   const [comment, setComment] = useState("");
   const [methodChoice, setMethod] = useState<MergeMethod | null>(null);
   const [deleteChoice, setDeleteBranch] = useState<boolean | null>(null);
@@ -306,6 +313,7 @@ export function PullRequestReview({
   const pr = detail.pullRequest;
   const phase = merged ? "merged" : detail.phase;
   const live = phase === "open" || phase === "draft";
+  const fixPrompt = live ? pullRequestFixPrompt(detail) : null;
   const inputs = { phase, checks: detail.checks, mergeState: detail.mergeState, reviewDecision: detail.reviewDecision ?? null };
   const status = readiness(inputs);
   const requirements = live ? mergeRequirements(inputs) : [];
@@ -362,6 +370,19 @@ export function PullRequestReview({
   async function checkout() {
     if (await act("checkout", () => commands.checkoutPullRequest(projectId, number))) onChanged();
   }
+
+  async function fixPullRequest() {
+    if (!fixPrompt || busy) return;
+    setFixing(true);
+    setError(null);
+    try {
+      await onFixPullRequest(fixPrompt);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setFixing(false);
+    }
+  }
   /** Runs a change to the pull request on GitHub, then shows its new state. */
   async function change(kind: Pending, run: () => Promise<Result>) {
     const ok = await act(kind, run);
@@ -416,6 +437,18 @@ export function PullRequestReview({
             <FileDiffIcon size={14} /> Review files
             <span className="pr-count">{detail.diff.files.length}</span>
           </button>
+          {live && (
+            <button
+              className={fixing ? "pending" : undefined}
+              disabled={busy || fixPrompt === null}
+              title={fixPrompt ? "Fix failing checks and merge conflicts in a new Thread with your default agent" : "No failing checks or merge conflicts to fix"}
+              onClick={() => void fixPullRequest()}
+            >
+              <Working on={fixing} label="Starting fix…">
+                <ToolsIcon size={14} /> Fix PR
+              </Working>
+            </button>
+          )}
           {live && (
             <button
               className={pending === "checkout" ? "pending" : undefined}

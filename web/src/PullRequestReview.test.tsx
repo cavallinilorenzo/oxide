@@ -11,6 +11,7 @@ let host: HTMLDivElement;
 let root: Root;
 const onChanged = vi.fn();
 const onBack = vi.fn();
+const onFixPullRequest = vi.fn<(prompt: string) => Promise<void>>();
 
 function detail(overrides: Partial<PullRequestDetail_Serialize> = {}): PullRequestDetail_Serialize {
   return {
@@ -52,6 +53,7 @@ function detail(overrides: Partial<PullRequestDetail_Serialize> = {}): PullReque
 
 beforeEach(() => {
   clearQueryCache();
+  onFixPullRequest.mockReset().mockResolvedValue();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -73,7 +75,7 @@ afterEach(async () => {
 
 async function render() {
   await act(async () =>
-    root.render(<PullRequestReview projectId={1} number={174} refreshKey={0} onBack={onBack} onChanged={onChanged} onReviewFiles={() => {}} />),
+    root.render(<PullRequestReview projectId={1} number={174} refreshKey={0} onBack={onBack} onChanged={onChanged} onReviewFiles={() => {}} onFixPullRequest={onFixPullRequest} />),
   );
 }
 const button = (name: string | RegExp) =>
@@ -81,6 +83,67 @@ const button = (name: string | RegExp) =>
     typeof name === "string" ? b.textContent?.trim() === name || b.getAttribute("aria-label") === name : name.test(`${b.textContent} ${b.getAttribute("aria-label")}`),
   )!;
 const click = (el: HTMLElement) => act(async () => el.click());
+
+it("requests a fix with the PR link, conflicts and every failed check, including optional checks", async () => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({
+    mergeState: "conflicting",
+    checks: [
+      ...detail().checks,
+      { name: "optional", state: "failure", url: null, required: false },
+      { name: "web", state: "failure", url: null, required: true },
+      { name: "waiting", state: "pending", url: null, required: true },
+    ],
+  }) });
+  await render();
+  await click(button("Fix PR"));
+  expect(onFixPullRequest).toHaveBeenCalledTimes(1);
+  const prompt = onFixPullRequest.mock.calls[0][0];
+  expect(prompt).toContain("https://github.com/me/oxide/pull/174");
+  expect(prompt).toContain("Resolve merge conflicts between dependabot/npm/react-virtual and main");
+  expect(prompt).toContain("Fix failing CI check: web (https://github.com/me/oxide/actions/runs/1)");
+  expect(prompt).toContain("Fix failing CI check: optional");
+  expect(prompt.match(/Fix failing CI check: web/g)).toHaveLength(1);
+  expect(prompt).not.toContain("rust");
+  expect(prompt).not.toContain("waiting");
+  expect(prompt).toContain("push to the existing PR branch");
+});
+
+it("can fix conflicts without failed checks, including in a draft", async () => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ phase: "draft", mergeState: "conflicting", checks: [] }) });
+  await render();
+  await click(button("Fix PR"));
+  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Resolve merge conflicts"));
+});
+
+it.each(["clean", "blocked", "behind", "unknown"] as const)("does not offer a repair for %s with passing or running checks", async (mergeState) => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ mergeState, checks: [
+    { name: "web", state: "success", url: null, required: true },
+    { name: "rust", state: "pending", url: null, required: true },
+  ] }) });
+  await render();
+  expect(button("Fix PR").disabled).toBe(true);
+  await click(button("Fix PR"));
+  expect(onFixPullRequest).not.toHaveBeenCalled();
+});
+
+it.each(["closed", "merged"] as const)("hides Fix PR for a %s PR even when old checks failed", async (phase) => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ phase }) });
+  await render();
+  expect(button("Fix PR")).toBeUndefined();
+});
+
+it("prevents duplicate fixes while starting and reports dispatch errors", async () => {
+  let reject!: (error: Error) => void;
+  onFixPullRequest.mockReturnValue(new Promise((_, fail) => { reject = fail; }));
+  await render();
+  await click(button("Fix PR"));
+  expect(button("Starting fix…").disabled).toBe(true);
+  await click(button("Starting fix…"));
+  expect(onFixPullRequest).toHaveBeenCalledTimes(1);
+  await act(async () => reject(new Error("Agent unavailable")));
+  expect(host.querySelector('[role="alert"]')!.textContent).toContain("Agent unavailable");
+  expect(button("Fix PR").disabled).toBe(false);
+});
 
 it("shows the author's avatar, an Open on GitHub button, and opens the pull request there", async () => {
   const open = vi.spyOn(commands, "openLink").mockResolvedValue({ status: "ok", data: null });

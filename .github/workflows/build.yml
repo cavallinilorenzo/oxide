@@ -157,11 +157,8 @@ jobs:
 
       - name: Build and stage the Vulkan and CUDA workers (Windows)
         if: inputs.platform == 'windows-x64'
-        shell: cmd
-        # The x64 MSVC environment (cl, Ninja, VCToolsRedistDir), as in the documented Native Tools prompt.
-        run: |
-          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find VC\Auxiliary\Build\vcvars64.bat`) do call "%%i"
-          node tools/dictation-package.mjs stage
+        # stage loads the x64 MSVC environment (vcvars64.bat) itself.
+        run: node tools/dictation-package.mjs stage
 
       - name: Build the Windows installer
         if: inputs.platform == 'windows-x64'

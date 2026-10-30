@@ -26,7 +26,7 @@ The full tier installs the web dependencies from the lockfile, then runs formatt
 
 The Rust tests run with [cargo-nextest](https://nexte.st), as in CI. Install it once with `cargo install --locked cargo-nextest`. Every Rust check also builds the dictation engine, which needs CMake, a C/C++ compiler and libclang (see [docs/dictation.md](docs/dictation.md)).
 
-On Windows the full tier also packages the Vulkan and CUDA dictation workers, as CI does: install the pinned Vulkan SDK and CUDA Toolkit once with `node tools/dictation-package.mjs setup` (elevated), then run the checks from an x64 Native Tools Command Prompt. [Packaging and distribution](docs/dictation.md#packaging-and-distribution) lists each package check and the failure it prevents.
+On Windows the full tier also packages the Vulkan and CUDA dictation workers, as CI does: install the pinned Vulkan SDK and CUDA Toolkit once with `node tools/dictation-package.mjs setup` (elevated), then run the checks from a new prompt; staging loads the Visual Studio x64 environment itself. [Packaging and distribution](docs/dictation.md#packaging-and-distribution) lists each package check and the failure it prevents.
 
 Every job, why it exists and its local command are in [docs/devops.md](docs/devops.md#ci-jobs).
 

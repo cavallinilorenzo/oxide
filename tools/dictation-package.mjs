@@ -2,7 +2,7 @@
 // what an installer or app bundle actually contains. See docs/dictation.md#packaging-and-distribution.
 //
 //   node tools/dictation-package.mjs setup                       Windows, elevated: install the pinned CUDA Toolkit and Vulkan SDK
-//   node tools/dictation-package.mjs stage                       Windows, x64 Native Tools prompt: build the release workers and
+//   node tools/dictation-package.mjs stage                       Windows (loads the x64 MSVC environment): build the release workers and
 //                                                                stage them with their runtime for tauri.windows-gpu.conf.json
 //   node tools/dictation-package.mjs verify windows-x64 [dir]    an installed folder (default: the built <target>/release)
 //   node tools/dictation-package.mjs verify macos-aarch64 [app]  default: <target>/release/bundle/macos/Oxide.app
@@ -49,6 +49,35 @@ export function runtimeFiles(roots, sources, importsOf) {
     }
   }
   return [...staged.values()];
+}
+
+/**
+ * `base` with the variables vcvars64.bat set, given `set`'s output after it ran.
+ * Windows variable names are case-insensitive, so a `Path` replaces a `PATH`.
+ */
+export function withVcvars(base, setOutput) {
+  const set = Object.fromEntries(setOutput.split(/\r?\n/).map((line) => line.match(/^([^=]+)=(.*)$/)).filter(Boolean).map(([, key, value]) => [key, value]));
+  const replaced = new Set(Object.keys(set).map((key) => key.toLowerCase()));
+  return { ...Object.fromEntries(Object.entries(base).filter(([key]) => !replaced.has(key.toLowerCase()))), ...set };
+}
+
+// The x64 MSVC environment of a Native Tools prompt: cl, Ninja and VCToolsRedistDir.
+function msvcEnv(env = process.env) {
+  if (env.VCToolsRedistDir) return env;
+  const vswhere = join(env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft Visual Studio", "Installer", "vswhere.exe");
+  const found = spawnSync(vswhere, [
+    "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "-find", "VC\\Auxiliary\\Build\\vcvars64.bat",
+  ], { encoding: "utf8" });
+  const vcvars = found.stdout?.split(/\r?\n/).find(Boolean);
+  if (found.status !== 0 || !vcvars) {
+    throw new Error("Visual Studio Build Tools with the x64 C++ tools were not found: see docs/dictation.md#packaging-and-distribution");
+  }
+  const result = spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${vcvars}" >nul && set"`], {
+    encoding: "utf8", env, windowsVerbatimArguments: true, maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`${vcvars} failed: ${result.stderr}`);
+  return withVcvars(env, result.stdout);
 }
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -103,7 +132,7 @@ async function setup() {
       writeFileSync(process.env.GITHUB_ENV, Object.entries(env).map(([key, value]) => `${key}=${value}\n`).join(""), { flag: "a" });
       writeFileSync(process.env.GITHUB_PATH, path.map((entry) => `${entry}\n`).join(""), { flag: "a" });
     }
-    console.log(`Done. Open a new x64 Native Tools prompt, or set:\n${Object.entries(env).map(([key, value]) => `  set ${key}=${value}`).join("\n")}\n  set PATH=${path.join(";")};%PATH%`);
+    console.log(`Done. Open a new prompt, or set:\n${Object.entries(env).map(([key, value]) => `  set ${key}=${value}`).join("\n")}\n  set PATH=${path.join(";")};%PATH%`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -136,15 +165,16 @@ function nativeVersions() {
 /** Build both release workers and stage them, their runtime and the manifest. */
 function stage() {
   requireWindows("stage");
-  for (const variable of ["CUDA_PATH", "VULKAN_SDK", "VCToolsRedistDir"]) {
+  for (const variable of ["CUDA_PATH", "VULKAN_SDK"]) {
     if (!process.env[variable]) {
-      throw new Error(`${variable} is not set: run "node tools/dictation-package.mjs setup", then use an x64 Native Tools prompt (docs/dictation.md).`);
+      throw new Error(`${variable} is not set: run "node tools/dictation-package.mjs setup", then open a new prompt (docs/dictation.md).`);
     }
   }
+  const env = msvcEnv();
   for (const tool of ["cl.exe", "cmake.exe", "ninja.exe", "glslc.exe", "nvcc.exe"]) {
-    if (spawnSync("where.exe", [tool], { stdio: "ignore" }).status !== 0) throw new Error(`Missing ${tool}: see docs/dictation.md#packaging-and-distribution`);
+    if (spawnSync("where.exe", [tool], { stdio: "ignore", env }).status !== 0) throw new Error(`Missing ${tool}: see docs/dictation.md#packaging-and-distribution`);
   }
-  const workers = ["vulkan", "cuda"].map((backend) => releaseWorker(backend));
+  const workers = ["vulkan", "cuda"].map((backend) => releaseWorker(backend, env));
   for (const worker of workers) {
     assertBuildSpace(repoRoot);
     run("cargo", worker.args, { cwd: repoRoot, env: worker.env });
@@ -154,7 +184,7 @@ function stage() {
 
   rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(STAGING, { recursive: true });
-  const runtime = runtimeFiles(built, runtimeSources(process.env), (path) => peImports(readFileSync(path)));
+  const runtime = runtimeFiles(built, runtimeSources(env), (path) => peImports(readFileSync(path)));
   for (const from of built) copyFileSync(from, join(STAGING, basename(from)));
   for (const { name, from } of runtime) copyFileSync(from, join(STAGING, name));
 

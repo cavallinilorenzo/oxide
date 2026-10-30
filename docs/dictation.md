@@ -346,7 +346,8 @@ Toolkit after checking their SHA-256 (pins in `GPU_BUILD_SDKS`, `tools/ci/policy
 Run it once from an elevated prompt; it installs no display driver. The CUDA pin
 covers NVIDIA's network installer, which then downloads the selected components
 itself; Oxide does not hash those components separately. Then, from the
-repository root in a new **x64 Native Tools Command Prompt**:
+repository root in a new Command Prompt (`stage` finds Visual Studio with
+`vswhere` and loads its x64 environment from `vcvars64.bat` itself):
 
 ```bat
 set LIBCLANG_PATH=C:\Program Files\LLVM\bin
@@ -391,8 +392,10 @@ release gate tracked in #235; packaging success alone does not claim it.
 
 ### Troubleshooting
 
-- **`stage` reports a missing `glslc.exe`, `nvcc.exe` or `VCToolsRedistDir`**: run
-  `setup`, then open a new x64 Native Tools Command Prompt.
+- **`stage` reports a missing `glslc.exe`, `nvcc.exe`, `CUDA_PATH` or `VULKAN_SDK`**: run
+  `setup`, then open a new prompt so `CUDA_PATH`, `VULKAN_SDK` and `PATH` are current.
+- **`stage` cannot find Visual Studio Build Tools**: install them with the Desktop
+  development with C++ workload (x64 tools, CMake and Ninja).
 - **`verify` reports "imports X, which is neither a Windows system DLL nor bundled"**:
   a dependency changed. If X is redistributable, stage it and add its notice; if it
   is part of every supported Windows, add it to `WINDOWS_SYSTEM_DLLS` with a reason.

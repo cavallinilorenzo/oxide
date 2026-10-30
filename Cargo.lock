@@ -3053,7 +3053,7 @@ dependencies = [
 name = "oxide-core"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "cc",
  "cpal",
  "crossbeam-channel",
@@ -3086,7 +3086,7 @@ dependencies = [
 name = "oxide-provider"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crossbeam-channel",
  "libc",
  "serde",

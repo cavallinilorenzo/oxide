@@ -70,3 +70,12 @@ Alex, the power user, encountered the compact toggle and misleading next-action 
 - Browser evaluate is read-only, so mutable injection/title preflight and the detector overlay were unavailable. Fallback evidence: CLI scan, screenshots, read-only DOM and source inspection. No overlay was claimed; no Impeccable live-server was started, so none required cleanup.
 - Target: `docs/prototypes/thread-board/index.html`. No critique ignore file was applied. Review artifacts remain together in the throwaway directory; the downloaded scratch skeleton source was removed. The optional prototype HTTP server may be kept for the human preview; it has no production or external bindings.
 - Human question is handled by the wayfinder parent: choose A/B/C or a mix. This review does not resolve the ticket or change GLOSSARY/ADRs. The map destination is a later layout spec; implementation remains out of scope.
+
+
+## Human decision: B with a compact Project action
+
+itsmrma chose B and explicitly rejected the separate labelled “Thread Board” navigation row because it consumes space. The chosen entry point is an always-visible, icon-only button in the same heading row as each Project name. Its tooltip and accessible name identify the Project; the active Board icon has a selected state. Clicking oxide opens only oxide’s Board; clicking compiler opens only compiler’s Board. Recent Threads remain directly below the Project heading. The centre overview, status groups, Approval access and Board Thread dispatch are otherwise retained.
+
+The prototype now includes functional Project scoping for the two fixture Projects, including new/Board Thread dispatch and checkout labels. Browser checks exercised both Project buttons, keyboard activation and both required stage sizes. B screenshots were refreshed. A/C screenshots remain the original comparison captures. The focused change does not alter any glossary definition; the final layout ADR and broader glossary changes remain the map’s handoff. The prototype detector still reports the existing small-metadata warning.
+
+This records itsmrma’s live reaction; no second reaction from cavallinilorenzo was supplied in this chat.

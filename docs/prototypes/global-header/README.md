@@ -2,7 +2,7 @@
 
 Question: [What stays global in the header once Work modes are gone?](https://github.com/cavallinilorenzo/oxide/issues/277).
 
-Status: **ready for human reaction; no decision recorded**. Fixture only. This branch is a primary source and must never be merged.
+Status: **B chosen by itsmrma** in the live discussion. The canonical resolution is recorded on the linked decision ticket. Fixture only. This branch is a primary source and must never be merged.
 
 Double-click `index.html`, or run from this folder:
 
@@ -10,7 +10,7 @@ Double-click `index.html`, or run from this folder:
 python -m http.server 8277 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8277/index.html?variant=C&size=900x560`. The floating bar and left/right arrows switch variants; size buttons change the simulated window. Inputs do not intercept variant arrows. Compare shows the eight-principle judgement; State exposes the fixture state; Reset clears it. No installation or build is required.
+Open `http://127.0.0.1:8277/index.html?variant=B&size=900x560`. B is also the default without a variant parameter. The floating bar and left/right arrows switch variants; size buttons change the simulated window. Inputs do not intercept variant arrows. Compare shows the eight-principle judgement; State exposes the fixture state; Reset clears it. No installation or build is required.
 
 | Variant | Git controls | Tradeoff |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ Files/editor and shell are illustrative inputs, not Monaco or a PTY. Per-Thread 
 
 At 900×560 the 482px dock leaves 416px for the Thread. Sidebar and dock are exclusive; visible header handles and shortcuts remain. At 1440×900 all three regions fit. Normal viewing scales the stage to the browser; `&capture=1` uses exact stage dimensions with no prototype controls for screenshots.
 
-## Recommendation
+## Initial recommendation (before human reaction)
 
 **C · Git lives in Diff.** Global controls navigate Projects, signal needs-input, and show/hide regions. The Thread names its checkout; the Surface owns its actions. Diff keeps review and commit together, shows changed-file count on its tab, and makes the commit target independent of a pinned Terminal checkout. Choose B if immediate Git access beside the conversation is the higher priority.
 

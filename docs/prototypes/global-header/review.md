@@ -1,6 +1,6 @@
 # Header placement review
 
-Method: independent design assessment A (`header_design_review`) and browser/detector assessment B (`header_browser_evidence`), followed by parent synthesis and narrow verification of corrections. This is an Operate surface and a human decision prototype. **Recommendation: C; no decision recorded.**
+Method: independent design assessment A (`header_design_review`) and browser/detector assessment B (`header_browser_evidence`), followed by parent synthesis and narrow verification of corrections. This is an Operate surface and a human decision prototype. **Initial recommendation: C. Subsequent human choice: B, by itsmrma; see the canonical resolution on [the decision ticket](https://github.com/cavallinilorenzo/oxide/issues/277).** The assessments below preserve the evidence available before that choice.
 
 The supplied brief and previously chosen skeleton define the visual world. Dark surfaces, density and existing icon vocabulary are held constant. PRODUCT/GLOSSARY still contain legacy Work mode wording; updating those belongs to the map’s final handoff, not this placement prototype.
 
@@ -54,4 +54,4 @@ Parent captured all alternatives at exact **900×560 and 1440×900** browser/sta
 - Target: `docs/prototypes/global-header/index.html`. No prior critique ignore file was used. This review is retained beside the prototype rather than as a production design audit/trend snapshot.
 - Assessment tabs closed; no overlay server or temporary injection existed. Parent’s preview server on loopback port 8277 remains for human reaction; Ctrl+C in its process stops it. The standalone file remains usable without the server. No temporary files entered the prototype branch. Browser viewport override was reset after exact-size captures.
 
-The human reaction is still required: **C’s review/action home, B’s immediate Thread actions, A’s global access, or a specified mix?** No GLOSSARY term or ADR is changed until that decision and the map handoff.
+The human reaction selected B; the linked decision ticket holds the resolution and rationale. No GLOSSARY term changes for this placement. The final layout ADR/spec remain the map’s handoff.

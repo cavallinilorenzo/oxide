@@ -165,41 +165,6 @@ impl System for HostSystem {
     }
 
     #[cfg(target_os = "macos")]
-    fn is_app_installed(&self, bundle_id: &str) -> bool {
-        // Core only asks about bundle identifiers from its fixed list; the check keeps
-        // the Spotlight query well-formed regardless.
-        if !bundle_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
-        {
-            return false;
-        }
-        std::process::Command::new("mdfind")
-            .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
-            .output()
-            .map(|out| !out.stdout.iter().all(u8::is_ascii_whitespace))
-            .unwrap_or(false)
-    }
-
-    #[cfg(target_os = "macos")]
-    fn open_with_app(&self, bundle_id: &str, path: &std::path::Path) {
-        let _ = std::process::Command::new("open")
-            .args(["-b", bundle_id])
-            .arg(path)
-            .spawn();
-    }
-
-    #[cfg(target_os = "windows")]
-    fn is_app_installed(&self, bundle_id: &str) -> bool {
-        oxide_core::editor::is_installed_windows(bundle_id)
-    }
-
-    #[cfg(target_os = "windows")]
-    fn open_with_app(&self, bundle_id: &str, path: &std::path::Path) {
-        let _ = oxide_core::editor::open_windows(bundle_id, path);
-    }
-
-    #[cfg(target_os = "macos")]
     fn reveal_in_finder(&self, path: &std::path::Path) {
         let _ = std::process::Command::new("open")
             .arg("-R")

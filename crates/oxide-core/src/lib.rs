@@ -12,7 +12,6 @@ pub mod desktop_tools;
 mod detection_cache;
 pub mod dictation;
 mod discovery;
-pub mod editor;
 mod error;
 mod files;
 mod git;
@@ -36,7 +35,6 @@ mod worktree;
 pub use activity::{Notification, NotificationKind, System};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
-pub use editor::Editor;
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
@@ -485,26 +483,6 @@ impl Core {
             project_setup::github_clone_target(&self.expand_home(parent.trim()), name_with_owner)?;
         github::clone_repository(&self.gh, name_with_owner, &dest)?;
         self.add_project(&dest.to_string_lossy())
-    }
-
-    /// The known editors installed on this machine.
-    pub fn detected_editors(&self) -> Vec<Editor> {
-        let system = self.activity.system();
-        editor::detect(|bundle_id| system.is_app_installed(bundle_id))
-    }
-
-    /// Opens the Project's checkout, or the Thread's, in the editor chosen in Settings.
-    pub fn open_in_editor(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
-        let path = self.checkout_path(project_id, thread_id)?;
-        let detected = self.detected_editors();
-        let configured = self.settings().settings.editor;
-        let editor = editor::choose(&detected, &configured).ok_or_else(|| {
-            Error::Editor("No supported editor is installed. See the list in Settings.".into())
-        })?;
-        self.activity
-            .system()
-            .open_with_app(&editor.bundle_id, Path::new(&path));
-        Ok(())
     }
 
     /// Shows the Project's checkout, or the Thread's, in Finder.

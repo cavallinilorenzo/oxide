@@ -25,8 +25,6 @@ fn git(dir: &Path, args: &[&str]) {
 
 #[derive(Default)]
 struct RecordingSystem {
-    installed: Vec<&'static str>,
-    opened: Mutex<Vec<(String, PathBuf)>>,
     revealed: Mutex<Vec<PathBuf>>,
 }
 
@@ -35,15 +33,6 @@ impl System for RecordingSystem {
     fn release_activity(&self) {}
     fn notify(&self, _: Notification) {}
     fn set_badge(&self, _: u32) {}
-    fn is_app_installed(&self, bundle_id: &str) -> bool {
-        self.installed.contains(&bundle_id)
-    }
-    fn open_with_app(&self, bundle_id: &str, path: &Path) {
-        self.opened
-            .lock()
-            .unwrap()
-            .push((bundle_id.into(), path.into()));
-    }
     fn reveal_in_finder(&self, path: &Path) {
         self.revealed.lock().unwrap().push(path.into());
     }
@@ -61,14 +50,11 @@ impl Fixture {
     }
 }
 
-fn fixture(installed: Vec<&'static str>) -> Fixture {
+fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let core = Core::open_with_user_home(tmp.path().join("home"), tmp.path().join("user")).unwrap();
     core.set_real_time_ticker(false);
-    let system = Arc::new(RecordingSystem {
-        installed,
-        ..Default::default()
-    });
+    let system = Arc::new(RecordingSystem::default());
     core.set_system(system.clone());
     Fixture { tmp, core, system }
 }
@@ -97,7 +83,7 @@ fn install_gh(f: &Fixture, repos: serde_json::Value) {
 
 #[test]
 fn add_folder_registers_a_project_once() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let repo = f.root().join("code/app");
     make_repo(&repo);
 
@@ -111,7 +97,7 @@ fn add_folder_registers_a_project_once() {
 
 #[test]
 fn add_folder_expands_tilde_unhides_and_rejects_non_folders() {
-    let f = fixture(vec![]);
+    let f = fixture();
     make_repo(&f.root().join("user/app"));
 
     let project = f.core.add_project("~/app").unwrap();
@@ -124,7 +110,7 @@ fn add_folder_expands_tilde_unhides_and_rejects_non_folders() {
 
 #[test]
 fn new_project_creates_a_folder_with_git_init() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let parent = f.root().join("code");
     std::fs::create_dir_all(&parent).unwrap();
 
@@ -139,7 +125,7 @@ fn new_project_creates_a_folder_with_git_init() {
 
 #[test]
 fn new_project_refuses_existing_folders_and_names_that_escape_the_parent() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let parent = f.root().join("code");
     std::fs::create_dir_all(parent.join("taken")).unwrap();
     let p = parent.to_str().unwrap();
@@ -153,7 +139,7 @@ fn new_project_refuses_existing_folders_and_names_that_escape_the_parent() {
 
 #[test]
 fn clone_from_url_registers_the_clone() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let origin = f.root().join("origin/widgets");
     make_repo(&origin);
     let parent = f.root().join("code");
@@ -173,7 +159,7 @@ fn clone_from_url_registers_the_clone() {
 
 #[test]
 fn failed_clone_registers_nothing() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let parent = f.root().join("code");
 
     let err = f
@@ -186,7 +172,7 @@ fn failed_clone_registers_nothing() {
 
 #[test]
 fn github_search_filters_repositories_through_gh_and_clones_the_pick() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let origin = f.root().join("origin/gadgets");
     make_repo(&origin);
     install_gh(
@@ -214,69 +200,15 @@ fn github_search_filters_repositories_through_gh_and_clones_the_pick() {
 
 #[test]
 fn github_search_without_gh_explains_how_to_get_it() {
-    let f = fixture(vec![]);
+    let f = fixture();
     f.core.set_gh_search_path(Some(vec![]));
     let err = f.core.search_github_repositories("x").unwrap_err();
     assert!(err.to_string().contains("Install the GitHub CLI"));
 }
 
 #[test]
-fn detects_only_installed_editors_from_the_known_list() {
-    let f = fixture(vec![
-        "dev.zed.Zed",
-        "com.microsoft.VSCode",
-        "not.in.the.list",
-    ]);
-    let ids: Vec<String> = f
-        .core
-        .detected_editors()
-        .into_iter()
-        .map(|e| e.bundle_id)
-        .collect();
-    assert_eq!(ids, ["com.microsoft.VSCode", "dev.zed.Zed"]);
-}
-
-#[test]
-fn open_in_editor_uses_the_configured_editor_and_the_thread_checkout() {
-    let f = fixture(vec!["dev.zed.Zed", "com.microsoft.VSCode"]);
-    let repo = f.root().join("code/app");
-    make_repo(&repo);
-    let project = f.core.add_project(repo.to_str().unwrap()).unwrap();
-    let thread = f
-        .core
-        .create_thread(project.id, "claude", None, None, None)
-        .unwrap();
-
-    let mut settings = f.core.settings().settings;
-    settings.editor = "dev.zed.Zed".into();
-    f.core.save_settings(&settings).unwrap();
-    f.core.open_in_editor(project.id, Some(thread.id)).unwrap();
-
-    let opened = f.system.opened.lock().unwrap().clone();
-    assert_eq!(opened.len(), 1);
-    assert_eq!(opened[0].0, "dev.zed.Zed");
-    assert_eq!(opened[0].1, repo.canonicalize().unwrap());
-}
-
-#[test]
-fn open_in_editor_falls_back_to_the_first_detected_and_errors_with_none() {
-    let f = fixture(vec!["dev.zed.Zed"]);
-    let repo = f.root().join("code/app");
-    make_repo(&repo);
-    let project = f.core.add_project(repo.to_str().unwrap()).unwrap();
-
-    // The default Settings name no editor.
-    f.core.open_in_editor(project.id, None).unwrap();
-    assert_eq!(f.system.opened.lock().unwrap()[0].0, "dev.zed.Zed");
-
-    let none = fixture(vec![]);
-    let project = none.core.add_project(repo.to_str().unwrap()).unwrap();
-    assert!(none.core.open_in_editor(project.id, None).is_err());
-}
-
-#[test]
 fn reveal_in_finder_reveals_the_checkout() {
-    let f = fixture(vec![]);
+    let f = fixture();
     let repo = f.root().join("code/app");
     make_repo(&repo);
     let project = f.core.add_project(repo.to_str().unwrap()).unwrap();
@@ -291,7 +223,7 @@ fn reveal_in_finder_reveals_the_checkout() {
 
 #[test]
 fn scanned_projects_stay_closed_until_opened_and_closing_keeps_them_known() {
-    let f = fixture(vec![]);
+    let f = fixture();
     make_repo(&f.root().join("user/Code/scanned"));
     make_repo(&f.root().join("user/Code/added"));
 

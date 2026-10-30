@@ -7,13 +7,7 @@ import {
   useState,
 } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import {
-  HistoryIcon,
-  SyncIcon,
-  TerminalIcon,
-  XIcon,
-  SquareFillIcon,
-} from "@primer/octicons-react";
+import { TerminalIcon, XIcon, SquareFillIcon } from "@primer/octicons-react";
 import {
   TerminalCommandBlock,
   type TerminalBlock as Block,
@@ -266,7 +260,6 @@ export function TerminalWorkbench({
     const block: Block = {
       token,
       command,
-      cwd,
       output: "",
       outputOffset: 0,
       at: Date.now(),
@@ -353,27 +346,6 @@ export function TerminalWorkbench({
         <span className="mono" title={cwd}>
           {cwd}
         </span>
-        <span className="grow" />
-        <button className="btn sm" disabled={running || sessionId === null || closed} title="Clear terminal (Ctrl+L)" onClick={() => run("clear")}>Clear</button>
-        <button
-          className="btn sm"
-          disabled={running}
-          onClick={() => composer.current?.history()}
-        >
-          <HistoryIcon size={14} /> History
-        </button>
-        <button
-          className="icon-btn sm"
-          title="Restart shell"
-          aria-label="Restart shell"
-          disabled={running}
-          onClick={() => {
-            setSessionId(null);
-            setGeneration((n) => n + 1);
-          }}
-        >
-          <SyncIcon size={14} />
-        </button>
       </header>
       <div
         className="terminal-block-scroll"
@@ -402,10 +374,6 @@ export function TerminalWorkbench({
               if (sessionId !== null && !block.ended)
                 void commands.resizeTerminal(sessionId, rows, cols);
             }}
-            onReuse={() => {
-              composer.current?.setCommand(block.command);
-              composer.current?.focus();
-            }}
           />
         ))}
         <div ref={bottom} />
@@ -432,6 +400,7 @@ export function TerminalWorkbench({
             className="btn sm"
             onClick={() => {
               setSessionId(null);
+              setCwd(terminalPath(rootPath));
               setGeneration((n) => n + 1);
             }}
           >

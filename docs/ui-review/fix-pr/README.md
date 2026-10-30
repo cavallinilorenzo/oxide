@@ -1,8 +1,8 @@
 # Fix PR
 
-Fix PR appears directly beneath the first CI failure or merge conflict message, with
-one action per PR. When only an optional check fails, it appears in the Checks card
-beside the failed results. The action creates a new Thread in the same Project and automatically sends
+Fix PR appears in the bottom action bar immediately beside the merge button, only
+when an open or draft PR has failed CI checks (including optional checks) or merge
+conflicts. The action creates a new Thread in the same Project and automatically sends
 the PR URL, failed check names and run URLs, and any merge conflicts to the Provider
 selected in Settings, with its configured Model, Effort and permission mode.
 
@@ -10,14 +10,15 @@ selected in Settings, with its configured Model, Effort and permission mode.
 
 - `node tools/check.mjs fast`: rustfmt, ESLint and TypeScript pass. ESLint reports
   the existing TanStack Virtual/React Compiler warning in `ThreadView.tsx`.
-- `pnpm --dir web test`: 81 files, 506 tests pass, including contextual placement, repair eligibility,
+- `pnpm --dir web test`: 81 files, 507 tests pass, including footer placement, repair eligibility,
   failed-check deduplication, optional failures, conflicts, pending requests,
   dispatch errors, Settings defaults, automatic sending and draft recovery.
 - `pnpm --dir web build`: passes, with the existing large-chunk warning.
 - Chromium with deterministic native-service fixtures: the real App and PR panel
   dispatch exactly one request, use Settings defaults, and open the resulting Thread
-  with its prompt in the Transcript. Panels at 288px and 480px have no horizontal
-  overflow; no browser errors. Native Providers and GitHub writes are mocked.
+  with its prompt in the Transcript. Fix PR and Squash and merge share a row in
+  panels at 288px and 480px, with no horizontal overflow or browser errors.
+  Native Providers and GitHub writes are mocked.
 
 Screenshots: [288px panel](action-288.png), [480px panel](action-480.png),
 [pending request](starting.png), [new Thread](new-thread.png).

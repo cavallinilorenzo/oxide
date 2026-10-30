@@ -405,7 +405,6 @@ export function PullRequestReview({
       </Working>
     </button>
   );
-  const fixInMergeStatus = requirements.some((r) => r.tone === "bad" && (r.kind === "conflicts" || r.kind === "checks"));
 
   return (
     <div className="pr-review">
@@ -471,9 +470,8 @@ export function PullRequestReview({
             busy={busy}
             updating={pending === "update"}
             onUpdateBranch={() => void change("update", () => commands.updatePullRequestBranch(projectId, number))}
-            fixAction={fixAction}
           />}
-        <Checks checks={detail.checks} onOpen={(url) => void openLink(url)} fixAction={fixInMergeStatus ? null : fixAction} />
+        <Checks checks={detail.checks} onOpen={(url) => void openLink(url)} />
         <PullRequestPeople
           projectId={projectId}
           detail={detail}
@@ -548,6 +546,7 @@ export function PullRequestReview({
           autoMerge={autoMerge}
           tone={status.tone}
           status={status.label}
+          fixAction={fixAction}
           onMethod={setMethod}
           onDeleteBranch={setDeleteBranch}
           onMerge={() => void merge()}

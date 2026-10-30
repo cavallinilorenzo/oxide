@@ -4,12 +4,14 @@
     {
       "width": 288,
       "client": 287,
-      "scroll": 287
+      "scroll": 287,
+      "mergeAndFixSameRow": true
     },
     {
       "width": 480,
       "client": 479,
-      "scroll": 479
+      "scroll": 479,
+      "mergeAndFixSameRow": true
     }
   ],
   "calls": [

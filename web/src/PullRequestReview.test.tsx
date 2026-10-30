@@ -97,8 +97,8 @@ it("requests a fix with the PR link, conflicts and every failed check, including
   await render();
   const fix = button("Fix PR");
   expect(host.querySelector(".pr-actions")!.contains(fix)).toBe(false);
-  expect(fix.closest(".pr-req")?.textContent).toContain("conflicts that must be resolved");
-  expect(host.querySelectorAll(".pr-fix-action button, .pr-checks-fix button")).toHaveLength(1);
+  expect(fix.closest('[aria-label="Merge"]')).not.toBeNull();
+  expect(button(/Squash and merge/).nextElementSibling).toBe(fix);
   await click(button("Fix PR"));
   expect(onFixPullRequest).toHaveBeenCalledTimes(1);
   const prompt = onFixPullRequest.mock.calls[0][0];
@@ -115,6 +115,7 @@ it("requests a fix with the PR link, conflicts and every failed check, including
 it("can fix conflicts without failed checks, including in a draft", async () => {
   vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ phase: "draft", mergeState: "conflicting", checks: [] }) });
   await render();
+  expect(button("Ready for review").nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
   expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Resolve merge conflicts"));
 });
@@ -129,23 +130,28 @@ it.each(["clean", "blocked", "behind", "unknown"] as const)("does not offer a re
   expect(onFixPullRequest).not.toHaveBeenCalled();
 });
 
-it("places Fix PR directly with the failing CI message", async () => {
+it("places Fix PR beside Squash and merge for failing CI", async () => {
   await render();
-  expect(button("Fix PR").closest(".pr-req")?.textContent).toContain("1 check failing");
+  expect(button(/Squash and merge/).nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
   expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: web"));
 });
 
-it("places Fix PR in Checks when only an optional check fails", async () => {
+it("offers Fix PR beside the merge action when only an optional check fails", async () => {
   vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ checks: [
     { name: "required", state: "success", url: null, required: true },
     { name: "optional", state: "failure", url: null, required: false },
   ] }) });
   await render();
-  expect(button("Fix PR").closest('[aria-label="Checks"]')).not.toBeNull();
-  expect(host.querySelector('[aria-label="Merge status"]')!.contains(button("Fix PR"))).toBe(false);
+  expect(button(/Squash and merge/).nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
   expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: optional"));
+});
+
+it("still offers Fix PR in the footer when the repository allows no merge method", async () => {
+  vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({ mergeMethods: [] }) });
+  await render();
+  expect(button("Fix PR").closest('[aria-label="Merge"]')).not.toBeNull();
 });
 
 it.each(["closed", "merged"] as const)("hides Fix PR for a %s PR even when old checks failed", async (phase) => {

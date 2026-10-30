@@ -220,6 +220,7 @@ impl WhisperBackendRuntime for CpuRuntime {
         Ok(TranscriptionOutcome {
             text,
             execution: ExecutionDetails {
+                fallback_reason: None,
                 backend: BackendId::Cpu,
                 adapter: Some("CPU".into()),
                 offloaded: false,

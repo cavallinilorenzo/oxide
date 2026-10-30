@@ -33,13 +33,14 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
   const [progress, setProgress] = useState<DictationBenchmarkProgress | null>(null);
   const [results, setResults] = useState<DictationBenchmarkResult[]>([]);
   const active = useRef(false);
+  const latestPreference = useRef<AdvicePreference>("balanced");
   const pending = useRef(new Set<DictationModelId>());
   const benchmark = useRef(0);
   const running = useRef(false);
   const refreshVersion = useRef(0);
   const capture = useDictationState();
   const fail = (cause: unknown) => { if (active.current) setError(cause instanceof Error ? cause.message : String(cause)); };
-  const refresh = async (choice: AdvicePreference = preference) => {
+  const refresh = async (choice: AdvicePreference = latestPreference.current) => {
     const version = ++refreshVersion.current;
     setRefreshing(true);
     try {
@@ -52,6 +53,8 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
   useEffect(() => {
     active.current = true;
     let disposed = false;
+    const initialVersion = refreshVersion.current;
+    const invalidateBenchmark = () => { benchmark.current++; };
     const changed = new Set<DictationModelId>();
     const stop = listen<DictationModelStatus>("dictation-model-download", ({ payload }) => {
       if (!active.current) return;
@@ -65,9 +68,9 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
       if (installed.status === "error") throw new Error(installed.error.message);
       setModels(old => [...installed.data.filter(m => !changed.has(m.id)), ...old.filter(m => changed.has(m.id))]);
       if (current.status === "error") throw new Error(current.error.message);
-      setStatus(current.data);
-    }).catch(fail);
-    return () => { disposed = true; active.current = false; if (running.current) void commands.dictationCancelPerformance().catch(() => {}); void stop.then(fn => fn()).catch(() => {}); };
+      if (initialVersion === refreshVersion.current) setStatus(current.data);
+    }).catch(cause => { if (!disposed) fail(cause); });
+    return () => { disposed = true; active.current = false; invalidateBenchmark(); if (running.current) void commands.dictationCancelPerformance().catch(() => {}); void stop.then(fn => fn()).catch(() => {}); };
   }, []);
   const operation = async (model: DictationModelId, action: "install" | "retry" | "delete") => {
     if (pending.current.has(model)) return;
@@ -98,7 +101,7 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
   const candidates = advice?.backends ?? [];
   const gpuCandidates = candidates.filter(c => c.probe.backend !== "cpu");
   const selectedCandidate = value.backend ? candidates.find(c => c.probe.backend === value.backend && (c.adapterId ?? null) === (value.adapterId ?? null)) : undefined;
-  const benchmarkCandidate = value.device === "cpu" ? candidates.find(c => c.probe.backend === "cpu") : selectedCandidate ?? (value.device === "auto" && recommended?.model === selectedModel ? candidates.find(c => c.probe.backend === recommended.backend && c.adapterId === recommended.adapterId) : undefined);
+  const benchmarkCandidate = value.device === "cpu" ? candidates.find(c => c.probe.backend === "cpu") : selectedCandidate;
   const installed = models.some(m => m.id === selectedModel && m.state.status === "installed");
   const selectedDecision = report?.decisions.find(d => d.model === selectedModel && d.backend === (value.device === "cpu" ? "cpu" : benchmarkCandidate?.probe.backend) && (d.adapterId ?? null) === (benchmarkCandidate?.adapterId ?? null));
   const check = async () => {
@@ -131,14 +134,14 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
       </div>
       <details><summary>Advanced GPU backend and adapter</summary>
         <p>Auto can retry once on CPU when memory permits. Explicit GPU reports failure and offers CPU.</p>
-        <label className="settings-field">GPU backend and adapter<select aria-label="GPU backend and adapter" value={selectedCandidate ? String(candidates.indexOf(selectedCandidate)) : ""} onChange={e => { const c = candidates[Number(e.target.value)]; onChange({ ...value, backend: e.target.value === "" ? null : c.probe.backend, adapterId: e.target.value === "" ? null : c.adapterId }); }}><option value="">Automatic backend / default adapter</option>{gpuCandidates.map(c => <option key={`${c.probe.backend}:${c.adapterId}`} value={candidates.indexOf(c)} disabled={!usable(c)}>{backendName(c.probe.backend)} · {c.probe.adapter ?? "Unknown adapter"}</option>)}</select></label>
+        <div className="settings-field"><span>GPU backend and adapter</span><Dropdown label="GPU backend and adapter" value={selectedCandidate ? String(candidates.indexOf(selectedCandidate)) : ""} options={[{ value: "", label: "Automatic backend / default adapter" }, ...gpuCandidates.filter(usable).map(c => ({ value: String(candidates.indexOf(c)), label: `${backendName(c.probe.backend)} · ${c.probe.adapter ?? "Unknown adapter"}` }))]} onChange={id => { const c = id === "" ? undefined : candidates[Number(id)]; onChange({ ...value, backend: c?.probe.backend ?? null, adapterId: c?.adapterId ?? null }); }} /></div>
         {value.backend && !selectedCandidate && <p role="status">Saved adapter is unavailable. Reconnect it, select another adapter or use CPU.</p>}
         <button type="button" onClick={() => onChange({ ...value, device: "cpu" })}>Use CPU</button>
       </details>
       <div aria-label="Runtime capability"><h3>Runtime capability</h3>{(candidates.length ? candidates.map(c => c.probe) : status?.probes ?? []).map((probe, i) => <p key={i}>{backendName(probe.backend)} · {probe.adapter ?? "Default device"}: {capability(probe.state)} {probe.memoryPool && `Memory ${bytes(probe.memoryPool.availableBytes)} available / ${bytes(probe.memoryPool.totalBytes)} total (${probe.memoryPool.unified ? "shared/unified pool" : "dedicated"}).`}</p>)}</div>
       <p role="status">Latest execution: {status?.lastExecution ? `${backendName(status.lastExecution.backend)} · ${status.lastExecution.adapter ?? "CPU"} · ${status.lastExecution.offloaded ? "verified GPU offload" : "CPU, no GPU offload"}${status.lastExecution.offloadEvidence ? ` · ${status.lastExecution.offloadEvidence}` : ""}` : "No execution reported yet."}</p>
       <div aria-label="Resource advice"><h3>Resources and recommendation</h3><p>{advice ? `${advice.resources.cpu.model} · ${advice.resources.cpu.architecture} · ${advice.resources.cpu.usableCores} usable threads. RAM ${bytes(advice.resources.availableRamBytes)} available / ${bytes(advice.resources.totalRamBytes)} total. Free disk ${bytes(advice.resources.freeDiskBytes)}.` : `RAM ${bytes(status?.availableMemoryGb == null ? null : status.availableMemoryGb * 1073741824)} available. Resource details unknown; refresh to retry.`}</p>
-        <Dropdown label="Recommendation preference" value={preference} options={[{ value: "balanced", label: "Balanced" }, { value: "quality", label: "Quality" }]} onChange={choice => { setPreference(choice); void refresh(choice); }} />
+        <Dropdown label="Recommendation preference" value={preference} options={[{ value: "balanced", label: "Balanced" }, { value: "quality", label: "Quality" }]} onChange={choice => { latestPreference.current = choice; setPreference(choice); void refresh(choice); }} />
         <button type="button" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing resources…" : "Refresh resources"}</button>
         <p>{recommended ? `${recommended.provisional ? "Provisional" : "Measured"}: ${recommended.model} · ${backendName(recommended.backend)} · ${recommended.adapter ?? "CPU"}. Confidence: ${recommended.confidence}. ${recommended.reason}` : status?.recommendation ?? "Loading resource advice…"}</p>
         {recommended && <button type="button" disabled={refreshing || !recommended.safeToLoad || !models.some(m => m.id === recommended.model && m.state.status === "installed")} onClick={() => onChange({ ...value, model: recommended.model, device: recommended.backend === "cpu" ? "cpu" : "gpu", backend: recommended.backend === "cpu" ? null : recommended.backend, adapterId: recommended.adapterId })}>Apply recommendation</button>}

@@ -84,7 +84,7 @@ it("focus changes during recording retain the original target and never submit",
 });
 it("announces CPU fallback after inserting the transcript once", async () => {
   await setup();
-  vi.spyOn(commands, "dictationStatus").mockResolvedValue({ status: "ok", data: { installed: true, gpuCompiled: true, availableMemoryGb: 8, cpuThreads: 8, recommendation: "", manifest: { whisperRsVersion: "test", whisperCppPinned: "test", includedBackends: ["cpu", "vulkan"] }, probes: [], lastExecution: { backend: "cpu", adapter: null, offloaded: false, offloadEvidence: "Fell back to CPU after primary backend failure: driver unavailable" } } });
+  vi.spyOn(commands, "dictationStatus").mockResolvedValue({ status: "ok", data: { installed: true, gpuCompiled: true, availableMemoryGb: 8, cpuThreads: 8, recommendation: "", manifest: { whisperRsVersion: "test", whisperCppPinned: "test", includedBackends: ["cpu", "vulkan"] }, probes: [], lastExecution: { backend: "cpu", adapter: null, offloaded: false, offloadEvidence: "Fell back to CPU after primary backend failure: driver unavailable", fallbackReason: "driver unavailable" } } });
   await key(); await key();
   expect(insert).toHaveBeenCalledExactlyOnceWith("ciao mondo");
   expect(host.querySelector('[role="status"]')?.textContent).toContain("Fell back to CPU");

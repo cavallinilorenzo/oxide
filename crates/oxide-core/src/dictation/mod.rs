@@ -85,7 +85,11 @@ pub struct Status {
 }
 
 pub fn status(home: &Path) -> Status {
-    let resource_advice = resources::inspect(home, resources::Preference::Balanced);
+    status_with_preference(home, resources::Preference::Balanced)
+}
+
+fn status_with_preference(home: &Path, preference: resources::Preference) -> Status {
+    let resource_advice = resources::inspect(home, preference);
     let available =
         resource_advice.resources.available_ram_bytes.unwrap_or(0) as f64 / 1_073_741_824.0;
     let threads = resource_advice.resources.cpu.usable_cores;
@@ -343,7 +347,11 @@ impl Dictation {
     }
 
     pub fn status(&self, home: &Path) -> Status {
-        let mut s = status(home);
+        self.status_with_preference(home, resources::Preference::Balanced)
+    }
+
+    pub fn status_with_preference(&self, home: &Path, preference: resources::Preference) -> Status {
+        let mut s = status_with_preference(home, preference);
         s.last_execution = self.last_execution();
         s
     }
@@ -392,6 +400,33 @@ impl Dictation {
                 "This build has CPU support only. Choose CPU in Settings.",
             ));
         }
+        let mut backend = settings.backend;
+        let mut adapter_id = settings.adapter_id.clone();
+        if settings.device == Device::Auto && backend.is_none() {
+            let advice = resources::inspect(home, resources::Preference::Balanced);
+            let choice = advice
+                .recommendation
+                .decisions
+                .iter()
+                .filter(|d| {
+                    d.model == settings.model
+                        && d.safe_to_load
+                        && matches!(
+                            d.status,
+                            resources::AdviceStatus::Recommended
+                                | resources::AdviceStatus::UsableSlower
+                        )
+                })
+                .min_by_key(|d| {
+                    (
+                        d.provisional,
+                        d.median_rtf_milli.unwrap_or(u64::MAX),
+                        d.backend != BackendId::Cpu,
+                    )
+                });
+            backend = Some(choice.map_or(BackendId::Cpu, |d| d.backend));
+            adapter_id = choice.and_then(|d| d.adapter_id.clone());
+        }
         Ok(PreparedRecording {
             generation,
             lease,
@@ -399,8 +434,8 @@ impl Dictation {
                 language: settings.language.clone(),
                 device: settings.device,
                 model: settings.model,
-                backend: settings.backend,
-                adapter_id: settings.adapter_id.clone(),
+                backend,
+                adapter_id,
             },
         })
     }
@@ -629,6 +664,7 @@ impl Dictation {
                                 ))
                             })?;
                             let mut exec = outcome.execution;
+                            exec.fallback_reason = Some(gpu_err.to_string());
                             exec.offload_evidence = Some(format!(
                                 "Fell back to CPU after primary backend failure: {gpu_err}"
                             ));

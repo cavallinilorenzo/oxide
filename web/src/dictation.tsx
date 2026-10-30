@@ -53,8 +53,8 @@ async function toggle(element: Element | null) {
       void commands.dictationStatus().then(result => {
         if (version !== generation || state.phase !== "idle" || result.status !== "ok") return;
         const execution = result.data.lastExecution;
-        if (execution?.backend === "cpu" && execution.offloadEvidence?.startsWith("Fell back")) {
-          update({ phase: "idle", error: null, notice: execution.offloadEvidence });
+        if (execution?.backend === "cpu" && execution.fallbackReason) {
+          update({ phase: "idle", error: null, notice: `Fell back to CPU: ${execution.fallbackReason}` });
         }
       }).catch(() => {});
     } catch (error) { if (version === generation) update({ phase: "idle", error: message(error) }); }
@@ -94,7 +94,7 @@ export function DictationController() {
   }, [shortcuts]);
   if (current.phase === "idle" && !current.error && !current.notice) return null;
   return <aside className="dictation-status" aria-label="Dictation">
-    <span role={current.error ? "alert" : "status"}>{current.error ?? current.notice ?? (current.phase === "recording" ? `Listening — ${formatAccelerator(shortcuts.dictation)} to insert, Esc to cancel` : current.phase === "starting" ? "Opening microphone…" : "Transcribing locally…")}</span>
+    <span role={current.error ? "alert" : "status"}>{current.error ?? current.notice ?? (current.phase === "recording" ? `Listening — ${formatAccelerator(shortcuts.dictation)} to insert, Esc to cancel` : current.phase === "starting" ? "Preparing model and microphone…" : "Transcribing locally…")}</span>
     <button type="button" onClick={cancelDictation}>{current.phase === "idle" ? "Dismiss" : "Cancel"}</button>
   </aside>;
 }

@@ -694,6 +694,7 @@ export type ExecutionDetails_Deserialize = {
 	adapter?: string | null,
 	offloaded: boolean,
 	offloadEvidence?: string | null,
+	fallbackReason?: string | null,
 };
 
 export type ExecutionDetails_Serialize = {
@@ -701,6 +702,7 @@ export type ExecutionDetails_Serialize = {
 	adapter: string | null,
 	offloaded: boolean,
 	offloadEvidence: string | null,
+	fallbackReason?: string,
 };
 
 export type FieldError = {

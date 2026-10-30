@@ -39,3 +39,21 @@ remain explicitly unavailable until #258 supplies dispatch evidence.
 
 No audio/transcripts are logged or exported by these changes. No telemetry or
 new diagnostics export flow is introduced.
+
+## Review fixes and verification
+
+The two-axis review against `origin/main` has no remaining Standards or Spec
+blockers. Review regressions cover stale preference after download completion and
+recording-token cancellation of independently selected CUDA/Vulkan workers. The
+adapter control reuses the shared keyboard-accessible Dropdown. CPU fallback uses
+typed `fallbackReason` metadata, preserving native evidence separately.
+
+The first full local runner completed all checks: 398 Rust tests passed, but the
+web suite exposed a broad status selector in SettingsView and DMG decoration hit
+macOS Finder Automation denial (-1743). The selector/IPC fixture is corrected;
+the complete web suite then passed 475 tests. The final runner uses `CI=true`
+with `CARGO_TARGET_DIR=/tmp/oxide-233-checks`, keeping the user's existing build
+cache intact. Tauri's [pinned DMG bundler](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle/macos/dmg/mod.rs)
+uses this headless path to skip Finder decoration; it does not skip compilation
+or installer creation. The pre-existing ThreadView virtualizer lint warning
+remains; there are no new lint warnings.

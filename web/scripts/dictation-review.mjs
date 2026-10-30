@@ -21,8 +21,8 @@ try {
   await section.getByText(/RAM 6.30 GiB/).waitFor();
   await section.getByRole("button", { name: "Download large-v3-turbo", exact: true }).waitFor();
   await section.getByText("Advanced GPU backend and adapter", { exact: true }).click();
-  await section.getByRole("combobox", { name: "GPU backend and adapter" }).focus();
-  assert.equal(await section.getByRole("combobox", { name: "GPU backend and adapter" }).evaluate(el => el === document.activeElement), true);
+  await section.getByRole("button", { name: /^GPU backend and adapter:/ }).focus();
+  assert.equal(await section.getByRole("button", { name: /^GPU backend and adapter:/ }).evaluate(el => el === document.activeElement), true);
   await section.getByText("Advanced GPU backend and adapter", { exact: true }).click();
   await page.screenshot({ path: `${output}/settings.png` });
   await page.setViewportSize({ width: 1064, height: 700 });

@@ -91,6 +91,8 @@ pub struct ExecutionDetails {
     pub adapter: Option<String>,
     pub offloaded: bool,
     pub offload_evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

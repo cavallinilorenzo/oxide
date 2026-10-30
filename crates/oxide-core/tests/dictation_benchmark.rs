@@ -25,6 +25,7 @@ fn sample() -> BenchmarkResult {
             cold_load_ms: 9000,
         },
         execution: ExecutionDetails {
+            fallback_reason: None,
             backend: BackendId::Cpu,
             adapter: Some("CPU".into()),
             offloaded: false,

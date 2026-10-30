@@ -263,6 +263,7 @@ impl WhisperBackendRuntime for MockSuccessfulGpuRuntime {
         Ok(TranscriptionOutcome {
             text: "gpu transcribed text".into(),
             execution: ExecutionDetails {
+                fallback_reason: None,
                 backend: BackendId::Metal,
                 adapter: Some("Apple M3 Max".into()),
                 offloaded: true,

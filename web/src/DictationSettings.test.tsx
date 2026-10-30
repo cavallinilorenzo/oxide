@@ -140,3 +140,14 @@ it("cancels an explicit download and waits for it to settle before offering retr
   expect(button("Retry tiny")).toBeDefined();
   expect(changed).not.toHaveBeenCalled();
 });
+it("refreshes advice using the latest preference after a pending download finishes", async () => {
+  await withAdvice();
+  let finish!: (result: { status: "ok"; data: null }) => void;
+  vi.spyOn(commands, "dictationModelInstall").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  vi.spyOn(commands, "dictationModelStatus").mockResolvedValue({ status: "ok", data: { id: "tiny", state: { status: "installed" } } });
+  await act(async () => button("Download tiny").click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Recommendation preference: Balanced"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent === "Quality")!.click());
+  await act(async () => finish({ status: "ok", data: null }));
+  expect(commands.dictationAdvice).toHaveBeenLastCalledWith("quality");
+});

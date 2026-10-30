@@ -409,6 +409,8 @@ pub struct ExecutionDetails {
     pub adapter: Option<String>,
     pub offloaded: bool,
     pub offload_evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -474,8 +476,7 @@ async fn dictation_advice(
     let core = core.inner().clone();
     let dictation = dictation.inner().clone();
     Ok(tauri::async_runtime::spawn_blocking(move || {
-        let mut status = dictation.status(core.home());
-        status.resource_advice = oxide_core::dictation::resources::inspect(
+        let status = dictation.status_with_preference(
             core.home(),
             match preference {
                 dictation_advice::AdvicePreference::Balanced => {

@@ -13,6 +13,7 @@ Some reports link into `references/`, which holds pinned upstream snapshots as G
 | T3 Code architecture | [t3-code-architecture.md](t3-code-architecture.md) | [#6](https://github.com/cavallinilorenzo/oxide/issues/6) |
 | Tauri and Rust building blocks | [tauri-rust-building-blocks.md](tauri-rust-building-blocks.md) | [#7](https://github.com/cavallinilorenzo/oxide/issues/7) |
 | Tauri frontend frameworks | [tauri-frontend-frameworks.md](tauri-frontend-frameworks.md) | [#8](https://github.com/cavallinilorenzo/oxide/issues/8) |
+| Modes versus docked panels | [modes-versus-panels.md](modes-versus-panels.md) | [#269](https://github.com/cavallinilorenzo/oxide/issues/269) |
 
 ## Cross-cutting takeaways
 

@@ -163,13 +163,17 @@ so a result just above a product target cannot qualify by truncation. CPU uses
 no offload; GPU measurements require observed device/driver identity to match
 and native backend selection plus completed compute evidence (Vulkan additionally
 requires positive GPU kernel timestamps). Missing evidence refuses the result;
-there is no benchmark GPU-to-CPU fallback. The pinned CUDA/Metal paths expose
-selection/allocation logs but no completed dispatch counters. Their checks
-currently return an explicit unavailable-evidence error before inference, with
-CPU/Vulkan offered instead. Measuring those backends requires native execution
-instrumentation, tracked in [#258](https://github.com/cavallinilorenzo/oxide/issues/258)
-after the maintainer accepted CPU/Vulkan scope for #232. Ordinary CUDA/Metal
-dictation is unchanged; physical hardware acceptance remains with #235.
+there is no benchmark GPU-to-CPU fallback. CUDA/Metal use pinned native
+instrumentation to count completed matrix-bearing graph dispatches after backend
+synchronization. Each of the four runs retains its actual backend, adapter and
+CUDA PCI identity, plus positive graph/matrix counters and zero failures. These
+typed snapshots are validated again on cache reads; selection/allocation logs,
+successful transcription and old string-only evidence cannot qualify. CUDA UUIDs
+must map unambiguously to native PCI identity. Runtime keys include the dispatch
+instrumentation revision. Synchronizing graphs adds overhead to these benchmark
+timings. See the [ABI and build notes](../crates/oxide-core/native/README.md).
+Ordinary CUDA/Metal dictation is unchanged; physical hardware acceptance remains
+with #235.
 
 Settings IPC is `dictationCheckPerformance(request, progressChannel)` and
 `dictationCancelPerformance()`. The typed channel reports Loading, Warmup and
@@ -246,9 +250,11 @@ cargo run --locked -p oxide-core --example dictation_benchmark -- HOME cpu
 ```
 
 For Vulkan, set the documented worker-path environment override, then pass
-`HOME vulkan WORKER STABLE_ADAPTER_ID`. CUDA/Metal requests currently report
-unavailable execution evidence. This developer smoke
+`HOME vulkan WORKER STABLE_ADAPTER_ID`. CUDA uses
+`HOME cuda CUDA_WORKER STABLE_CUDA_UUID`; Apple Silicon Metal uses
+`HOME metal UNUSED_WORKER_PATH 'EXACT_METAL_ADAPTER_NAME'`. This developer smoke
 prints only measurement metadata and progress, never audio/transcripts, and
 shares the production coordinator/process path. The app executable implements
-the same CPU child entry point. The Metal and CUDA worker protocol entry points
-are present but cannot produce accepted measurements until instrumented.
+the same CPU child entry point. Metal/CUDA measurements are accepted only with all four native dispatch snapshots.
+No physical CUDA/Metal measurements are claimed for #258; hardware sign-off,
+including failure/cancellation recovery, remains in the single #235 release pass.

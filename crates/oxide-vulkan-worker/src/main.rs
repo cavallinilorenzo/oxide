@@ -235,6 +235,7 @@ fn main() {
                     CapabilityState::NoCompatibleDevice,
                 ))?;
             Ok(NativeDevice {
+                native_device_id: None,
                 candidate: BackendCandidate {
                     probe: BackendProbe {
                         backend,

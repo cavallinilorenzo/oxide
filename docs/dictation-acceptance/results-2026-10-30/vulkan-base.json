@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "executableSha256": "2fa837be0af3fbb6e911442f8dc23b0856a5a2fa468b15e406f4647a27e80215",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "base",
+    "measurement": {
+      "key": {
+        "modelSha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        "backend": "vulkan",
+        "adapterId": "vulkan:00000000290000000000000000000000",
+        "driverVersion": "AMD proprietary driver: 26.10.1 (AMD proprietary shader compiler) (raw 8388961)",
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "x86_64",
+          "model": "AMD Ryzen 7 5700X 8-Core Processor             ",
+          "usableCores": 16,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793382729,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        281,
+        280,
+        282
+      ],
+      "coldLoadMs": 246
+    },
+    "execution": {
+      "backend": "vulkan",
+      "adapter": "AMD Radeon RX 5600 XT",
+      "offloaded": true,
+      "offloadEvidence": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); whisper_backend_init_gpu: using Vulkan0 backend; native compute kernel timestamps"
+    }
+  },
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 305,
+    "processSamples": 8,
+    "gpuSamples": 7,
+    "peakWorkingSetBytes": 139272192,
+    "peakPrivateCommitBytes": 923086848,
+    "sampledDedicatedBytes": 395325440,
+    "sampledSharedBytes": 59011072
+  }
+}

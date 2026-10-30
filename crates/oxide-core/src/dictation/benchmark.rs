@@ -199,6 +199,9 @@ impl BenchmarkResult {
             return Err(dispatch::unproven());
         }
         if self.fixture_version != FIXTURE_VERSION
+            || super::models::catalogue()
+                .entry(self.model)
+                .is_none_or(|entry| entry.sha256 != key.model_sha256)
             || self.measurement.audio_duration_ms != FIXTURE_DURATION_MS
             || self.measurement.warm_inference_ms.contains(&0)
             || self.execution.backend != key.backend

@@ -305,10 +305,12 @@ CUDA Toolkit or a Cargo feature. Model weights are not bundled.
 | Windows x64 setup (NSIS) | CPU (in the app), Vulkan (`oxide-vulkan-worker.exe`), CUDA (`oxide-cuda-worker.exe`) | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, any Visual C++ runtime DLL a worker imports, `dictation-runtime.json`, `licenses/` | Windows 10 1803 or later. Vulkan: the GPU vendor's driver with Vulkan 1.2. CUDA: an NVIDIA driver that supports CUDA 12.9 (see [NVIDIA's CUDA 12.9 release notes](https://docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/)) and compute capability 5.0 or later |
 | macOS Apple Silicon (`.app`, `.dmg`) | CPU and Metal, both in the app | `Resources/licenses/` | macOS 11 or later on Apple Silicon. Nothing to install |
 
-**The user needs** column lists what the packages are built to require, not tested
-results. Installed packages have not yet been tested on any physical GPU (#235), so
-compatibility beyond the [Support limits](#support-limits) below is unknown; Settings
-shows each backend's actual state on the user's machine.
+**The user needs** column lists what the packages are built to require, not minimum
+tested versions. The [#235 acceptance record](dictation-acceptance/issue-235.md)
+tracks installed-package hashes, actual offload, timing/memory observations and
+unverified hardware separately. NVIDIA CUDA/Vulkan and Apple Silicon distributed
+hardware sign-off remain open. Settings shows each backend's actual state on the
+user's machine; compatibility outside recorded rows remains unknown.
 
 ### Runtime discovery
 
@@ -403,6 +405,10 @@ These checks prove packaging, loading and CPU startup. They do not prove GPU
 offload or performance: hosted runners have no GPU. Hardware validation of
 installed packages (NVIDIA CUDA and Vulkan, AMD Vulkan, Apple Silicon Metal) is a
 release gate tracked in #235; packaging success alone does not claim it.
+Use the [acceptance matrix and operator commands](dictation-acceptance/issue-235.md)
+for the physical pass. Keep catalogue memory estimates provisional until load,
+inference and staging peaks have measured provenance. Missing hardware, physical
+microphone tests and unresolved recovery/privacy findings remain explicit gaps.
 
 ### Troubleshooting
 
@@ -434,8 +440,11 @@ release gate tracked in #235; packaging success alone does not claim it.
   no Metal claim; Linux builds from source with CPU only; Windows on ARM has no package.
 - cuBLAS dominates the Windows installer's size, and updates download the whole
   installer. Check the size of the CI artifact when changing CUDA.
-- Physical results so far are from development builds: RX 5600 XT Vulkan and
-  Apple M1 Pro Metal (above). No NVIDIA or installed-package result is recorded yet (#235).
+- Installed Windows 11 Pro build 26300.9818 / RX 5600 XT / AMD 26.10.1 Vulkan
+  offload is recorded for Tiny/Base/Small in the [#235 matrix](dictation-acceptance/issue-235.md).
+  This is one tested configuration, not a minimum driver/OS claim. Apple M1 Pro
+  Metal evidence above is from development builds; distributed Metal and NVIDIA
+  acceptance remain unverified.
 
 ## Licenses
 

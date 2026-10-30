@@ -253,7 +253,16 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
    cargo test -p oxide-provider --test agy_live_smoke -- --ignored
    ```
 
-   Dictation GPU support is a separate gate: CI proves the packages load, not that a GPU is used. When a release changes dictation, its packaging or its native dependencies, install the draft's builds on the physical hardware and attach evidence of actual offload (NVIDIA CUDA and Vulkan, AMD Vulkan, Apple Silicon Metal) as described in #235. Missing hardware leaves that row unverified in the notes.
+   Dictation GPU support is a separate gate: CI proves the packages load, not that a GPU is used. When a release changes dictation, its packaging or its native dependencies, install the draft's builds on the physical hardware and attach evidence of actual offload (NVIDIA CUDA and Vulkan, AMD Vulkan, Apple Silicon Metal) using the [#235 acceptance matrix and commands](dictation-acceptance/issue-235.md).
+   Retain the installer/app/worker SHA-256, source commit, native versions,
+   OS/adapter/driver, exact model hash, cold load, three warm runs/median RTF,
+   peak RAM/dedicated/shared memory and native execution proof. Also exercise
+   runtime-free CPU startup/inference, recovery, offline lifecycle and physical
+   microphone/shortcut insertion/privacy. Missing hardware or measurements leave
+   the relevant acceptance rows and hardware sign-off open. Hosted compilation
+   and another platform's results cannot close them. Carry unresolved failures
+   and the decision on those release gates to the Release Manager; do not mark
+   #225 complete while its required criteria are open.
 
 6. **Publish.** Edit the notes, then click Publish. The release becomes immutable and, if stable, the updater feed goes live.
 7. **Watch** the *Verify release* run. If it opens an issue, roll forward.

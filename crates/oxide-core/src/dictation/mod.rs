@@ -49,6 +49,10 @@ pub struct DictationSettings {
     pub language: String,
     pub device: Device,
     pub model: ModelId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<BackendId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_id: Option<String>,
 }
 
 impl Default for DictationSettings {
@@ -58,6 +62,8 @@ impl Default for DictationSettings {
             language: "auto".into(),
             device: Device::Cpu,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         }
     }
 }
@@ -165,6 +171,8 @@ pub struct RecordingSnapshot {
     pub language: String,
     pub device: Device,
     pub model: ModelId,
+    pub backend: Option<BackendId>,
+    pub adapter_id: Option<String>,
 }
 
 /// Verified model and settings prepared off the UI thread, invalidated by cancellation.
@@ -391,6 +399,8 @@ impl Dictation {
                 language: settings.language.clone(),
                 device: settings.device,
                 model: settings.model,
+                backend: settings.backend,
+                adapter_id: settings.adapter_id.clone(),
             },
         })
     }
@@ -517,6 +527,37 @@ impl Dictation {
             threads,
         };
 
+        let runtime: Arc<dyn WhisperBackendRuntime> = match if snapshot.device == Device::Cpu {
+            Some(BackendId::Cpu)
+        } else {
+            snapshot.backend
+        } {
+            Some(BackendId::Cpu) => Arc::new(CpuRuntime),
+            Some(BackendId::Vulkan) => Arc::new(vulkan::VulkanRuntime::new(
+                vulkan::worker_path(),
+                snapshot.adapter_id.clone(),
+            )),
+            Some(BackendId::Cuda) => Arc::new(cuda::CudaRuntime::new(
+                cuda::worker_path(),
+                snapshot.adapter_id.clone(),
+            )),
+            Some(BackendId::Metal) => Arc::new(MetalRuntime),
+            None => self.runtime.clone(),
+        };
+        let transcribe_primary = || {
+            if snapshot.backend == Some(BackendId::Metal)
+                && snapshot
+                    .adapter_id
+                    .as_ref()
+                    .is_some_and(|id| runtime.probe().adapter.as_ref() != Some(id))
+            {
+                return Err(BackendError::InitializationFailed(
+                    "The selected Metal adapter is unavailable. Refresh devices or use CPU.".into(),
+                ));
+            }
+            runtime.transcribe(&request)
+        };
+
         // Execution logic based on mode:
         // - Auto: attempts preferred backend; retries CPU once only after a fresh policy check.
         // - Gpu: explicit GPU request. If it fails or runtime is CPU-only, report failure and offer CPU; NEVER silently substitute CPU for GPU.
@@ -531,28 +572,24 @@ impl Dictation {
                 Ok(outcome.text)
             }
             Device::Gpu => {
-                if self.runtime.backend_id() == BackendId::Cpu {
+                if runtime.backend_id() == BackendId::Cpu {
                     return Err(err(
                         "GPU transcription failed: active runtime has CPU support only. Choose CPU in Settings to transcribe on CPU.",
                     ));
                 }
-                let outcome = self
-                    .runtime
-                    .transcribe(&request)
+                let outcome = transcribe_primary()
                     .map_err(|e| err(format!("GPU transcription failed: {e}. Choose CPU in Settings to transcribe on CPU.")))?;
                 self.record_execution(&request, outcome.execution)?;
                 Ok(outcome.text)
             }
             Device::Auto => {
-                if self.runtime.backend_id() == BackendId::Cpu {
-                    let outcome = self
-                        .runtime
-                        .transcribe(&request)
+                if runtime.backend_id() == BackendId::Cpu {
+                    let outcome = transcribe_primary()
                         .map_err(|e| err(format!("Auto transcription failed on CPU: {e}")))?;
                     self.record_execution(&request, outcome.execution)?;
                     Ok(outcome.text)
                 } else {
-                    match self.runtime.transcribe(&request) {
+                    match transcribe_primary() {
                         Ok(outcome) => {
                             self.record_execution(&request, outcome.execution)?;
                             Ok(outcome.text)

@@ -1,7 +1,7 @@
 // Render the real frontend with deterministic IPC fixtures; never opens a real
 // Project, starts a Provider, or writes to the user's Oxide settings.
 // Supply an installed Playwright module through OXIDE_PLAYWRIGHT_MODULE.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import process from "node:process";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 
 const { chromium, webkit } = await import(process.env.OXIDE_PLAYWRIGHT_MODULE
   ? pathToFileURL(resolve(process.env.OXIDE_PLAYWRIGHT_MODULE)).href : "playwright");
+const dictationCatalogue = JSON.parse(await readFile(new URL("../../crates/oxide-core/src/dictation/catalogue.json", import.meta.url), "utf8"));
 export async function waitForLayout(page) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   // The file split observes a region resized by the outer workspace observer.
@@ -22,7 +23,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
-  await page.addInitScript((scenario) => {
+  await page.addInitScript(({ scenario, dictationCatalogue }) => {
     let callbackId = 0;
     const callbacks = new Map();
     const commandCounts = {};
@@ -67,7 +68,9 @@ export async function openReview(engine = "chromium", scenario = "completed", in
           { nameWithOwner: "demo/uni", description: "Another Project", isPrivate: false },
         ];
         if (command === "list_slash_commands") return [{ name: "review", description: "Review the current changes" }];
-        if (command === "dictation_status") return { installed: false, gpuCompiled: true, availableMemoryGb: 6.3, cpuThreads: 8, recommendation: "Recommended for short dictation on CPU. Whisper small uses roughly 1 GB of memory; speed depends on your processor." };
+        if (command === "dictation_status" || command === "dictation_advice") return { installed: true, gpuCompiled: true, availableMemoryGb: 6.3, cpuThreads: 8, recommendation: "Provisional Base/CPU. Check local performance.", probes: [{ backend: "metal", adapter: "Apple M2", state: { status: "available" }, memoryPool: { unified: true, totalBytes: 17179869184, availableBytes: 6764573491 } }], lastExecution: null };
+        if (command === "dictation_model_catalogue") return dictationCatalogue;
+        if (command === "dictation_models") return dictationCatalogue.models.map(({ id }) => ({ id, state: { status: id === "small" ? "installed" : "missing" } }));
         if (command === "dictation_start" || command === "dictation_cancel") return null;
         if (command === "dictation_stop") return "Test di dettatura locale";
         if (command === "get_settings") return { settings, errors: [], scanRoots: [] };
@@ -108,7 +111,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
         throw new Error(`UI review fixture missing command: ${command}`);
       },
     };
-  }, scenario);
+  }, { scenario, dictationCatalogue });
   await page.goto(process.env.OXIDE_REVIEW_URL ?? "http://127.0.0.1:1420");
   if (inputOnly) { await page.locator(".header").waitFor(); return { browser, page, errors }; }
   await page.locator(".thread-title").waitFor();

@@ -7,6 +7,7 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	dictationStatus: () => typedError<DictationStatus_Serialize, AppError>(__TAURI_INVOKE("dictation_status")),
+	dictationAdvice: (preference: AdvicePreference) => typedError<DictationStatus_Serialize, AppError>(__TAURI_INVOKE("dictation_advice", { preference })),
 	dictationCheckPerformance: (request: DictationBenchmarkRequest_Deserialize, progress: Channel<DictationBenchmarkProgress_Deserialize>) => typedError<DictationBenchmarkResult_Serialize[], AppError>(__TAURI_INVOKE("dictation_check_performance", { request, progress })),
 	dictationCancelPerformance: () => __TAURI_INVOKE<void>("dictation_cancel_performance"),
 	dictationInstall: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_install")),
@@ -559,6 +560,8 @@ export type DictationSettings_Deserialize = {
 	language: string,
 	device: DictationDevice,
 	model?: DictationModelId,
+	backend?: BackendId | null,
+	adapterId?: string | null,
 };
 
 export type DictationSettings_Serialize = {
@@ -566,6 +569,8 @@ export type DictationSettings_Serialize = {
 	language: string,
 	device: DictationDevice,
 	model: DictationModelId,
+	backend?: BackendId,
+	adapterId?: string,
 };
 
 export type DictationStatus = DictationStatus_Serialize | DictationStatus_Deserialize;

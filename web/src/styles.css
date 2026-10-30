@@ -1521,3 +1521,13 @@ section.terminal.terminal-hidden { display: none; }
 
 .dictation-status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 10000; max-width: min(650px, calc(100vw - 40px)); display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--bg3); color: var(--fg); border: 1px solid var(--line-strong); border-radius: 8px; }
 .cbtn[aria-pressed="true"] { color: var(--red); }
+
+.dictation-settings { display: grid; gap: 12px; min-width: 0; }
+.dictation-settings p { overflow-wrap: anywhere; }
+.dictation-settings select { width: 100%; min-width: 0; }
+.dictation-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.dictation-model { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.dictation-model h4 { margin: 0; }
+.dictation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dictation-model progress { width: 100%; }
+.dictation-settings summary { cursor: pointer; }

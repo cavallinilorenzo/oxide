@@ -3,18 +3,23 @@
 The backend now supports six multilingual models through a versioned catalogue
 and explicit lifecycle APIs. See [model catalogue and lifecycle](dictation-models.md)
 for migration, API usage, verification evidence and the hardware-validation handoff.
-The current settings interface continues to expose the original Small download;
-the detailed model-selection interface is tracked in #233.
+Settings exposes all six exact model IDs, per-model download size, provisional memory
+estimates and speed/quality tradeoffs. Download, cancel, retry and delete are explicit.
+A download never selects a model: select it only once installed, then save Settings.
+The selected enabled model cannot be deleted; the backend also protects saved/leased models.
 
 An explicit offline performance-check API now measures an installed combination
 using bundled speech, with no microphone or automatic downloads. It reports
 cold loading separately from the median of three warm runs and improves resource
 advice using local measurements. See [performance checks and smoke evidence](dictation-resources.md#explicit-local-performance-check-232)
-for bounds, cancellation, cache invalidation and troubleshooting. Settings controls
-for this API belong to #233; no existing dictation setting is changed by a check.
+for bounds, cancellation, cache invalidation and troubleshooting. Use **Check performance** in Settings to see loading, warmup and three measured
+runs, cancel, or read cold-load/median/RTF results. A check never changes Settings.
+Choose CPU or an explicit available backend/adapter for an unambiguous check.
+CUDA/Metal checks currently report unavailable dispatch evidence (follow-up #258).
 
-In Settings, download Whisper small (466 MiB), enable dictation, choose a language
-(`auto`, `it`, `en`, or another Whisper language code), and save. CPU is the default.
+In Settings, explicitly download a model (the existing Small cache is reused), enable dictation, choose a language
+(`auto`, `it`, `en`, or another Whisper language code), and save. Existing CPU/GPU and language settings are preserved, with Small for legacy settings.
+New installations remain disabled; Auto, CPU and GPU are offered.
 The shortcut is Ctrl+Shift+R on Windows/Linux or Cmd+Shift+R on macOS, rebindable
 in Settings. Focus a chat composer or terminal, press once to speak and again to
 insert. The chat microphone button does the same. Escape cancels. Recordings stop
@@ -22,7 +27,7 @@ after two minutes. Text is inserted without submitting; terminal control charact
 and newlines become spaces. Closing an input discards its pending result.
 
 Audio is captured from the system default microphone in memory and never uploaded
-or saved. The model is kept at `~/.oxide/models/ggml-small.bin`; it is downloaded only
+or saved. Models are kept in `~/.oxide/models/` (including the existing `ggml-small.bin`); each is downloaded only
 when Download is pressed, with progress, SHA-256 verification and atomic publication.
 No provider credentials, Python runtime, transcription subscription or API key is needed.
 Silence and very short recordings are ignored. As with other speech recognition,
@@ -294,3 +299,27 @@ tracked separately in issue #224.
 The worker's ash binding is MIT/Apache-2.0. The diagnostic WAV reader (hound) is
 Apache-2.0. The local build does not redistribute the Vulkan SDK or a driver;
 packaged runtime dependencies and their retained notices are owned by #234.
+
+## Settings status and recovery
+
+Requested mode/backend/stable adapter and **Latest execution** are separate. Available
+means the runtime can initialize; only inference evidence can establish GPU offload.
+Auto may retry once on CPU when fresh memory checks permit, with the failure reason
+shown in Latest execution after refreshing. Explicit GPU reports failure: use **Use CPU**
+and save to switch. CPU performs no GPU offload. Changes apply to the next recording;
+unchecking Enable discards any current audio/result immediately, even before Save.
+
+Advanced controls list backend/device pairs from fresh runtime discovery. A missing
+saved adapter remains visible as unavailable; reconnect it or choose another and save.
+Missing build support requires a compatible package; missing driver/runtime requires
+a driver update; initialization failure offers refresh/CPU; low memory suggests
+closing apps or selecting a smaller model. Unknown budgets remain **Unknown**.
+
+Refresh resources to see CPU, RAM, disk and per-adapter dedicated or shared memory.
+Balanced/Quality advice shows its reason, provisional/measured status and confidence.
+**Apply recommendation** is explicit and available only once its model is installed
+and the policy marks the combination safe. It preserves enable and language; save
+Settings afterward. Advice never starts downloads or enables dictation.
+
+Automated Settings/keyboard/layout evidence and the remaining single release-validation
+pass are recorded in [the #233 evidence](ui-review/dictation/issue-233.md).

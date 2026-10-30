@@ -284,6 +284,8 @@ fn auto_mode_refuses_cpu_fallback_when_memory_insufficient() {
         language: "auto".into(),
         device: Device::Auto,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -295,6 +297,8 @@ fn auto_mode_refuses_cpu_fallback_when_memory_insufficient() {
         language: "auto".into(),
         device: Device::Auto,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -332,6 +336,8 @@ fn auto_retry_preserves_the_ram_reserve_even_when_the_model_peak_fits() {
             language: "auto".into(),
             device: Device::Auto,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         },
         vec![0.1; 16000],
         16000,
@@ -442,6 +448,8 @@ fn auto_mode_recovers_from_metal_failure_with_fallback_evidence() {
             language: "auto".into(),
             device: Device::Auto,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         };
 
         let samples = vec![0.1f32; 16000];
@@ -453,6 +461,8 @@ fn auto_mode_recovers_from_metal_failure_with_fallback_evidence() {
             language: "auto".into(),
             device: Device::Auto,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         };
 
         // Model file is missing in home, so Metal fails initialization and Auto attempts CPU
@@ -477,6 +487,8 @@ fn explicit_gpu_mode_with_metal_runtime_reports_actionable_error_on_failure() {
             language: "auto".into(),
             device: Device::Gpu,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         };
 
         let samples = vec![0.1f32; 16000];
@@ -488,6 +500,8 @@ fn explicit_gpu_mode_with_metal_runtime_reports_actionable_error_on_failure() {
             language: "auto".into(),
             device: Device::Gpu,
             model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
         };
 
         let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -530,6 +544,8 @@ fn auto_retries_cpu_once_on_gpu_failure_and_records_why() {
         language: "auto".into(),
         device: Device::Auto,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     // 16000 samples at 16000 Hz of non-silent tone
@@ -544,6 +560,8 @@ fn auto_retries_cpu_once_on_gpu_failure_and_records_why() {
         language: "auto".into(),
         device: Device::Auto,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let result = dictation.stop(home.path(), &settings);
@@ -575,6 +593,8 @@ fn explicit_gpu_request_with_cpu_runtime_fails_without_silent_substitution() {
         language: "auto".into(),
         device: Device::Gpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -586,6 +606,8 @@ fn explicit_gpu_request_with_cpu_runtime_fails_without_silent_substitution() {
         language: "auto".into(),
         device: Device::Gpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -608,6 +630,8 @@ fn explicit_gpu_failure_never_silently_substitutes_cpu() {
         language: "auto".into(),
         device: Device::Gpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -619,6 +643,8 @@ fn explicit_gpu_failure_never_silently_substitutes_cpu() {
         language: "auto".into(),
         device: Device::Gpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -645,6 +671,8 @@ fn settings_changes_during_recording_do_not_alter_in_flight_session() {
         language: "it".into(),
         device: Device::Gpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -657,6 +685,8 @@ fn settings_changes_during_recording_do_not_alter_in_flight_session() {
         language: "en".into(),
         device: Device::Cpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let text = dictation.stop(home.path(), &changed_settings).unwrap();
@@ -678,6 +708,8 @@ fn disabling_dictation_during_recording_discards_audio() {
         language: "auto".into(),
         device: Device::Cpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -689,6 +721,8 @@ fn disabling_dictation_during_recording_discards_audio() {
         language: "auto".into(),
         device: Device::Cpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let err = dictation.stop(home.path(), &disabled_settings).unwrap_err();
@@ -705,6 +739,8 @@ fn cancellation_clears_active_recording_and_subsequent_stop_fails() {
         language: "auto".into(),
         device: Device::Cpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let samples = vec![0.1f32; 16000];
@@ -718,6 +754,8 @@ fn cancellation_clears_active_recording_and_subsequent_stop_fails() {
         language: "auto".into(),
         device: Device::Cpu,
         model: ModelId::Small,
+        backend: None,
+        adapter_id: None,
     };
 
     let err = dictation.stop(home.path(), &settings).unwrap_err();
@@ -759,6 +797,8 @@ fn disable_cancels_in_flight_inference_and_discards_late_result() {
             language: "it".into(),
             device: Device::Gpu,
             model: ModelId::Tiny,
+            backend: None,
+            adapter_id: None,
         },
         vec![0.1; 16000],
         16000,
@@ -785,4 +825,14 @@ fn disable_cancels_in_flight_inference_and_discards_late_result() {
         assert!(task.join().unwrap().is_err());
     });
     assert!(dictation.last_execution().is_none());
+}
+
+#[test]
+fn requested_backend_and_stable_adapter_survive_settings_roundtrip() {
+    let settings: DictationSettings = serde_json::from_str(
+        r#"{"enabled":true,"language":"it","device":"gpu","backend":"vulkan","adapterId":"pci:1002:731f"}"#,
+    ).unwrap();
+    let value = serde_json::to_value(settings).unwrap();
+    assert_eq!(value["backend"], "vulkan");
+    assert_eq!(value["adapterId"], "pci:1002:731f");
 }

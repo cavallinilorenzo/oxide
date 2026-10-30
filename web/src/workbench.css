@@ -795,3 +795,19 @@
 .code-loading-layout > aside { width: 200px; flex: none; border-right: 1px solid var(--line); background: var(--bg2); }
 .code-loading-layout > div { flex: 1; min-width: 0; }
 @container (max-width: 440px) { .code-loading-layout > aside { display: none; } }
+/* The Thread remains central; presentation changes retain each tool instance. */
+.sidebar-region[hidden], .centre-column[hidden], .surface-content[hidden] { display: none; }
+.surface-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.surface-content > section, .surface-content > .pr-views, .surface-content > .issues-surface { flex: 1; min-height: 0; }
+.tools > .code-workbench, .tools > .terminal-workbench { flex: 1; min-height: 0; min-width: 0; }
+.thread-restore-handle { flex: none; width: 32px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--bg2); color: var(--dim); display: flex; align-items: center; justify-content: center; }
+.surface-empty { flex: 1; }
+.tools > .tabs { flex: none; min-width: 0; }
+.tools > .tabs .tab { min-width: 28px; padding: 0 7px; white-space: nowrap; }
+.tools > .tabs > .icon-btn { flex: none; }
+@container (max-width: 560px) {
+  .tools > .tabs .tab:not([aria-selected="true"]) .tool-tab-label { display: none; }
+}
+.window.windows .header { display: flex; }
+.window.windows .header-project { flex: 1; justify-content: flex-start; }
+.header > .icon-btn { flex: none; min-width: 28px; }

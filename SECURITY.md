@@ -11,13 +11,13 @@ Please report vulnerabilities **privately** through GitHub's private vulnerabili
 Include what you can:
 
 - the Oxide version or commit
-- your macOS version
+- your macOS or Windows version
 - the Provider and Provider CLI version involved, if any
 - steps to reproduce, the impact, and a proof of concept if you have one
 
 ## What to expect
 
-Oxide is maintained by one person on a best-effort basis:
+Oxide is maintained by two people, [@cavallinilorenzo](https://github.com/cavallinilorenzo) and [@itsmrma](https://github.com/itsmrma), on a best-effort basis:
 
 - an acknowledgement, usually within a week
 - an assessment, and either a fix plan or a reasoned explanation if the report is out of scope
@@ -39,4 +39,4 @@ Oxide is a desktop app that starts agent CLIs (Providers such as Claude Code, Co
 - anything a Provider does while running under **Full access**, or under any mode with approvals the user granted. Full access means nothing asks.
 - actions a Provider takes with your privileges that its own CLI would also take outside Oxide. Report those to the Provider's vendor.
 - vulnerabilities in the Provider CLIs themselves, in `git`, or in `gh`
-- macOS Gatekeeper warnings on unsigned builds (see the [README](README.md#opening-an-unsigned-build))
+- macOS Gatekeeper and Windows SmartScreen warnings on unsigned builds (see the [README](README.md#opening-an-unsigned-build))

@@ -26,6 +26,8 @@ The full tier installs the web dependencies from the lockfile, then runs formatt
 
 The Rust tests run with [cargo-nextest](https://nexte.st), as in CI. Install it once with `cargo install --locked cargo-nextest`. Every Rust check also builds the dictation engine, which needs CMake, a C/C++ compiler and libclang (see [docs/dictation.md](docs/dictation.md)).
 
+Every job, why it exists and its local command are in [docs/devops.md](docs/devops.md#ci-jobs).
+
 Before every commit, `node tools/check.mjs fast` is enough. To run it automatically, add it to `.git/hooks/pre-commit` yourself; the repository doesn't install hooks, and CI is the authority.
 
 The pipeline's decisions (which lanes a change needs, the merge gate, PR titles, release versions, release notes, Dependabot auto-merge, the updater feed) live as pure functions in `tools/ci/policy.mjs`, with a command-line wrapper in `tools/ci/cli.mjs`. `node --test "tools/**/*.test.mjs"` runs all the tooling tests.
@@ -105,74 +107,6 @@ Oxide is developed with coding agents. [AGENTS.md](AGENTS.md) is the single sour
 
 ## Releasing Oxide
 
-Only the two Release Managers, `cavallinilorenzo` and `itsmrma`, turn a `main`
-commit into an official release. The binding control is the `release`
-environment: its required reviewers are exactly those two, and the signing
-secrets are unreadable until one of them approves. A `v*` tag ruleset makes tags
-immutable (no update, no deletion) for everyone but the repository admin.
-Publishing stays a human click.
+Only the two Release Managers, `cavallinilorenzo` and `itsmrma`, release. In short: merge a `chore(release): vX.Y.Z` PR (bump all three manifests with `node tools/ci/cli.mjs bump X.Y.Z`), wait for `gate` on the `main` run, push an annotated `vX.Y.Z` tag, approve the `release` deployment, smoke test the draft, then click Publish. The pipeline builds and signs both platforms from scratch and creates a **draft**; nothing reaches users until a Release Manager publishes it. Rollback is rolling forward with a patch release.
 
-1. Bump the version through a PR into `main` titled `chore(release): vX.Y.Z`.
-   `node tools/ci/cli.mjs bump X.Y.Z` writes it to `Cargo.toml`, the Tauri config
-   and `web/package.json`, and updates the workspace entries of `Cargo.lock`.
-   Use `vX.Y.Z-rc.N` for a release candidate: it is published as a pre-release
-   and never reaches the update feed.
-2. Wait for `gate` to succeed on the `main` run of the merge commit. That run
-   also builds both bundles, so the commit is proven packageable.
-3. Tag that commit and push the tag:
-
-   ```sh
-   git tag -a vX.Y.Z <sha> -m "Oxide vX.Y.Z"
-   git push origin vX.Y.Z
-   ```
-
-   The Release workflow's `verify` job fails with an actionable message unless
-   the tag is on `main` (or `release/*`), matches the three manifests, and has
-   a successful `gate` on that commit's push run.
-4. Approve the `release` deployment in the Release run (Actions → Release →
-   Review deployments). Either Release Manager may approve, including the one
-   who pushed the tag.
-5. The `publish` job creates a **draft** release with the `.dmg`, the
-   `.app.tar.gz` and `-setup.exe` updater packages with their `.sig` files,
-   `latest.json`, `SHA256SUMS.txt`, the SPDX SBOM, build provenance
-   attestations, and draft notes with per-platform signing notices. Each build
-   is a clean, cache-free rebuild of the tagged commit.
-6. Download the draft's builds and run the live Provider smoke tests on each
-   platform you can. Edit the notes, then Publish.
-7. Watch the "Verify release" run. It re-downloads every asset, checks the
-   checksums and attestations (`gh attestation verify <file> --repo
-   cavallinilorenzo/oxide`) and, for a stable release, that
-   `releases/latest/download/latest.json` serves this version with resolving URLs
-   and non-empty signatures. On failure it opens a `needs-triage` issue.
-
-**Rollback is rolling forward.** Published releases are immutable and installed
-apps only update forward: ship a patch release.
-
-### Secrets and signing
-
-The `release` environment holds `TAURI_SIGNING_PRIVATE_KEY` (and
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one). The release build fails
-if the key is missing. Keep an encrypted offline backup: installed apps accept
-only packages signed by that key, and the matching public key is in
-`crates/oxide-app/tauri.conf.json`. Never commit the key or replace the public
-key casually.
-
-When the Apple secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY`,
-`APPLE_API_PRIVATE_KEY`) are present in the same environment, the macOS build is
-signed and notarized. Without them it is ad-hoc signed, and the release notes
-say so. The Windows installer is not Authenticode-signed; the notes mention
-SmartScreen.
-
-### Rehearsing a release
-
-Normal local builds need neither the signing key nor the updater config. To
-rehearse the pipeline, tag a release candidate (`vX.Y.Z-rc.1`) after the bump
-merged; it produces a draft pre-release. Afterwards the repository admin deletes
-the draft and the tag.
-
-Drafts and pre-releases never become the stable feed. The first published signed
-stable release enables the feed; an update appears only when it is newer than
-an installed app. A missing feed or connection failure is reported as a failed
-check, never as "up to date". See [Tauri's updater
-guide](https://v2.tauri.app/plugin/updater/) for the signing model.
+The full runbook, the roles and how they are enforced, the signing secrets and the rehearsal procedure are in [docs/devops.md](docs/devops.md#release-runbook). The decisions behind them are in [ADR-0008](docs/adr/0008-continuous-delivery-with-human-published-releases.md).

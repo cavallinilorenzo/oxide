@@ -21,4 +21,4 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ### Checks
 
-Verify your work the way CI does: `node tools/check.mjs` runs what the PR lanes run on this OS, and `node tools/check.mjs fast` runs rustfmt, ESLint and TypeScript. It needs `cargo-nextest` (`cargo install --locked cargo-nextest`). Pipeline decisions live in `tools/ci/policy.mjs`; change them test-first in `tools/ci/policy.test.mjs`. See CONTRIBUTING's "Local checks".
+Verify your work the way CI does: `node tools/check.mjs` runs what the PR lanes run on this OS, and `node tools/check.mjs fast` runs rustfmt, ESLint and TypeScript. It needs `cargo-nextest` (`cargo install --locked cargo-nextest`). Pipeline decisions live in `tools/ci/policy.mjs`; change them test-first in `tools/ci/policy.test.mjs`. See CONTRIBUTING's "Local checks". Read [docs/devops.md](docs/devops.md) before changing a workflow, a CI check or the release process: it has every job, its reason and the release runbook.

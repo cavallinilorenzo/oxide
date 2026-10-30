@@ -40,12 +40,12 @@ const runChecks = (session) => {
   for (const { id, command } of plan.run) {
     if (compilesRust(command)) assertBuildSpace(repoRoot);
     console.log(`\n> ${id}: ${commandLine(command)}`);
-    // All checks share one scratch target, including Tauri and the generated bindings.
+    // All checks reuse the persistent Cargo target, including Tauri and bindings.
     const result = exec(command, session?.env);
     if (result.error) console.error(`Cannot start ${command[0]}: ${result.error.message}`);
     completed++;
     if (result.status !== 0) failures.push({ id, command });
-    else session?.preserve(command);
+    else session?.reportOutputs(command);
     if (compilesRust(command)) assertBuildSpace(repoRoot);
   }
 };

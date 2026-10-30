@@ -9,9 +9,9 @@ edition = "2024"
 license = "MIT"
 publish = false
 
-# Tauri integration tests link large binaries. Keep backtraces useful without
-# full debug symbols or an unbounded set of incremental compilation artifacts.
+# Tauri integration tests link large binaries. Omit debug symbols to keep the
+# persistent cache small, and reuse incremental work when workspace code changes.
 # The test profile inherits these development settings; release is unaffected.
 [profile.dev]
-debug = "line-tables-only"
-incremental = false
+debug = 0
+incremental = true

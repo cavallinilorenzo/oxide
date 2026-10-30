@@ -1,129 +1,109 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { withBuildSession } from "./build-session.mjs";
 
 const silent = () => {};
 function fixture(t) {
-  // Canonical, like the session's own paths: macOS temp folders sit behind a symlink.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "oxide-build-session-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, "target"));
-  writeFileSync(join(root, "target", "running-app.exe"), "keep existing output");
   return root;
 }
 
-test("checks share their scratch target, which is removed once all checks finish", (t) => {
+test("successive checks and app builds reuse the default Cargo cache", (t) => {
   const root = fixture(t);
-  let target;
+  const target = join(root, "target");
   const result = withBuildSession(root, { CUSTOM_VALUE: "kept" }, (session) => {
-    target = session.target;
-    assert.equal(session.env.CARGO_TARGET_DIR, target);
     assert.equal(session.env.CUSTOM_VALUE, "kept");
-    writeFileSync(join(target, "test.pdb"), "temporary debug symbols");
-    assert.ok(existsSync(join(target, "test.pdb")));
+    assert.equal(session.env.CARGO_TARGET_DIR, target);
+    mkdirSync(join(session.target, "debug", "deps"), { recursive: true });
+    writeFileSync(join(session.target, "debug", "deps", "dependency.rlib"), "compiled dependency");
     return 42;
   }, silent);
   assert.equal(result, 42);
-  assert.equal(existsSync(target), false);
-  assert.equal(readFileSync(join(root, "target", "running-app.exe"), "utf8"), "keep existing output");
-});
-
-test("a failed check and a disk-budget exception both clean the scratch directory", (t) => {
-  const root = fixture(t);
-  let target;
-  assert.equal(withBuildSession(root, {}, (session) => { target = session.target; return 1; }, silent), 1);
-  assert.equal(existsSync(target), false);
-  assert.throws(() => withBuildSession(root, {}, (session) => {
-    target = session.target;
-    writeFileSync(join(target, "failed-build.o"), "temporary");
-    throw new Error("Build artifacts exceed budget");
-  }, silent), /exceed budget/);
-  assert.equal(existsSync(target), false);
-});
-
-test("an explicit Cargo target is a container, not something cleanup may remove", (t) => {
-  const root = fixture(t);
-  mkdirSync(join(root, "custom"));
-  writeFileSync(join(root, "custom", "keep.txt"), "keep");
-  withBuildSession(root, { CARGO_TARGET_DIR: "custom" }, (session) => {
-    assert.equal(resolve(session.target, ".."), join(root, "custom"));
-  }, silent);
-  assert.deepEqual(readdirSync(join(root, "custom")), ["keep.txt"]);
-});
-
-test("successful Tauri builds keep final apps and bundles, but remove compiler caches", (t) => {
-  const root = fixture(t);
-  let target;
   withBuildSession(root, {}, (session) => {
-    target = session.target;
-    const release = join(target, "aarch64-apple-darwin", "release");
-    mkdirSync(join(release, "bundle"), { recursive: true });
-    mkdirSync(join(release, "deps"));
-    writeFileSync(join(release, "bundle", "Oxide.dmg"), "installer");
-    writeFileSync(join(release, "oxide-app"), "final binary");
-    writeFileSync(join(release, "deps", "old.rlib"), "cache");
-    session.preserve(["web/node_modules/.bin/tauri", "build", "--target", "aarch64-apple-darwin"]);
+    assert.equal(session.target, target);
+    assert.equal(readFileSync(join(session.target, "debug", "deps", "dependency.rlib"), "utf8"), "compiled dependency");
   }, silent);
-  assert.equal(existsSync(target), false);
-  const outputRoot = join(root, "target", "check-artifacts");
-  const release = join(outputRoot, readdirSync(outputRoot)[0], "aarch64-apple-darwin", "release");
-  assert.equal(readFileSync(join(release, "bundle", "Oxide.dmg"), "utf8"), "installer");
-  assert.equal(readFileSync(join(release, "oxide-app"), "utf8"), "final binary");
-  assert.equal(existsSync(join(release, "deps")), false);
+  assert.deepEqual(readdirSync(target), ["debug"]);
 });
 
-test("a replaced scratch directory cannot redirect cleanup into another folder", (t) => {
+test("failures retain compiled dependencies for the next attempt", (t) => {
   const root = fixture(t);
-  const other = join(root, "other");
-  mkdirSync(other);
-  writeFileSync(join(other, "keep.txt"), "keep");
-  assert.throws(() => withBuildSession(root, {}, (session) => {
-    rmSync(session.target, { recursive: true });
-    symlinkSync(other, session.target, process.platform === "win32" ? "junction" : "dir");
-  }, silent), /Refusing to clean/);
-  assert.equal(readFileSync(join(other, "keep.txt"), "utf8"), "keep");
+  assert.equal(withBuildSession(root, {}, (session) => {
+    writeFileSync(join(session.target, "dependency.rlib"), "reusable");
+    return 1;
+  }, silent), 1);
+  assert.throws(() => withBuildSession(root, {}, () => {
+    throw new Error("Build failed");
+  }, silent), /Build failed/);
+  withBuildSession(root, {}, (session) => {
+    assert.equal(readFileSync(join(session.target, "dependency.rlib"), "utf8"), "reusable");
+  }, silent);
 });
 
-test("if final outputs cannot be preserved, the only copy is retained for recovery", (t) => {
+test("explicit relative and absolute Cargo targets are reused directly", (t) => {
   const root = fixture(t);
-  let target;
-  assert.throws(() => withBuildSession(root, {}, (session) => {
-    target = session.target;
-    writeFileSync(join(target, "diagnostic.txt"), "recover");
-    session.preserve(["tauri", "build"]);
-  }, silent), /Scratch files kept/);
-  assert.equal(readFileSync(join(target, "diagnostic.txt"), "utf8"), "recover");
+  const target = join(root, "custom");
+  const inherited = { CARGO_TARGET_DIR: "custom" };
+  withBuildSession(root, inherited, (session) => {
+    assert.equal(session.target, target);
+    writeFileSync(join(session.target, "dependency.rlib"), "reusable");
+  }, silent);
+  withBuildSession(root, { CARGO_TARGET_DIR: target }, (session) => {
+    assert.equal(readFileSync(join(session.target, "dependency.rlib"), "utf8"), "reusable");
+  }, silent);
+  assert.equal(inherited.CARGO_TARGET_DIR, "custom");
+  assert.equal(existsSync(join(root, "target")), false);
 });
 
-test("overlapping runs cannot remove each other's compiler files", (t) => {
+test("successful bundles stay in Cargo's output directory without per-run copies", (t) => {
+  const root = fixture(t);
+  const messages = [];
+  withBuildSession(root, {}, (session) => {
+    const release = join(session.target, "aarch64-apple-darwin", "release");
+    mkdirSync(join(release, "bundle"), { recursive: true });
+    writeFileSync(join(release, "bundle", "Oxide.dmg"), "installer");
+    writeFileSync(join(release, "oxide-app"), "binary");
+    session.reportOutputs(["web/node_modules/.bin/tauri", "build", "--target", "aarch64-apple-darwin"]);
+    assert.ok(messages.some((message) => message.includes(release)));
+  }, (message) => messages.push(message));
+  assert.equal(readFileSync(join(root, "target", "aarch64-apple-darwin", "release", "bundle", "Oxide.dmg"), "utf8"), "installer");
+  assert.deepEqual(readdirSync(join(root, "target")), ["aarch64-apple-darwin"]);
+});
+
+test("debug and custom-profile app builds report their actual output directory", (t) => {
+  const root = fixture(t);
+  for (const [flags, profile] of [[ ["--debug"], "debug" ], [ ["--profile=custom"], "custom" ]]) {
+    const messages = [];
+    withBuildSession(root, {}, (session) => {
+      const output = join(session.target, profile);
+      mkdirSync(output);
+      writeFileSync(join(output, "oxide-app.exe"), "binary");
+      session.reportOutputs(["tauri", "build", ...flags]);
+      assert.ok(messages.some((message) => message.includes(output)));
+    }, (message) => messages.push(message));
+  }
+});
+
+test("overlapping sessions share the cache and never clean another build's files", (t) => {
   const root = fixture(t);
   withBuildSession(root, {}, (outer) => {
     writeFileSync(join(outer.target, "still-building.o"), "active");
-    let innerTarget;
     withBuildSession(root, {}, (inner) => {
-      innerTarget = inner.target;
-      assert.notEqual(inner.target, outer.target);
+      assert.equal(inner.target, outer.target);
     }, silent);
-    assert.equal(existsSync(innerTarget), false);
     assert.equal(readFileSync(join(outer.target, "still-building.o"), "utf8"), "active");
   }, silent);
 });
 
-test("debug app builds keep the executable without retaining PDBs or dependencies", (t) => {
+test("missing final outputs report an error while retaining the cache", (t) => {
   const root = fixture(t);
-  withBuildSession(root, {}, (session) => {
-    const debug = join(session.target, "debug");
-    mkdirSync(debug);
-    writeFileSync(join(debug, "oxide-app.exe"), "executable");
-    writeFileSync(join(debug, "oxide_app.pdb"), "symbols");
-    session.preserve(["tauri", "build", "--debug"]);
-  }, silent);
-  const outputRoot = join(root, "target", "check-artifacts");
-  const debug = join(outputRoot, readdirSync(outputRoot)[0], "debug");
-  assert.deepEqual(readdirSync(debug), ["oxide-app.exe"]);
+  assert.throws(() => withBuildSession(root, {}, (session) => {
+    writeFileSync(join(session.target, "dependency.rlib"), "reusable");
+    session.reportOutputs(["tauri", "build"]);
+  }, silent), /No final app binary or bundle.*cache retained/);
+  assert.equal(readFileSync(join(root, "target", "dependency.rlib"), "utf8"), "reusable");
 });

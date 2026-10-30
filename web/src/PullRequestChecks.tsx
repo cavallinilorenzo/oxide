@@ -6,7 +6,7 @@ const CHECK_WORD = { success: "Passed", failure: "Failed", pending: "Running" } 
 
 /** Checks in a box: what needs attention is listed, what passed folds into one row you can open.
  *  A check with a link opens its run on GitHub, to see what went wrong. */
-export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen: (url: string) => void }) {
+export function Checks({ checks, onOpen, fixAction }: { checks: PullRequestCheck[]; onOpen: (url: string) => void; fixAction?: React.ReactNode }) {
   const { failing, pending, passing } = countChecks(checks);
   const all = dedupeChecks(checks);
   // Once branch protection names required checks, the others are shown but do not count.
@@ -40,6 +40,7 @@ export function Checks({ checks, onOpen }: { checks: PullRequestCheck[]; onOpen:
           ))}
         </ul>
       )}
+      {all.some((c) => c.state === "failure") && fixAction && <div className="pr-checks-fix">{fixAction}</div>}
       {passed.length > 0 &&
         (inline ? (
           <ul className="pr-checks">

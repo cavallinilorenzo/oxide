@@ -998,6 +998,8 @@ section.terminal.terminal-hidden { display: none; }
 .pr-views .pr-req-bad > svg { color: var(--red); }
 .pr-views .pr-req-neutral > svg { color: var(--faint); }
 .pr-views .pr-req-bad { background: color-mix(in srgb, var(--red) 7%, transparent); }
+.pr-views .pr-fix-action { margin-top: var(--space-2); }
+.pr-views .pr-checks-fix { padding: var(--space-2) 12px; }
 
 /* Description toggle */
 .pr-views .pr-description { border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); gap: 0; }

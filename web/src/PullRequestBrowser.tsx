@@ -393,6 +393,19 @@ export function PullRequestReview({
   const setDraft = (draft: boolean) => change("ready", () => commands.setPullRequestDraft(projectId, number, draft));
   const edit = (partial: Partial<PullRequestEdit>) =>
     change("edit", () => commands.editPullRequest(projectId, number, { ...NO_EDIT, ...partial }));
+  const fixAction = fixPrompt && (
+    <button
+      className={fixing ? "pending" : undefined}
+      disabled={busy}
+      title="Fix failing checks and merge conflicts in a new Thread with your default agent"
+      onClick={() => void fixPullRequest()}
+    >
+      <Working on={fixing} label="Starting fix…">
+        <ToolsIcon size={14} /> Fix PR
+      </Working>
+    </button>
+  );
+  const fixInMergeStatus = requirements.some((r) => r.tone === "bad" && (r.kind === "conflicts" || r.kind === "checks"));
 
   return (
     <div className="pr-review">
@@ -439,18 +452,6 @@ export function PullRequestReview({
           </button>
           {live && (
             <button
-              className={fixing ? "pending" : undefined}
-              disabled={busy || fixPrompt === null}
-              title={fixPrompt ? "Fix failing checks and merge conflicts in a new Thread with your default agent" : "No failing checks or merge conflicts to fix"}
-              onClick={() => void fixPullRequest()}
-            >
-              <Working on={fixing} label="Starting fix…">
-                <ToolsIcon size={14} /> Fix PR
-              </Working>
-            </button>
-          )}
-          {live && (
-            <button
               className={pending === "checkout" ? "pending" : undefined}
               disabled={busy || git.pickerDisabledReason !== null}
               title={git.pickerDisabledReason ?? "Check this branch out in the main checkout"}
@@ -470,8 +471,9 @@ export function PullRequestReview({
             busy={busy}
             updating={pending === "update"}
             onUpdateBranch={() => void change("update", () => commands.updatePullRequestBranch(projectId, number))}
+            fixAction={fixAction}
           />}
-        <Checks checks={detail.checks} onOpen={(url) => void openLink(url)} />
+        <Checks checks={detail.checks} onOpen={(url) => void openLink(url)} fixAction={fixInMergeStatus ? null : fixAction} />
         <PullRequestPeople
           projectId={projectId}
           detail={detail}

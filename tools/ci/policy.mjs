@@ -382,6 +382,7 @@ const WINDOWS_SYSTEM_DLLS = new Set([
   "oleaut32.dll", "shlwapi.dll", "ws2_32.dll", "bcrypt.dll", "bcryptprimitives.dll", "crypt32.dll", "secur32.dll",
   "userenv.dll", "dbghelp.dll", "psapi.dll", "version.dll", "winmm.dll", "setupapi.dll", "cfgmgr32.dll", "iphlpapi.dll",
   "powrprof.dll", "ncrypt.dll", "rpcrt4.dll", "comctl32.dll", "dxgi.dll", "ucrtbase.dll",
+  "pdh.dll", // Windows Performance Data Helper (pdh.h), provided by Windows since XP.
 ]);
 const isWindowsSystemDll = (dll) => WINDOWS_SYSTEM_DLLS.has(dll) || /^(api|ext)-ms-win-[\w-]+\.dll$/.test(dll);
 const DICTATION_NOTICES = ["licenses/whisper.txt", "licenses/dictation-fixture.txt"];

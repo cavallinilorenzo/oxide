@@ -587,6 +587,16 @@ describe("checkDictationPackage", () => {
 
   const importing = (exe, dll) => ({ ...WINDOWS, imports: { ...WINDOWS.imports, [exe]: [...WINDOWS.imports[exe], dll] } });
 
+  test("both GPU workers may import the Windows Performance Data Helper without bundling it", () => {
+    // PR #265's installed workers both import pdh.dll from Windows.
+    for (const worker of ["oxide-cuda-worker.exe", "oxide-vulkan-worker.exe"]) {
+      for (const dll of ["pdh.dll", "PDH.DLL"]) {
+        const result = checkDictationPackage("windows-x64", importing(worker, dll));
+        assert.equal(result.ok, true, result.message);
+      }
+    }
+  });
+
   test("the host never loads a GPU runtime or driver, so it starts on any machine", () => {
     for (const dll of ["vulkan-1.dll", "NVCUDA.dll", "cudart64_12.dll", "cublas64_12.dll"]) {
       const result = checkDictationPackage("windows-x64", importing("oxide-app.exe", dll));

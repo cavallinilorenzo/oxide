@@ -19,6 +19,35 @@ const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listen
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 export function useDictationState() { return useSyncExternalStore(subscribe, () => state); }
 
+function playDictationStartSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    // Pleasant ascending chime: 587.33 Hz (D5) -> 880 Hz (A5)
+    osc.frequency.setValueAtTime(587.33, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.08, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.15);
+    osc.onended = () => { void ctx.close(); };
+  } catch {
+    // Audio context failure should not impede dictation
+  }
+}
+
 export function useDictationTarget(ref: RefObject<HTMLElement | null>, insert: (text: string) => void, enabled = true) {
   const latest = useRef(insert);
   useLayoutEffect(() => { latest.current = insert; });
@@ -71,6 +100,7 @@ async function toggle(element: Element | null) {
     const result = await commands.dictationStart();
     if (version !== generation) { await commands.dictationCancel(); return; }
     if (result.status === "error") throw new Error(result.error.message);
+    playDictationStartSound();
     update({ phase: "recording", error: null });
     timer = setTimeout(() => { void toggle(null); }, 119_000);
   } catch (error) { if (version === generation) update({ phase: "idle", error: message(error) }); }

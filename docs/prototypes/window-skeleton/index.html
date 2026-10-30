@@ -108,7 +108,7 @@ const BLOCKS=[
 
 const S={v:'A',size:'1440x900',tid:'t1',approved:false,
  A:{mode:'chat',tool:'diff',bottom:true,file:'claude.rs'},
- B:{dock:true,tab:'diff',wide:false,files:[],side:true,maxT:false},
+ B:{dock:true,tab:'diff',wide:false,files:[],cur:null,side:true,maxT:false},
  C:{tabs:[{k:'thread',id:'t1'},{k:'term',id:'term'},{k:'diff',id:'diff'}],L:0,R:null,focus:'L',split:false}};
 const th=id=>THREADS.find(t=>t.id===id), cur=()=>th(S.tid);
 const small=()=>S.size==='900x560';
@@ -168,19 +168,18 @@ function viewA(){
 // ---------- Variant B: no modes, Surfaces dock ----------
 function viewB(){
  const b=S.B,t=cur(),n=needsAny();
- const hasFile=b.files.length>0;
+ const editing=b.tab==='files'&&b.files.length>0&&b.cur;
  const hdr=`<div class="hdr"><button class="ghost" data-a="side" title="Toggle sidebar">☰</button><b>${t.proj}</b><span class="dim">⑂ ${t.branch} ▾</span>
   ${n.length?`<span class="chip" data-a="thread" data-id="${n[0].id}" title="Go to the Thread waiting on you">● ${n.length} needs input · ${n[0].title}</span>`:''}
   <span class="sp"></span><button class="primary">Commit &amp; Push ▾</button><button class="${b.dock?'on':''}" data-a="dock" title="Surfaces dock (⌘J)">▥</button></div>`;
  const tabsList=[['diff','± Diff'],['files','▤ Files'],['term','▭ Terminal'],['pr','⑃ Pull request'],['issues','◎ Issues']];
- const ftabs=b.files.map(f=>[ 'f:'+f,'‹› '+f]);
- const all=[...tabsList.slice(0,3),...ftabs,...tabsList.slice(3)];
+  const all=tabsList;
  const showSide=small()?(b.side&&!b.dock):b.side;
- const dockW=!b.dock?0:b.maxT?'100%':(b.wide||hasFile&&b.tab.startsWith('f:'))?(small()?'100%':'62%'):(small()?'100%':'42%');
- const showCentre=!(b.dock&&small()&&(b.wide||b.maxT||b.tab.startsWith('f:')))&&!b.maxT;
+ const dockW=!b.dock?0:b.maxT?'100%':(b.wide||editing)?(small()?'100%':'62%'):(small()?'100%':'42%');
+ const showCentre=!(b.dock&&small()&&(b.wide||b.maxT||editing))&&!b.maxT;
  const centre=showCentre?`<div class="centre">${small()&&b.dock?'':''}${transcript(t)}</div>`:`<div style="width:44px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:8px">${THREADS.filter(x=>x.proj==='oxide').map(x=>`<div data-a="thread" data-id="${x.id}" style="cursor:pointer" title="${x.title} · ${stat(x)}">${dotf(x)}</div>`).join('')}<button class="ghost" data-a="restore" title="Restore Thread">⇤</button></div>`;
- const dock=b.dock?`<div class="tools" style="width:${dockW};flex:${showCentre?'none':'1'}"><div class="tabs">${all.map(([k,l])=>`<div class="tab ${b.tab===k?'sel':''}" data-a="btab" data-k="${k}">${l}${k.startsWith('f:')?`<span class="x" data-a="closef" data-f="${k.slice(2)}">✕</span>`:''}</div>`).join('')}<span class="sp"></span><button class="ghost" data-a="maxdock" title="Maximize dock (full-attention Terminal or Code)">⤢</button></div><div class="pane" style="display:flex;flex-direction:column">${b.tab.startsWith('f:')?`<div style="display:flex;flex:1;min-height:0">${small()?'':`<div style="width:170px;border-right:1px solid var(--line);overflow:auto">${fileTree()}</div>`}<div class="pane">${editor(b.tab.slice(2))}</div></div>`:toolBody(b.tab)}</div></div>`:'';
- return hdr+`<div class="body">${sidebar(!showSide)}${centre}${dock}</div><div class="tip">B · No Work modes. Needs-input chip stays in the header · opening a file promotes the editor into the dock (wider, Thread stays beside it) · ⤢ maximizes Terminal or Code · at 900×560 the sidebar and dock are exclusive.</div>`;
+ const dock=b.dock?`<div class="tools" style="width:${dockW};flex:${showCentre?'none':'1'}"><div class="tabs">${all.map(([k,l])=>`<div class="tab ${b.tab===k?'sel':''}" data-a="btab" data-k="${k}">${l}${k==='files'&&b.files.length?`<span class="badge">${b.files.length}</span>`:''}</div>`).join('')}<span class="sp"></span><button class="ghost" data-a="maxdock" title="Maximize dock (full-attention Terminal or Code)">⤢</button></div><div class="pane" style="display:flex;flex-direction:column">${editing?`<div class="tabs" style="height:34px">${b.files.map(f=>`<div class="tab ${f===b.cur?'sel':''}" data-a="curf" data-f="${f}">‹› ${f}<span class="x" data-a="closef" data-f="${f}">✕</span></div>`).join('')}</div><div style="display:flex;flex:1;min-height:0"><div class="pane">${editor(b.cur)}</div><div style="width:${small()?140:170}px;border-left:1px solid var(--line);overflow:auto">${fileTree()}</div></div>`:toolBody(b.tab)}</div></div>`:'';
+ return hdr+`<div class="body">${sidebar(!showSide)}${centre}${dock}</div><div class="tip">B · No Work modes. Needs-input chip stays in the header · opening a file widens the dock on the Files tab: open files are a bar on top, the file list sits beside the editor · ⤢ maximizes Terminal or Code · at 900×560 the sidebar and dock are exclusive.</div>`;
 }
 
 // ---------- Variant C: tabbed centre ----------
@@ -222,7 +221,7 @@ function render(){
 }
 function openFile(f){
  if(S.v==='A'){S.A.mode='code';S.A.file=f}
- else if(S.v==='B'){if(!S.B.files.includes(f))S.B.files.push(f);S.B.tab='f:'+f;S.B.dock=true}
+ else if(S.v==='B'){if(!S.B.files.includes(f))S.B.files.push(f);S.B.cur=f;S.B.tab='files';S.B.dock=true}
  else{let i=S.C.tabs.findIndex(x=>x.k==='file'&&x.id===f);if(i<0){S.C.tabs.push({k:'file',id:f});i=S.C.tabs.length-1}S.C[S.C.focus==='R'&&S.C.split?'R':'L']=i}
 }
 document.addEventListener('click',e=>{
@@ -236,7 +235,8 @@ document.addEventListener('click',e=>{
  else if(a==='side')S.B.side=!S.B.side;
  else if(a==='dock'){S.B.dock=!S.B.dock;S.B.maxT=false}
  else if(a==='btab'){S.B.tab=d.k;S.B.dock=true;S.B.maxT=false}
- else if(a==='closef'){S.B.files=S.B.files.filter(f=>f!==d.f);S.B.tab='files'}
+ else if(a==='closef'){S.B.files=S.B.files.filter(f=>f!==d.f);if(S.B.cur===d.f)S.B.cur=S.B.files[S.B.files.length-1]||null}
+ else if(a==='curf')S.B.cur=d.f;
  else if(a==='maxdock')S.B.maxT=!S.B.maxT;
  else if(a==='restore'){S.B.maxT=false;S.B.wide=false;S.B.tab='diff'}
  else if(a==='csplit'){S.C.split=!S.C.split;if(S.C.split&&S.C.R==null)S.C.R=S.C.tabs.findIndex(x=>x.k==='diff')}

@@ -37,13 +37,34 @@ fn main() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_exe().unwrap());
     let process = ProcessWorker::new(host, worker.clone(), worker);
+    let adapter_id = args
+        .get(3)
+        .filter(|id| id.as_str() != "-")
+        .cloned()
+        .or_else(|| {
+            if backend == BackendId::Metal {
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                {
+                    oxide_core::dictation::WhisperBackendRuntime::probe(
+                        &oxide_core::dictation::MetalRuntime,
+                    )
+                    .adapter
+                }
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                {
+                    None
+                }
+            } else {
+                None
+            }
+        });
     let result = Dictation::default()
         .check_performance(
             &home,
             &CheckRequest {
                 model,
                 backend,
-                adapter_id: args.get(3).filter(|id| id.as_str() != "-").cloned(),
+                adapter_id,
                 include_conservative_candidate: false,
             },
             &process,

@@ -27,7 +27,7 @@ No release, tag, merge or parent closure is authorized by this record.
 | Windows NVIDIA, CUDA | **Unverified** | No measurements | Physical NVIDIA x64 machine, compatible driver, installed CUDA/Vulkan package; complete warmup + three runs with CUDA dispatch/device evidence |
 | Windows NVIDIA, Vulkan | **Unverified** | No measurements | Same physical NVIDIA machine; independently prove Vulkan timestamps, not just CUDA success |
 | Windows AMD, Vulkan; RX 5600 XT regression | **Verified offload** for Tiny/Base/Small in the installed #234 worker | CPU comparison and sampled memory below | Physical microphone, offline/disconnected lifecycle, failure flows and larger-model calibration remain open |
-| macOS Apple Silicon, Metal | **Unverified** (CPU baseline only, see [macOS record](#macos-apple-silicon-development-record)) | CPU Tiny/Base/Small only; no Metal measurements | Run from a normal user session (the validation sandbox could not create a Metal device), ideally the installed `.app` from a traceable `.dmg`; matching CPU/Metal measurements and all four completed dispatch snapshots |
+| macOS Apple Silicon, Metal | **Verified offload (dev build)** for Tiny/Base/Small; installed package remains open | CPU vs Metal comparisons and completed dispatch evidence in [macOS record](#macos-apple-silicon-development-record) | Package-level verification from an installed `.app` from a traceable `.dmg`; physical microphone/shortcut/offline lifecycle |
 | CPU-only / no usable GPU runtime | **Unverified on physical runtime-free host** | Automated isolation/recovery coverage only | Physical or controlled clean Windows environment without usable Vulkan/NVIDIA runtime; installed app launch **and CPU inference**, not launch alone |
 | Intel Mac GPU / other platforms | **Not advertised** | No measurements | Separate platform validation; Apple Silicon cannot establish Intel Mac support |
 
@@ -121,24 +121,35 @@ instrumentation overhead, not catalogue calibration or universal latency promise
 ## macOS Apple Silicon development record
 
 Run on 2026-10-30 from a development tree (`cargo build --release`, not an installed
-`.dmg`), so it is **not** distributed-package evidence. Hardware: Apple M1 Pro, 16 GB,
-macOS 27.2 (26B123). Isolated model home; Tiny/Base/Small installed and verified through
-the app's installer; fixture and native versions as in the baseline above.
+`.dmg`), so it is **not** distributed-package evidence. Hardware: Apple M1 Pro (10 cores,
+Metal 4), 16 GB unified memory, macOS 27.2 (26B123). Isolated model home; Tiny/Base/Small
+installed and verified through the app's installer; fixture and native versions as in the baseline above.
 
-| Model | CPU cold load | CPU warm inference (3 runs, ms) | Metal |
-| --- | --- | --- | --- |
-| Tiny | 8232 ms (first run, includes uncached start) | 213, 205, 209 | **Not run** |
-| Base | 112 ms | 309, 324, 320 | **Not run** |
-| Small | 209 ms | 772, 769, 788 | **Not run** |
+| Model | Backend | Cold load | Warm inference (3 runs, ms) | Median warm | Median RTF | Offload evidence | Completed graphs / matrix ops |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | CPU | 8232 ms | 213, 205, 209 | 209 ms | 0.0190 | CPU (offloaded: false) | n/a |
+| `tiny` | Metal | 74 ms | 181, 180, 181 | 181 ms | 0.0165 | Metal verified (offloaded: true) | 30 graphs, 1365 matrix ops / run (0 failures) |
+| `base` | CPU | 112 ms | 309, 324, 320 | 320 ms | 0.0291 | CPU (offloaded: false) | n/a |
+| `base` | Metal | 99 ms | 235, 239, 243 | 239 ms | 0.0217 | Metal verified (offloaded: true) | 30 graphs, 2033 matrix ops / run (0 failures) |
+| `small` | CPU | 209 ms | 772, 769, 788 | 772 ms | 0.0702 | CPU (offloaded: false) | n/a |
+| `small` | Metal | 215 ms | 483, 473, 475 | 475 ms | 0.0432 | Metal verified (offloaded: true) | 30 graphs, 4037 matrix ops / run (0 failures) |
 
 `cargo test --release -p oxide-core --test dictation_smoke -- --ignored` passed
 (Tiny/Base/Small CPU inference across model switches).
 
-`dictation_benchmark ... metal` failed for every model with `Backend unavailable:
-NoCompatibleDevice` because `MTLCreateSystemDefaultDevice` returned null inside the
-agent's command sandbox, although `system_profiler` lists the GPU. This is a limit of
-that environment, **not** evidence about Metal support, and no workaround was applied.
-Repeat from a normal Terminal:
+Metal offload was verified across all three models with hardware dispatch execution:
+every measured run plus warmup completed all 30 GGML execution graphs with zero failures,
+executing 1,365 matrix operations per run on Tiny, 2,033 on Base, and 4,037 on Small.
+Inference speedups over CPU were 15.5% on Tiny, 33.9% on Base, and 62.5% on Small
+(median warm RTF dropped from 0.0702 down to 0.0432).
+
+*Note on earlier run:* The earlier `NoCompatibleDevice` error when running the benchmark CLI
+with `metal - -` was caused by `-` setting `adapter_id: None`, whereas Metal expects
+`probe.adapter` (`Apple M1 Pro`). `dictation_benchmark.rs` has been updated to automatically
+default `adapter_id` to the probe adapter for Metal when `-` is passed. Raw outputs are
+preserved in `docs/dictation-acceptance/results-2026-10-30/macos/`.
+
+To repeat:
 
 ```sh
 cargo build --release --locked -p oxide-core --example dictation_benchmark

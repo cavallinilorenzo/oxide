@@ -1,0 +1,78 @@
+[
+  {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "small",
+    "measurement": {
+      "key": {
+        "modelSha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        "backend": "metal",
+        "adapterId": "Apple M1 Pro",
+        "driverVersion": "27.2.0",
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release; whisper-1.8.3-ggml-abi2-dispatch-v1",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "aarch64",
+          "model": "Apple M1 Pro",
+          "usableCores": 10,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793384604,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        483,
+        473,
+        475
+      ],
+      "coldLoadMs": 215
+    },
+    "execution": {
+      "backend": "metal",
+      "adapter": "Apple M1 Pro",
+      "offloaded": true,
+      "offloadEvidence": "whisper-1.8.3-ggml-abi2-dispatch-v1; completed GPU matrix graph dispatches in warmup and all three measured runs"
+    },
+    "dispatch": {
+      "revision": "whisper-1.8.3-ggml-abi2-dispatch-v1",
+      "backend": "metal",
+      "adapterId": "Apple M1 Pro",
+      "nativeBackend": "Metal",
+      "deviceId": null,
+      "runs": [
+        {
+          "nativeBackend": "Metal",
+          "adapter": "Apple M1 Pro",
+          "deviceId": null,
+          "completedGraphs": 30,
+          "matrixOps": 4037,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "Metal",
+          "adapter": "Apple M1 Pro",
+          "deviceId": null,
+          "completedGraphs": 30,
+          "matrixOps": 4037,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "Metal",
+          "adapter": "Apple M1 Pro",
+          "deviceId": null,
+          "completedGraphs": 30,
+          "matrixOps": 4037,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "Metal",
+          "adapter": "Apple M1 Pro",
+          "deviceId": null,
+          "completedGraphs": 30,
+          "matrixOps": 4037,
+          "failures": 0
+        }
+      ]
+    }
+  }
+]

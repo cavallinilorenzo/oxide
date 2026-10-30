@@ -1,0 +1,37 @@
+[
+  {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "tiny",
+    "measurement": {
+      "key": {
+        "modelSha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+        "backend": "cpu",
+        "adapterId": null,
+        "driverVersion": null,
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release; cpu-build-flags=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "aarch64",
+          "model": "Apple M1 Pro",
+          "usableCores": 10,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793384241,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        213,
+        205,
+        209
+      ],
+      "coldLoadMs": 8232
+    },
+    "execution": {
+      "backend": "cpu",
+      "adapter": "CPU",
+      "offloaded": false,
+      "offloadEvidence": null
+    }
+  }
+]

@@ -1095,8 +1095,8 @@ section.terminal.terminal-hidden { display: none; }
 .pr-views .pr-merge-status.ok { color: var(--green); }
 .pr-views .pr-merge-status.warn { color: var(--yellow); }
 .pr-views .pr-merge-status.bad { color: var(--red); }
-.pr-views .pr-merge-row { display: flex; align-items: center; gap: var(--space-2); }
-.pr-views .pr-merge-row > .primary { flex: 1; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; }
+.pr-views .pr-merge-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pr-views .pr-merge-row > .primary { flex: 1 1 140px; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; }
 .pr-views .pr-merge-row > .primary.risky:is(:not(:disabled), .pending) { background: var(--bg4); border-color: var(--red); color: var(--fg-bright); }
 .pr-views .pr-merge-row > .icon-btn { flex: none; width: var(--control-height); height: var(--control-height); border: 1px solid var(--line-strong); background: var(--bg3); }
 .pr-views .pr-merge-note { margin: 0; color: var(--dim); font-size: 12px; }

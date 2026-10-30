@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-28T14:58:20.601Z",
         "reason": "ticket #195 requires an animated shimmer on the live status phrase (motion, not decorative fill); solid text under prefers-reduced-motion"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/prototypes/window-skeleton/index.html"
+        ],
+        "createdAt": "2026-10-30T15:01:41.859Z",
+        "reason": "Claude decided: dense diff hunks, Command blocks and 24px header controls match the app's own density; throwaway prototype, not user confirmed"
       }
     ]
   }

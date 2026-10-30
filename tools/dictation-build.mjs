@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyFileSync } from "node:fs";
 import { assertBuildSpace } from "./checks/build-space.mjs";
+import { msvcEnv } from "./checks/msvc-env.mjs";
 
 export function dictationBuild(backend, inherited = process.env) {
   if (!["cpu", "vulkan", "cuda"].includes(backend)) {
@@ -38,10 +39,29 @@ export function dictationBuild(backend, inherited = process.env) {
   };
 }
 
+/**
+ * The release build of a GPU worker for packaging. ggml otherwise tunes code to
+ * the build machine (GGML_NATIVE): AVX-512 on a CI runner, or only the CUDA
+ * architectures it can see. OFF selects its portable x64 baseline (AVX2, FMA,
+ * F16C) and CUDA architecture list (5.0 to Blackwell on CUDA 12).
+ */
+export function releaseWorker(backend, inherited = process.env) {
+  if (!["vulkan", "cuda"].includes(backend)) throw new Error("Expected worker backend: vulkan or cuda");
+  const { worker } = dictationBuild(backend, inherited);
+  const name = `oxide-${backend}-worker`;
+  return {
+    // Cargo otherwise buffers CMake/nvcc output until the entire native build
+    // finishes, leaving the longest part of packaging silent for many minutes.
+    args: ["build", "--locked", "--release", ...(backend === "cuda" ? ["-vv"] : []), "--manifest-path", `crates/${name}/Cargo.toml`],
+    env: { ...worker.env, GGML_NATIVE: "OFF" },
+    exe: join(worker.env.CARGO_TARGET_DIR, "release", `${name}.exe`),
+  };
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.platform !== "win32") throw new Error("This build entry point requires Windows x64");
-    const build = dictationBuild(process.argv[2]);
+    const build = dictationBuild(process.argv[2], process.argv[2] === "cuda" ? msvcEnv() : process.env);
     for (const command of ["cl.exe", "cmake.exe", "ninja.exe", ...(process.argv[2] === "vulkan" ? ["glslc.exe"] : []), ...(process.argv[2] === "cuda" ? ["nvcc.exe"] : [])]) {
       if (spawnSync("where.exe", [command], { env: build.env }).status !== 0) {
         throw new Error(`Missing ${command}: use an x64 Native Tools prompt; see docs/dictation.md`);

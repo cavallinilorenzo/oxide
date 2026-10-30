@@ -1,0 +1,270 @@
+<!doctype html>
+<!--
+PROTOTYPE, THROWAWAY (wayfinder ticket "How are open files and the file list laid out inside the Files Surface?").
+Question: where do open files live, how do they close, what happens with many open files at 900x560,
+and how does a Diff hunk open in Code?
+Three structurally different variants of the right panel, same fixture, switch with the bottom bar,
+the arrow keys, or ?variant=A|B|C. Open the file directly; no build, no persistence, no backend.
+A = open files as panel tabs (today). B = fixed tool strip; Files shows a bar of open files, list beside it.
+C = fixed tool strip; Files shows an "Open" list above the tree, editor beside it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE: open files in the Files Surface</title>
+<style>
+:root{--bg:#0f1115;--bg2:#151820;--bg3:#1b1f29;--bg4:#232836;--line:#2a3040;--fg:#d7dbe4;--fgb:#f1f4f9;--dim:#a0a8ba;--faint:#8994a9;--acc:#1f6ad5;--acc2:#58a6ff;--green:#4cc38a;--red:#f06a6a;--yellow:#e6b450;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:#06070a;color:var(--fg);font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+button{font:inherit;color:var(--fg);background:#212830;border:1px solid #3d444d;border-radius:6px;padding:3px 9px;cursor:pointer;height:26px}
+button:hover{background:#262c36}button.on{background:var(--bg4);border-color:var(--acc2);color:var(--fgb)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.ghost{background:none;border-color:transparent;padding:2px 6px;height:22px}button.ghost:hover{background:var(--bg3)}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid #1f6feb;outline-offset:-2px}
+#stagewrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+#stage{background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden;display:flex;flex-direction:column;flex:none}
+.hdr{height:40px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--line);flex:none;white-space:nowrap}
+.sp{flex:1}.body{flex:1;display:flex;min-height:0}
+.side{width:44px;flex:none;border-right:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot.working{background:var(--acc2)}.dot.needs{background:var(--yellow)}.dot.done{background:var(--green)}
+.centre{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.centre.squeezed{outline:2px dashed var(--red);outline-offset:-2px}
+.scroll{flex:1;overflow:auto;padding:14px 16px}
+.user{background:var(--bg3);border-radius:10px;padding:8px 12px;margin:0 0 12px auto;width:fit-content;max-width:90%}
+.act{color:var(--faint);font-size:12px;margin:0 0 10px}
+.composer{border-top:1px solid var(--line);padding:8px 12px}.composer div{background:var(--bg2);border:1px solid #3d444d;border-radius:10px;padding:8px 10px;color:var(--faint)}
+.tools{border-left:1px solid var(--line);display:flex;flex-direction:column;flex:none;min-width:0;position:relative}
+.tabs{display:flex;align-items:stretch;height:36px;border-bottom:1px solid var(--line);padding:0 4px;flex:none;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin}
+.tab{padding:0 9px;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center;flex:none}
+.tab:hover{color:var(--fg)}.tab.sel{color:var(--fgb);border-bottom-color:var(--acc2)}
+.tab .x{color:var(--faint);border-radius:4px;padding:0 4px}.tab .x:hover{background:var(--bg4);color:var(--fgb)}
+.tab.pv .n{font-style:italic}.tab.file{border-left:1px solid var(--line)}
+.tab.fixed{max-width:none}
+.pane{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.scrl{overflow:auto;flex:1;min-height:0}
+.bar{display:flex;align-items:stretch;height:32px;border-bottom:1px solid var(--line);background:var(--bg2);flex:none}
+.bar .scr{display:flex;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none}
+.bar .scr::-webkit-scrollbar{display:none}
+.bar .tab{height:32px;font-size:12px;border-right:1px solid var(--line);border-bottom:0;box-shadow:inset 0 -2px 0 transparent}
+.bar .tab.sel{background:var(--bg);box-shadow:inset 0 -2px 0 var(--acc2)}
+.bar .tool{display:flex;align-items:center;padding:0 4px;border-left:1px solid var(--line);gap:2px}
+.dirtyd{width:7px;height:7px;border-radius:50%;background:var(--yellow);display:inline-block}
+.row{display:flex;align-items:center;gap:6px;padding:3px 10px;cursor:pointer;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row:hover{background:var(--bg3)}.row.sel{background:var(--bg4);color:var(--fgb)}.row.isopen{color:var(--fg)}
+.row .x{margin-left:auto;color:var(--faint);padding:0 4px;border-radius:4px}.row .x:hover{background:var(--bg4);color:var(--fgb)}
+.tree .row{padding-left:calc(10px + var(--d,0)*12px)}
+h6{margin:8px 10px 3px;font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.cols{display:flex;flex:1;min-height:0;position:relative}
+.list{width:178px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--bg)}
+.list.over{position:absolute;left:0;top:0;bottom:0;z-index:5;box-shadow:6px 0 18px #000a;width:220px;background:var(--bg2)}
+.ed{font:12px/1.55 var(--mono);padding:6px 0}.ed div{display:flex;white-space:pre}.ed i{width:40px;text-align:right;padding-right:12px;color:#5b6477;font-style:normal;flex:none}.ed .mk{background:#3a2f12;box-shadow:inset 2px 0 var(--yellow)}
+.edh{display:flex;align-items:center;gap:6px;padding:4px 10px;border-bottom:1px solid var(--line);font-size:12px;color:var(--faint);white-space:nowrap;overflow:hidden;flex:none}
+.hunk{font:12px/1.5 var(--mono);margin:6px 0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.hunk div{padding:0 10px;white-space:pre}.hunk .h{background:var(--bg3);color:var(--faint)}.hunk .a{background:#12261c;color:#9be0bd}.hunk .d{background:#2a1517;color:#f3a3a3}
+.badge{font-size:11px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:0 6px}
+.term{background:#0b0d11;font:12px/1.5 var(--mono);padding:8px 12px;flex:1;overflow:auto}
+.menu{position:absolute;right:4px;top:34px;z-index:9;background:var(--bg2);border:1px solid #3d444d;border-radius:8px;box-shadow:0 8px 24px #000a;min-width:200px;padding:4px;max-height:300px;overflow:auto}
+.menu .row{border-radius:5px}
+.sep{border-top:1px solid var(--line);margin:4px 0}
+.faint{color:var(--faint)}.dim{color:var(--dim)}
+.tip{position:absolute;bottom:8px;left:52px;background:#000d;border:1px solid #444;border-radius:6px;padding:8px 12px;font-size:11px;color:#ccc;max-width:46%;z-index:20}
+.log{position:absolute;top:44px;left:52px;background:#000d;border:1px solid #444;border-radius:6px;padding:6px 10px;font:11px/1.4 var(--mono);color:#9fb;max-width:46%;z-index:20;white-space:pre-wrap}
+#bar{height:44px;flex:none;display:flex;align-items:center;justify-content:center;gap:10px;background:#000;border-top:1px solid #333;color:#fff}
+#bar button{background:#fff;color:#000;border-color:#fff;font-weight:600}
+#bar .o button{background:#222;color:#fff;border-color:#555}#bar .o button.on{background:#444;border-color:#fff}
+#judge{position:fixed;top:0;right:0;bottom:44px;width:560px;background:#0c0e13;border-left:1px solid #444;overflow:auto;padding:14px 16px;display:none;z-index:99}
+#judge.open{display:block}#judge table{border-collapse:collapse;width:100%;font-size:12px}#judge td,#judge th{border-bottom:1px solid #222;padding:5px 4px;vertical-align:top;text-align:left}
+.ok{color:var(--green)}.mid{color:var(--yellow)}.no{color:var(--red)}
+</style>
+</head>
+<body>
+<div id="stagewrap"><div id="stage"></div></div>
+<div id="judge"></div>
+<div id="bar">
+  <button id="prev">←</button><span id="vlabel" style="min-width:340px;text-align:center"></span><button id="next">→</button>
+  <span class="o"><button data-size="1440x900">1440×900</button><button data-size="900x560">900×560</button></span>
+  <span class="o"><button id="stress">Open 8 more files</button><button id="reset">Reset</button></span>
+  <span class="o"><button id="jbtn">Scorecard</button></span>
+</div>
+<script>
+// ---------- fixture ----------
+const TREE=[['crates',0,1],['oxide-pty',1,1],['resize.rs',2,0],['lib.rs',2,0],['oxide-provider',1,1],['claude.rs',2,0],['codex.rs',2,0],['catalog.rs',2,0],['route.rs',2,0],['web',0,1],['src',1,1],['App.tsx',2,0],['CodeWorkbench.tsx',2,0],['FilesPanel.tsx',2,0],['DiffPanel.tsx',2,0],['EditorFileTree.tsx',2,0],['BoardView.tsx',2,0],['GLOSSARY.md',0,0],['PRODUCT.md',0,0]];
+const ALLFILES=TREE.filter(t=>!t[2]).map(t=>t[0]);
+const CODE=`pub fn apply_resize(pty: &mut Pty, grid: &mut Grid, rows: u16, cols: u16) {
+    // size first: rewrap counts wrapped rows from the new width
+    pty.resize(rows, cols)?;
+    rewrap(grid, cols);
+    grid.clamp_cursor();
+}
+
+pub fn build_catalog(init: &Initialize) -> Catalog {
+    let mut entries = Vec::new();
+    for cmd in &init.commands {
+        entries.push(Entry {
+            name: cmd.name.clone(),
+            route: route_for(cmd),
+        });
+    }
+    entries.extend(oxide_commands());
+    Catalog { entries }
+}
+
+fn route_for(cmd: &Command) -> Route {
+    match cmd.kind {
+        Kind::Native => Route::Native,
+        Kind::Prompt => Route::Passthrough,
+        _ => Route::Hidden,
+    }
+}`.split('\n');
+const HUNKS=[{f:'resize.rs',l:[1,4],h:'@@ -41,9 +41,12 @@ fn apply_resize'},{f:'claude.rs',l:[7,15],h:'@@ -12,4 +12,9 @@ fn build_catalog'},{f:'resize.rs',l:[18,24],h:'@@ -90,3 +90,7 @@ fn route_for'}];
+
+const fresh=()=>({v:'A',size:'1440x900',tool:'files',max:false,tree:true,menu:false,
+ files:[{n:'resize.rs',pin:true,dirty:true},{n:'claude.rs',pin:true},{n:'catalog.rs',pin:true},{n:'App.tsx',pin:true},{n:'lib.rs',pin:true},{n:'codex.rs',pin:false}],
+ cur:'codex.rs',hl:null,back:null,log:'',confirm:null});
+let S=fresh(); S.v=(new URLSearchParams(location.search).get('variant')||'A').toUpperCase();
+const small=()=>S.size==='900x560';
+const log=m=>S.log=m;
+
+// ---------- file ops (shared state model, per-variant presentation) ----------
+function openFile(n,{pin=false,hl=null,from=null}={}){
+ let f=S.files.find(x=>x.n===n);
+ if(!f){ // a single click opens a preview that replaces the previous preview (B, C only)
+  if(S.v!=='A'&&!pin){const pi=S.files.findIndex(x=>!x.pin&&!x.dirty);if(pi>=0)S.files.splice(pi,1,{n,pin:false});else S.files.push({n,pin:false})}
+  else S.files.push({n,pin:S.v==='A'||pin});
+ }else if(pin)f.pin=true;
+ S.cur=n;S.hl=hl;S.back=from;S.tool='files';S.menu=false;
+}
+function closeFile(n,force){
+ const f=S.files.find(x=>x.n===n);if(!f)return;
+ if(f.dirty&&!force){S.confirm=n;log(`“${n}” has unsaved changes → confirm: Save / Discard / Cancel`);return}
+ const i=S.files.indexOf(f);S.files.splice(i,1);S.confirm=null;
+ if(S.cur===n){const nx=S.files[i]||S.files[i-1];S.cur=nx?nx.n:null;S.hl=null;S.back=null}
+ log(`closed ${n} → ${S.cur?'now showing '+S.cur:'no file open: '+(S.v==='A'?'panel falls back to the previous tool tab':'Files shows only the list')}`);
+ if(S.v==='A'&&!S.cur&&S.tool==='files')S.tool='diff';
+}
+const edTitle=n=>n;
+
+// ---------- pieces ----------
+const toolTabs=[['diff','± Diff'],['files','▤ Files'],['term','▭ Terminal'],['pr','⑃ Pull request'],['issues','◎ Issues']];
+const toolStrip=()=>`<div class="tabs" role="tablist">${toolTabs.map(([k,l])=>`<div class="tab fixed ${S.tool===k?'sel':''}" role="tab" tabindex="0" data-a="tool" data-k="${k}">${l}</div>`).join('')}<span class="sp"></span><button class="ghost" data-a="max" title="Maximize panel">${S.max?'⤡':'⤢'}</button></div>`;
+const editor=(withBack)=>{
+ const f=S.files.find(x=>x.n===S.cur);if(!f)return`<div class="scrl" style="display:grid;place-items:center;color:var(--faint);text-align:center;padding:20px">No file open.<br>Pick one from the list.</div>`;
+ const hl=S.hl;
+ return`<div class="edh">${S.back&&withBack?`<button class="ghost" data-a="backdiff" title="Back to the Diff hunk">← Diff</button>`:''}<span style="overflow:hidden;text-overflow:ellipsis">${f.n}</span><span class="badge">${f.n.endsWith('.rs')?'Rust':f.n.endsWith('.md')?'Markdown':'TSX'}</span>${f.dirty?'<span class="dirtyd" title="Unsaved"></span>':''}${!f.pin?'<span class="badge" title="Preview: the next click replaces it. Double-click or edit to keep.">preview</span>':''}</div>
+ <div class="scrl ed">${CODE.map((l,i)=>`<div class="${hl&&i>=hl[0]&&i<=hl[1]?'mk':''}"><i>${i+1}</i>${l.replace(/</g,'&lt;')}</div>`).join('')}</div>`;
+};
+const treeRows=()=>TREE.map(([n,d,dir])=>`<div class="row ${dir?'':S.files.some(f=>f.n===n)?'isopen':''} ${S.cur===n?'sel':''}" style="--d:${d}" data-a="${dir?'noop':'tree'}" data-n="${n}" title="${n}">${dir?'▾ ':'· '}${n}</div>`).join('');
+const diffView=()=>`<div class="scrl" style="padding:8px 12px"><div class="faint" style="margin-bottom:6px">Turn · 2 files <span class="badge">+9 −5</span></div>
+ ${HUNKS.map((h,i)=>`<div class="faint" style="display:flex;align-items:center;gap:6px;margin-top:6px"><span>${h.f}</span><span class="sp"></span><button class="ghost" data-a="hunk" data-i="${i}" title="Open this hunk in Code">Open in Code ↗</button></div><div class="hunk"><div class="h">${h.h}</div><div class="d">-    rewrap(&amp;mut grid, cols);</div><div class="a">+    pty.resize(rows, cols)?;</div><div class="a">+    // size first</div></div>`).join('')}</div>`;
+const termView=()=>`<div class="term"><div class="faint" style="margin-bottom:6px">Terminal · oxide (main)</div><div style="color:var(--acc2)">❯ cargo nextest run -p oxide-pty</div><div>   Summary 14 run: 13 passed, 1 failed</div></div>`;
+const other=k=>k==='diff'?diffView():k==='term'?termView():k==='pr'?`<div style="padding:12px"><b>#271 Window skeleton</b><div class="faint">Open · 2 checks passing</div></div>`:`<div style="padding:12px" class="faint">Issues…</div>`;
+const nOpen=()=>S.files.length;
+const menu=(extra)=>S.menu?`<div class="menu">${S.files.map(f=>`<div class="row ${S.cur===f.n?'sel':''}" data-a="cur" data-n="${f.n}">${f.dirty?'<span class="dirtyd"></span>':''}<span style="${f.pin?'':'font-style:italic'}">${f.n}</span><span class="x" data-a="close" data-n="${f.n}">✕</span></div>`).join('')}<div class="sep"></div><div class="row" data-a="closeothers">Close others</div><div class="row" data-a="closeall">Close all</div></div>`:'';
+const confirmBox=()=>S.confirm?`<div style="position:absolute;inset:0;background:#0009;display:grid;place-items:center;z-index:30"><div style="background:var(--bg2);border:1px solid #3d444d;border-radius:10px;padding:14px;max-width:300px"><b>Save changes to ${S.confirm}?</b><div style="margin-top:10px;display:flex;gap:6px"><button class="primary" data-a="forceclose" data-n="${S.confirm}">Save</button><button data-a="forceclose" data-n="${S.confirm}">Discard</button><button data-a="cancelc">Cancel</button></div></div></div>`:'';
+
+// ---------- panel per variant ----------
+function panelA(){
+ const f=S.tool==='files'&&S.cur;
+ let body;
+ if(S.tool==='files'&&!S.cur)body=`<div class="scrl tree">${treeRows()}</div>`;
+ else if(S.tool==='files')body=editor(true);
+ else body=other(S.tool);
+ // in A the Files tab is the plain tree; file tabs sit in the same strip
+ return `<div role="tablist" class="tabs">${toolTabs.map(([k,l])=>`<div class="tab fixed ${S.tool===k&&!(k==='files'&&S.cur&&S.tool==='files')?'sel':''}" role="tab" tabindex="0" data-a="tool" data-k="${k}" ${k==='files'?'data-tree="1"':''}>${l}</div>`).join('')}${S.files.map(x=>`<div class="tab file ${S.tool==='files'&&S.cur===x.n?'sel':''}" role="tab" data-a="cur" data-n="${x.n}" title="${x.n}"><span class="n">${x.n}</span>${x.dirty?'<span class="dirtyd"></span>':''}<span class="x" data-a="close" data-n="${x.n}">✕</span></div>`).join('')}<span class="sp"></span><button class="ghost" data-a="max">${S.max?'⤡':'⤢'}</button></div>
+ <div class="pane">${body}${S.tool==='files'&&S.cur?'':''}</div>`;
+}
+function treeOverlay(cls,inner){return`<div class="list ${cls}">${inner}</div>`}
+function panelB(){
+ let body;
+ if(S.tool!=='files')body=other(S.tool);
+ else{
+  const showTree=S.tree, over=small()&&S.tree;
+  const bar=`<div class="bar"><div class="tool"><button class="ghost ${S.tree?'on':''}" data-a="tree" title="Show file list">▤</button></div>
+   <div class="scr" role="tablist">${S.files.length?S.files.map(x=>`<div class="tab ${S.cur===x.n?'sel':''} ${x.pin?'':'pv'}" role="tab" tabindex="0" data-a="cur" data-n="${x.n}" title="${x.n}"><span class="n">${x.n}</span>${x.dirty?'<span class="dirtyd"></span>':''}<span class="x" data-a="close" data-n="${x.n}">✕</span></div>`).join(''):'<span class="faint" style="padding:7px 10px">No open files</span>'}</div>
+   <div class="tool"><button class="ghost" data-a="menu" title="All open files">▾ ${nOpen()}</button></div></div>`;
+  const list=`<div class="list ${over?'over':''}"><h6>oxide</h6><div class="scrl tree">${treeRows()}</div></div>`;
+  body=`${bar}<div class="cols">${showTree?list:''}<div class="pane" style="flex:1;min-width:0">${editor(true)}</div></div>${menu()}`;
+ }
+ return toolStrip()+`<div class="pane">${body}</div>`;
+}
+function panelC(){
+ let body;
+ if(S.tool!=='files')body=other(S.tool);
+ else{
+  const over=small()&&S.tree;
+  const openList=`<h6>Open (${nOpen()})</h6><div style="max-height:34%;overflow:auto;flex:none">${S.files.map(x=>`<div class="row ${S.cur===x.n?'sel':''}" data-a="cur" data-n="${x.n}" title="${x.n}">${x.dirty?'<span class="dirtyd"></span>':''}<span style="${x.pin?'':'font-style:italic'}">${x.n}</span><span class="x" data-a="close" data-n="${x.n}">✕</span></div>`).join('')||'<div class="faint" style="padding:3px 10px">None</div>'}</div><div class="sep"></div><h6>oxide</h6><div class="scrl tree">${treeRows()}</div>`;
+  const list=`<div class="list ${over?'over':''}">${openList}</div>`;
+  body=`<div class="cols">${S.tree?list:''}<div class="pane" style="flex:1;min-width:0"><div class="bar" style="height:28px"><div class="tool"><button class="ghost ${S.tree?'on':''}" data-a="tree" title="Show file list">▤</button></div><span class="faint" style="padding:5px 8px">${S.cur||'—'}</span></div>${editor(true)}</div></div>`;
+ }
+ return toolStrip()+`<div class="pane">${body}</div>`;
+}
+
+// ---------- shell ----------
+function render(){
+ const [w,h]=S.size.split('x').map(Number),st=document.getElementById('stage');
+ st.style.width=w+'px';st.style.height=h+'px';
+ const k=Math.min(1,(innerWidth-8)/w,(innerHeight-52)/h);st.style.transform=`scale(${k})`;st.style.margin=`${-(h*(1-k))/2}px ${-(w*(1-k))/2}px`;
+ const pw=S.max?w-44:(small()?420:560), cw=w-44-(S.max?pw:pw);
+ const panel=({A:panelA,B:panelB,C:panelC})[S.v]();
+ const opens=S.files.map(f=>(S.cur===f.n?'▸':'')+f.n+(f.pin?'':'~')+(f.dirty?'*':'')).join('  ');
+ st.innerHTML=`<div class="hdr"><b>oxide</b><span class="dim">⑂ main ▾</span><span class="sp"></span><button class="primary">Commit &amp; Push ▾</button><button class="on" title="Right panel">▥</button></div>
+ <div class="body"><div class="side"><span class="dot working"></span><span class="dot needs"></span><span class="dot done"></span></div>
+ ${S.max?'':`<div class="centre ${cw<300?'squeezed':''}"><div class="scroll"><div class="user">Fix the terminal resize bug</div><div class="act">▸ Explored 4 files · Edited 2 files</div><div>I changed the order in <code>resize.rs</code>…</div><div class="faint" style="margin-top:10px">centre ${cw}px</div></div><div class="composer"><div>Reply…</div></div></div>`}
+ <div class="tools" style="width:${S.max?'auto':pw+'px'};flex:${S.max?1:'none'}">${panel}${confirmBox()}</div></div>
+ <div class="log">open: ${opens||'—'}\ntool: ${S.tool} · panel ${S.max?'maximized':pw+'px'}${S.log?'\n'+S.log:''}</div>
+ <div class="tip">${({A:'A · today: each opened file is a tab in the panel’s tool strip. Count the tabs at 900×560 after “Open 8 more files”.',B:'B · fixed tool strip. Files = a bar of open files on top, file list beside the editor (▤ toggles it; an overlay at 900×560). Click = preview (italic), double-click = keep. ▾ lists all open files.',C:'C · fixed tool strip. Files = an “Open” list above the tree, editor beside. No bar; the list is the only place to see or close open files.'})[S.v]}</div>`;
+ document.getElementById('vlabel').textContent={A:'A · Open files as panel tabs (today)',B:'B · Bar of open files inside Files, list beside',C:'C · Open list above the tree'}[S.v];
+ document.querySelectorAll('[data-size]').forEach(b=>b.classList.toggle('on',b.dataset.size===S.size));
+ document.getElementById('judge').innerHTML=judge();
+ history.replaceState(null,'','?variant='+S.v);
+ const sel=st.querySelector('.bar .tab.sel,.tabs .tab.file.sel');if(sel)sel.scrollIntoView({block:'nearest',inline:'nearest'});
+}
+
+// ---------- scorecard ----------
+const SC=[
+ ['Where open files live','no','Mixed into the tool strip, so the strip is no longer “one tab per tool”','ok','A bar inside Files; strip stays 5 tabs','mid','A list inside Files; no bar'],
+ ['Principle 4: one stable home','no','Files is two places: the tree tab and N file tabs','ok','Files owns tree and open files','ok','Files owns both'],
+ ['Closing','ok','✕ on tab; closing last returns to previous tool','ok','✕ on tab, ▾ menu: close others/all; closing selects the neighbour; dirty asks','mid','✕ on row; no close-others unless added'],
+ ['Many files at 900×560','no','Tabs scroll off past Pull request; strip hides Issues','ok','Bar scrolls, active scrolled into view, ▾ N lists all; previews cap growth','mid','Open list grows and squeezes the tree (capped at 34% height, then scrolls)'],
+ ['Tree vs editor width at 900×560','no','Tree is a separate tab; no side-by-side','mid','Tree is an overlay (▤); editor keeps full width','mid','Same overlay, but it carries both lists'],
+ ['Diff hunk → Code','mid','New file tab; Diff tab stays, back is a tab click','ok','Hunk selects/opens the file in Files, highlights lines, “← Diff” returns','ok','Same as B'],
+ ['Keyboard','mid','Tabs arrow-navigable','ok','Bar is one tablist (←/→, Delete closes), tree is a separate tab stop','mid','Open list is a listbox; fine but no tablist semantics'],
+ ['Matches the Window skeleton','no','Panel tabs vs tool = file','ok','Dock stays Surfaces; files are inside the Files Surface','ok','Same']];
+function judge(){return`<h3 style="margin:0 0 8px;color:#fff">Judged on the ticket’s four questions</h3><table><tr><th></th><th>A today</th><th>B bar + list</th><th>C list above tree</th></tr>${SC.map(r=>`<tr><td>${r[0]}</td>${[1,3,5].map(i=>`<td class="${r[i]}">${{ok:'✔',mid:'◐',no:'✘'}[r[i]]} ${r[i+1]}</td>`).join('')}</tr>`).join('')}</table>
+<h3 style="color:#fff;margin:16px 0 6px">Recommendation: B</h3><div class="dim">The tool strip stays one tab per tool. Files shows a bar of open files (scrolling, ▾ N list, ✕, middle-click closes) with the file list beside the editor; at 900×560 the list is an overlay toggled by ▤. A click on a file opens a preview that the next click replaces; double-click or an edit keeps it. “Open in Code” on a Diff hunk selects Files, opens the file at the hunk and offers “← Diff”. Closing the active file selects its neighbour; closing the last leaves the list.</div>`}
+
+// ---------- events ----------
+document.addEventListener('click',e=>{
+ const el=e.target.closest('[data-a]');
+ if(!el){if(S.menu){S.menu=false;render()}return}
+ const d=el.dataset,a=d.a;e.stopPropagation();
+ if(a==='tool'){S.tool=d.k;S.menu=false;if(S.v==='A'&&d.k==='files'&&d.tree){S.cur=null}}
+ else if(a==='cur'){S.cur=d.n;S.tool='files';S.menu=false;S.hl=null;S.back=null}
+ else if(a==='tree'&&!(S.v==='A')&&d.n){openFile(d.n)}
+ else if(a==='tree'){if(d.n)openFile(d.n); else S.tree=!S.tree}
+ else if(a==='close')closeFile(d.n);
+ else if(a==='forceclose')closeFile(d.n,true);
+ else if(a==='cancelc')S.confirm=null;
+ else if(a==='menu')S.menu=!S.menu;
+ else if(a==='closeothers'){S.files=S.files.filter(f=>f.n===S.cur);S.menu=false;log('closed others')}
+ else if(a==='closeall'){S.files=[];S.cur=null;S.menu=false;log('closed all')}
+ else if(a==='max')S.max=!S.max;
+ else if(a==='hunk'){const h=HUNKS[+d.i];openFile(h.f,{pin:false,hl:h.l,from:'diff'});log(`hunk ${h.h} → opened ${h.f} at lines ${h.l[0]+1}–${h.l[1]+1}${S.v==='A'?' in a new tab':' in Files'}`)}
+ else if(a==='backdiff'){S.tool='diff';S.back=null}
+ render();
+});
+// tree button in the toolbar and tree rows share data-a="tree": the toolbar one has no data-n
+document.addEventListener('dblclick',e=>{const el=e.target.closest('[data-n]');if(el&&S.v!=='A'){const f=S.files.find(x=>x.n===el.dataset.n);if(f){f.pin=true;render()}}});
+document.addEventListener('auxclick',e=>{const el=e.target.closest('[data-n]');if(el&&e.button===1){closeFile(el.dataset.n);render()}});
+const go=n=>{S.v='ABC'[('ABC'.indexOf(S.v)+n+3)%3];render()};
+prev.onclick=()=>go(-1);next.onclick=()=>go(1);
+jbtn.onclick=()=>document.getElementById('judge').classList.toggle('open');
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{S.size=b.dataset.size;S.tree=!small();render()});
+stress.onclick=()=>{ALLFILES.filter(n=>!S.files.some(f=>f.n===n)).slice(0,8).forEach(n=>S.files.push({n,pin:true}));render()};
+reset.onclick=()=>{const v=S.v,z=S.size;S=fresh();S.v=v;S.size=z;S.tree=!small();render()};
+addEventListener('keydown',e=>{if(/INPUT|TEXTAREA/.test(e.target.tagName))return;if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1)});
+addEventListener('resize',render);
+render();
+</script>
+</body>
+</html>

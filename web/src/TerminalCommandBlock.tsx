@@ -1,15 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  HistoryIcon,
-  ClockIcon,
-  FileDirectoryIcon,
-} from "@primer/octicons-react";
 import { terminalAppearance } from "./appearance";
 
 export interface TerminalBlock {
@@ -17,7 +8,6 @@ export interface TerminalBlock {
   command: string;
   output: string;
   outputOffset: number;
-  cwd: string;
   at: number;
   completedAt?: number;
   exitCode: number | null;
@@ -34,7 +24,6 @@ interface Props {
   onReady: (rows: number, cols: number) => void;
   onResize: (rows: number, cols: number) => void;
   onScreen: (fullscreen: boolean) => void;
-  onReuse: () => void;
 }
 
 /** The PTY has a stable viewport. Output can change its clipping, never its live geometry. */
@@ -45,16 +34,8 @@ export function TerminalCommandBlock(props: Props) {
   const callbacks = useRef(props);
   const written = useRef(0);
   const fitSurface = useRef<() => void>(() => {});
-  const [expanded, setExpanded] = useState(true);
   const [screen, setScreen] = useState(false);
   const [height, setHeight] = useState(16);
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 100);
-    return () => window.clearInterval(timer);
-  }, [active]);
-  const elapsed = Math.max(0, (block.completedAt ?? now) - block.at);
   useLayoutEffect(() => {
     callbacks.current = props;
   });
@@ -192,92 +173,72 @@ export function TerminalCommandBlock(props: Props) {
     onScreen(active && screen);
   }, [active, screen, onScreen]);
   useEffect(() => {
-    if (!visible || !expanded) return;
+    if (!visible) return;
     fitSurface.current();
     if (active) terminal.current?.focus();
     else terminal.current?.blur();
-  }, [visible, expanded, active]);
+  }, [visible, active]);
   return (
     <section
       className={`terminal-command-block${active ? " running" : ""}${active && screen ? " fullscreen" : ""}`}
       aria-label={`Command: ${block.command}`}
     >
-      <div className="terminal-block-meta"><span title={block.cwd}><FileDirectoryIcon size={12} /> {block.cwd}</span></div>
       <header>
         <code>{block.command}</code>
         <span className="grow" />
-        <button
-          className="icon-btn sm"
-          aria-label={expanded ? "Collapse output" : "Expand output"}
-          disabled={active}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? (
-            <ChevronDownIcon size={14} />
-          ) : (
-            <ChevronRightIcon size={14} />
-          )}
-        </button>
-        <span className="block-duration" aria-label={`Command duration: ${formatDuration(elapsed)}`}><ClockIcon size={12} /> {formatDuration(elapsed)}</span>
-        <span className={`block-exit${block.exitCode ? " error" : ""}`}>
-          {active ? (
-            "Running"
-          ) : block.exitCode === 0 ? (
-            <>
-              <CheckIcon size={12} /> Done
-            </>
-          ) : block.exitCode === null ? (
-            "Shell exited"
-          ) : (
-            `Exit ${block.exitCode}`
-          )}
-        </span>
-        <button
-          className="icon-btn sm"
-          aria-label="Reuse command"
-          onClick={props.onReuse}
-        >
-          <HistoryIcon size={13} />
-        </button>
-        <button
-          className="icon-btn sm"
-          aria-label="Copy command output"
-          onClick={() => {
-            const t = terminal.current;
-            if (t)
-              void navigator.clipboard.writeText(
-                Array.from(
-                  { length: t.buffer.active.length },
-                  (_, i) =>
-                    t.buffer.active.getLine(i)?.translateToString(true) ?? "",
-                )
-                  .join("\n")
-                  .trimEnd(),
-              );
-          }}
-        >
-          <CopyIcon size={13} />
-        </button>
+        <BlockStatus block={block} running={active} />
       </header>
       {block.truncated && (
         <p className="terminal-truncated">
           Showing the last 256 KiB of output.
         </p>
       )}
-      <div
-        className="terminal-output-clip"
-        hidden={!expanded}
-        style={{ height }}
-      >
+      <div className="terminal-output-clip" style={{ height }}>
         <div className="terminal-block-output" ref={host} />
       </div>
     </section>
   );
 }
 
+/** One status at the right of the header: a spinner while running, then how long it took. */
+function BlockStatus({ block, running }: { block: TerminalBlock; running: boolean }) {
+  // One live region per block: the spinner is mounted with it, so only the outcome is announced.
+  return (
+    <span className={`terminal-block-status${!running && block.exitCode !== 0 ? " error" : ""}`} role="status">
+      {running ? (
+        <span className="terminal-block-spinner" role="img" aria-label="Running" />
+      ) : (
+        <BlockOutcome block={block} />
+      )}
+    </span>
+  );
+}
+
+function BlockOutcome({ block }: { block: TerminalBlock }) {
+  const duration = formatDuration(Math.max(0, (block.completedAt ?? block.at) - block.at));
+  let visibleText = duration;
+  let spokenText = `Command duration: ${duration}`;
+  if (block.exitCode === null) {
+    visibleText = `shell exited · ${duration}`;
+    spokenText = `Shell exited after ${duration}`;
+  } else if (block.exitCode !== 0) {
+    visibleText = `exit ${block.exitCode} · ${duration}`;
+    spokenText = `Exit ${block.exitCode} after ${duration}`;
+  }
+  return (
+    <>
+      <span aria-hidden="true">{visibleText}</span>
+      <span className="sr-only">{spokenText}</span>
+    </>
+  );
+}
+
+/** Rounds to the shown precision before picking the unit, so 59.999 s reads 1m 0.0s, not 60.00 s. */
 export function formatDuration(milliseconds: number): string {
-  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
-  const seconds = milliseconds / 1000;
-  if (seconds < 60) return `${seconds.toFixed(2)} s`;
-  return `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(1)}s`;
+  const ms = Math.round(milliseconds);
+  if (ms < 1000) return `${ms} ms`;
+  const hundredths = Math.round(milliseconds / 10);
+  if (hundredths < 6000) return `${(hundredths / 100).toFixed(2)} s`;
+  const tenths = Math.round(milliseconds / 100);
+  return `${Math.floor(tenths / 600)}m ${((tenths % 600) / 10).toFixed(1)}s`;
 }

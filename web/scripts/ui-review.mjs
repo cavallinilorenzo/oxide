@@ -40,7 +40,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
       { ...base, id: 4, title: "Investigate provider connection", status: "error" },
     ];
     const provider = { model: null, effort: null, permissionMode: "auto-edit" };
-    const settings = { shortcuts: {"dictation": "Mod+Shift+R", "newThread": "Mod+N", "openProject": "Mod+Shift+N", "modelPicker": "Mod+Shift+M", "pullRequests": "Mod+Shift+P", "issues": "Mod+Shift+I", "terminal": "Mod+Shift+T", "files": "Mod+Shift+F", "diff": "Mod+Shift+D", "previousThread": "Mod+ArrowUp", "nextThread": "Mod+ArrowDown", "closeThread": "Mod+Shift+W", "toggleTools": "Mod+\\", "toggleBoard": "Mod+B", "openSettings": "Mod+,"}, defaultProvider: "claude", confirmQuit: true, editor: "", claudeCustomizations: {
+    const settings = { shortcuts: {"dictation": "Mod+Shift+R", "newThread": "Mod+N", "openProject": "Mod+Shift+N", "modelPicker": "Mod+Shift+M", "pullRequests": "Mod+Shift+P", "issues": "Mod+Shift+I", "terminal": "Mod+Shift+T", "files": "Mod+Shift+F", "diff": "Mod+Shift+D", "previousThread": "Mod+ArrowUp", "nextThread": "Mod+ArrowDown", "closeThread": "Mod+Shift+W", "toggleTools": "Mod+\\", "toggleBoard": "Mod+B", "openSettings": "Mod+,"}, defaultProvider: "claude", confirmQuit: true, claudeCustomizations: {
       claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false,
     }, providers: { claude: provider, codex: provider, antigravity: provider } };
     const caps = { supportedPermissionModes: ["ask", "auto-edit", "full-access"], interactiveApprovals: true, supportsReasoning: true, imageAttachments: true, midThreadModelSwitch: true };
@@ -84,7 +84,6 @@ export async function openReview(engine = "chromium", scenario = "completed", in
         if (command === "detect_provider") return { available: true, installed: true, authenticated: true, version: "2.0", warning: null };
         if (command === "get_model_catalog") return [{ id: "claude-sonnet-4-6", name: "Sonnet", supportedEfforts: ["low", "medium", "high"] }];
         if (command === "get_favourite_models") return [];
-        if (command === "detected_editors") return [{ bundleId: "com.microsoft.VSCode", name: "Visual Studio Code" }];
         if (command === "get_project_setup_command") return null;
         if (command === "git_status") return { branch: "fix/desktop-ui-consistency", upstream: "origin/main", ahead: 0, behind: 0, added: 42, removed: 12, changedFiles: 4, pickerDisabledReason: null, protected: false, unpublished: false };
         if (command === "fetch_project") return false;

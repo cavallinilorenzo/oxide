@@ -15,7 +15,9 @@ advice using local measurements. See [performance checks and smoke evidence](dic
 for bounds, cancellation, cache invalidation and troubleshooting. Use **Check performance** in Settings to see loading, warmup and three measured
 runs, cancel, or read cold-load/median/RTF results. A check never changes Settings.
 Choose CPU or an explicit available backend/adapter for an unambiguous check.
-CUDA/Metal checks currently report unavailable dispatch evidence (follow-up #258).
+CUDA/Metal checks require completed native GPU graph dispatch counters for warmup
+and all three measured runs. See the [instrumentation ABI/build notes](../crates/oxide-core/native/README.md).
+Physical CUDA/Metal measurement sign-off remains with #235.
 
 In Settings, explicitly download a model (the existing Small cache is reused), enable dictation, choose a language
 (`auto`, `it`, `en`, or another Whisper language code), and save. Existing CPU/GPU and language settings are preserved, with Small for legacy settings.
@@ -459,3 +461,19 @@ Settings afterward. Advice never starts downloads or enables dictation.
 
 Automated Settings/keyboard/layout evidence and the remaining single release-validation
 pass are recorded in [the #233 evidence](ui-review/dictation/issue-233.md).
+
+### CUDA/Metal performance instrumentation (#258)
+
+The benchmark child observes the actual native GPU stream's graph-compute callback,
+waits for completion, then records matrix-bearing graph dispatches and device
+identity. Loading/initialization/allocation logs never qualify. The typed result
+and cache require matching evidence in warmup and every measured run. CPU/Vulkan
+retain their existing paths; failed checks release the dictation gate.
+
+The shim compiles with the existing C++ build tools and adds no GPU imports to
+CPU-only builds. It pins whisper-rs-sys 0.15.0 / whisper.cpp 1.8.3 / ggml ABI 2;
+headers, retained MIT notice, source hashes and upgrade instructions are in the
+[native build notes](../crates/oxide-core/native/README.md). No new redistributable
+GPU dependency is introduced. Physical measurements were unavailable in this
+environment (no installed model or CUDA Toolkit); #235 owns the final hardware
+validation, alongside cancellation/failure recovery and packaged runtime checks.

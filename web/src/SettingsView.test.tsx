@@ -17,7 +17,7 @@ afterEach(async () => { await act(async () => root.render(null)); clearMocks(); 
 it("offers supported defaults and saves appearance, dictation and each Provider independently", async () => {
   const settings: Settings = {
     dictation: { enabled: false, language: "auto", device: "cpu", model: "small" },
-    defaultProvider: "claude", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS, claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
+    defaultProvider: "claude", confirmQuit: true, shortcuts: DEFAULT_SHORTCUTS, claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },
       codex: { model: null, effort: null, permissionMode: "auto-edit" },
@@ -30,7 +30,7 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
   mockIPC((command, args) => {
     if (command === "get_settings") return { settings, errors: [] };
     if (command === "save_settings") { saved = (args as { settings: Settings }).settings; return pendingSave; }
-    if (command === "detected_editors" || command === "get_model_catalog") return [];
+    if (command === "get_model_catalog") return [];
     if (command === "detect_provider") return { installed: false, authenticated: false, available: false };
     if (command === "plugin:event|listen") return 1;
     if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;
@@ -38,6 +38,8 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
   });
   await act(async () => root.render(<SettingsView onClose={() => {}} />));
   expect(container.querySelector('nav[aria-label="Settings sections"] a[href="#settings-dictation"]')?.textContent).toBe("Dictation");
+  expect(container.querySelector('[aria-label^="Default Provider:"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("Open in editor");
   const dictation = container.querySelector<HTMLInputElement>('[aria-labelledby="settings-dictation"] input[type="checkbox"]')!;
   act(() => dictation.click());
   const modeButton = (provider: string) => container.querySelector<HTMLButtonElement>(`button[aria-label^="${provider} Permission mode:"]`)!;
@@ -83,7 +85,7 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
 it("groups model effort variants while keeping the saved effort selectable", async () => {
   const settings: Settings = {
     dictation: { enabled: false, language: "auto", device: "cpu", model: "small" },
-    defaultProvider: "antigravity", confirmQuit: true, editor: "", shortcuts: DEFAULT_SHORTCUTS,
+    defaultProvider: "antigravity", confirmQuit: true, shortcuts: DEFAULT_SHORTCUTS,
     claudeCustomizations: { claudeMd: false, skills: false, plugins: false, mcpServers: false, hooks: false },
     providers: {
       claude: { model: null, effort: null, permissionMode: "ask" },
@@ -101,7 +103,6 @@ it("groups model effort variants while keeping the saved effort selectable", asy
     if (command === "get_settings") return { settings, errors: [] };
     if (command === "save_settings") { saved = (args as { settings: Settings }).settings; return null; }
     if (command === "get_model_catalog") return (args as { provider: string }).provider === "antigravity" ? variants : [];
-    if (command === "detected_editors") return [];
     if (command === "detect_provider") return { installed: false, authenticated: false, available: false };
     if (command === "plugin:event|listen") return 1;
     if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;

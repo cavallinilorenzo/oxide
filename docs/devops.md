@@ -69,6 +69,12 @@ In the tables, **Blocking** means a red job turns `gate` red. Every job below bl
 
 The local runner is `node tools/check.mjs` (everything the PR lanes run on this OS) or `node tools/check.mjs fast` (rustfmt, ESLint, TypeScript). Where a job has no individual command, the entry says so.
 
+Local compilation reuses a persistent Cargo target across runs, with incremental
+development builds and no debug information. It warns above 12 GiB; an explicit
+`OXIDE_BUILD_BUDGET_GIB` enforces a hard limit. See CONTRIBUTING's "Local build
+disk usage" for cache maintenance and output locations. CI keeps its existing
+`CARGO_INCREMENTAL=0` setting and release builds keep their existing profiles.
+
 ### `changes`
 
 - **What:** lists the PR's changed files through the API and calls `lanesFor`, which decides which lanes run.

@@ -8,14 +8,12 @@ import { SETTINGS_SECTIONS, useSettingsSection } from "./useSettingsSection";
 import { getAppearance, saveAppearance, validateAppearance } from "./appearance";
 import { Skeleton } from "./Skeleton";
 import { listen } from "@tauri-apps/api/event";
-import { EditorMark } from "./EditorMark";
 import { ProviderMark } from "./ProviderMark";
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import {
   commands,
   type Detection,
-  type Editor,
   type ModelInfo,
   type SettingsState,
   type Settings_Deserialize as Settings,
@@ -63,7 +61,6 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
   const [claudeDetection, setClaudeDetection] = useState<Detection | null>(
     null,
   );
-  const [editors, setEditors] = useState<Editor[]>([]);
   const [catalogs, setCatalogs] = useState<Partial<Record<Provider, ModelInfo[]>>>({});
   const scroller = useRef<HTMLElement>(null);
   const activeSection = useSettingsSection(scroller, state !== null && draft !== null);
@@ -80,9 +77,6 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       if (res.status === "ok") {
         setClaudeDetection(res.data);
       }
-    });
-    commands.detectedEditors().then((res) => {
-      if (res.status === "ok") setEditors(res.data);
     });
     let active = true;
     for (const provider of PROVIDERS) {
@@ -193,17 +187,6 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
                 options={PROVIDERS.map((p) => ({ value: p.id, label: p.label, icon: <ProviderMark provider={p.id} /> }))}
                 onChange={(defaultProvider) => set({ defaultProvider })} />
               {fieldErrors("defaultProvider")}
-            </div>
-
-            <div className="settings-field">
-              <span>Editor for "Open in editor"</span>
-              <Dropdown label="Editor for Open in editor" value={draft.editor}
-                options={withSavedValue([
-                  { value: "", label: "First detected editor", icon: <EditorMark bundleId="" /> },
-                  ...editors.map((editor) => ({ value: editor.bundleId, label: editor.name, icon: <EditorMark bundleId={editor.bundleId} /> })),
-                ], draft.editor)}
-                onChange={(editor) => set({ editor })} />
-              {fieldErrors("editor")}
             </div>
           </div>
           <label className="inline">

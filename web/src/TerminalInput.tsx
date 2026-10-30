@@ -27,9 +27,12 @@ interface Props {
   ref: Ref<TerminalInputHandle>;
   history: CommandHistory[];
   sessionId: number | null;
+  /** Where shell completion resolves paths. */
   cwd: string;
   disabled: boolean;
   visible: boolean;
+  /** No Command has run yet: show the shortcut hint. */
+  fresh: boolean;
   onRun: (command: string) => void;
 }
 export function TerminalInput({
@@ -39,6 +42,7 @@ export function TerminalInput({
   cwd,
   disabled,
   visible,
+  fresh,
   onRun,
 }: Props) {
   const [input, setInput] = useState("");
@@ -108,7 +112,10 @@ export function TerminalInput({
       change(input.slice(0, start) + text + input.slice(end));
       requestAnimationFrame(() => {
         textarea.current?.focus();
-        textarea.current?.setSelectionRange(start + text.length, start + text.length);
+        textarea.current?.setSelectionRange(
+          start + text.length,
+          start + text.length,
+        );
       });
     },
   }));
@@ -329,11 +336,10 @@ export function TerminalInput({
           </footer>
         </div>
       )}
-      <div className="terminal-prompt-path" title={cwd}>
-        {cwd}
-      </div>
       <div className="terminal-command-entry">
-        <span className="terminal-prompt-symbol" aria-hidden="true">{ /Windows/i.test(navigator.userAgent) ? "PS>" : "$" }</span>
+        <span className="terminal-prompt-symbol" aria-hidden="true">
+          {/Windows/i.test(navigator.userAgent) ? "PS>" : "$"}
+        </span>
         <div className="terminal-input-editor">
           {suggestion && selection === input.length && (
             <div className="terminal-ghost" aria-hidden="true">
@@ -350,9 +356,7 @@ export function TerminalInput({
             rows={Math.min(8, input.split("\n").length)}
             disabled={disabled}
             spellCheck={false}
-            placeholder={
-              sessionId === null ? "Starting shell…" : ""
-            }
+            placeholder={sessionId === null ? "Starting shell…" : ""}
             onSelect={(event) =>
               setSelection(event.currentTarget.selectionStart)
             }
@@ -395,23 +399,25 @@ export function TerminalInput({
           <PlayIcon size={16} />
         </button>
       </div>
-      <div className="terminal-command-hint">
-        <span>
-          {pending
-            ? "Completing…"
-            : suggestion
-              ? "→ accept suggestion · Tab complete · ↑ history"
-              : "Tab complete · ↑ history · Shift+Enter new line"}
-        </span>
-        <button
-          type="button"
-          className="link"
-          disabled={disabled}
-          onClick={() => openHistory(true)}
-        >
-          Ctrl+R
-        </button>
-      </div>
+      {fresh && (
+        <div className="terminal-command-hint">
+          <span>
+            {pending
+              ? "Completing…"
+              : suggestion
+                ? "→ accept suggestion · Tab complete · ↑ history"
+                : "Tab complete · ↑ history · Shift+Enter new line"}
+          </span>
+          <button
+            type="button"
+            className="link"
+            disabled={disabled}
+            onClick={() => openHistory(true)}
+          >
+            Ctrl+R
+          </button>
+        </div>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}

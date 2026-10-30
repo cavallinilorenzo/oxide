@@ -115,7 +115,7 @@ const repository = path.resolve(__dirname, "../..");
     });
     assert.notEqual(layout.border, "0px", "Commands need a visible separator");
     assert.ok(Math.abs(layout.commandX - layout.outputX) < 2, "Command and output must share a text edge");
-    await page.locator(".terminal-command-block").last().locator(".block-duration").waitFor();
+    await page.locator(".terminal-command-block").last().locator(".terminal-block-status:not(:has(.terminal-block-spinner))").waitFor();
     await page.screenshot({ path: path.join(output, "native-blocks.png") });
     await input.fill("echo");
     await input.press("ArrowRight");

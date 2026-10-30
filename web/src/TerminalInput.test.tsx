@@ -72,6 +72,7 @@ it("Right accepts the latest matching history entry, while Tab requests real she
         cwd="C:\\project"
         disabled={false}
         visible
+        fresh
         onRun={() => {
           throw new Error("must not execute suggestions");
         }}
@@ -98,10 +99,13 @@ it("Up opens searchable history and navigates older commands without executing t
         cwd="/project"
         disabled={false}
         visible
+        fresh
         onRun={run}
       />,
     ),
   );
+  // The prompt is the symbol and the input; the directory lives in the Terminal header.
+  expect(container.querySelector("form")?.textContent).not.toContain("/project");
   await key("ArrowUp");
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   expect(

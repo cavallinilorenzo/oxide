@@ -6,6 +6,7 @@ use std::time::Duration;
 
 fn sample() -> BenchmarkResult {
     BenchmarkResult {
+        dispatch: None,
         fixture_version: oxide_core::dictation::benchmark::FIXTURE_VERSION.into(),
         model: ModelId::Small,
         measurement: MeasuredPerformance {
@@ -535,5 +536,217 @@ fn process_timeout_and_cancellation_reap_native_worker() {
         }
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(!dir.path().join("survived").exists());
+    }
+}
+
+#[test]
+fn cuda_and_metal_completed_dispatches_enable_keyed_measurements() {
+    for (backend, native) in [(BackendId::Cuda, "CUDA0"), (BackendId::Metal, "Metal")] {
+        let mut candidate = BackendCandidate::cpu();
+        candidate.probe.backend = backend;
+        candidate.probe.adapter = Some("Test GPU".into());
+        candidate.adapter_id = Some("stable-gpu".into());
+        candidate.driver_version = Some("driver-1".into());
+        candidate.runtime_version = runtime_version(backend);
+        let (dir, worker) = process_fixture(&candidate, "", false);
+        add_dispatch_reply(dir.path(), backend, native);
+        let result = worker
+            .run(
+                dir.path(),
+                ModelId::Small,
+                &candidate,
+                Default::default(),
+                &mut |_| {},
+            )
+            .unwrap();
+        assert_eq!(
+            result.measurement.key,
+            PerformanceKey::for_candidate(
+                ModelId::Small,
+                &candidate,
+                &sample().measurement.key.cpu
+            )
+        );
+        assert!(result.execution.offloaded);
+        store_result(dir.path(), &result).unwrap();
+        let cached = read_cache(dir.path());
+        assert_eq!(cached.len(), 1);
+        let mut candidate = candidate.clone();
+        candidate.probe.memory_pool = Some(oxide_core::dictation::MemoryPool {
+            unified: backend == BackendId::Metal,
+            total_bytes: 16 << 30,
+            available_bytes: Some(12 << 30),
+            max_working_set_bytes: Some(12 << 30),
+        });
+        let resources = ResourceSnapshot {
+            captured_at_secs: now_secs(),
+            cpu: sample().measurement.key.cpu,
+            total_ram_bytes: Some(16 << 30),
+            available_ram_bytes: Some(12 << 30),
+            baseline_bytes: Some(1 << 29),
+            free_disk_bytes: None,
+        };
+        let advice = recommend(
+            &resources,
+            &[candidate],
+            &[ModelId::Small],
+            Preference::Balanced,
+            &[cached[0].measurement.clone()],
+            now_secs(),
+        );
+        let small = advice
+            .decisions
+            .iter()
+            .find(|d| d.model == ModelId::Small)
+            .unwrap();
+        assert!(!small.provisional);
+        assert_eq!(small.median_rtf_milli, Some(364));
+        // Cache reads revalidate typed evidence; a human-readable proof alone
+        // cannot turn an old or damaged CUDA/Metal entry into measured advice.
+        for run in 0..4 {
+            let mut damaged = cached[0].clone();
+            damaged.dispatch.as_mut().unwrap().runs[run].completed_graphs = 0;
+            assert!(store_result(dir.path(), &damaged).is_err());
+            std::fs::write(
+                dir.path().join("dictation-performance.json"),
+                serde_json::to_vec(&[damaged]).unwrap(),
+            )
+            .unwrap();
+            assert!(read_cache(dir.path()).is_empty());
+        }
+    }
+}
+
+fn add_dispatch_reply(dir: &Path, backend: BackendId, native: &str) {
+    let path = dir.join("reply.json");
+    let mut reply: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    reply["Finished"]["Ok"]["dispatch"] = serde_json::json!({
+        "revision": "whisper-1.8.3-ggml-abi2-dispatch-v1",
+        "backend": backend,
+        "adapterId": "stable-gpu",
+        "nativeBackend": native,
+        "deviceId": if backend == BackendId::Cuda { Some("0000:01:00.0") } else { None },
+        "runs": ([0, 1, 2, 3].map(|_| serde_json::json!({
+            "nativeBackend": native, "adapter": "Test GPU",
+            "deviceId": if backend == BackendId::Cuda { Some("0000:01:00.0") } else { None },
+            "completedGraphs": 12, "matrixOps": 40, "failures": 0
+        })))
+    });
+    std::fs::write(path, reply.to_string()).unwrap();
+}
+
+#[test]
+fn cached_gpu_evidence_cannot_describe_a_cpu_fallback() {
+    use oxide_core::dictation::benchmark::{DISPATCH_REVISION, DispatchEvidence, DispatchRun};
+    let mut result = sample();
+    result.measurement.key.backend = BackendId::Metal;
+    result.measurement.key.adapter_id = Some("gpu".into());
+    result.measurement.key.driver_version = Some("driver".into());
+    result.execution.backend = BackendId::Metal;
+    result.execution.adapter = Some("Test GPU".into());
+    result.execution.offloaded = true;
+    result.execution.offload_evidence = Some("completed native dispatches".into());
+    result.dispatch = Some(DispatchEvidence {
+        revision: DISPATCH_REVISION.into(),
+        backend: BackendId::Metal,
+        adapter_id: "gpu".into(),
+        native_backend: "Metal".into(),
+        device_id: None,
+        runs: std::array::from_fn(|_| DispatchRun {
+            native_backend: "Metal".into(),
+            adapter: "Test GPU".into(),
+            device_id: None,
+            completed_graphs: 1,
+            matrix_ops: 1,
+            failures: 0,
+        }),
+    });
+    assert!(result.validate().is_ok());
+    result.execution.fallback_reason = Some("GPU initialization failed; using CPU".into());
+    assert!(result.validate().is_err());
+}
+
+#[test]
+fn every_gpu_run_requires_completed_dispatch_and_matching_native_identity() {
+    for (backend, native) in [(BackendId::Cuda, "CUDA0"), (BackendId::Metal, "Metal")] {
+        let mut candidate = BackendCandidate::cpu();
+        candidate.probe.backend = backend;
+        candidate.probe.adapter = Some("Test GPU".into());
+        candidate.adapter_id = Some("stable-gpu".into());
+        candidate.driver_version = Some("driver-1".into());
+        candidate.runtime_version = runtime_version(backend);
+        for run in 0..4 {
+            for (field, value) in [
+                ("completedGraphs", serde_json::json!(0)),
+                ("matrixOps", serde_json::json!(0)),
+                ("failures", serde_json::json!(1)),
+                ("nativeBackend", serde_json::json!("CPU")),
+                ("adapter", serde_json::json!("another GPU")),
+                ("deviceId", serde_json::json!("0000:ff:00.0")),
+            ] {
+                let (dir, worker) = process_fixture(&candidate, "", false);
+                add_dispatch_reply(dir.path(), backend, native);
+                let path = dir.path().join("reply.json");
+                let mut reply: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                reply["Finished"]["Ok"]["dispatch"]["runs"][run][field] = value;
+                std::fs::write(path, reply.to_string()).unwrap();
+                assert!(
+                    worker
+                        .run(
+                            dir.path(),
+                            ModelId::Small,
+                            &candidate,
+                            Default::default(),
+                            &mut |_| {}
+                        )
+                        .is_err(),
+                    "{backend} run {run}: {field}"
+                );
+                assert!(read_cache(dir.path()).is_empty());
+            }
+        }
+        for invalid in [
+            "initialization",
+            "fallback",
+            "adapter",
+            "native",
+            "revision",
+            "missingRun",
+        ] {
+            let (dir, worker) = process_fixture(&candidate, "", false);
+            add_dispatch_reply(dir.path(), backend, native);
+            let path = dir.path().join("reply.json");
+            let mut reply: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let observed = &mut reply["Finished"]["Ok"];
+            match invalid {
+                "initialization" => {
+                    reply = serde_json::json!({"Finished":{"Err":{"InitializationFailed":"GPU initialization failed"}}})
+                }
+                "fallback" => observed["candidate"]["probe"]["backend"] = serde_json::json!("cpu"),
+                "adapter" => observed["dispatch"]["adapterId"] = serde_json::json!("another-uuid"),
+                "native" => observed["native_backend"] = serde_json::json!("CPU"),
+                "revision" => observed["dispatch"]["revision"] = serde_json::json!("obsolete"),
+                "missingRun" => {
+                    observed["dispatch"]["runs"].as_array_mut().unwrap().pop();
+                }
+                _ => unreachable!(),
+            }
+            std::fs::write(path, reply.to_string()).unwrap();
+            assert!(
+                worker
+                    .run(
+                        dir.path(),
+                        ModelId::Small,
+                        &candidate,
+                        Default::default(),
+                        &mut |_| {}
+                    )
+                    .is_err(),
+                "{backend}: {invalid}"
+            );
+        }
     }
 }

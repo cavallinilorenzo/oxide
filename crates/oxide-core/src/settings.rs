@@ -213,9 +213,6 @@ pub struct Settings {
     pub default_provider: Provider,
     pub providers: Providers,
     pub confirm_quit: bool,
-    /// Bundle identifier of the editor "Open in editor" uses; empty or not detected means
-    /// the first detected editor.
-    pub editor: String,
     /// Which of the user's own `CLAUDE.md`, skills, plugins, hooks and MCP servers Claude Code
     /// may load. All off by default so a new Thread starts with a clean context window.
     pub claude_customizations: ClaudeCustomizations,
@@ -230,7 +227,6 @@ impl Default for Settings {
             default_provider: Provider::Claude,
             providers: Providers::default(),
             confirm_quit: true,
-            editor: String::new(),
             claude_customizations: ClaudeCustomizations::default(),
             shortcuts: Shortcuts::default(),
         }
@@ -428,8 +424,10 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
     let mut errors = vec![];
     let defaults = Settings::default();
     let mut root = root;
-    // Older versions exposed discovery roots as a setting. Ignore it, even if malformed.
+    // Older versions exposed discovery roots and an "Open in editor" choice as settings.
+    // Ignore them, even if malformed; the next save drops them.
     root.remove("scanRoots");
+    root.remove("editor");
     let settings = Settings {
         dictation: field(&mut root, "", "dictation", defaults.dictation, &mut errors),
         default_provider: field(
@@ -450,7 +448,6 @@ fn parse(text: &str) -> std::result::Result<Settings, Vec<FieldError>> {
             defaults.confirm_quit,
             &mut errors,
         ),
-        editor: field(&mut root, "", "editor", defaults.editor, &mut errors),
         shortcuts: shortcuts(
             take_object(&mut root, "shortcuts", &mut errors),
             &mut errors,

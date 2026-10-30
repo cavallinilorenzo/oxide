@@ -168,28 +168,51 @@ fn infer(
 /// this boundary. The calling process is disposable and is killed on timeout/cancel.
 pub(crate) fn benchmark_on_device(
     request: &TranscriptionRequest,
-    backend: BackendId,
-    gpu_device: i32,
+    device: &super::benchmark::NativeDevice,
     mut progress: impl FnMut(super::benchmark::Phase),
-) -> Result<super::benchmark::Timing, BackendError> {
+) -> Result<
+    (
+        super::benchmark::Timing,
+        Option<super::benchmark::DispatchEvidence>,
+    ),
+    BackendError,
+> {
     use std::time::Instant;
+    let mut recorder = super::benchmark::Recorder::install(device)?;
     progress(super::benchmark::Phase::Loading);
     let started = Instant::now();
-    let context = load_context(request, backend != BackendId::Cpu, gpu_device)?;
+    let context = load_context(
+        request,
+        device.candidate.probe.backend != BackendId::Cpu,
+        device.native_index,
+    )?;
     let mut state = context
         .create_state()
         .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
     let cold_load_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    super::benchmark::measure(
+    let timing = super::benchmark::measure(
         super::benchmark::FIXTURE_DURATION_MS,
         cold_load_ms,
         || {
+            if let Some(recorder) = &recorder {
+                recorder.begin_run();
+            }
             let started = Instant::now();
             infer(request, &mut state)?;
-            Ok(started.elapsed())
+            let elapsed = started.elapsed();
+            if let Some(recorder) = &mut recorder {
+                recorder.end_run();
+            }
+            Ok(elapsed)
         },
         progress,
-    )
+    )?;
+    Ok((
+        timing,
+        recorder
+            .map(super::benchmark::Recorder::finish)
+            .transpose()?,
+    ))
 }
 
 /// Native CPU execution runtime. Never requests offload.

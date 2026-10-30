@@ -147,33 +147,6 @@ async fn clone_github_repository(
     .map(Project::from)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Editor {
-    name: String,
-    bundle_id: String,
-}
-
-/// The known editors installed on this machine.
-#[tauri::command]
-#[specta::specta]
-async fn detected_editors(core: State<'_, Arc<Core>>) -> Result<Vec<Editor>, AppError> {
-    git_blocking(&core, |core| Ok(core.detected_editors()))
-        .await
-        .map(|list| list.iter().map(convert).collect())
-}
-
-/// Opens the Project's checkout (or the Thread's) in the editor chosen in Settings.
-#[tauri::command]
-#[specta::specta]
-fn open_in_editor(
-    core: State<'_, Arc<Core>>,
-    project_id: u32,
-    thread_id: Option<u32>,
-) -> Result<(), AppError> {
-    Ok(core.open_in_editor(project_id, thread_id)?)
-}
-
 #[tauri::command]
 #[specta::specta]
 fn reveal_in_finder(
@@ -268,7 +241,6 @@ pub struct Settings {
     default_provider: Provider,
     providers: Providers,
     confirm_quit: bool,
-    editor: String,
     claude_customizations: ClaudeCustomizations,
     shortcuts: Shortcuts,
 }
@@ -2963,8 +2935,6 @@ pub fn builder() -> Builder<tauri::Wry> {
         clone_project,
         search_github_repositories,
         clone_github_repository,
-        detected_editors,
-        open_in_editor,
         reveal_in_finder,
         set_project_hidden,
         set_project_open,

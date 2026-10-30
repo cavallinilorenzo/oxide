@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-28T14:58:20.601Z",
         "reason": "ticket #195 requires an animated shimmer on the live status phrase (motion, not decorative fill); solid text under prefers-reduced-motion"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/prototypes/open-files.html"
+        ],
+        "createdAt": "2026-10-30T15:19:11.961Z",
+        "reason": "Claude: throwaway wayfinder prototype (never merged) that deliberately mirrors the app's compact tab/badge density; not shipped UI"
       }
     ]
   }

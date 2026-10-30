@@ -55,6 +55,19 @@ test("Vulkan and CUDA build separate locked workers without sharing the host nat
   assert.equal(dictationBuild("cpu", {}).worker, undefined);
 });
 
+test("CUDA builds accept the runner's newer MSVC; other backends leave nvcc alone", () => {
+  // CUDA 12.9's nvcc rejects Visual Studio 18's MSVC 14.51 ("unsupported Microsoft
+  // Visual Studio version") unless told otherwise. NVCC_APPEND_FLAGS reaches every
+  // nvcc call, including CMake's compiler identification.
+  const inherited = { CARGO_TARGET_DIR: "short-root", NVCC_APPEND_FLAGS: "-lineinfo" };
+  for (const env of [dictationBuild("cuda", inherited).env, dictationBuild("cuda", inherited).worker.env, releaseWorker("cuda", inherited).env]) {
+    assert.equal(env.NVCC_APPEND_FLAGS, "-lineinfo -allow-unsupported-compiler");
+  }
+  assert.equal(dictationBuild("cuda", {}).env.NVCC_APPEND_FLAGS, "-allow-unsupported-compiler");
+  assert.equal(dictationBuild("vulkan", inherited).env.NVCC_APPEND_FLAGS, "-lineinfo");
+  assert.equal(dictationBuild("cpu", {}).env.NVCC_APPEND_FLAGS, undefined);
+});
+
 test("packaged workers are release builds tuned for any x64 CPU and CUDA GPU, not the build machine", () => {
   const inherited = { CARGO_TARGET_DIR: "short-root", CMAKE_GENERATOR_INSTANCE: "old-vs", GGML_NATIVE: "ON", GGML_CUDA: "ON" };
   for (const backend of ["vulkan", "cuda"]) {

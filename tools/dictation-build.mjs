@@ -22,6 +22,11 @@ export function dictationBuild(backend, inherited = process.env) {
     // object/PDB limit even in an ordinary checkout. Keep these names short.
     CARGO_TARGET_DIR: resolve(join(inherited.CARGO_TARGET_DIR || "target", backend === "cpu" ? "dc" : (backend === "cuda" ? "dcu" : "dv"))),
   });
+  if (backend === "cuda") {
+    // CUDA 12.9's nvcc rejects the runner's newer MSVC (Visual Studio 18, 14.51)
+    // as an unsupported host compiler, even while CMake identifies it.
+    env.NVCC_APPEND_FLAGS = [inherited.NVCC_APPEND_FLAGS, "-allow-unsupported-compiler"].filter(Boolean).join(" ");
+  }
   return {
     env,
     args: ["build", "--locked", "-p", "oxide-app",

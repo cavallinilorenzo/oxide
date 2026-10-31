@@ -159,10 +159,18 @@ impl CudaRuntime {
             WorkerRequest::Transcribe { request, .. } => required_memory(&request.model_path),
             WorkerRequest::Probe => 0,
         };
-        let mut child = Command::new(&self.path)
+        let mut command = Command::new(&self.path);
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // The packaged app is a GUI process: without this each probe flashes a console window.
+            command.creation_flags(0x08000000);
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
 

@@ -387,6 +387,55 @@ fn deleting_a_dirty_board_thread_asks_first_and_declining_keeps_everything() {
 }
 
 #[test]
+fn deleting_a_board_thread_closes_only_its_own_terminals_and_declining_keeps_them() {
+    let f = fixture();
+    let doomed = f.core.dispatch_thread(request(&f, "Doomed")).unwrap();
+    let sibling = f.core.dispatch_thread(request(&f, "Sibling")).unwrap();
+    completed_first_turn(&f.core, doomed.id);
+    completed_first_turn(&f.core, sibling.id);
+
+    // Each shell keeps the checkout it was started in.
+    let in_doomed = f
+        .core
+        .start_block_terminal(f.project.id, Some(doomed.id))
+        .unwrap();
+    let in_sibling = f
+        .core
+        .start_block_terminal(f.project.id, Some(sibling.id))
+        .unwrap();
+    let in_main = f.core.start_block_terminal(f.project.id, None).unwrap();
+    assert!(Path::new(&in_doomed.cwd).starts_with(worktree_of(&doomed)));
+    assert!(Path::new(&in_sibling.cwd).starts_with(worktree_of(&sibling)));
+    assert!(!Path::new(&in_main.cwd).starts_with(worktree_of(&doomed)));
+
+    // Declining the dirty-worktree confirmation leaves the worktree and every shell alive.
+    std::fs::write(worktree_of(&doomed).join("wip.txt"), "unsaved").unwrap();
+    assert_eq!(
+        f.core.delete_thread(doomed.id, false).unwrap(),
+        DeleteOutcome::NeedsConfirmation
+    );
+    assert!(worktree_of(&doomed).exists());
+    assert!(f.core.write_terminal(in_doomed.id, b"true\n").is_ok());
+
+    // Confirming closes the worktree's shells; siblings and the main checkout's shell survive.
+    assert_eq!(
+        f.core.delete_thread(doomed.id, true).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(!worktree_of(&doomed).exists());
+    assert!(f.core.write_terminal(in_doomed.id, b"true\n").is_err());
+    assert!(f.core.write_terminal(in_sibling.id, b"true\n").is_ok());
+    assert!(f.core.write_terminal(in_main.id, b"true\n").is_ok());
+    git(&f.work, &["rev-parse", "--verify", "oxide/doomed"]);
+
+    // Explicit close closes exactly that session.
+    f.core.close_terminal(in_sibling.id).unwrap();
+    assert!(f.core.write_terminal(in_sibling.id, b"true\n").is_err());
+    assert!(f.core.write_terminal(in_main.id, b"true\n").is_ok());
+    f.core.close_terminal(in_main.id).unwrap();
+}
+
+#[test]
 fn a_worktree_deleted_by_hand_is_recreated_on_the_next_message() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Come back")).unwrap();

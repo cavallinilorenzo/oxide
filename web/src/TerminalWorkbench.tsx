@@ -28,6 +28,8 @@ interface Props {
   visible: boolean;
   queuedCommand: { id: number; command: string } | null;
   onCommandConsumed: () => void;
+  /** The command a Command block is running, or `null` when the shell is idle. */
+  onRunningChange?: (command: string | null) => void;
 }
 const WINDOWS = /Windows/i.test(navigator.userAgent);
 const OUTPUT_LIMIT = 256 * 1024;
@@ -58,6 +60,7 @@ export function TerminalWorkbench({
   visible,
   queuedCommand,
   onCommandConsumed,
+  onRunningChange,
 }: Props) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [history, setHistory] = useState<CommandHistory[]>(() =>
@@ -72,6 +75,10 @@ export function TerminalWorkbench({
   const launched = useRef(new Set<string>());
   const [running, setRunning] = useState(false);
   const activeBlock = useRef<string | null>(null);
+  const runningCommand = useRef("");
+  const reportRunning = useRef(onRunningChange);
+  useEffect(() => { reportRunning.current = onRunningChange; });
+  useEffect(() => { reportRunning.current?.(running ? runningCommand.current : null); }, [running]);
   const composer = useRef<TerminalInputHandle>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -269,6 +276,7 @@ export function TerminalWorkbench({
       truncated: false,
     };
     activeBlock.current = token;
+    runningCommand.current = command;
     setRunning(true);
     composer.current?.clear();
     setError(null);

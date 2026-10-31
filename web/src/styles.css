@@ -333,6 +333,12 @@ html.macos .header,
   opacity: 0;
 }
 .row-action:hover:not(:disabled) { color: var(--fg); background: var(--bg4); }
+/* The Board entry never hides: it is how a Project's overview is reached. */
+.row-action.board-action { opacity: 1; }
+.row-action.board-action[aria-pressed="true"] { color: var(--fg); background: var(--bg4); }
+.attention-btn { position: relative; gap: 4px; }
+.attention-btn.active { color: var(--yellow); }
+.attention-count { font: 600 11px var(--mono); }
 .project-row:is(:hover, :focus-within) .row-action, .thread-row:is(:hover, :focus-within) .row-action { opacity: 1; }
 .thread-row { display: flex; align-items: center; margin: 0 8px; border-radius: var(--radius-control); position: relative; transition: background-color var(--motion-fast) ease-out; }
 .thread-row:hover { background: var(--bg3); }

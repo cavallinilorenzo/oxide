@@ -27,6 +27,10 @@ import {
   TrashIcon,
 } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
+import { attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
+import { AttentionButton } from "./AttentionButton";
+import { useAttention } from "./useAttention";
+import { useAttentionFocus } from "./useAttentionFocus";
 import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
@@ -132,6 +136,12 @@ export function App() {
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
+  const openProjectIds = useMemo(() => sidebarProjects(projects ?? []).map((project) => project.id), [projects]);
+  const attentionCards = useAttention(openProjectIds);
+  const attention = summarizeAttention(attentionCards);
+  // A requested jump: kept until its Thread is shown and the response focused, so loading or failure never drops it.
+  const [attentionJump, setAttentionJump] = useState<{ target: AttentionTarget; failed: boolean } | null>(null);
+  const pendingThread = useRef<number | null>(null);
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
@@ -374,6 +384,34 @@ export function App() {
     }
   }, [selected, threads, createThreadIn]);
 
+  /** Jumps to the Thread holding the most urgent request. Never answers or clears it. */
+  const jumpToAttention = () => {
+    const target = attentionTarget(attentionCards, openProjectIds);
+    if (!target) return;
+    setShowSettings(false);
+    setShowBoard(false);
+    setMaximized(false);
+    if (target.projectId === selectedId) setSelectedThreadId(target.threadId);
+    else {
+      restore.current = null;
+      pendingThread.current = target.threadId;
+      setSelectedId(target.projectId);
+      setThreads(null);
+      setSelectedThreadId(null);
+    }
+    setAttentionJump({ target, failed: false });
+  };
+
+  // Focus the response once its Thread is on screen; background updates never reach this.
+  const jumpTarget = attentionJump && !attentionJump.failed ? attentionJump.target : null;
+  const onJumpFocused = useCallback(() => setAttentionJump(null), []);
+  const onJumpFailed = useCallback(() => setAttentionJump((current) => current && { ...current, failed: true }), []);
+  useAttentionFocus(
+    jumpTarget,
+    jumpTarget !== null && selectedId === jumpTarget.projectId && currentThreadId === jumpTarget.threadId && !showBoard && !showSettings,
+    onJumpFocused, onJumpFailed,
+  );
+
   // The native menu follows the same creation path as the sidebar and shortcut.
   useEffect(() => {
     const unlisten = listen("new-thread", () => {
@@ -530,7 +568,10 @@ export function App() {
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
-        const initialThreadId = wanted?.projectId === selected.id
+        const jump = pendingThread.current;
+        pendingThread.current = null;
+        const initialThreadId = jump !== null && res.data.some((thread) => thread.id === jump) ? jump
+          : wanted?.projectId === selected.id
           ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
           : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
@@ -585,6 +626,8 @@ export function App() {
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
+        <AttentionButton summary={attention} failed={attentionJump?.failed ?? false} onActivate={jumpToAttention}
+          onRetry={() => setAttentionJump((current) => current && { ...current, failed: false })} />
         {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
             <FileDirectoryIcon size={16} />
@@ -630,6 +673,7 @@ export function App() {
             }}
             onSelect={(p) => {
               restore.current = null;
+              pendingThread.current = null;
               setShowSettings(false);
               setSelectedId(p.id);
               setThreads(null);
@@ -650,8 +694,11 @@ export function App() {
             }}
             onRenameThread={onThreadTitleChange}
             onOpenPalette={() => overlays.current?.openPalette()}
+            boardOpen={showBoard && !showSettings}
             onOpenBoard={(p) => {
               setMaximized(false);
+              // The Board button toggles: pressing it again returns to the Project's Thread and dock.
+              if (p.id === selected?.id && showBoard && !showSettings) { setShowBoard(false); return; }
               if (p.id !== selected?.id) {
                 restore.current = null;
                 setSelectedId(p.id);
@@ -857,6 +904,8 @@ interface SidebarProps {
   onRenameThread?: (threadId: number, newTitle: string) => void;
   /** ⌘⇧N: every known Project, scanned ones included, is found there. */
   onOpenPalette: () => void;
+  /** The central Board is showing (for the selected Project). */
+  boardOpen: boolean;
   onOpenBoard: (p: Project) => void;
   onOpenSettings: () => void;
   settingsOpen: boolean;
@@ -875,6 +924,7 @@ function Sidebar({
   onNewThread,
   onRenameThread,
   onOpenPalette,
+  boardOpen,
   onOpenBoard,
   onOpenSettings,
   settingsOpen,
@@ -1011,7 +1061,8 @@ function Sidebar({
                     <span className="project-name">{p.name}</span>
                     {p.missing && <span className="badge">missing</span>}
                   </button>
-                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title={`Thread Board`}>
+                  <button className="row-action board-action" aria-pressed={isSelected && boardOpen} onClick={() => onOpenBoard(p)}
+                    aria-label={`Thread Board of ${p.name}`} title={`Thread Board of ${p.name} (${keys("toggleBoard")})`}>
                     <ProjectIcon size={13} />
                   </button>
                   <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${keys("openProject")})`}>

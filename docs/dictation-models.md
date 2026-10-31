@@ -111,3 +111,8 @@ budgets for every model/backend before marking estimates measured or claiming
 support.** Confirm offline execution on physically disconnected packaged builds,
 then apply #231 reserves and #232 benchmark rules. This slice does not complete
 the parent issue's platform acceptance matrix.
+
+The [#235 acceptance record](dictation-acceptance/issue-235.md) maps each model to
+real-artifact tests, installed measurements and remaining peak-memory work. Sampled
+process/GPU counters are lower bounds; they do not by themselves change any
+catalogue entry to `measured: true`.

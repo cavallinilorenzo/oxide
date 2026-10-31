@@ -33,14 +33,10 @@ fn tiny_base_small_real_artifacts_transcribe_offline_across_model_switches() {
                 threads: 4,
             })
             .unwrap();
-        eprintln!(
-            "{id}: {:.2}s: {}",
-            started.elapsed().as_secs_f64(),
-            result.text
-        );
+        eprintln!("{id}: {:.2}s", started.elapsed().as_secs_f64());
         let text = result.text.to_lowercase();
-        assert!(text.contains("ask not"), "{id}: {text}");
-        assert!(text.contains("country"), "{id}: {text}");
+        assert!(text.contains("ask not"), "{id}: fixture phrase missing");
+        assert!(text.contains("country"), "{id}: fixture word missing");
         assert!(!result.execution.offloaded);
     }
 }

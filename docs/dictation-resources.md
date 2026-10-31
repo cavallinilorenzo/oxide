@@ -258,3 +258,9 @@ shares the production coordinator/process path. The app executable implements
 the same CPU child entry point. Metal/CUDA measurements are accepted only with all four native dispatch snapshots.
 No physical CUDA/Metal measurements are claimed for #258; hardware sign-off,
 including failure/cancellation recovery, remains in the single #235 release pass.
+
+Current installed-package results, exact binary hashes and calibration gaps are
+in the [#235 acceptance record](dictation-acceptance/issue-235.md). The diagnostic
+example also accepts optional `MODEL_ID INSTALLED_HOST` arguments after the adapter
+ID (`-` for CPU). Build it in release mode with the package's native flags to keep
+identity checks meaningful. Development observations above remain separate.

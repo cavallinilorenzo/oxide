@@ -61,6 +61,21 @@ fn cache_retains_only_current_fixture_and_proven_execution() {
 }
 
 #[test]
+fn measurement_for_another_model_cannot_be_published_or_reused() {
+    let home = tempfile::tempdir().unwrap();
+    let mut mismatched = sample();
+    mismatched.model = ModelId::Base;
+    assert!(store_result(home.path(), &mismatched).is_err());
+    // A hand-edited or old cache must pass the same identity check on read.
+    std::fs::write(
+        home.path().join("dictation-performance.json"),
+        serde_json::to_vec(&[mismatched]).unwrap(),
+    )
+    .unwrap();
+    assert!(read_cache(home.path()).is_empty());
+}
+
+#[test]
 fn a_failed_batch_does_not_publish_its_successful_first_combination() {
     let home = tempfile::tempdir().unwrap();
     let good = sample();

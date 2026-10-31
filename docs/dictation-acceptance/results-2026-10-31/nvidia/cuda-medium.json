@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "requestedBackend": "cuda",
+  "requestedModel": "medium",
+  "failure": null,
+  "elapsedMs": 6937,
+  "executableSha256": "c30f90c80611dfd988b860027549a8fbba81ac671eb2b9578ba289753fd943e7",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "medium",
+    "measurement": {
+      "key": {
+        "modelSha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+        "backend": "cuda",
+        "adapterId": "cuda:8e75221ccf0d162efaff030f2eec89ef",
+        "driverVersion": "NVIDIA 13.4",
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release; whisper-1.8.3-ggml-abi2-dispatch-v1",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "x86_64",
+          "model": "AMD Ryzen 5 3600 6-Core Processor              ",
+          "usableCores": 12,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793448584,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        673,
+        670,
+        648
+      ],
+      "coldLoadMs": 1384
+    },
+    "execution": {
+      "backend": "cuda",
+      "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+      "offloaded": true,
+      "offloadEvidence": "whisper-1.8.3-ggml-abi2-dispatch-v1; completed GPU matrix graph dispatches in warmup and all three measured runs"
+    },
+    "dispatch": {
+      "revision": "whisper-1.8.3-ggml-abi2-dispatch-v1",
+      "backend": "cuda",
+      "adapterId": "cuda:8e75221ccf0d162efaff030f2eec89ef",
+      "nativeBackend": "CUDA0",
+      "deviceId": "0000:26:00.0",
+      "runs": [
+        {
+          "nativeBackend": "CUDA0",
+          "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+          "deviceId": "0000:26:00.0",
+          "completedGraphs": 31,
+          "matrixOps": 8334,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "CUDA0",
+          "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+          "deviceId": "0000:26:00.0",
+          "completedGraphs": 31,
+          "matrixOps": 8334,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "CUDA0",
+          "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+          "deviceId": "0000:26:00.0",
+          "completedGraphs": 31,
+          "matrixOps": 8334,
+          "failures": 0
+        },
+        {
+          "nativeBackend": "CUDA0",
+          "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+          "deviceId": "0000:26:00.0",
+          "completedGraphs": 31,
+          "matrixOps": 8334,
+          "failures": 0
+        }
+      ]
+    }
+  },
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 167,
+    "processSamples": 39,
+    "gpuSamples": 32,
+    "peakWorkingSetBytes": 444694528,
+    "peakPrivateCommitBytes": 3193925632,
+    "sampledDedicatedBytes": 2217594880,
+    "sampledSharedBytes": 79691776
+  }
+}

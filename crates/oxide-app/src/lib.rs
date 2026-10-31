@@ -621,6 +621,20 @@ async fn dictation_stop(
 }
 #[tauri::command]
 #[specta::specta]
+async fn dictation_retry_on_cpu(
+    core: State<'_, Arc<Core>>,
+    dictation: State<'_, Arc<oxide_core::dictation::Dictation>>,
+) -> Result<String, AppError> {
+    let core = core.inner().clone();
+    let dictation = dictation.inner().clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        dictation.retry_on_cpu(core.home(), &core.settings().settings.dictation)
+    })
+    .await
+    .map_err(|e| oxide_core::Error::Dictation(e.to_string()))??)
+}
+#[tauri::command]
+#[specta::specta]
 fn dictation_cancel(dictation: State<'_, Arc<oxide_core::dictation::Dictation>>) {
     dictation.cancel();
 }
@@ -2966,6 +2980,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         dictation_model_delete,
         dictation_start,
         dictation_stop,
+        dictation_retry_on_cpu,
         dictation_cancel,
         list_projects,
         rescan_projects,

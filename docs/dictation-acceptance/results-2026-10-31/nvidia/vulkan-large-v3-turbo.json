@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "requestedBackend": "vulkan",
+  "requestedModel": "large-v3-turbo",
+  "failure": "worker-or-resource-failure",
+  "elapsedMs": 267,
+  "executableSha256": "2fa837be0af3fbb6e911442f8dc23b0856a5a2fa468b15e406f4647a27e80215",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": null,
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 134,
+    "processSamples": 0,
+    "gpuSamples": 0,
+    "peakWorkingSetBytes": null,
+    "peakPrivateCommitBytes": null,
+    "sampledDedicatedBytes": null,
+    "sampledSharedBytes": null
+  }
+}

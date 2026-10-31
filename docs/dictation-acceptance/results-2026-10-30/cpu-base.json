@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "executableSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "base",
+    "measurement": {
+      "key": {
+        "modelSha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        "backend": "cpu",
+        "adapterId": null,
+        "driverVersion": null,
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release; cpu-build-flags=[1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "x86_64",
+          "model": "AMD Ryzen 7 5700X 8-Core Processor             ",
+          "usableCores": 16,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793382564,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        9429,
+        9132,
+        9010
+      ],
+      "coldLoadMs": 223
+    },
+    "execution": {
+      "backend": "cpu",
+      "adapter": "CPU",
+      "offloaded": false,
+      "offloadEvidence": null
+    }
+  },
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 333,
+    "processSamples": 149,
+    "gpuSamples": 0,
+    "peakWorkingSetBytes": 371740672,
+    "peakPrivateCommitBytes": 881340416,
+    "sampledDedicatedBytes": null,
+    "sampledSharedBytes": null
+  }
+}

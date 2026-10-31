@@ -89,3 +89,15 @@ it("announces CPU fallback after inserting the transcript once", async () => {
   expect(insert).toHaveBeenCalledExactlyOnceWith("ciao mondo");
   expect(host.querySelector('[role="status"]')?.textContent).toContain("Fell back to CPU");
 });
+it("retries the failed GPU recording on CPU and inserts once into the original target", async () => {
+  await setup();
+  vi.spyOn(commands, "dictationStop").mockResolvedValue({ status: "error", error: { message: "GPU transcription failed: boom. Choose CPU in Settings to transcribe on CPU." } });
+  vi.spyOn(commands, "dictationRetryOnCpu").mockResolvedValue({ status: "ok", data: "ciao dalla cpu" });
+  await key(); await key();
+  expect(insert).not.toHaveBeenCalled();
+  const retry = [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry on CPU")!;
+  await act(async () => retry.click());
+  expect(commands.dictationRetryOnCpu).toHaveBeenCalledOnce();
+  expect(insert).toHaveBeenCalledExactlyOnceWith("ciao dalla cpu");
+  expect(host.textContent).not.toContain("Retry on CPU");
+});

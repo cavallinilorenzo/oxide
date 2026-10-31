@@ -21,6 +21,8 @@ import { usePushFlow } from "./usePushFlow";
 
 interface GitHeaderProps {
   projectId: number;
+  /** The Thread whose checkout every control here acts on. */
+  threadId: number;
   /** Changes whenever a Thread's status does, so the picker lock stays current. */
   threadsKey: string;
   onOpenDiff: () => void;
@@ -31,16 +33,24 @@ interface GitHeaderProps {
 
 type Outcome = { status: "ok"; data: unknown } | { status: "error"; error: AppError };
 
-/** The left half of the Git header: branch picker, dirty chip and Pull.
- *  State belongs to one Project, so a different one remounts it. */
+/** The Git controls under a Thread's title: branch picker, dirty chip, Pull and Commit & Push.
+ *  State belongs to one Thread, so selecting another remounts it: a late answer or an unsubmitted
+ *  dialog of the old selection can neither show nor operate on the new one. */
 export function GitHeader(props: GitHeaderProps) {
-  return <GitHeaderBody key={props.projectId} {...props} />;
+  return <GitHeaderBody key={`${props.projectId}:${props.threadId}`} {...props} />;
 }
 
-function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, onChanged }: GitHeaderProps) {
+function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPullRequest, onChanged }: GitHeaderProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set false on unmount: an answer for a deselected Thread is dropped.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const branchRef = useRef<HTMLDivElement>(null);
@@ -58,13 +68,16 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
 
   const refresh = useCallback(
     () =>
-      commands.gitStatus(projectId).then((result) => {
+      commands.gitStatus(projectId, threadId).then((result) => {
+        if (!mounted.current) return;
         setStatus(result.status === "ok" ? result.data : null);
+        setLoadError(result.status === "error" ? result.error.message : null);
       }),
-    [projectId],
+    [projectId, threadId],
   );
   const push = usePushFlow(
     projectId,
+    threadId,
     () => {
       void refresh();
       onChanged();
@@ -92,13 +105,23 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
     setBusy(true);
     setError(null);
     const result = await run();
-    if (result.status === "error") setError(result.error.message);
-    else onChanged();
-    setBusy(false);
+    if (mounted.current) {
+      if (result.status === "error") setError(result.error.message);
+      setBusy(false);
+    }
+    if (result.status === "ok") onChanged();
     await refresh();
   }
 
-  if (!status) return null;
+  if (!status) {
+    return loadError ? (
+      <div className="git-header">
+        <span className="git-error" role="alert" title={loadError}>
+          <span className="git-error-text">{loadError}</span>
+        </span>
+      </div>
+    ) : null;
+  }
   const action = nextAction(status);
   const pushNow = () => push.start(() => null);
   const disabledReason = status.pickerDisabledReason ?? (busy ? "Working…" : null);
@@ -122,9 +145,10 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
         {open && (
           <BranchMenu
             projectId={projectId}
+            threadId={threadId}
             onClose={() => setOpen(false)}
-            onCheckout={(name) => act(() => commands.checkoutBranch(projectId, name))}
-            onCreate={(name) => act(() => commands.createBranch(projectId, name))}
+            onCheckout={(name) => act(() => commands.checkoutBranch(projectId, threadId, name))}
+            onCreate={(name) => act(() => commands.createBranch(projectId, threadId, name))}
           />
         )}
       </div>
@@ -142,7 +166,7 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
           className={`btn pull-button${busy ? " pending" : ""}`}
           disabled={busy}
           title={`Fast-forward ${status.behind} commit${status.behind === 1 ? "" : "s"} from ${status.upstream ?? "upstream"}`}
-          onClick={() => void act(() => commands.pull(projectId))}
+          onClick={() => void act(() => commands.pull(projectId, threadId))}
         >
           {busy ? <SyncIcon size={14} className="spin" /> : <RepoPullIcon size={14} />} Pull
         </button>
@@ -218,13 +242,14 @@ function GitHeaderBody({ projectId, threadsKey, onOpenDiff, onOpenPullRequest, o
 
 interface BranchMenuProps {
   projectId: number;
+  threadId: number;
   onClose: () => void;
   onCheckout: (name: string) => Promise<void>;
   onCreate: (name: string) => Promise<void>;
 }
 
-function BranchMenu({ projectId, onClose, onCheckout, onCreate }: BranchMenuProps) {
-  const result = useQuery(`p${projectId}:branches`, () => commands.listBranches(projectId));
+function BranchMenu({ projectId, threadId, onClose, onCheckout, onCreate }: BranchMenuProps) {
+  const result = useQuery(`p${projectId}:branches:t${threadId}`, () => commands.listBranches(projectId, threadId));
   const branches: GitBranch[] | null =
     result.state === "ready" ? result.data : result.state === "error" ? [] : null;
   const [query, setQuery] = useState("");

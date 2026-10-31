@@ -1406,14 +1406,30 @@ impl Core {
 
     /// Branch, ahead/behind and uncommitted-change counts of a Project's main checkout.
     pub fn git_status(&self, project_id: u32) -> Result<GitStatus> {
-        let mut status = git::status(&self.main_checkout(project_id)?)?;
-        status.picker_disabled_reason = self.checkout_blocked_reason(project_id)?;
+        self.git_status_in(project_id, None)
+    }
+
+    /// [`Core::git_status`] of the checkout a Thread works in (`None`: the Project's main one).
+    pub fn git_status_in(&self, project_id: u32, thread_id: Option<u32>) -> Result<GitStatus> {
+        let target = self.git_target(project_id, thread_id)?;
+        let mut status = git::status(&target.root)?;
+        status.picker_disabled_reason = self.checkout_blocked_reason(project_id, &target)?;
         Ok(status)
     }
 
     /// The changes of a Project's main checkout in one scope, straight from Git.
     pub fn diff(&self, project_id: u32, scope: DiffScope) -> Result<Diff> {
-        git_diff::diff(&self.main_checkout(project_id)?, scope)
+        self.diff_in(project_id, None, scope)
+    }
+
+    /// [`Core::diff`] in the checkout of a Thread (`None`: the Project's main one).
+    pub fn diff_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        scope: DiffScope,
+    ) -> Result<Diff> {
+        git_diff::diff(&self.git_target(project_id, thread_id)?.root, scope)
     }
 
     /// What one Turn changed: the diff between its two Checkpoints.
@@ -1441,18 +1457,47 @@ impl Core {
 
     /// Local and remote branches of a Project's main checkout.
     pub fn list_branches(&self, project_id: u32) -> Result<Vec<GitBranch>> {
-        git::list_branches(&self.main_checkout(project_id)?)
+        self.list_branches_in(project_id, None)
+    }
+
+    /// [`Core::list_branches`] as seen from a Thread's checkout (`None`: the main one).
+    pub fn list_branches_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<Vec<GitBranch>> {
+        git::list_branches(&self.git_target(project_id, thread_id)?.root)
     }
 
     /// Checks out a branch (`feature`, or `origin/feature` to track a remote
     /// one). Git's own refusal, e.g. for uncommitted changes, is the error.
     pub fn checkout_branch(&self, project_id: u32, name: &str) -> Result<()> {
-        self.switch_branch(project_id, |cwd| git::checkout(cwd, name))
+        self.checkout_branch_in(project_id, None, name)
+    }
+
+    /// [`Core::checkout_branch`] in a Thread's checkout (`None`: the main one).
+    pub fn checkout_branch_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        name: &str,
+    ) -> Result<()> {
+        self.switch_branch(project_id, thread_id, |cwd| git::checkout(cwd, name))
     }
 
     /// Creates a branch from HEAD and checks it out.
     pub fn create_branch(&self, project_id: u32, name: &str) -> Result<()> {
-        self.switch_branch(project_id, |cwd| git::create_branch(cwd, name))
+        self.create_branch_in(project_id, None, name)
+    }
+
+    /// [`Core::create_branch`] in a Thread's checkout (`None`: the main one).
+    pub fn create_branch_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        name: &str,
+    ) -> Result<()> {
+        self.switch_branch(project_id, thread_id, |cwd| git::create_branch(cwd, name))
     }
 
     /// `git fetch`, skipped when the last one was under [`FETCH_INTERVAL`] ago.
@@ -1468,21 +1513,47 @@ impl Core {
 
     /// `git pull --ff-only`; a diverged branch fails with Git's message.
     pub fn pull(&self, project_id: u32) -> Result<()> {
+        self.pull_in(project_id, None)
+    }
+
+    /// [`Core::pull`] in a Thread's checkout (`None`: the main one).
+    pub fn pull_in(&self, project_id: u32, thread_id: Option<u32>) -> Result<()> {
         // Pulling rewrites files like a checkout does, so it takes the same guard.
-        self.switch_branch(project_id, git::pull)
+        self.switch_branch(project_id, thread_id, git::pull)
     }
 
     /// Commits exactly the given files of the main checkout with `message`,
     /// leaving other staged state alone.
     pub fn commit(&self, project_id: u32, paths: &[String], message: &str) -> Result<()> {
-        let cwd = self.main_checkout(project_id)?;
+        self.commit_in(project_id, None, paths, message)
+    }
+
+    /// [`Core::commit`] in a Thread's checkout (`None`: the main one).
+    pub fn commit_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        paths: &[String],
+        message: &str,
+    ) -> Result<()> {
+        let cwd = self.git_target(project_id, thread_id)?.root;
         self.git.mutate(&cwd, || git::commit(&cwd, paths, message))
     }
 
     /// Pushes the current branch (upstream set on the first push, never
     /// forced). Pushing `main`/`master` needs `allow_protected`.
     pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<()> {
-        let cwd = self.main_checkout(project_id)?;
+        self.push_in(project_id, None, allow_protected)
+    }
+
+    /// [`Core::push`] from a Thread's checkout (`None`: the main one).
+    pub fn push_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        allow_protected: bool,
+    ) -> Result<()> {
+        let cwd = self.git_target(project_id, thread_id)?.root;
         self.git.mutate(&cwd, || git::push(&cwd, allow_protected))
     }
 
@@ -1495,7 +1566,16 @@ impl Core {
     /// Whether `gh` works, and the branch's open pull request when it does.
     /// Runs `gh` only when called: the Surface refreshes it, Core never polls.
     pub fn pull_request_state(&self, project_id: u32) -> Result<PullRequestState> {
-        github::pull_request_state(&self.gh, &self.main_checkout(project_id)?)
+        self.pull_request_state_in(project_id, None)
+    }
+
+    /// [`Core::pull_request_state`] of a Thread's checkout branch (`None`: the main one).
+    pub fn pull_request_state_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<PullRequestState> {
+        github::pull_request_state(&self.gh, &self.git_target(project_id, thread_id)?.root)
     }
 
     /// Branches on GitHub that can be selected as a pull request's base.
@@ -1505,7 +1585,16 @@ impl Core {
 
     /// Title, body and base prefilled for a new pull request of the current branch.
     pub fn pull_request_draft(&self, project_id: u32) -> Result<PullRequestDraft> {
-        let cwd = self.main_checkout(project_id)?;
+        self.pull_request_draft_in(project_id, None)
+    }
+
+    /// [`Core::pull_request_draft`] for a Thread's checkout branch (`None`: the main one).
+    pub fn pull_request_draft_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+    ) -> Result<PullRequestDraft> {
+        let cwd = self.git_target(project_id, thread_id)?.root;
         let mut draft = github::pull_request_draft(&self.gh, &cwd)?;
         if let Some(n) = self.issue_of_branch(project_id, &draft.head)? {
             draft.body = worktree::closing_issue(&draft.body, n);
@@ -1519,7 +1608,17 @@ impl Core {
         project_id: u32,
         input: &PullRequestInput,
     ) -> Result<PullRequest> {
-        let cwd = self.main_checkout(project_id)?;
+        self.create_pull_request_in(project_id, None, input)
+    }
+
+    /// [`Core::create_pull_request`] for a Thread's checkout branch (`None`: the main one).
+    pub fn create_pull_request_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        input: &PullRequestInput,
+    ) -> Result<PullRequest> {
+        let cwd = self.git_target(project_id, thread_id)?.root;
         let mut input = input.clone();
         if let Some(branch) = git::status(&cwd)?.branch
             && let Some(n) = self.issue_of_branch(project_id, &branch)?
@@ -1697,7 +1796,8 @@ impl Core {
             // working Thread must not see.
             if delete_branch
                 && !auto
-                && let Some(reason) = self.checkout_blocked_reason(project_id)?
+                && let Some(reason) =
+                    self.checkout_blocked_reason(project_id, &self.git_target(project_id, None)?)?
             {
                 return Err(Error::Git(reason));
             }
@@ -1714,35 +1814,86 @@ impl Core {
     /// branch picker's rules: Git's refusal is the error, and it is refused
     /// while a Thread is working.
     pub fn checkout_pull_request(&self, project_id: u32, number: u32) -> Result<()> {
-        self.switch_branch(project_id, |cwd| {
+        self.switch_branch(project_id, None, |cwd| {
             github::checkout_pull_request(&self.gh, cwd, number)
         })
     }
 
     /// Runs a command that changes the main checkout's files, serialized per
     /// checkout and refused while a Thread is working in it.
-    fn switch_branch(&self, project_id: u32, f: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
-        let cwd = self.main_checkout(project_id)?;
-        self.git.mutate(&cwd, || {
-            if let Some(reason) = self.checkout_blocked_reason(project_id)? {
+    fn switch_branch(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        f: impl FnOnce(&Path) -> Result<()>,
+    ) -> Result<()> {
+        let target = self.git_target(project_id, thread_id)?;
+        self.git.mutate(&target.root, || {
+            if let Some(reason) = self.checkout_blocked_reason(project_id, &target)? {
                 return Err(Error::Git(reason));
             }
-            f(&cwd)
+            f(&target.root)
         })
     }
 
     /// Threads started from the chat work in the main checkout, so switching branches under a
-    /// running Turn would change its files. Board Threads have worktrees of their own.
-    fn checkout_blocked_reason(&self, project_id: u32) -> Result<Option<String>> {
+    /// running Turn would change its files. Board Threads have worktrees of their own, so only
+    /// a Turn in that same worktree blocks them.
+    fn checkout_blocked_reason(
+        &self,
+        project_id: u32,
+        target: &GitTarget,
+    ) -> Result<Option<String>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let working: u32 = db.query_row(
-            "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path IS NULL",
-            [project_id],
-            |r| r.get(0),
-        )?;
+        let working: u32 = match &target.worktree {
+            None => db.query_row(
+                "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path IS NULL",
+                [project_id],
+                |r| r.get(0),
+            )?,
+            Some(path) => db.query_row(
+                "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path = ?2",
+                rusqlite::params![project_id, path],
+                |r| r.get(0),
+            )?,
+        };
         Ok((working > 0).then(|| {
             "A Thread is working in this checkout. Wait for its Turn to finish or stop it.".into()
         }))
+    }
+
+    /// Resolves the checkout a Git operation acts on. `None` is the Project's main checkout;
+    /// a Thread resolves to its own worktree if it has one. A Thread of another Project, an
+    /// unknown Thread or a worktree that no longer exists is an explicit error: there is
+    /// never a fallback to the main checkout.
+    fn git_target(&self, project_id: u32, thread_id: Option<u32>) -> Result<GitTarget> {
+        let Some(thread_id) = thread_id else {
+            return Ok(GitTarget {
+                root: self.main_checkout(project_id)?,
+                worktree: None,
+            });
+        };
+        let worktree: Option<Option<String>> = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            rusqlite::OptionalExtension::optional(db.query_row(
+                "SELECT worktree_path FROM threads WHERE id = ?1 AND project_id = ?2",
+                rusqlite::params![thread_id, project_id],
+                |r| r.get(0),
+            ))?
+        };
+        let Some(worktree) = worktree else {
+            return Err(Error::Git(format!(
+                "Thread {thread_id} does not belong to Project {project_id}."
+            )));
+        };
+        let root = PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
+        if !root.is_dir() {
+            return Err(Error::Git(format!(
+                "The checkout of Thread {thread_id} is missing: {}",
+                root.display()
+            )));
+        }
+        Ok(GitTarget { root, worktree })
     }
 
     fn main_checkout(&self, project_id: u32) -> Result<PathBuf> {
@@ -1870,4 +2021,11 @@ fn mark_unfinished_work_interrupted(db: &Connection) -> Result<()> {
              WHERE status IN ('working', 'needs-input', 'needs_input');",
     )?;
     Ok(())
+}
+
+/// The checkout a Git operation resolved to.
+struct GitTarget {
+    root: PathBuf,
+    /// The Thread's worktree path, or `None` for the Project's main checkout.
+    worktree: Option<String>,
 }

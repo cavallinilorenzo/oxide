@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FileDirectoryIcon, GitBranchIcon, PencilIcon } from "@primer/octicons-react";
 import { commands, type ModelInfo, type Thread } from "./bindings";
 import { ProviderAvatar } from "./ProviderAvatar";
@@ -13,6 +13,8 @@ interface ThreadHeaderProps {
   model: string | null;
   effort: string | null;
   projectPath: string;
+  /** The Thread's Git controls: they replace the dispatch-time branch label with the live one. */
+  gitControls?: ReactNode;
   reportsUsage: boolean;
   editing: boolean;
   editTitle: string;
@@ -31,6 +33,7 @@ export function ThreadHeader({
   model,
   effort,
   projectPath,
+  gitControls,
   reportsUsage,
   editing,
   editTitle,
@@ -106,12 +109,13 @@ export function ThreadHeader({
         <div className="thread-folder-line" title={lines.folder.path}>
           <FileDirectoryIcon size={12} />
           <span className="thread-folder-path">{lines.folder.text}</span>
-          {lines.folder.branch && (
+          {!gitControls && lines.folder.branch && (
             <span className="thread-folder-branch">
               <GitBranchIcon size={12} /> {lines.folder.branch}
             </span>
           )}
         </div>
+        {gitControls && <div className="thread-git">{gitControls}</div>}
       </div>
       <div className="thread-header-actions">
         <UsageRing provider={provider} reportsUsage={reportsUsage} />

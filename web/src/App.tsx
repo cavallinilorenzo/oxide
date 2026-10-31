@@ -571,15 +571,6 @@ export function App() {
             <strong>Oxide</strong>
           </span>
         ) : null}
-        {selected && !selected.missing && (
-          <GitHeader
-            projectId={selected.id}
-            threadsKey={threadsKey}
-            onOpenDiff={() => openDiff()}
-            onOpenPullRequest={openPullRequest}
-            onChanged={onGitChanged}
-          />
-        )}
         </div>
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
@@ -731,6 +722,16 @@ export function App() {
                   threadId={selectedThreadId}
                   projectId={selected.id}
                   projectPath={selected.path}
+                  gitControls={currentThreadId !== null && !selected.missing ? (
+                    <GitHeader
+                      projectId={selected.id}
+                      threadId={currentThreadId}
+                      threadsKey={threadsKey}
+                      onOpenDiff={() => openDiff()}
+                      onOpenPullRequest={openPullRequest}
+                      onChanged={onGitChanged}
+                    />
+                  ) : undefined}
                   draft={getDraft(drafts, selectedThreadId)}
                   onDraftChange={(text) =>
                     setDrafts((prev) => setDraft(prev, selectedThreadId, text))
@@ -844,6 +845,7 @@ export function App() {
                   createRequest={createPrRequest}
                   onCreateHandled={() => setCreatePrRequest(0)}
                   projectId={selected.id}
+                  threadId={currentThreadId}
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}

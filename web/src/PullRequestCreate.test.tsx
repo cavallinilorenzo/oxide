@@ -56,6 +56,7 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
     root.render(
       <PullRequestCreate
         projectId={1}
+        threadId={7}
         onCancel={() => {}}
         onCreated={created}
       />,
@@ -74,6 +75,7 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
   );
   expect(create).toHaveBeenCalledWith(
     1,
+    7,
     "Fix topic",
     "Tested locally",
     "main",
@@ -107,7 +109,7 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
 });
 
 it("blocks PR creation from main before loading defaults or pushing", async () => {
-  const status = await commands.gitStatus(1);
+  const status = await commands.gitStatus(1, 7);
   if (status.status !== "ok") throw new Error("fixture");
   vi.mocked(commands.gitStatus).mockResolvedValue({
     status: "ok",
@@ -117,6 +119,7 @@ it("blocks PR creation from main before loading defaults or pushing", async () =
     root.render(
       <PullRequestCreate
         projectId={1}
+        threadId={7}
         onCancel={() => {}}
         onCreated={() => {}}
       />,

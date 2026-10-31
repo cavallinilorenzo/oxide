@@ -1577,8 +1577,12 @@ async fn git_blocking<T: Send + 'static>(
 /// Branch, ahead/behind and uncommitted-change counts of the main checkout.
 #[tauri::command]
 #[specta::specta]
-async fn git_status(core: State<'_, Arc<Core>>, project_id: u32) -> Result<GitStatus, AppError> {
-    git_blocking(&core, move |core| core.git_status(project_id))
+async fn git_status(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<GitStatus, AppError> {
+    git_blocking(&core, move |core| core.git_status_in(project_id, thread_id))
         .await
         .map(|status| convert(&status))
 }
@@ -1588,10 +1592,13 @@ async fn git_status(core: State<'_, Arc<Core>>, project_id: u32) -> Result<GitSt
 async fn list_branches(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
 ) -> Result<Vec<GitBranch>, AppError> {
-    git_blocking(&core, move |core| core.list_branches(project_id))
-        .await
-        .map(|branches| branches.iter().map(convert).collect())
+    git_blocking(&core, move |core| {
+        core.list_branches_in(project_id, thread_id)
+    })
+    .await
+    .map(|branches| branches.iter().map(convert).collect())
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1659,11 +1666,14 @@ pub struct Diff {
 async fn git_diff(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     scope: DiffScope,
 ) -> Result<Diff, AppError> {
-    git_blocking(&core, move |core| core.diff(project_id, convert(&scope)))
-        .await
-        .map(|diff| convert(&diff))
+    git_blocking(&core, move |core| {
+        core.diff_in(project_id, thread_id, convert(&scope))
+    })
+    .await
+    .map(|diff| convert(&diff))
 }
 
 /// What a Thread's latest Turn changed, from its two Checkpoints.
@@ -1681,9 +1691,13 @@ async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Dif
 async fn checkout_branch(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     name: String,
 ) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.checkout_branch(project_id, &name)).await
+    git_blocking(&core, move |core| {
+        core.checkout_branch_in(project_id, thread_id, &name)
+    })
+    .await
 }
 
 /// Creates a branch from HEAD and checks it out.
@@ -1692,9 +1706,13 @@ async fn checkout_branch(
 async fn create_branch(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     name: String,
 ) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.create_branch(project_id, &name)).await
+    git_blocking(&core, move |core| {
+        core.create_branch_in(project_id, thread_id, &name)
+    })
+    .await
 }
 
 /// Background fetch; returns whether it ran (it is throttled).
@@ -1707,8 +1725,12 @@ async fn fetch_project(core: State<'_, Arc<Core>>, project_id: u32) -> Result<bo
 /// `git pull --ff-only`.
 #[tauri::command]
 #[specta::specta]
-async fn pull(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.pull(project_id)).await
+async fn pull(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.pull_in(project_id, thread_id)).await
 }
 
 /// Commits exactly the given files; other staged state is untouched.
@@ -1717,10 +1739,14 @@ async fn pull(core: State<'_, Arc<Core>>, project_id: u32) -> Result<(), AppErro
 async fn commit(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     paths: Vec<String>,
     message: String,
 ) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.commit(project_id, &paths, &message)).await
+    git_blocking(&core, move |core| {
+        core.commit_in(project_id, thread_id, &paths, &message)
+    })
+    .await
 }
 
 /// Pushes the current branch; never forced.
@@ -1729,9 +1755,13 @@ async fn commit(
 async fn push(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     allow_protected: bool,
 ) -> Result<(), AppError> {
-    git_blocking(&core, move |core| core.push(project_id, allow_protected)).await
+    git_blocking(&core, move |core| {
+        core.push_in(project_id, thread_id, allow_protected)
+    })
+    .await
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1979,10 +2009,13 @@ pub struct PullRequestDraft {
 async fn pull_request_state(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
 ) -> Result<PullRequestState, AppError> {
-    git_blocking(&core, move |core| core.pull_request_state(project_id))
-        .await
-        .map(|state| convert(&state))
+    git_blocking(&core, move |core| {
+        core.pull_request_state_in(project_id, thread_id)
+    })
+    .await
+    .map(|state| convert(&state))
 }
 
 /// The repository's branches on GitHub, for choosing a pull request's base.
@@ -2004,10 +2037,13 @@ async fn pull_request_base_branches(
 async fn pull_request_draft(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
 ) -> Result<PullRequestDraft, AppError> {
-    git_blocking(&core, move |core| core.pull_request_draft(project_id))
-        .await
-        .map(|draft| convert(&draft))
+    git_blocking(&core, move |core| {
+        core.pull_request_draft_in(project_id, thread_id)
+    })
+    .await
+    .map(|draft| convert(&draft))
 }
 
 /// Pushes the branch if needed, then opens a pull request for it.
@@ -2016,14 +2052,16 @@ async fn pull_request_draft(
 async fn create_pull_request(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     title: String,
     body: String,
     base: String,
     draft: bool,
 ) -> Result<PullRequest, AppError> {
     git_blocking(&core, move |core| {
-        core.create_pull_request(
+        core.create_pull_request_in(
             project_id,
+            thread_id,
             &oxide_core::PullRequestInput {
                 title,
                 body,

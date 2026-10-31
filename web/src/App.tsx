@@ -188,9 +188,9 @@ export function App() {
     // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
     if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
-  const openCodeFile = (path: string, diff?: DiffFile) => {
+  const openCodeFile = (path: string, diff?: DiffFile, remote = false) => {
     if (!workbenchContext) return;
-    setCodeRequest({ id: ++codeSequence.current, path, diff, contextKey: workbenchContext.key });
+    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, contextKey: workbenchContext.key });
     selectSurface("Files");
   };
   useEffect(() => {
@@ -842,7 +842,7 @@ export function App() {
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
-                  onOpenFile={(file) => openCodeFile(file.path, file)}
+                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr")}
                 />
               </Suspense></div>
             )}
@@ -861,7 +861,7 @@ export function App() {
               </Suspense></div>
             )}
             {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
               const projectId = Number(id); const isSelectedProject = projectId === selected?.id;

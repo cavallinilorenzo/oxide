@@ -11,8 +11,10 @@ import {
   CodeIcon,
   FileCodeIcon,
   FileIcon,
+  ChevronDownIcon,
   FoldIcon,
   GearIcon,
+  ListUnorderedIcon,
   PlusIcon,
   SearchIcon,
   SyncIcon,
@@ -29,7 +31,12 @@ import { fontStyle, getAppearance } from "./appearance";
 import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
-import { patchDocument, type CodeOpenRequest } from "./codeOpen";
+import { hunkTarget, patchDocument, type CodeOpenRequest } from "./codeOpen";
+import { batchCloseTargets, neighborAfterClose, previewToReplace } from "./editorTabs";
+
+/** Dock width below which the file list becomes a toggled overlay. */
+const COMPACT_WIDTH = 560;
+type CloseChoice = "save" | "discard" | "cancel";
 
 interface Document {
   readOnly?: boolean;
@@ -40,6 +47,12 @@ interface Document {
   dirty: boolean;
   view: monaco.editor.ICodeEditorViewState | null;
   saving: boolean;
+  /** Replaced by the next single-click open until it is edited or double-clicked. */
+  preview?: boolean;
+  /** The reviewed revision may differ from the local file, so hunk lines can't be trusted. */
+  remote?: boolean;
+  /** Opened from a Diff hunk, so Back to Diff is offered. */
+  fromDiff?: boolean;
   listener?: monaco.IDisposable;
 }
 interface Problem {
@@ -55,6 +68,8 @@ interface Props {
   visible: boolean;
   onChanged: () => void;
   onRunCommand: (command: string) => void;
+  /** Shows the Diff Surface again, where the comparison, file and scroll were left. */
+  onBackToDiff?: () => void;
 }
 
 export function CodeWorkbench({
@@ -66,6 +81,7 @@ export function CodeWorkbench({
   onChanged,
   onRunCommand,
   openRequest,
+  onBackToDiff,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -81,6 +97,12 @@ export function CodeWorkbench({
   const [newFile, setNewFile] = useState<string | null>(null);
   const [treeRevision, setTreeRevision] = useState(0);
   const [closing, setClosing] = useState<string | null>(null);
+  const closeAnswer = useRef<((choice: CloseChoice) => void) | null>(null);
+  const [compact, setCompact] = useState(false);
+  const [treeOpen, setTreeOpen] = useState(false);
+  const [filesMenu, setFilesMenu] = useState(false);
+  const root = useRef<HTMLElement>(null);
+  const treeToggle = useRef<HTMLButtonElement>(null);
   const [states, setStates] = useState<Record<string, string>>({});
   const [cursor, setCursor] = useState({ lineNumber: 1, column: 1 });
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -125,10 +147,35 @@ export function CodeWorkbench({
     instance.focus();
   }, []);
 
+  /** Drops a document and its model without asking; callers decide whether that is allowed. */
+  const discardDocument = useCallback(
+    (path: string) => {
+      const doc = records.current.get(path);
+      if (!doc) return;
+      const order = [...records.current.keys()];
+      const selected = editor.current?.getModel() === doc.model;
+      if (selected) editor.current?.setModel(null);
+      languages.current?.remove(doc.model);
+      records.current.delete(path);
+      doc.listener?.dispose();
+      doc.model.dispose();
+      publish();
+      if (selected) {
+        const next = records.current.get(neighborAfterClose(order, path) ?? "");
+        if (next) select(next);
+        else setActive(null);
+      }
+    },
+    [publish, select],
+  );
   const openFile = useCallback(
-    async (path: string, selection?: monaco.IRange, reveal = true) => {
+    async (path: string, selection?: monaco.IRange, reveal = true, keep = true) => {
       const existing = records.current.get(path);
       if (existing) {
+        if (keep && existing.preview) {
+          existing.preview = false;
+          publish();
+        }
         if (reveal) select(existing, selection);
         return;
       }
@@ -153,6 +200,9 @@ export function CodeWorkbench({
           editorLanguage(path),
           uri,
         );
+        // A new preview takes the place of the unmodified one; dirty or kept files stay.
+        const stale = keep ? null : previewToReplace([...records.current.values()].map((d) => ({ path: d.path, preview: !!d.preview, dirty: d.dirty })));
+        if (stale) discardDocument(stale);
         const doc: Document = {
           path,
           model,
@@ -160,9 +210,11 @@ export function CodeWorkbench({
           dirty: false,
           view: null,
           saving: false,
+          preview: !keep,
         };
         doc.listener = model.onDidChangeContent(() => {
           doc.dirty = model.getValue() !== doc.saved;
+          if (doc.dirty) doc.preview = false;
           languages.current?.changed(model);
           publish();
         });
@@ -177,7 +229,7 @@ export function CodeWorkbench({
         setLoading(opening.current.size > 0);
       }
     },
-    [projectId, threadId, rootPath, publish, select],
+    [projectId, threadId, rootPath, publish, select, discardDocument],
   );
 
   const saveDocument = useCallback(
@@ -219,29 +271,63 @@ export function CodeWorkbench({
     return true;
   }, [saveDocument]);
 
-  const closeFile = useCallback(
-    (path: string) => {
-      const doc = records.current.get(path);
-      if (!doc) return;
-      const selected = editor.current?.getModel() === doc.model;
-      if (selected) editor.current?.setModel(null);
-      languages.current?.remove(doc.model);
-      records.current.delete(path);
-      doc.listener?.dispose();
-      doc.model.dispose();
-      publish();
-      setClosing(null);
-      if (selected) {
-        const next = [...records.current.values()].at(-1);
-        if (next) select(next);
-        else setActive(null);
-      }
-    },
-    [publish, select],
+  const ask = useCallback(
+    (path: string) =>
+      new Promise<CloseChoice>((resolve) => {
+        closeAnswer.current = resolve;
+        setClosing(path);
+      }),
+    [],
   );
-  const actions = useRef({ openFile, saveAll, saveDocument, closeFile });
+  /** The one close policy: clean files close, dirty ones ask Save / Discard / Cancel, and Cancel stops a batch. */
+  const requestClose = useCallback(
+    async (paths: string[]) => {
+      for (const path of paths) {
+        const doc = records.current.get(path);
+        if (!doc) continue;
+        if (doc.dirty && !doc.readOnly) {
+          if (active !== path) select(doc);
+          const choice = await ask(path);
+          setClosing(null);
+          closeAnswer.current = null;
+          if (choice === "cancel") return false;
+          if (choice === "save" && !(await saveDocument(doc))) return false;
+        }
+        discardDocument(path);
+      }
+      return true;
+    },
+    [active, ask, discardDocument, saveDocument, select],
+  );
+  const closeFile = useCallback((path: string) => void requestClose([path]), [requestClose]);
+  const openTree = useCallback(() => {
+    setTreeOpen(true);
+    requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".editor-explorer button.files-row, .editor-explorer header button")?.focus());
+  }, []);
+  const closeTree = useCallback(() => {
+    setTreeOpen(false);
+    treeToggle.current?.focus();
+  }, []);
+  // Narrow docks show the file list as an overlay instead of a permanent split.
+  useEffect(() => {
+    const element = root.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      if (width > 0) setCompact(width < COMPACT_WIDTH);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // The active file stays visible in a scrolling bar.
+  useEffect(() => {
+    if (!active) return;
+    const tabs = root.current?.querySelectorAll<HTMLElement>(".editor-tab.active");
+    tabs?.[0]?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [active, documents.length]);
+  const actions = useRef({ openFile, saveAll, saveDocument, closeFile, requestClose });
   useLayoutEffect(() => {
-    actions.current = { openFile, saveAll, saveDocument, closeFile };
+    actions.current = { openFile, saveAll, saveDocument, closeFile, requestClose };
   });
 
   useEffect(() => {
@@ -371,7 +457,7 @@ export function CodeWorkbench({
     let doc = records.current.get(path);
     if (doc) { doc.model.setValue(content); doc.saved = content; }
     else {
-      doc = { path, model: monaco.editor.createModel(content, "diff"), saved: content, dirty: false, view: null, saving: false, readOnly: true, sourcePath: openRequest.diff.status === "deleted" ? undefined : openRequest.path };
+      doc = { path, model: monaco.editor.createModel(content, "diff"), saved: content, dirty: false, view: null, saving: false, readOnly: true, sourcePath: openRequest.diff.status === "deleted" ? undefined : openRequest.path, remote: openRequest.remote };
       records.current.set(path, doc);
     }
     publish();
@@ -409,10 +495,7 @@ export function CodeWorkbench({
         const doc = [...records.current.values()].find(
           (d) => d.model === editor.current?.getModel(),
         );
-        if (doc) {
-          if (doc.dirty) setClosing(doc.path);
-          else actions.current.closeFile(doc.path);
-        }
+        if (doc) void actions.current.requestClose([doc.path]);
       }
     };
     window.addEventListener("keydown", key, true);
@@ -475,8 +558,19 @@ export function CodeWorkbench({
   ).length;
 
   return (
-    <main className="code-workbench" aria-label="Code editor" hidden={!visible}>
-      <aside className="editor-explorer">
+    <main
+      ref={root}
+      className={`code-workbench${compact ? " compact" : ""}${compact && treeOpen ? " tree-open" : ""}`}
+      aria-label="Code editor"
+      hidden={!visible}
+    >
+      <aside
+        className="editor-explorer"
+        aria-label="File list"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && compact && treeOpen) closeTree();
+        }}
+      >
         <header>
           <span>Files</span>
           <button
@@ -538,23 +632,63 @@ export function CodeWorkbench({
         <EditorFileTree
           projectId={projectId}
           threadId={threadId}
-          selected={active}
-          onOpen={(path) => void openFile(path)}
+          selected={current?.readOnly ? (current.sourcePath ?? null) : active}
+          onOpen={(path) => {
+            if (compact) closeTree();
+            void openFile(path, undefined, true, false);
+          }}
+          onKeep={(path) => void openFile(path)}
           revision={treeRevision}
         />
       </aside>
       <div className="editor-main">
+        <div className="editor-tabs-bar">
+        {compact && (
+          <button
+            ref={treeToggle}
+            className="icon-btn sm editor-tree-toggle"
+            aria-label="Toggle file list"
+            aria-expanded={treeOpen}
+            title="File list"
+            onClick={() => (treeOpen ? closeTree() : openTree())}
+          >
+            <ListUnorderedIcon size={14} />
+          </button>
+        )}
         <div className="editor-tabs" role="tablist" aria-label="Open files">
           {documents.map((doc) => (
             <div
-              className={`editor-tab${active === doc.path ? " active" : ""}`}
+              className={`editor-tab${active === doc.path ? " active" : ""}${doc.preview ? " preview" : ""}`}
               key={doc.path}
+              data-path={doc.path}
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  void requestClose([doc.path]);
+                }
+              }}
+              onMouseDown={(e) => {
+                if (e.button === 1) e.preventDefault();
+              }}
             >
               <button
                 role="tab"
                 aria-selected={active === doc.path}
                 title={doc.path}
                 onClick={() => select(records.current.get(doc.path)!)}
+                onDoubleClick={() => {
+                  const record = records.current.get(doc.path);
+                  if (record?.preview) {
+                    record.preview = false;
+                    publish();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Delete") {
+                    e.preventDefault();
+                    void requestClose([doc.path]);
+                  }
+                }}
               >
                 <FileIcon size={13} />
                 <span>{doc.readOnly ? "Changes: " : ""}{doc.path.split("/").pop()}</span>
@@ -565,14 +699,74 @@ export function CodeWorkbench({
               <button
                 className="icon-btn sm"
                 aria-label={`Close ${doc.path}`}
-                onClick={() =>
-                  doc.dirty ? setClosing(doc.path) : closeFile(doc.path)
-                }
+                onClick={() => void requestClose([doc.path])}
               >
                 <XIcon size={12} />
               </button>
             </div>
           ))}
+        </div>
+        <div className="editor-files-menu-wrap">
+          <button
+            className="icon-btn sm"
+            aria-label="All open files"
+            aria-haspopup="menu"
+            aria-expanded={filesMenu}
+            title="All open files"
+            onClick={() => setFilesMenu((v) => !v)}
+          >
+            <ChevronDownIcon size={14} />
+          </button>
+          {filesMenu && (
+            <div
+              className="editor-files-menu"
+              role="menu"
+              aria-label="Open files"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setFilesMenu(false);
+              }}
+            >
+              {documents.length === 0 && <p className="dim">No open files.</p>}
+              {documents.map((doc) => (
+                <button
+                  key={doc.path}
+                  role="menuitem"
+                  className={active === doc.path ? "selected" : ""}
+                  onClick={() => {
+                    setFilesMenu(false);
+                    select(records.current.get(doc.path)!);
+                  }}
+                >
+                  <FileIcon size={13} />
+                  <span>{doc.readOnly ? "Changes: " : ""}{doc.path}</span>
+                  {doc.dirty && <span className="editor-dirty" aria-label="Unsaved changes" />}
+                </button>
+              ))}
+              <hr />
+              <button
+                role="menuitem"
+                disabled={documents.length < 2 || !active}
+                onClick={() => {
+                  setFilesMenu(false);
+                  void requestClose(batchCloseTargets(documents.map((d) => d.path), "others", active));
+                }}
+              >
+                Close others
+              </button>
+              <button
+                role="menuitem"
+                disabled={documents.length === 0}
+                onClick={() => {
+                  setFilesMenu(false);
+                  void requestClose(batchCloseTargets(documents.map((d) => d.path), "all", active));
+                }}
+              >
+                Close all
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="editor-tabs-actions">
           <span className="grow" />
           <button
             className="icon-btn sm"
@@ -583,12 +777,34 @@ export function CodeWorkbench({
             <GearIcon size={15} />
           </button>
         </div>
+        </div>
         {current && (
           <div className="editor-breadcrumb">
             <span title={current.path}>{current.path}</span>
             {current.readOnly && <span className="chip">Git patch · read-only</span>}
             <span className="grow" />
-            {current.sourcePath && <button className="btn sm" onClick={() => void openFile(current.sourcePath!)}>Open working file</button>}
+            {current.sourcePath && (
+              <button
+                className="btn sm"
+                onClick={() => {
+                  const line = current.remote ? 1 : hunkTarget(current.model.getValue(), cursor.lineNumber);
+                  const range = { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 };
+                  const path = current.sourcePath!;
+                  void openFile(path, range).then(() => {
+                    const doc = records.current.get(path);
+                    if (doc && !doc.fromDiff) {
+                      doc.fromDiff = true;
+                      publish();
+                    }
+                  });
+                }}
+              >
+                Open in Code
+              </button>
+            )}
+            {(current.fromDiff || current.readOnly) && onBackToDiff && (
+              <button className="btn sm" onClick={onBackToDiff}>Back to Diff</button>
+            )}
             <button
               className="btn sm"
               disabled={current.readOnly}
@@ -629,11 +845,15 @@ export function CodeWorkbench({
             {current && (
               <button
                 className="btn sm"
-                onClick={() =>
-                  current.dirty
-                    ? setClosing(`reload:${current.path}`)
-                    : void reload()
-                }
+                onClick={() => {
+                  if (!current.dirty) return void reload();
+                  void ask(`reload:${current.path}`).then((choice) => {
+                    setClosing(null);
+                    closeAnswer.current = null;
+                    if (choice === "discard") void reload();
+                    if (choice === "save") void saveDocument(records.current.get(current.path)!);
+                  });
+                }}
               >
                 Reload from disk
               </button>
@@ -657,6 +877,11 @@ export function CodeWorkbench({
               <button className="btn" onClick={() => setQuickOpen(true)}>
                 <SearchIcon size={14} /> Find file <kbd>{shortcutLabel}P</kbd>
               </button>
+              {compact && (
+                <button className="btn" onClick={openTree}>
+                  <ListUnorderedIcon size={14} /> Browse files
+                </button>
+              )}
               <button className="link" onClick={() => setTools(true)}>
                 Set up language tools
               </button>
@@ -735,37 +960,24 @@ export function CodeWorkbench({
       )}
       {closing && (
         <div className="modal-backdrop">
-          <div className="modal" role="alertdialog" aria-label="Unsaved file">
+          <div
+            className="modal"
+            role="alertdialog"
+            aria-label="Unsaved file"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") closeAnswer.current?.("cancel");
+            }}
+          >
             <h2>Keep your changes?</h2>
             <p>{closing.replace(/^reload:/, "")} has unsaved changes.</p>
             <div className="modal-actions">
-              <button autoFocus onClick={() => setClosing(null)}>
+              <button autoFocus onClick={() => closeAnswer.current?.("cancel")}>
                 Cancel
               </button>
-              <button
-                onClick={() => {
-                  if (closing.startsWith("reload:")) {
-                    setClosing(null);
-                    void reload();
-                  } else closeFile(closing);
-                }}
-              >
+              <button onClick={() => closeAnswer.current?.("discard")}>
                 Discard changes
               </button>
-              <button
-                className="primary"
-                onClick={() => {
-                  const path = closing.replace(/^reload:/, "");
-                  const doc = records.current.get(path);
-                  if (doc)
-                    void saveDocument(doc).then((saved) => {
-                      if (saved) {
-                        if (closing.startsWith("reload:")) setClosing(null);
-                        else closeFile(path);
-                      } else setClosing(null);
-                    });
-                }}
-              >
+              <button className="primary" onClick={() => closeAnswer.current?.("save")}>
                 Save changes
               </button>
             </div>

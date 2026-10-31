@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "requestedBackend": "cpu",
+  "requestedModel": "tiny",
+  "failure": null,
+  "elapsedMs": 21865,
+  "executableSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "tiny",
+    "measurement": {
+      "key": {
+        "modelSha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+        "backend": "cpu",
+        "adapterId": null,
+        "driverVersion": null,
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release; cpu-build-flags=[1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "x86_64",
+          "model": "AMD Ryzen 5 3600 6-Core Processor              ",
+          "usableCores": 12,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793444977,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        4514,
+        4511,
+        4526
+      ],
+      "coldLoadMs": 179
+    },
+    "execution": {
+      "backend": "cpu",
+      "adapter": "CPU",
+      "offloaded": false,
+      "offloadEvidence": null
+    }
+  },
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 245,
+    "processSamples": 123,
+    "gpuSamples": 0,
+    "peakWorkingSetBytes": 271626240,
+    "peakPrivateCommitBytes": 762863616,
+    "sampledDedicatedBytes": null,
+    "sampledSharedBytes": null
+  }
+}

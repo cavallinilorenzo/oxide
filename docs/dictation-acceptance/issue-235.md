@@ -24,8 +24,8 @@ No release, tag, merge or parent closure is authorized by this record.
 
 | Required target | Installed package + actual offload | Comparison / memory | Exact remaining dependency |
 | --- | --- | --- | --- |
-| Windows NVIDIA, CUDA | **Unverified** | No measurements | Physical NVIDIA x64 machine, compatible driver, installed CUDA/Vulkan package; complete warmup + three runs with CUDA dispatch/device evidence |
-| Windows NVIDIA, Vulkan | **Unverified** | No measurements | Same physical NVIDIA machine; independently prove Vulkan timestamps, not just CUDA success |
+| Windows NVIDIA, CUDA | **Verified offload** for Tiny/Base/Small in the installed #234 CUDA worker (RTX 2060 SUPER) | CPU comparison and sampled memory in the [NVIDIA record](#windows-nvidia-installed-record) | Missing/incompatible driver and OOM flows, physical microphone/shortcut, larger-model calibration |
+| Windows NVIDIA, Vulkan | **Verified offload** for Tiny/Base/Small, independent of CUDA (separate worker, `Vulkan0`, native kernel timestamps) | Same record | Same as above |
 | Windows AMD, Vulkan; RX 5600 XT regression | **Verified offload** for Tiny/Base/Small in the installed #234 worker | CPU comparison and sampled memory below | Physical microphone, offline/disconnected lifecycle, failure flows and larger-model calibration remain open |
 | macOS Apple Silicon, Metal | **Verified offload (dev build)** for Tiny/Base/Small; installed package remains open | CPU vs Metal comparisons and completed dispatch evidence in [macOS record](#macos-apple-silicon-development-record) | Package-level verification from an installed `.app` from a traceable `.dmg`; physical microphone/shortcut/offline lifecycle |
 | CPU-only / no usable GPU runtime | **Unverified on physical runtime-free host** | Automated isolation/recovery coverage only | Physical or controlled clean Windows environment without usable Vulkan/NVIDIA runtime; installed app launch **and CPU inference**, not launch alone |
@@ -117,6 +117,48 @@ not whole-app peaks or allocator instrumentation. GPU sampling can miss short
 peaks; missing CPU GPU counters are **unknown**, not zero. Hashing/staging and
 residency/commit differ, as the columns show. Results are local observations with
 instrumentation overhead, not catalogue calibration or universal latency promises.
+
+## Windows NVIDIA installed record
+
+Run on 2026-10-31 on a second physical machine: AMD Ryzen 5 3600 (12 logical
+processors), NVIDIA GeForce RTX 2060 SUPER (8 GB), NVIDIA driver 617.14 (CUDA
+13.4), Windows 11 Home build 26200. The package is the same #234 installer as above
+(`Oxide_0.1.0_x64-setup.exe`, SHA-256
+`3e3d6823a97892508b61f04b2023a8f2cf34707cdf3fee8fcb0e1ac65f94d0ca`, artifact
+`oxide-windows-x64-ci` from run 41094709855, downloaded with `gh run download` and
+hash-checked), installed silently into a scratch folder. `verify windows-x64` passed and
+`smoke` found the RTX 2060 SUPER **available** through both `oxide-vulkan-worker.exe`
+and `oxide-cuda-worker.exe`. The release `dictation_benchmark` example (built with
+`GGML_NATIVE=OFF`) only drove the installed worker; models were Tiny/Base/Small, each
+SHA-256-checked against the catalogue. Stable IDs came from the installed workers:
+`vulkan:8e75221ccf0d162efaff030f2eec89ef` (driver `NVIDIA: 617.14`, Vulkan API
+1.4.351) and `cuda:8e75221ccf0d162efaff030f2eec89ef` (compute capability 7.5).
+Runs were serial through `tools/dictation-acceptance.ps1`. Sanitized reports:
+[results-2026-10-31/nvidia](results-2026-10-31/nvidia/).
+
+| Model / backend | Cold load (ms) | Three warm runs (ms) | Median (ms) | Median RTF | Actual offload evidence |
+| --- | ---: | --- | ---: | ---: | --- |
+| Tiny / CPU | 179 | 4514 / 4511 / 4526 | 4514 | 0.410 | none (CPU) |
+| Base / CPU | 265 | 9548 / 9571 / 9758 | 9571 | 0.870 | none (CPU) |
+| Small / CPU | n/a | timed out | n/a | n/a | the unchanged 120 s deadline; no measurement accepted |
+| Tiny / Vulkan | 202 | 255 / 259 / 259 | 259 | 0.0235 | `Vulkan0` init + native kernel timestamps |
+| Base / Vulkan | 238 | 291 / 287 / 288 | 288 | 0.0262 | same |
+| Small / Vulkan | 604 | 373 / 364 / 364 | 364 | 0.0331 | same |
+| Tiny / CUDA | 138 | 255 / 255 / 273 | 255 | 0.0232 | `CUDA0` dispatch snapshots: 30 graphs, 1365 matrix ops, 0 failures in warmup and all three runs |
+| Base / CUDA | 175 | 402 / 310 / 298 | 310 | 0.0282 | same mechanism |
+| Small / CUDA | 514 | 387 / 392 / 393 | 392 | 0.0356 | same mechanism |
+
+Sampled memory (lower bounds from 100 ms polling, not calibration, so no model is marked
+`measured: true`): Small/Vulkan peak working set 273 MB, private commit 1.52 GB, sampled
+dedicated GPU memory 903 MB; Small/CUDA peak working set 444 MB, private commit
+1.95 GB, dedicated 976 MB; Small/CPU timed out at peak working set 832 MB.
+
+Observed gaps: the Vulkan Tiny run's maximum sampling gap was 5.6 s (the first run,
+likely driver shader compilation), so its memory numbers are especially unreliable.
+Vulkan reports carry native timestamps but not the CUDA-style per-run dispatch
+snapshot. Both are recorded exactly as emitted. Not covered by this record: the
+missing/incompatible NVIDIA driver and OOM flows, the physical microphone, shortcut,
+offline and insertion passes, and Medium/Large v3/Turbo.
 
 ## macOS Apple Silicon development record
 

@@ -60,7 +60,8 @@ fn request(project_id: u32) -> DispatchRequest {
 
 /// Waits for the fake Provider's Turn to finish, so no Thread is working any more.
 fn settle(core: &Core, thread_id: u32) {
-    for _ in 0..500 {
+    // Generous: a Board dispatch creates a worktree, which is slow on Windows runners.
+    for _ in 0..3000 {
         let snapshot = core.get_thread_snapshot(thread_id).unwrap();
         if snapshot.thread.status != ThreadStatus::Working && !snapshot.turns.is_empty() {
             return;

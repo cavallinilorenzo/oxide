@@ -8,7 +8,7 @@ export function dictationLine(text: string): string { return [...text].map((c) =
 type Target = { element: HTMLElement; insert: (text: string) => void };
 const targets = new Map<HTMLElement, Target>();
 const listeners = new Set<() => void>();
-type State = { phase: "idle" | "starting" | "recording" | "transcribing"; error: string | null; notice?: string };
+type State = { phase: "idle" | "starting" | "recording" | "transcribing"; error: string | null; notice?: string; retry?: boolean };
 let state: State = { phase: "idle", error: null };
 let destination: Target | undefined;
 let caret: Range | undefined;
@@ -59,6 +59,29 @@ export function useDictationTarget(ref: RefObject<HTMLElement | null>, insert: (
     return () => { targets.delete(element); };
   }, [ref, enabled]);
 }
+function insertResult(text: string) {
+  if (!text) return;
+  if (!destination || !destination.element.isConnected || targets.get(destination.element) !== destination) throw new Error("The original input was closed. Dictation was discarded.");
+  destination.element.focus();
+  if (caret && destination.element.contains(caret.startContainer)) { const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(caret); }
+  destination.insert(text);
+}
+export async function retryDictationOnCpu() {
+  if (!state.retry || state.phase !== "idle") return;
+  const version = generation;
+  update({ phase: "transcribing", error: null });
+  try {
+    const result = await commands.dictationRetryOnCpu();
+    if (version !== generation) return;
+    if (result.status === "error") throw new Error(result.error.message);
+    insertResult(result.data);
+    update({ phase: "idle", error: null });
+  } catch (error) {
+    if (version === generation) update({ phase: "idle", error: message(error), retry: /^GPU transcription failed|CPU retry refused|CPU transcription failed/.test(message(error)) });
+    return;
+  }
+  destination = undefined;
+}
 export function toggleDictation(element: Element | null = document.activeElement) {
   void toggle(element);
 }
@@ -72,12 +95,7 @@ async function toggle(element: Element | null) {
       const result = await commands.dictationStop();
       if (version !== generation) return;
       if (result.status === "error") throw new Error(result.error.message);
-      if (result.data) {
-        if (!destination || !destination.element.isConnected || targets.get(destination.element) !== destination) throw new Error("The original input was closed. Dictation was discarded.");
-        destination.element.focus();
-        if (caret && destination.element.contains(caret.startContainer)) { const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(caret); }
-        destination.insert(result.data);
-      }
+      insertResult(result.data);
       update({ phase: "idle", error: null });
       void commands.dictationStatus().then(result => {
         if (version !== generation || state.phase !== "idle" || result.status !== "ok") return;
@@ -86,7 +104,11 @@ async function toggle(element: Element | null) {
           update({ phase: "idle", error: null, notice: `Fell back to CPU: ${execution.fallbackReason}` });
         }
       }).catch(() => {});
-    } catch (error) { if (version === generation) update({ phase: "idle", error: message(error) }); }
+    } catch (error) {
+      const retry = /^GPU transcription failed/.test(message(error));
+      if (version === generation) update({ phase: "idle", error: message(error), retry });
+      if (retry) return;
+    }
     destination = undefined;
     return;
   }
@@ -125,6 +147,7 @@ export function DictationController() {
   if (current.phase === "idle" && !current.error && !current.notice) return null;
   return <aside className="dictation-status" aria-label="Dictation">
     <span role={current.error ? "alert" : "status"}>{current.error ?? current.notice ?? (current.phase === "recording" ? `Listening — ${formatAccelerator(shortcuts.dictation)} to insert, Esc to cancel` : current.phase === "starting" ? "Preparing model and microphone…" : "Transcribing locally…")}</span>
+    {current.retry && current.phase === "idle" && <button type="button" onClick={() => { void retryDictationOnCpu(); }}>Retry on CPU</button>}
     <button type="button" onClick={cancelDictation}>{current.phase === "idle" ? "Dismiss" : "Cancel"}</button>
   </aside>;
 }

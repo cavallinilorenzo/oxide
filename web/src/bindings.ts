@@ -20,6 +20,7 @@ export const commands = {
 	dictationModelDelete: (model: DictationModelId) => typedError<null, AppError>(__TAURI_INVOKE("dictation_model_delete", { model })),
 	dictationStart: () => typedError<null, AppError>(__TAURI_INVOKE("dictation_start")),
 	dictationStop: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_stop")),
+	dictationRetryOnCpu: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_retry_on_cpu")),
 	dictationCancel: () => __TAURI_INVOKE<void>("dictation_cancel"),
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	/**

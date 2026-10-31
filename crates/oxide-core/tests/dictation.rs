@@ -837,3 +837,131 @@ fn requested_backend_and_stable_adapter_survive_settings_roundtrip() {
     assert_eq!(value["backend"], "vulkan");
     assert_eq!(value["adapterId"], "pci:1002:731f");
 }
+
+struct MockCpuRuntime {
+    calls: AtomicUsize,
+    samples_seen: std::sync::Mutex<Vec<usize>>,
+}
+
+impl WhisperBackendRuntime for MockCpuRuntime {
+    fn backend_id(&self) -> BackendId {
+        BackendId::Cpu
+    }
+
+    fn probe(&self) -> BackendProbe {
+        BackendProbe {
+            backend: BackendId::Cpu,
+            state: CapabilityState::Available,
+            adapter: None,
+            memory_pool: None,
+        }
+    }
+
+    fn transcribe(
+        &self,
+        request: &TranscriptionRequest,
+    ) -> Result<TranscriptionOutcome, BackendError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.samples_seen
+            .lock()
+            .unwrap()
+            .push(request.samples.len());
+        Ok(TranscriptionOutcome {
+            text: "retried on cpu".into(),
+            execution: ExecutionDetails {
+                backend: BackendId::Cpu,
+                adapter: None,
+                offloaded: false,
+                offload_evidence: None,
+                fallback_reason: None,
+            },
+        })
+    }
+}
+
+fn explicit_gpu_failure_fixture() -> (
+    Dictation,
+    Arc<MockFailingGpuRuntime>,
+    Arc<MockCpuRuntime>,
+    tempfile::TempDir,
+    DictationSettings,
+) {
+    let gpu = Arc::new(MockFailingGpuRuntime {
+        calls: AtomicUsize::new(0),
+    });
+    let cpu = Arc::new(MockCpuRuntime {
+        calls: AtomicUsize::new(0),
+        samples_seen: Default::default(),
+    });
+    let dictation = Dictation::with_runtime(gpu.clone()).with_cpu_runtime(cpu.clone());
+    dictation.inject_recording_for_test(
+        RecordingSnapshot {
+            language: "auto".into(),
+            device: Device::Gpu,
+            model: ModelId::Small,
+            backend: None,
+            adapter_id: None,
+        },
+        vec![0.1f32; 16000],
+        16000,
+    );
+    let settings = DictationSettings {
+        enabled: true,
+        device: Device::Gpu,
+        ..Default::default()
+    };
+    (dictation, gpu, cpu, tempfile::tempdir().unwrap(), settings)
+}
+
+#[test]
+fn explicit_gpu_failure_retains_bounded_audio_and_cpu_retry_reuses_it() {
+    let (dictation, gpu, cpu, home, settings) = explicit_gpu_failure_fixture();
+    assert!(!dictation.has_retry_audio());
+
+    dictation.stop(home.path(), &settings).unwrap_err();
+    assert!(dictation.has_retry_audio());
+    assert_eq!(
+        cpu.calls.load(Ordering::SeqCst),
+        0,
+        "no silent substitution"
+    );
+
+    let text = dictation.retry_on_cpu(home.path(), &settings).unwrap();
+    assert_eq!(text, "retried on cpu");
+    assert_eq!(gpu.calls.load(Ordering::SeqCst), 1, "GPU is not re-run");
+    assert_eq!(*cpu.samples_seen.lock().unwrap(), vec![16000]);
+    assert!(!dictation.has_retry_audio(), "audio is consumed on success");
+    let exec = dictation.last_execution().unwrap();
+    assert_eq!(exec.backend, BackendId::Cpu);
+    assert!(!exec.offloaded);
+    assert!(exec.fallback_reason.unwrap().contains("Fake native GPU"));
+
+    let again = dictation.retry_on_cpu(home.path(), &settings).unwrap_err();
+    assert!(again.to_string().contains("No recording to retry"));
+}
+
+#[test]
+fn retry_audio_is_dropped_on_discard_cancel_and_disable() {
+    for drop_it in [
+        |d: &Dictation, _h: &std::path::Path| d.discard_retry_audio(),
+        |d: &Dictation, _h: &std::path::Path| d.cancel(),
+    ] {
+        let (dictation, _gpu, cpu, home, settings) = explicit_gpu_failure_fixture();
+        dictation.stop(home.path(), &settings).unwrap_err();
+        drop_it(&dictation, home.path());
+        assert!(!dictation.has_retry_audio());
+        dictation.retry_on_cpu(home.path(), &settings).unwrap_err();
+        assert_eq!(cpu.calls.load(Ordering::SeqCst), 0);
+    }
+
+    let (dictation, _gpu, cpu, home, settings) = explicit_gpu_failure_fixture();
+    dictation.stop(home.path(), &settings).unwrap_err();
+    let disabled = DictationSettings {
+        enabled: false,
+        ..settings
+    };
+    let err = dictation.retry_on_cpu(home.path(), &disabled).unwrap_err();
+    assert!(err.to_string().contains("disabled"));
+    assert!(!dictation.has_retry_audio());
+    assert_eq!(cpu.calls.load(Ordering::SeqCst), 0);
+}

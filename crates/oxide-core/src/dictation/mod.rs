@@ -194,6 +194,15 @@ struct Recording {
     _lease: Option<models::ModelLease>,
 }
 
+/// Bounded audio of the last explicit-GPU failure, kept only in memory until the user retries on CPU,
+/// starts a new recording, cancels or disables dictation.
+struct RetryAudio {
+    snapshot: RecordingSnapshot,
+    samples: Vec<f32>,
+    rate: u32,
+    failure: String,
+}
+
 pub struct Dictation {
     pub models: Arc<models::ModelManager>,
     generation: AtomicU64,
@@ -203,7 +212,9 @@ pub struct Dictation {
     recording: Mutex<Option<Recording>>,
     busy: Mutex<bool>,
     last_execution: Mutex<Option<ExecutionDetails>>,
+    retry: Mutex<Option<RetryAudio>>,
     runtime: Arc<dyn WhisperBackendRuntime>,
+    cpu_runtime: Arc<dyn WhisperBackendRuntime>,
     memory_checker: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
     resource_provider: Option<Arc<dyn Fn() -> resources::ResourceSnapshot + Send + Sync>>,
 }
@@ -253,7 +264,9 @@ impl Default for Dictation {
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
+            retry: Mutex::new(None),
             runtime: default_runtime(),
+            cpu_runtime: Arc::new(CpuRuntime),
             memory_checker: None,
             resource_provider: None,
         }
@@ -275,7 +288,9 @@ impl Dictation {
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
+            retry: Mutex::new(None),
             runtime,
+            cpu_runtime: Arc::new(CpuRuntime),
             memory_checker: None,
             resource_provider: None,
         }
@@ -294,7 +309,9 @@ impl Dictation {
             recording: Mutex::new(None),
             busy: Mutex::new(false),
             last_execution: Mutex::new(None),
+            retry: Mutex::new(None),
             runtime,
+            cpu_runtime: Arc::new(CpuRuntime),
             memory_checker: Some(memory_checker),
             resource_provider: None,
         }
@@ -302,6 +319,12 @@ impl Dictation {
 
     pub fn with_models(mut self, models: Arc<models::ModelManager>) -> Self {
         self.models = models;
+        self
+    }
+
+    /// CPU engine used by Auto fallback and explicit retry; replaceable for deterministic recovery tests.
+    pub fn with_cpu_runtime(mut self, cpu_runtime: Arc<dyn WhisperBackendRuntime>) -> Self {
+        self.cpu_runtime = cpu_runtime;
         self
     }
 
@@ -446,6 +469,7 @@ impl Dictation {
         if recording.is_some() || *self.busy.lock().unwrap() {
             return Err(err("Dictation is already active."));
         }
+        self.discard_retry_audio();
         let (stop, stopped) = mpsc::channel();
         let (result_tx, result) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
@@ -472,6 +496,7 @@ impl Dictation {
 
     pub fn cancel(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.discard_retry_audio();
         self.cancel_performance();
         let recording = self.recording.lock().unwrap().take();
         if let Some(cancelled) = self.cancellation.lock().unwrap().take() {
@@ -481,6 +506,97 @@ impl Dictation {
         if let Some(recording) = recording {
             let _ = recording.stop.send(());
         }
+    }
+
+    /// True while the audio of a failed explicit-GPU transcription can still be retried on CPU.
+    pub fn has_retry_audio(&self) -> bool {
+        self.retry.lock().unwrap().is_some()
+    }
+
+    pub fn discard_retry_audio(&self) {
+        *self.retry.lock().unwrap() = None;
+    }
+
+    /// User-chosen CPU retry of the audio kept after an explicit GPU failure. Never runs implicitly.
+    /// The audio is kept if the CPU attempt fails so the user can try again or discard it.
+    pub fn retry_on_cpu(&self, home: &Path, settings: &DictationSettings) -> Result<String> {
+        let mut busy = self.busy.lock().unwrap();
+        if *busy || self.recording.lock().unwrap().is_some() {
+            return Err(err("Dictation is already active."));
+        }
+        if !settings.enabled {
+            self.discard_retry_audio();
+            return Err(err("Dictation was disabled. Recording discarded."));
+        }
+        let pending = self
+            .retry
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| err("No recording to retry."))?;
+        *busy = true;
+        drop(busy);
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        *self.cancellation.lock().unwrap() = Some(cancelled.clone());
+        let result = self
+            .refuse_unsafe_cpu_load(home, pending.snapshot.model)
+            .map_err(|reason| err(format!("CPU retry refused. {reason}")))
+            .and_then(|()| {
+                let cpu_snapshot = RecordingSnapshot {
+                    device: Device::Cpu,
+                    backend: Some(BackendId::Cpu),
+                    adapter_id: None,
+                    ..pending.snapshot.clone()
+                };
+                self.transcribe_snapshot(
+                    home,
+                    &cpu_snapshot,
+                    &pending.samples,
+                    pending.rate,
+                    cancelled.clone(),
+                )
+            });
+        match &result {
+            Ok(_) => {
+                if let Some(exec) = self.last_execution.lock().unwrap().as_mut() {
+                    exec.fallback_reason = Some(pending.failure.clone());
+                    exec.offload_evidence = Some(format!(
+                        "CPU retry chosen by the user after explicit GPU failure: {}",
+                        pending.failure
+                    ));
+                }
+            }
+            Err(_) if !cancelled.load(Ordering::SeqCst) => {
+                *self.retry.lock().unwrap() = Some(pending);
+            }
+            Err(_) => {}
+        }
+        *self.busy.lock().unwrap() = false;
+        result
+    }
+
+    fn refuse_unsafe_cpu_load(
+        &self,
+        home: &Path,
+        model: ModelId,
+    ) -> std::result::Result<(), String> {
+        let mut resources = self.resource_provider.as_ref().map_or_else(
+            || resources::capture(&home.join("models")),
+            |provider| provider(),
+        );
+        if let Some(checker) = &self.memory_checker {
+            let available = checker();
+            resources.available_ram_bytes = (available.is_finite() && available >= 0.0)
+                .then_some((available * 1_073_741_824.0) as u64);
+        }
+        resources::assess_load(
+            &resources,
+            &self.cpu_runtime.probe(),
+            model,
+            resources::now_secs(),
+        )
+        .map_err(|refusal| refusal.reason.to_string())
     }
 
     pub fn stop(&self, home: &Path, settings: &DictationSettings) -> Result<String> {
@@ -599,21 +715,36 @@ impl Dictation {
         // - Cpu: executes directly on CPU, never requests offload.
         match snapshot.device {
             Device::Cpu => {
-                let cpu = CpuRuntime;
-                let outcome = cpu
+                let outcome = self
+                    .cpu_runtime
                     .transcribe(&request)
                     .map_err(|e| err(format!("CPU transcription failed: {e}")))?;
                 self.record_execution(&request, outcome.execution)?;
                 Ok(outcome.text)
             }
             Device::Gpu => {
+                let hold = |failure: String| {
+                    if !request.cancelled.load(Ordering::SeqCst) {
+                        *self.retry.lock().unwrap() = Some(RetryAudio {
+                            snapshot: snapshot.clone(),
+                            samples: samples.to_vec(),
+                            rate,
+                            failure,
+                        });
+                    }
+                };
                 if runtime.backend_id() == BackendId::Cpu {
+                    hold("active runtime has CPU support only".into());
                     return Err(err(
                         "GPU transcription failed: active runtime has CPU support only. Choose CPU in Settings to transcribe on CPU.",
                     ));
                 }
-                let outcome = transcribe_primary()
-                    .map_err(|e| err(format!("GPU transcription failed: {e}. Choose CPU in Settings to transcribe on CPU.")))?;
+                let outcome = transcribe_primary().map_err(|e| {
+                    if !matches!(e, BackendError::Cancelled) {
+                        hold(e.to_string());
+                    }
+                    err(format!("GPU transcription failed: {e}. Choose CPU in Settings to transcribe on CPU."))
+                })?;
                 self.record_execution(&request, outcome.execution)?;
                 Ok(outcome.text)
             }
@@ -634,31 +765,14 @@ impl Dictation {
                             if request.cancelled.load(Ordering::SeqCst) {
                                 return Err(err("Dictation cancelled. Recording discarded."));
                             }
-                            let mut resources = self.resource_provider.as_ref().map_or_else(
-                                || resources::capture(&home.join("models")),
-                                |provider| provider(),
-                            );
-                            if let Some(checker) = &self.memory_checker {
-                                let available = checker();
-                                resources.available_ram_bytes = (available.is_finite()
-                                    && available >= 0.0)
-                                    .then_some((available * 1_073_741_824.0) as u64);
-                            }
-                            if let Err(refusal) = resources::assess_load(
-                                &resources,
-                                &CpuRuntime.probe(),
-                                snapshot.model,
-                                resources::now_secs(),
-                            ) {
+                            if let Err(reason) = self.refuse_unsafe_cpu_load(home, snapshot.model) {
                                 return Err(err(format!(
-                                    "Auto execution failed on primary backend ({gpu_err}) and CPU retry was refused due to low memory or unavailable resource data. {}",
-                                    refusal.reason
+                                    "Auto execution failed on primary backend ({gpu_err}) and CPU retry was refused due to low memory or unavailable resource data. {reason}"
                                 )));
                             }
 
                             // Retry once on CPU
-                            let cpu = CpuRuntime;
-                            let outcome = cpu.transcribe(&request).map_err(|e| {
+                            let outcome = self.cpu_runtime.transcribe(&request).map_err(|e| {
                                 err(format!(
                                     "Primary backend failed ({gpu_err}) and CPU fallback also failed: {e}"
                                 ))

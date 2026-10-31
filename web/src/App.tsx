@@ -852,6 +852,7 @@ export function App() {
                   createRequest={createPrRequest}
                   onCreateHandled={() => setCreatePrRequest(0)}
                   projectId={selected.id}
+                  projectName={selected.name}
                   threadId={currentThreadId}
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
@@ -881,9 +882,17 @@ export function App() {
               <div className="surface-content" hidden={activeTool !== "Issues"}><Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
                 <IssuesSurface
                   projectId={selected.id}
-                  onDispatched={(thread) =>
-                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
-                  }
+                  projectName={selected.name}
+                  onDispatched={(thread) => {
+                    // The Thread opens through the same dispatch/setup flow as the Board's; if the
+                    // user moved to another Project meanwhile, it only joins that Project's list there.
+                    if (currentProjectRef.current !== thread.projectId) return;
+                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)]);
+                    setSelectedThreadId(thread.id);
+                    setShowSettings(false);
+                    setShowBoard(false);
+                    setMaximized(false);
+                  }}
                 />
               </Suspense></div>
             )}

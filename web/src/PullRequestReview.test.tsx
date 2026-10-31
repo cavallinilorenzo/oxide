@@ -75,7 +75,7 @@ afterEach(async () => {
 
 async function render() {
   await act(async () =>
-    root.render(<PullRequestReview projectId={1} number={174} refreshKey={0} onBack={onBack} onChanged={onChanged} onReviewFiles={() => {}} onFixPullRequest={onFixPullRequest} />),
+    root.render(<PullRequestReview projectId={1} threadId={7} number={174} refreshKey={0} onBack={onBack} onChanged={onChanged} onReviewFiles={() => {}} onFixPullRequest={onFixPullRequest} />),
   );
 }
 const button = (name: string | RegExp) =>

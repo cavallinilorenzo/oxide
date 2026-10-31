@@ -2352,16 +2352,17 @@ async fn edit_pull_request(
     .await
 }
 
-/// Checks the pull request's branch out in the main checkout.
+/// Checks the pull request's branch out in a Thread's checkout (`None`: the main one).
 #[tauri::command]
 #[specta::specta]
 async fn checkout_pull_request(
     core: State<'_, Arc<Core>>,
     project_id: u32,
+    thread_id: Option<u32>,
     number: u32,
 ) -> Result<(), AppError> {
     git_blocking(&core, move |core| {
-        core.checkout_pull_request(project_id, number)
+        core.checkout_pull_request_in(project_id, thread_id, number)
     })
     .await
 }

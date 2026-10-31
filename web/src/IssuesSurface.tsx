@@ -16,6 +16,8 @@ import { GithubSetup } from "./GithubSetup";
 
 export interface IssuesSurfaceProps {
   projectId: number;
+  /** Names the repository whose issues are listed. */
+  projectName?: string;
   /** Changes after the user's own actions that should reload the surface. */
   refreshKey?: number;
   /** Called after issue mutations (create/close/comment), so parent views can react if needed. */
@@ -34,7 +36,7 @@ export function IssuesSurface(props: IssuesSurfaceProps) {
   return <IssuesViews key={props.projectId} {...props} />;
 }
 
-function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
+function IssuesViews({ projectId, projectName, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
   const tick = useAutoRefresh();
   const reload = refreshKey + tick;
   const availability = useQuery(`p${projectId}:issues:state`, () => commands.issuesState(projectId), reload);
@@ -87,6 +89,7 @@ function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: Iss
     content = (
       <IssueList
         projectId={projectId}
+        projectName={projectName}
         refreshKey={reload + listRevision}
         onOpen={setOpened}
         onCreate={() => setCreating(true)}
@@ -105,12 +108,13 @@ function IssuesViews({ projectId, refreshKey = 0, onChanged, onDispatched }: Iss
 
 interface IssueListProps {
   projectId: number;
+  projectName?: string;
   refreshKey: number;
   onOpen: (number: number) => void;
   onCreate: () => void;
 }
 
-function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) {
+function IssueList({ projectId, projectName, refreshKey, onOpen, onCreate }: IssueListProps) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [closed, setClosed] = useState(false);
@@ -166,6 +170,7 @@ function IssueList({ projectId, refreshKey, onOpen, onCreate }: IssueListProps) 
       </div>
       <div className="pr-scroll">
         <RefreshNotice query={list} />
+        {projectName && <h3 className="pr-scope-title" title={`${closed ? "Closed" : "Open"} issues of ${projectName}'s repository`}>{closed ? "Closed" : "Open"} issues · <span>{projectName}</span></h3>}
         {list.state === "loading" && <Skeleton label="Loading issues…" />}
         {list.state === "error" && (
           <p role="alert" className="pr-empty error">

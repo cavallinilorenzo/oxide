@@ -39,6 +39,8 @@ import { pullRequestFixPrompt } from "./fixPullRequest";
 
 interface PullRequestBrowserProps {
   projectId: number;
+  /** Names the repository whose lists are shown, which no Thread owns. */
+  projectName: string;
   /** The Thread whose checkout a new pull request is opened from. */
   threadId: number | null;
   /** Changes after the user's own Git changes, which reload the list. */
@@ -72,12 +74,16 @@ function Branches({ head, base }: { head: string; base: string }) {
 }
 
 /** Open pull requests of the repository: list, search, and one pull request to review. */
-export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged, onReviewFiles, onFixPullRequest, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
-  const [creating, setCreating] = useState(createRequest > 0);
+export function PullRequestBrowser({ projectId, projectName, threadId, refreshKey, onChanged, onReviewFiles, onFixPullRequest, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
+  // The form belongs to the checkout it was opened for: another selection dismisses it unsubmitted.
+  const [creatingFor, setCreatingFor] = useState<{ threadId: number | null } | null>(createRequest > 0 ? { threadId } : null);
+  const creating = creatingFor !== null && creatingFor.threadId === threadId;
+  const setCreating = (open: boolean) => setCreatingFor(open ? { threadId } : null);
+  if (creatingFor !== null && creatingFor.threadId !== threadId) setCreatingFor(null);
   const [seenCreateRequest, setSeenCreateRequest] = useState(createRequest);
   if (seenCreateRequest !== createRequest) {
     setSeenCreateRequest(createRequest);
-    if (createRequest > 0) setCreating(true);
+    if (createRequest > 0) setCreatingFor({ threadId });
   }
   useEffect(() => { if (createRequest > 0) onCreateHandled?.(); }, [createRequest, onCreateHandled]);
   const [mine, setMine] = useState(false);
@@ -90,6 +96,13 @@ export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged,
     () => commands.listPullRequests(projectId, mine, search),
     refreshKey + manual,
   );
+  // Where branch actions land, shown beside the repository-wide list.
+  const branch = useQuery(
+    `p${projectId}:prs:branch:${threadId ?? "none"}`,
+    async () => (threadId === null ? { status: "ok" as const, data: null } : commands.gitStatus(projectId, threadId)),
+    refreshKey + manual,
+  );
+  const branchName = branch.state === "ready" ? (branch.data?.branch ?? "detached HEAD") : null;
   const [opened, setOpened] = useState<number | null>(null);
   // A quiet line on the list after a pull request was merged or closed; it fades on its own.
   const [outcome, setOutcome] = useState<{ kind: "merged" | "closed"; number: number } | null>(null);
@@ -108,6 +121,7 @@ export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged,
     return (
       <PullRequestReview
         projectId={projectId}
+        threadId={threadId}
         number={opened}
         refreshKey={refreshKey}
         onBack={(done) => {
@@ -124,7 +138,14 @@ export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged,
 
   return (
     <div className="pr-browser">
-      <div className="pr-new"><button className="btn primary" onClick={() => setCreating(true)}><GitPullRequestIcon size={14} /> New pull request</button></div>
+      <div className="pr-new">
+        <button className="btn primary" disabled={threadId === null} onClick={() => setCreating(true)} title={threadId === null ? "Select a Thread to open a pull request from its branch" : undefined}><GitPullRequestIcon size={14} /> New pull request</button>
+        <p className="pr-scope" aria-label="Branch actions">
+          {threadId === null ? "Select a Thread to open a pull request from its branch." : branchName === null
+            ? (branch.state === "error" ? `The Thread's checkout is unavailable: ${branch.message}` : "Reading the Thread's branch…")
+            : <>From <span className="pr-branch" title={branchName}>{branchName}</span> in the selected Thread's checkout</>}
+        </p>
+      </div>
       <form
         className="pr-search"
         role="search"
@@ -159,6 +180,7 @@ export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged,
             #{outcome.number} {outcome.kind}
           </p>
         )}
+        <h3 className="pr-scope-title" title={`Open pull requests of ${projectName}'s repository`}>Open pull requests · <span>{projectName}</span></h3>
         {list.state === "loading" && <Skeleton label="Loading pull requests…" />}
         {list.state === "error" && (
           <GithubSetup projectId={projectId} guidance={list.message} onReady={() => { invalidateQueries(`p${projectId}:`); setManual((v) => v + 1); }} />
@@ -202,10 +224,12 @@ export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged,
 type Loaded =
   | { state: "loading" }
   | { state: "error"; message: string }
-  | { state: "ready"; detail: PullRequestDetail; git: GitStatus };
+  | { state: "ready"; detail: PullRequestDetail; git: GitStatus | null; gitError: string | null };
 
 interface PullRequestReviewProps {
   projectId: number;
+  /** The Thread whose checkout "Check out" changes; the remote review itself belongs to none. */
+  threadId: number | null;
   number: number;
   refreshKey: number;
   onBack: (done?: "merged" | "closed") => void;
@@ -221,6 +245,7 @@ type Result = { status: "ok" } | { status: "error"; error: { message: string } }
 
 export function PullRequestReview({
   projectId,
+  threadId,
   number,
   refreshKey,
   onBack,
@@ -230,15 +255,15 @@ export function PullRequestReview({
 }: PullRequestReviewProps) {
   const [reload, setReload] = useState(0);
   const query = useQuery(
-    `p${projectId}:prs:detail:${number}`,
-    async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus }>> => {
+    `p${projectId}:prs:detail:${number}:${threadId ?? "none"}`,
+    async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus | null; gitError: string | null }>> => {
       const [detail, git] = await Promise.all([
         commands.pullRequestDetail(projectId, number),
-        commands.gitStatus(projectId, null),
+        threadId === null ? Promise.resolve(null) : commands.gitStatus(projectId, threadId),
       ]);
       if (detail.status === "error") return detail;
-      if (git.status === "error") return git;
-      return { status: "ok", data: { detail: detail.data, git: git.data } };
+      // An unreadable checkout disables "Check out" only: the remote review needs no checkout.
+      return { status: "ok", data: { detail: detail.data, git: git?.status === "ok" ? git.data : null, gitError: git?.status === "error" ? git.error.message : null } };
     },
     refreshKey + reload,
   );
@@ -311,7 +336,7 @@ export function PullRequestReview({
     );
   }
 
-  const { detail, git } = loaded;
+  const { detail, git, gitError } = loaded;
   const pr = detail.pullRequest;
   const phase = merged ? "merged" : detail.phase;
   const live = phase === "open" || phase === "draft";
@@ -370,7 +395,9 @@ export function PullRequestReview({
   }
 
   async function checkout() {
-    if (await act("checkout", () => commands.checkoutPullRequest(projectId, number))) onChanged();
+    if (threadId === null) return;
+    // The target is captured here: selecting another Thread meanwhile cannot redirect it.
+    if (await act("checkout", () => commands.checkoutPullRequest(projectId, threadId, number))) onChanged();
   }
 
   async function fixPullRequest() {
@@ -454,8 +481,8 @@ export function PullRequestReview({
           {live && (
             <button
               className={pending === "checkout" ? "pending" : undefined}
-              disabled={busy || git.pickerDisabledReason !== null}
-              title={git.pickerDisabledReason ?? "Check this branch out in the main checkout"}
+              disabled={busy || git === null || git.pickerDisabledReason !== null}
+              title={git === null ? "Select a Thread to check this branch out in its checkout" : (git.pickerDisabledReason ?? `Check this branch out in the selected Thread's checkout (now ${git.branch ?? "detached HEAD"})`)}
               onClick={() => void checkout()}
             >
               <Working on={pending === "checkout"} label="Checking out…">
@@ -464,7 +491,8 @@ export function PullRequestReview({
             </button>
           )}
         </div>
-        {live && git.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
+        {live && git === null && <p className="pr-note">{gitError ? `The selected Thread's checkout is unavailable: ${gitError}` : "Select a Thread to check this branch out in its checkout."} Reviewing files needs no checkout.</p>}
+        {live && git?.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
 
         {detail.body.trim() && <Description body={detail.body} />}
         {live && <MergeStatus

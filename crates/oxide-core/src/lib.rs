@@ -1814,7 +1814,18 @@ impl Core {
     /// branch picker's rules: Git's refusal is the error, and it is refused
     /// while a Thread is working.
     pub fn checkout_pull_request(&self, project_id: u32, number: u32) -> Result<()> {
-        self.switch_branch(project_id, None, |cwd| {
+        self.checkout_pull_request_in(project_id, None, number)
+    }
+
+    /// [`Core::checkout_pull_request`] in a Thread's checkout (`None`: the main one). A Thread
+    /// of another Project or a deleted worktree is an error, never the main checkout.
+    pub fn checkout_pull_request_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        number: u32,
+    ) -> Result<()> {
+        self.switch_branch(project_id, thread_id, |cwd| {
             github::checkout_pull_request(&self.gh, cwd, number)
         })
     }

@@ -1400,3 +1400,45 @@ fn checks_know_whether_branch_protection_requires_them() {
         ]
     );
 }
+
+#[test]
+fn checkout_in_a_thread_switches_only_that_threads_worktree() {
+    let f = fixture();
+    publish_pr_branch(&f, "b.txt", "b\n");
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    let thread = f
+        .core
+        .dispatch_thread(oxide_core::DispatchRequest {
+            project_id: f.project.id,
+            prompt: "work".into(),
+            provider: "fake".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            base_branch: Some("main".into()),
+            issue_number: None,
+            issue_title: None,
+        })
+        .unwrap();
+    let worktree = PathBuf::from(thread.worktree_path.clone().unwrap());
+
+    f.core
+        .checkout_pull_request_in(f.project.id, Some(thread.id), 5)
+        .unwrap();
+
+    assert_eq!(
+        git(&worktree, &["branch", "--show-current"]).trim(),
+        "add-b"
+    );
+    assert!(worktree.join("b.txt").exists());
+    assert_eq!(git(&f.work, &["branch", "--show-current"]).trim(), "main");
+    assert!(!f.work.join("b.txt").exists());
+
+    // An unknown Thread is an error rather than the main checkout.
+    let err = f
+        .core
+        .checkout_pull_request_in(f.project.id, Some(thread.id + 100), 5)
+        .unwrap_err();
+    assert!(!err.to_string().is_empty());
+    assert_eq!(git(&f.work, &["branch", "--show-current"]).trim(), "main");
+}

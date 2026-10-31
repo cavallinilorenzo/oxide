@@ -387,6 +387,55 @@ fn deleting_a_dirty_board_thread_asks_first_and_declining_keeps_everything() {
 }
 
 #[test]
+fn deleting_a_board_thread_closes_only_its_own_terminals_and_declining_keeps_them() {
+    let f = fixture();
+    let doomed = f.core.dispatch_thread(request(&f, "Doomed")).unwrap();
+    let sibling = f.core.dispatch_thread(request(&f, "Sibling")).unwrap();
+    completed_first_turn(&f.core, doomed.id);
+    completed_first_turn(&f.core, sibling.id);
+
+    // Each shell keeps the checkout it was started in.
+    let in_doomed = f
+        .core
+        .start_block_terminal(f.project.id, Some(doomed.id))
+        .unwrap();
+    let in_sibling = f
+        .core
+        .start_block_terminal(f.project.id, Some(sibling.id))
+        .unwrap();
+    let in_main = f.core.start_block_terminal(f.project.id, None).unwrap();
+    assert!(Path::new(&in_doomed.cwd).starts_with(worktree_of(&doomed)));
+    assert!(Path::new(&in_sibling.cwd).starts_with(worktree_of(&sibling)));
+    assert!(!Path::new(&in_main.cwd).starts_with(worktree_of(&doomed)));
+
+    // Declining the dirty-worktree confirmation leaves the worktree and every shell alive.
+    std::fs::write(worktree_of(&doomed).join("wip.txt"), "unsaved").unwrap();
+    assert_eq!(
+        f.core.delete_thread(doomed.id, false).unwrap(),
+        DeleteOutcome::NeedsConfirmation
+    );
+    assert!(worktree_of(&doomed).exists());
+    assert!(f.core.write_terminal(in_doomed.id, b"true\n").is_ok());
+
+    // Confirming closes the worktree's shells; siblings and the main checkout's shell survive.
+    assert_eq!(
+        f.core.delete_thread(doomed.id, true).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(!worktree_of(&doomed).exists());
+    assert!(f.core.write_terminal(in_doomed.id, b"true\n").is_err());
+    assert!(f.core.write_terminal(in_sibling.id, b"true\n").is_ok());
+    assert!(f.core.write_terminal(in_main.id, b"true\n").is_ok());
+    git(&f.work, &["rev-parse", "--verify", "oxide/doomed"]);
+
+    // Explicit close closes exactly that session.
+    f.core.close_terminal(in_sibling.id).unwrap();
+    assert!(f.core.write_terminal(in_sibling.id, b"true\n").is_err());
+    assert!(f.core.write_terminal(in_main.id, b"true\n").is_ok());
+    f.core.close_terminal(in_main.id).unwrap();
+}
+
+#[test]
 fn a_worktree_deleted_by_hand_is_recreated_on_the_next_message() {
     let f = fixture();
     let thread = f.core.dispatch_thread(request(&f, "Come back")).unwrap();
@@ -413,4 +462,44 @@ fn opening_a_project_prunes_worktrees_deleted_by_hand() {
     f.core.open_project(f.project.id).unwrap();
 
     assert!(!git(&f.work, &["worktree", "list"]).contains("stale"));
+}
+
+fn read(path: PathBuf) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
+#[test]
+fn file_writes_stay_in_their_checkout_and_a_deleted_worktree_never_falls_back_to_main() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Edit files")).unwrap();
+    let worktree = PathBuf::from(thread.worktree_path.clone().unwrap());
+    let (project, id) = (f.project.id, thread.id);
+
+    // The same relative path is two documents: a write in the worktree leaves main alone.
+    // Line endings depend on the platform's checkout, so the buffer is what Core reads.
+    let opened = f
+        .core
+        .read_file(project, Some(id), "a.txt")
+        .unwrap()
+        .content;
+    f.core
+        .write_file(project, Some(id), "a.txt", &opened, "worktree edit\n")
+        .unwrap();
+    assert_eq!(read(worktree.join("a.txt")), "worktree edit\n");
+    assert_eq!(read(f.work.join("a.txt")), "committed\n");
+
+    // Once the Thread and its worktree are gone its context is stale: writes are refused
+    // and the main checkout keeps its content.
+    assert_eq!(
+        f.core.delete_thread(id, true).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(
+        f.core
+            .write_file(project, Some(id), "a.txt", &opened, "stale write\n")
+            .is_err()
+    );
+    assert!(f.core.create_file(project, Some(id), "new.txt").is_err());
+    assert!(!f.work.join("new.txt").exists());
+    assert_eq!(read(f.work.join("a.txt")), "committed\n");
 }

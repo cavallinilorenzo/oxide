@@ -333,6 +333,12 @@ html.macos .header,
   opacity: 0;
 }
 .row-action:hover:not(:disabled) { color: var(--fg); background: var(--bg4); }
+/* The Board entry never hides: it is how a Project's overview is reached. */
+.row-action.board-action { opacity: 1; }
+.row-action.board-action[aria-pressed="true"] { color: var(--fg); background: var(--bg4); }
+.attention-btn { position: relative; gap: 4px; }
+.attention-btn.active { color: var(--yellow); }
+.attention-count { font: 600 11px var(--mono); }
 .project-row:is(:hover, :focus-within) .row-action, .thread-row:is(:hover, :focus-within) .row-action { opacity: 1; }
 .thread-row { display: flex; align-items: center; margin: 0 8px; border-radius: var(--radius-control); position: relative; transition: background-color var(--motion-fast) ease-out; }
 .thread-row:hover { background: var(--bg3); }
@@ -393,6 +399,13 @@ html.macos .header,
 .thread-folder-path { overflow: hidden; text-overflow: ellipsis; }
 .thread-folder-branch { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .thread-header-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+/* The Thread's Git controls wrap onto another line before the branch name, counters or actions are cut off. */
+.thread-git { min-width: 0; margin-top: 4px; }
+.thread-git .git-header { flex-wrap: wrap; margin-left: -8px; row-gap: 4px; }
+.thread-git .git-header > .branch-picker { flex: 0 1 auto; max-width: 100%; }
+.thread-git .branch-button { width: auto; max-width: 100%; }
+.thread-git .branch-button .branch-name { max-width: min(220px, 40vw); }
+.thread-git .git-error { min-width: 0; max-width: 100%; }
 .usage-rings { display: flex; align-items: center; gap: 4px; }
 .usage-item { position: relative; display: inline-flex; }
 .usage-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-color: transparent; background: none; font-size: 12px; color: var(--dim); }
@@ -1393,6 +1406,10 @@ section.terminal.terminal-hidden { display: none; }
 .provider-tab:disabled { opacity: .4; background: transparent; border-color: transparent; cursor: not-allowed; }
 .pr-new { padding: 12px var(--pr-pad); border-bottom: 1px solid var(--line); }
 .pr-new button { width: 100%; justify-content: center; }
+.pr-new .pr-scope { display: flex; align-items: baseline; gap: 4px; min-width: 0; margin: 8px 0 0; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.pr-new .pr-scope .pr-branch { max-width: 60%; }
+.pr-views .pr-scope-title { display: flex; gap: 4px; min-width: 0; margin: 0; padding: 10px var(--pr-pad) 4px; font-size: 12px; font-weight: 500; color: var(--dim); }
+.pr-views .pr-scope-title span { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pr-create { padding: 16px var(--pr-pad); overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 18px; }
 .pr-create > * { flex-shrink: 0; }
 .pr-compose-heading { display: flex; align-items: center; gap: 8px; }
@@ -1522,12 +1539,110 @@ section.terminal.terminal-hidden { display: none; }
 .dictation-status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 10000; max-width: min(650px, calc(100vw - 40px)); display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--bg3); color: var(--fg); border: 1px solid var(--line-strong); border-radius: 8px; }
 .cbtn[aria-pressed="true"] { color: var(--red); }
 
-.dictation-settings { display: grid; gap: 12px; min-width: 0; }
-.dictation-settings p { overflow-wrap: anywhere; }
-.dictation-settings select { width: 100%; min-width: 0; }
-.dictation-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-.dictation-model { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
-.dictation-model h4 { margin: 0; }
-.dictation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.dictation-model progress { width: 100%; }
-.dictation-settings summary { cursor: pointer; }
+/* Dictation Settings Redesign (Impeccable UI) */
+.dictation-settings { display: grid; gap: 18px; min-width: 0; }
+.dictation-primary-toggle { display: grid; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.dictation-toggle-label { font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.dictation-helper-text { font-size: 12.5px; color: var(--dim); margin: 0; line-height: 1.5; }
+
+/* Hero Hardware Recommendation Card */
+.dictation-hero-card {
+  background: var(--bg2);
+  border: 1px solid var(--acc);
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.dictation-hero-header { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.dictation-badge-hero {
+  background: var(--acc);
+  color: var(--acc-fg);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+.dictation-hero-title { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0.02em; color: var(--fg-bright); }
+.dictation-hero-desc { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg); }
+.dictation-hero-meta { font-size: 11.5px; color: var(--dim); }
+.dictation-hero-meta p { margin: 0; }
+.dictation-hero-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+.dictation-apply-btn {
+  background: var(--acc);
+  color: var(--acc-fg);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--acc);
+  cursor: pointer;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.dictation-apply-btn:hover:not(:disabled) { background: var(--acc-hover); }
+.dictation-apply-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dictation-hero-notice { margin: 0; font-size: 12px; color: var(--dim); font-style: italic; }
+.dictation-decision-status { margin: 0; font-size: 12px; color: var(--dim); }
+
+/* Models Grid */
+.dictation-models-section { display: grid; gap: 12px; margin-top: 6px; }
+.dictation-models-header h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--fg-bright); }
+.dictation-models-subtitle { margin: 0; font-size: 12px; color: var(--dim); }
+.dictation-models { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.dictation-model {
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dictation-model.selected { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.dictation-model.recommended:not(.selected) { border-color: var(--line-strong); }
+.dictation-model-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dictation-model-head h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--fg-bright); }
+.status-pill { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--line); }
+.status-pill.status-installed { background: rgba(46, 160, 67, 0.15); border-color: rgba(46, 160, 67, 0.4); color: var(--green); }
+.status-pill.status-error { background: rgba(248, 81, 73, 0.15); border-color: rgba(248, 81, 73, 0.4); color: var(--red); }
+.status-pill.status-missing, .status-pill.status-unknown { color: var(--dim); }
+.dictation-model-tradeoff { font-size: 12px; margin: 0; color: var(--fg); line-height: 1.4; flex-grow: 1; }
+.dictation-model-meta { display: grid; gap: 3px; font-size: 11px; color: var(--dim); }
+.dictation-state-desc { margin: 0; font-size: 11.5px; color: var(--dim); }
+.dictation-model progress { width: 100%; height: 6px; border-radius: 3px; accent-color: var(--acc); }
+.dictation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+.dictation-actions button { font-size: 12px; padding: 5px 11px; border-radius: 5px; cursor: pointer; }
+.dictation-actions .primary-action { background: var(--bg2); border: 1px solid var(--line-strong); color: var(--fg); }
+.dictation-actions .selected-action { background: var(--acc); color: var(--acc-fg); border: 1px solid var(--acc); font-weight: 600; }
+.dictation-actions .download-action { background: var(--bg2); border: 1px solid var(--line-strong); font-weight: 500; color: var(--fg-bright); }
+.dictation-actions .danger-action { background: transparent; border: 1px solid var(--line); color: var(--dim); }
+.dictation-actions .danger-action:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+
+/* Advanced Diagnostics Drawer */
+.dictation-advanced-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg2);
+  margin-top: 8px;
+}
+.dictation-advanced-details summary {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--fg-bright);
+  user-select: none;
+}
+.dictation-advanced-content { display: grid; gap: 16px; margin-top: 14px; font-size: 12px; }
+.dictation-advanced-block { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.dictation-advanced-block:last-child { border-bottom: none; padding-bottom: 0; }
+.dictation-advanced-block h3, .dictation-advanced-block h4 { margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-bright); }
+.dictation-advanced-block p { margin: 0; line-height: 1.5; color: var(--dim); }
+.dictation-advice-preference-row { display: flex; gap: 10px; align-items: center; }
+.dictation-check-progress { display: flex; gap: 10px; align-items: center; }
+.notice-text { font-size: 12px; color: var(--dim); margin: 0; }
+.warning-text { color: #d29922; font-size: 12px; margin: 0; }

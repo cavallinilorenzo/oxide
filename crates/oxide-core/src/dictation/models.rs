@@ -127,7 +127,9 @@ impl Default for ModelManager {
     }
 }
 
-static VERIFIED_CACHE: LazyLock<Mutex<HashMap<PathBuf, (u64, std::time::SystemTime, bool)>>> =
+type VerifiedModelCache = HashMap<PathBuf, (u64, std::time::SystemTime, bool)>;
+
+static VERIFIED_CACHE: LazyLock<Mutex<VerifiedModelCache>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl ModelManager {
@@ -176,10 +178,11 @@ impl ModelManager {
         let modified = metadata
             .modified()
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        if let Some(&(len, mtime, valid)) = VERIFIED_CACHE.lock().unwrap().get(path) {
-            if len == metadata.len() && mtime == modified {
-                return Ok(valid);
-            }
+        if let Some(&(len, mtime, valid)) = VERIFIED_CACHE.lock().unwrap().get(path)
+            && len == metadata.len()
+            && mtime == modified
+        {
+            return Ok(valid);
         }
         let mut file = File::open(path).map_err(err)?;
         let mut hash = Sha256::new();

@@ -27,9 +27,17 @@ import {
   TrashIcon,
 } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
+import { attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
+import { AttentionButton } from "./AttentionButton";
+import { useAttention } from "./useAttention";
+import { useAttentionFocus } from "./useAttentionFocus";
 import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
+import {
+  allTabsOfThread, closeTab, describeAffectedTabs, emptyTerminals, focusCheckoutTab, openTab, removeThreadTabsEverywhere, selectTab, setRunning,
+  type TerminalsByProject,
+} from "./terminalTabs";
 import { performThreadDelete, selectionAfterDelete, threadsAfterDelete } from "./deleteThread";
 import { GitHeader } from "./GitHeader";
 import { ProjectOverview } from "./ProjectOverview";
@@ -52,7 +60,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(nav
 
 const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
-const TerminalWorkbench = lazy(() => import("./TerminalWorkbench").then((module) => ({ default: module.TerminalWorkbench })));
+const TerminalSurface = lazy(() => import("./TerminalSurface").then((module) => ({ default: module.TerminalSurface })));
 const CodeWorkbench = lazy(() => import("./CodeWorkbench").then((module) => ({ default: module.CodeWorkbench })));
 type WorkbenchContext = { key: string; projectId: number; threadId: number | null; rootPath: string };
 
@@ -128,6 +136,12 @@ export function App() {
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
+  const openProjectIds = useMemo(() => sidebarProjects(projects ?? []).map((project) => project.id), [projects]);
+  const attentionCards = useAttention(openProjectIds);
+  const attention = summarizeAttention(attentionCards);
+  // A requested jump: kept until its Thread is shown and the response focused, so loading or failure never drops it.
+  const [attentionJump, setAttentionJump] = useState<{ target: AttentionTarget; failed: boolean } | null>(null);
+  const pendingThread = useRef<number | null>(null);
   const currentThreadId = threads?.some((thread) => thread.id === selectedThreadId)
     ? selectedThreadId
     : null;
@@ -142,7 +156,8 @@ export function App() {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: null,
   }, dockRequested, { sidebarVisible: showSidebar, priority: regionPriority, maximized });
   const dockVisible = layout.toolsVisible;
-  const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean; terminal?: boolean }>>({});
+  const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean }>>({});
+  const [terminals, setTerminals] = useState<TerminalsByProject>({});
   const [visitedTools, setVisitedTools] = useState<Record<string, boolean>>({});
   if (dockRequested && activeTool && selected && !visitedTools[`${selected.id}:${activeTool}`]) {
     setVisitedTools({ ...visitedTools, [`${selected.id}:${activeTool}`]: true });
@@ -155,16 +170,27 @@ export function App() {
   }
   const selectSurface = useCallback((name: string, explicit = true) => {
     setActiveTool(name); setShowTools(true); setShowSettings(false); setShowBoard(false); setRegionPriority("tools");
-    if (name === "Terminal" && explicit && workbenchContext && currentThreadId !== null) {
-      setOpenedSurfaces((previous) => ({ ...previous, [workbenchContext.key]: { ...previous[workbenchContext.key], terminal: true } }));
+    // The first explicit visit opens the Project's first shell; later visits and Thread changes never spawn one.
+    if (name === "Terminal" && explicit && workbenchContext) {
+      setTerminals((previous) => (previous[workbenchContext.projectId]?.tabs.length ?? 0) > 0 ? previous : openTab(previous, workbenchContext.projectId, workbenchContext));
     }
-  }, [workbenchContext, currentThreadId]);
+  }, [workbenchContext]);
+  // A Project's shells stay mounted while hidden; the selected Project shows the empty state once visited.
+  const terminalSurfaces: TerminalsByProject = Object.fromEntries(
+    Object.entries(terminals).filter(([, state]) => state.tabs.length > 0)
+      .concat(selected && activeTool === "Terminal" ? [[String(selected.id), terminals[selected.id] ?? emptyTerminals]] : []),
+  );
+  const openTerminalTab = useCallback(() => {
+    if (workbenchContext) setTerminals((previous) => openTab(previous, workbenchContext.projectId, workbenchContext));
+  }, [workbenchContext]);
   const runInstallCommand = (command: string) => {
     setInstallCommand({ id: ++installSequence.current, command }); selectSurface("Terminal");
+    // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
+    if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
-  const openCodeFile = (path: string, diff?: DiffFile) => {
+  const openCodeFile = (path: string, diff?: DiffFile, remote = false) => {
     if (!workbenchContext) return;
-    setCodeRequest({ id: ++codeSequence.current, path, diff, contextKey: workbenchContext.key });
+    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, contextKey: workbenchContext.key });
     selectSurface("Files");
   };
   useEffect(() => {
@@ -358,6 +384,34 @@ export function App() {
     }
   }, [selected, threads, createThreadIn]);
 
+  /** Jumps to the Thread holding the most urgent request. Never answers or clears it. */
+  const jumpToAttention = () => {
+    const target = attentionTarget(attentionCards, openProjectIds);
+    if (!target) return;
+    setShowSettings(false);
+    setShowBoard(false);
+    setMaximized(false);
+    if (target.projectId === selectedId) setSelectedThreadId(target.threadId);
+    else {
+      restore.current = null;
+      pendingThread.current = target.threadId;
+      setSelectedId(target.projectId);
+      setThreads(null);
+      setSelectedThreadId(null);
+    }
+    setAttentionJump({ target, failed: false });
+  };
+
+  // Focus the response once its Thread is on screen; background updates never reach this.
+  const jumpTarget = attentionJump && !attentionJump.failed ? attentionJump.target : null;
+  const onJumpFocused = useCallback(() => setAttentionJump(null), []);
+  const onJumpFailed = useCallback(() => setAttentionJump((current) => current && { ...current, failed: true }), []);
+  useAttentionFocus(
+    jumpTarget,
+    jumpTarget !== null && selectedId === jumpTarget.projectId && currentThreadId === jumpTarget.threadId && !showBoard && !showSettings,
+    onJumpFocused, onJumpFailed,
+  );
+
   // The native menu follows the same creation path as the sidebar and shortcut.
   useEffect(() => {
     const unlisten = listen("new-thread", () => {
@@ -399,11 +453,13 @@ export function App() {
 
   const deleteThread = useCallback((threadId: number) => {
     const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
-    overlays.current?.openDelete(threadId, title);
-  }, [threads]);
+    const affected = describeAffectedTabs(allTabsOfThread(terminals, threadId));
+    overlays.current?.openDelete(threadId, title, affected);
+  }, [threads, terminals]);
 
   const onThreadDeleted = useCallback((deletedId: number) => {
     setWorkbenches((contexts) => contexts.filter((context) => context.threadId !== deletedId));
+    setTerminals((previous) => removeThreadTabsEverywhere(previous, deletedId));
     setThreads((prev) => threadsAfterDelete(prev, deletedId));
     setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
   }, []);
@@ -411,7 +467,8 @@ export function App() {
   // An empty Thread (no Turn yet) closes at once; any other one asks first.
   const closeThread = useCallback(async (threadId: number) => {
     const turns = await commands.listTurns(threadId, 0, 1);
-    if (turns.status === "ok" && turns.data.turnCount === 0) {
+    const ownsShells = allTabsOfThread(terminals, threadId).length > 0;
+    if (turns.status === "ok" && turns.data.turnCount === 0 && !ownsShells) {
       const result = await performThreadDelete(threadId, false, commands.deleteThread);
       if (result.status === "deleted") {
         onThreadDeleted(threadId);
@@ -419,7 +476,7 @@ export function App() {
       }
     }
     deleteThread(threadId);
-  }, [deleteThread, onThreadDeleted]);
+  }, [deleteThread, onThreadDeleted, terminals]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -511,7 +568,10 @@ export function App() {
       } else if (active && res.status === "ok") {
         setThreads(res.data);
         const wanted = restore.current;
-        const initialThreadId = wanted?.projectId === selected.id
+        const jump = pendingThread.current;
+        pendingThread.current = null;
+        const initialThreadId = jump !== null && res.data.some((thread) => thread.id === jump) ? jump
+          : wanted?.projectId === selected.id
           ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
           : res.data[0]?.id ?? null;
         setSelectedThreadId(initialThreadId);
@@ -553,19 +613,12 @@ export function App() {
             <strong>Oxide</strong>
           </span>
         ) : null}
-        {selected && !selected.missing && currentThreadId !== null && !showBoard && (
-          <GitHeader
-            projectId={selected.id}
-            threadsKey={threadsKey}
-            onOpenDiff={() => openDiff()}
-            onOpenPullRequest={openPullRequest}
-            onChanged={onGitChanged}
-          />
-        )}
         </div>
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
+        <AttentionButton summary={attention} failed={attentionJump?.failed ?? false} onActivate={jumpToAttention}
+          onRetry={() => setAttentionJump((current) => current && { ...current, failed: false })} />
         {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
             <FileDirectoryIcon size={16} />
@@ -611,6 +664,7 @@ export function App() {
             }}
             onSelect={(p) => {
               restore.current = null;
+              pendingThread.current = null;
               setShowSettings(false);
               setSelectedId(p.id);
               setThreads(null);
@@ -631,8 +685,11 @@ export function App() {
             }}
             onRenameThread={onThreadTitleChange}
             onOpenPalette={() => overlays.current?.openPalette()}
+            boardOpen={showBoard && !showSettings}
             onOpenBoard={(p) => {
               setMaximized(false);
+              // The Board button toggles: pressing it again returns to the Project's Thread and dock.
+              if (p.id === selected?.id && showBoard && !showSettings) { setShowBoard(false); return; }
               if (p.id !== selected?.id) {
                 restore.current = null;
                 setSelectedId(p.id);
@@ -690,6 +747,16 @@ export function App() {
                   threadId={selectedThreadId}
                   projectId={selected.id}
                   projectPath={selected.path}
+                  gitControls={currentThreadId !== null && !selected.missing ? (
+                    <GitHeader
+                      projectId={selected.id}
+                      threadId={currentThreadId}
+                      threadsKey={threadsKey}
+                      onOpenDiff={() => openDiff()}
+                      onOpenPullRequest={openPullRequest}
+                      onChanged={onGitChanged}
+                    />
+                  ) : undefined}
                   draft={getDraft(drafts, selectedThreadId)}
                   onDraftChange={(text) =>
                     setDrafts((prev) => setDraft(prev, selectedThreadId, text))
@@ -775,7 +842,7 @@ export function App() {
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
-                  onOpenFile={(file) => openCodeFile(file.path, file)}
+                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr")}
                 />
               </Suspense></div>
             )}
@@ -785,6 +852,8 @@ export function App() {
                   createRequest={createPrRequest}
                   onCreateHandled={() => setCreatePrRequest(0)}
                   projectId={selected.id}
+                  projectName={selected.name}
+                  threadId={currentThreadId}
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
@@ -793,19 +862,37 @@ export function App() {
               </Suspense></div>
             )}
             {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
-              {openedSurfaces[context.key]?.terminal && <Suspense fallback={dockVisible && activeTool === "Terminal" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Terminal…" /> : null}><TerminalWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Terminal" && context.key === workbenchContext?.key} queuedCommand={context.key === workbenchContext?.key ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)} /></Suspense>}
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
-            {activeTool === "Terminal" && !openedSurfaces[workbenchContext?.key ?? ""]?.terminal && <section className="empty-state surface-empty"><TerminalIcon size={24} /><p>{currentThreadId === null ? "Select a Thread to open a terminal in its checkout." : "Open a terminal in the selected Thread’s checkout."}</p><button className="btn" disabled={currentThreadId === null} onClick={() => selectSurface("Terminal")}>Open terminal</button></section>}
+            {Object.entries(terminalSurfaces).map(([id, state]) => {
+              const projectId = Number(id); const isSelectedProject = projectId === selected?.id;
+              return <Suspense key={id} fallback={isSelectedProject && dockVisible && activeTool === "Terminal" ? <Skeleton kind="code" label="Loading Terminal…" /> : null}>
+                <TerminalSurface projectId={projectId} terminals={state} checkout={isSelectedProject ? workbenchContext : null}
+                  visible={isSelectedProject && dockVisible && activeTool === "Terminal"}
+                  queuedCommand={isSelectedProject ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)}
+                  onOpenTab={openTerminalTab}
+                  onSelectTab={(tabId) => setTerminals((previous) => selectTab(previous, projectId, tabId))}
+                  onCloseTab={(tabId) => setTerminals((previous) => closeTab(previous, projectId, tabId))}
+                  onRunningChange={(tabId, command) => setTerminals((previous) => setRunning(previous, projectId, tabId, command))} />
+              </Suspense>;
+            })}
             {selected && currentThreadId === null && activeTool === "Files" && <section className="empty-state surface-empty"><p>Select a Thread to open files in its checkout.</p><button className="btn primary" onClick={() => void startNewThread()}>New Thread</button></section>}
             {!selected && <section className="empty-state surface-empty"><p>Open a Project to use its tools.</p><button className="btn primary" onClick={() => overlays.current?.openPalette()}>Open a Project</button></section>}
             {selected && visitedTools[`${selected.id}:Issues`] && (
               <div className="surface-content" hidden={activeTool !== "Issues"}><Suspense fallback={<Skeleton kind="list" label="Loading issues…" />}>
                 <IssuesSurface
                   projectId={selected.id}
-                  onDispatched={(thread) =>
-                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
-                  }
+                  projectName={selected.name}
+                  onDispatched={(thread) => {
+                    // The Thread opens through the same dispatch/setup flow as the Board's; if the
+                    // user moved to another Project meanwhile, it only joins that Project's list there.
+                    if (currentProjectRef.current !== thread.projectId) return;
+                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)]);
+                    setSelectedThreadId(thread.id);
+                    setShowSettings(false);
+                    setShowBoard(false);
+                    setMaximized(false);
+                  }}
                 />
               </Suspense></div>
             )}
@@ -828,6 +915,8 @@ interface SidebarProps {
   onRenameThread?: (threadId: number, newTitle: string) => void;
   /** ⌘⇧N: every known Project, scanned ones included, is found there. */
   onOpenPalette: () => void;
+  /** The central Board is showing (for the selected Project). */
+  boardOpen: boolean;
   onOpenBoard: (p: Project) => void;
   onOpenSettings: () => void;
   settingsOpen: boolean;
@@ -846,6 +935,7 @@ function Sidebar({
   onNewThread,
   onRenameThread,
   onOpenPalette,
+  boardOpen,
   onOpenBoard,
   onOpenSettings,
   settingsOpen,
@@ -982,7 +1072,8 @@ function Sidebar({
                     <span className="project-name">{p.name}</span>
                     {p.missing && <span className="badge">missing</span>}
                   </button>
-                  <button className="row-action" onClick={() => onOpenBoard(p)} aria-label={`Thread Board of ${p.name}`} title={`Thread Board`}>
+                  <button className="row-action board-action" aria-pressed={isSelected && boardOpen} onClick={() => onOpenBoard(p)}
+                    aria-label={`Thread Board of ${p.name}`} title={`Thread Board of ${p.name} (${keys("toggleBoard")})`}>
                     <ProjectIcon size={13} />
                   </button>
                   <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${keys("openProject")})`}>
@@ -1062,7 +1153,7 @@ function WindowResizeHandles() {
   </div>;
 }
 
-type WorkspaceOverlaysHandle = { openPalette: () => void; openDelete: (id: number, title: string) => void };
+type WorkspaceOverlaysHandle = { openPalette: () => void; openDelete: (id: number, title: string, shells: string[]) => void };
 
 function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, onOpenProject, onThreadDeleted }: {
   ref: Ref<WorkspaceOverlaysHandle>;
@@ -1073,12 +1164,12 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
   onThreadDeleted: (id: number) => void;
 }) {
   const [showPalette, setShowPalette] = useState(false);
-  const [pending, setPending] = useState<{ id: number; title: string; discardChanges: boolean } | null>(null);
+  const [pending, setPending] = useState<{ id: number; title: string; discardChanges: boolean; shells: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useImperativeHandle(ref, () => ({
     openPalette: () => setShowPalette(true),
-    openDelete: (id, title) => { setError(null); setPending({ id, title, discardChanges: false }); },
+    openDelete: (id, title, shells) => { setError(null); setPending({ id, title, discardChanges: false, shells }); },
   }), []);
   useEffect(() => {
     if (!showPalette) return;
@@ -1104,6 +1195,10 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
       <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
         <h2 id="delete-thread-title">{pending.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pending.title}”?`}</h2>
         <p>{pending.discardChanges ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept." : "Its conversation is removed permanently."}</p>
+        {pending.shells.length > 0 && <>
+          <p>Deleting also closes the terminals in its worktree:</p>
+          <ul className="delete-shells">{pending.shells.map((shell, index) => <li key={index} className="mono">{shell}</li>)}</ul>
+        </>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="modal-actions">
           <button onClick={() => setPending(null)} disabled={deleting}>Cancel</button>

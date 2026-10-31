@@ -112,8 +112,11 @@ _Avoid_: Quota, rate limit (a rate limit is the Provider refusing a request; a U
 One command entered in a Project terminal tab, grouped with its output and exit status. It belongs to a persistent shell session, so its working directory and shell variables carry into the next Command block.
 _Avoid_: Turn, Thread, agent message
 
+**Project terminal tab**:
+One shell session in a Project's terminal tab strip. It keeps the checkout it was opened in, is flagged when that differs from the selected Thread's checkout, and survives Thread selection and Surface changes. Deleting a Board Thread closes only the tabs of its worktree.
+
 **Surface**:
-One of the five tools in the right dock: Diff, Files, Terminal, Pull request or Issues. A Surface can be maximized and restored while keeping its content and working state.
+One of the five tools in the right dock: Diff, Files, Terminal, Pull request or Issues. A Surface can be maximized and restored while keeping its content and working state. The Pull request and Issues lists belong to the Project's repository; only branch actions (opening a pull request, checking one out) act on the selected Thread's checkout and name it. Reviewing a remote pull request records its identity for the Diff Surface and never changes a checkout.
 _Avoid_: Tab, pane, widget
 
 **Diff scope**:

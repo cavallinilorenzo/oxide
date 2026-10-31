@@ -665,22 +665,6 @@
   min-height: 28px;
 }
 @container (max-width: 440px) {
-  .code-workbench {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .editor-explorer {
-    display: none;
-  }
-  .editor-explorer:has(.editor-new-file) {
-    display: block;
-    position: absolute;
-    z-index: 30;
-    top: 38px;
-    left: 0;
-    width: min(300px, 100%);
-    max-height: 70%;
-    box-shadow: 8px 8px 24px #0005;
-  }
   .editor-status > span:not(.grow) {
     display: none;
   }
@@ -811,3 +795,106 @@
 .window.windows .header { display: flex; }
 .window.windows .header-project { flex: 1; justify-content: flex-start; }
 .header > .icon-btn { flex: none; min-width: 28px; }
+
+/* Project terminal tabs: one strip, scrolling sideways so many shells never displace the Surface tabs. */
+.terminal-surface { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.terminal-surface[hidden], .terminal-tab-panel[hidden] { display: none; }
+.terminal-tabbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.terminal-tab-strip { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.terminal-tab { display: flex; align-items: center; flex: none; max-width: 220px; border-bottom: 2px solid transparent; color: var(--dim); }
+.terminal-tab.active { border-bottom-color: var(--acc2); color: var(--fg); }
+.terminal-tab > [role="tab"] { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 4px 7px 8px; background: none; border: 0; color: inherit; font-size: 12px; cursor: pointer; }
+.terminal-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-tab-running { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--acc2); }
+.terminal-tab-mismatch { flex: none; padding: 0 5px; border: 1px solid currentColor; border-radius: 8px; font-size: 10px; color: var(--yellow); }
+.terminal-tab-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.delete-shells { margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+
+/* Files: open-files bar, all-files menu and the compact file-list overlay. */
+.editor-tabs-bar {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+}
+.editor-tabs-bar > .editor-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+  scrollbar-width: thin;
+}
+.editor-tabs-bar > .editor-tree-toggle,
+.editor-tabs-bar .editor-files-menu-wrap > .icon-btn,
+.editor-tabs-actions > .icon-btn {
+  align-self: center;
+  margin: 0 6px;
+}
+.editor-tabs-actions {
+  display: flex;
+  margin-left: auto;
+}
+.editor-tab.preview > [role="tab"] > span:first-of-type {
+  font-style: italic;
+}
+.editor-files-menu-wrap {
+  position: relative;
+  display: flex;
+}
+.editor-files-menu {
+  position: absolute;
+  z-index: 40;
+  top: 100%;
+  left: 0;
+  min-width: 220px;
+  max-width: min(360px, 90vw);
+  max-height: 60vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 8px 8px 24px #0005;
+}
+.editor-files-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+.editor-files-menu > button > span:not(.editor-dirty) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-files-menu > button.selected {
+  color: var(--fg-bright);
+}
+.editor-files-menu > hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+.code-workbench.compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+.code-workbench.compact > .editor-explorer {
+  display: none;
+}
+.code-workbench.compact.tree-open > .editor-explorer {
+  display: block;
+  position: absolute;
+  z-index: 30;
+  top: 38px;
+  left: 0;
+  bottom: 0;
+  width: min(300px, 100%);
+  box-shadow: 8px 8px 24px #0005;
+}

@@ -37,7 +37,7 @@ it("reports a transport rejection after committing and exits the busy state with
   const refreshed = vi.fn();
   const openPr = vi.fn();
   function Harness() {
-    const flow = usePushFlow(1, refreshed, openPr);
+    const flow = usePushFlow(1, 7, refreshed, openPr);
     return (
       <>
         <button disabled={flow.busy} onClick={() => void flow.start(commit)}>
@@ -50,7 +50,7 @@ it("reports a transport rejection after committing and exits the busy state with
   await act(async () => root.render(<Harness />));
   await act(async () => host.querySelector("button")!.click());
   expect(commit).toHaveBeenCalledOnce();
-  expect(push).toHaveBeenCalledWith(1, false);
+  expect(push).toHaveBeenCalledWith(1, 7, false);
   expect(host.textContent).toContain("Connection lost");
   expect(host.querySelector("button")!.disabled).toBe(false);
   expect(refreshed).toHaveBeenCalledOnce();

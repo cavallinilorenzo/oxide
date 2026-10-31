@@ -22,5 +22,5 @@ path = "junit.xml"
 max-threads = 2
 
 [[profile.ci.overrides]]
-filter = "(package(oxide-provider) & binary(/_adapter$|^provider_contract$/)) | test(/terminal/)"
+filter = "(package(oxide-provider) & binary(/_adapter$|^provider_contract$/)) | test(/terminal/) | binary(thread_checkout_git)"
 test-group = "process-heavy"

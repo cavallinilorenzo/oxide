@@ -795,3 +795,33 @@
 .code-loading-layout > aside { width: 200px; flex: none; border-right: 1px solid var(--line); background: var(--bg2); }
 .code-loading-layout > div { flex: 1; min-width: 0; }
 @container (max-width: 440px) { .code-loading-layout > aside { display: none; } }
+/* The Thread remains central; presentation changes retain each tool instance. */
+.sidebar-region[hidden], .centre-column[hidden], .surface-content[hidden] { display: none; }
+.surface-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.surface-content > section, .surface-content > .pr-views, .surface-content > .issues-surface { flex: 1; min-height: 0; }
+.tools > .code-workbench, .tools > .terminal-workbench { flex: 1; min-height: 0; min-width: 0; }
+.thread-restore-handle { flex: none; width: 32px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--bg2); color: var(--dim); display: flex; align-items: center; justify-content: center; }
+.surface-empty { flex: 1; }
+.tools > .tabs { flex: none; min-width: 0; }
+.tools > .tabs .tab { min-width: 28px; padding: 0 7px; white-space: nowrap; }
+.tools > .tabs > .icon-btn { flex: none; }
+@container (max-width: 560px) {
+  .tools > .tabs .tab:not([aria-selected="true"]) .tool-tab-label { display: none; }
+}
+.window.windows .header { display: flex; }
+.window.windows .header-project { flex: 1; justify-content: flex-start; }
+.header > .icon-btn { flex: none; min-width: 28px; }
+
+/* Project terminal tabs: one strip, scrolling sideways so many shells never displace the Surface tabs. */
+.terminal-surface { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.terminal-surface[hidden], .terminal-tab-panel[hidden] { display: none; }
+.terminal-tabbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.terminal-tab-strip { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.terminal-tab { display: flex; align-items: center; flex: none; max-width: 220px; border-bottom: 2px solid transparent; color: var(--dim); }
+.terminal-tab.active { border-bottom-color: var(--acc2); color: var(--fg); }
+.terminal-tab > [role="tab"] { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 4px 7px 8px; background: none; border: 0; color: inherit; font-size: 12px; cursor: pointer; }
+.terminal-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-tab-running { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--acc2); }
+.terminal-tab-mismatch { flex: none; padding: 0 5px; border: 1px solid currentColor; border-radius: 8px; font-size: 10px; color: var(--yellow); }
+.terminal-tab-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.delete-shells { margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }

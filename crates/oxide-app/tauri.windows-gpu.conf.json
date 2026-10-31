@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../../target/dictation-runtime/windows-x64": "",
+      "../../docs/licenses/cuda.txt": "licenses/cuda.txt",
+      "../../docs/licenses/msvc-runtime.txt": "licenses/msvc-runtime.txt"
+    }
+  }
+}

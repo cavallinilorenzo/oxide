@@ -15,3 +15,8 @@ publish = false
 [profile.dev]
 debug = 0
 incremental = true
+
+# Optimize cryptographic hashing even in development profile so verifying downloaded
+# models or cold artifacts runs at near-release speed instead of 14 seconds unoptimized.
+[profile.dev.package.sha2]
+opt-level = 3

@@ -106,7 +106,7 @@ disk usage" for cache maintenance and output locations. CI keeps its existing
 
 ### `supply-chain`
 
-- **What:** the Tauri alignment check (the `tauri` crate and `@tauri-apps/*` packages must share a `major.minor`); `cargo deny check bans licenses sources` against the macOS and Windows graphs, using [`deny.toml`](../deny.toml); on PRs, GitHub's dependency review (`fail-on-severity: high`, licence allowlist).
+- **What:** the Tauri alignment check (the `tauri` crate and `@tauri-apps/*` packages must share a `major.minor`); `cargo deny check bans licenses sources` against the macOS and Windows graphs, and against the Vulkan and CUDA worker lockfiles (they ship but are outside the workspace), using [`deny.toml`](../deny.toml); on PRs, GitHub's dependency review (`fail-on-severity: high`, licence allowlist).
 - **Why:** it is policy over lockfiles and needs no build. It stops a licence we can't ship, a git source, a wildcard version, a new dependency with a high advisory, or a half-landed Tauri bump from reaching `main`.
 - **When / where:** `supplyChain` lane (any manifest, lockfile or `deny.toml`), Linux.
 - **Local:** `node tools/ci/cli.mjs tauri-alignment` (in `check.mjs`), and `cargo deny check bans licenses sources` after `cargo install --locked cargo-deny`. Dependency review runs only in CI.
@@ -127,10 +127,10 @@ disk usage" for cache maintenance and output locations. CI keeps its existing
 
 ### `bundle (macos)` and `bundle (windows)`
 
-- **What:** call the shared [`build.yml`](../.github/workflows/build.yml) with `release: false`: an unsigned release-profile `tauri build` (macOS `.app` + `.dmg`; Windows NSIS). The artifact is kept 7 days.
-- **Why:** a debug `cargo test` never runs `tauri build`. This catches config, capability, icon, resource and frontend-embedding breakage.
+- **What:** call the shared [`build.yml`](../.github/workflows/build.yml) with `release: false`: an unsigned release-profile `tauri build` (macOS `.app` + `.dmg`; Windows NSIS with the Vulkan and CUDA dictation workers), then the dictation package checks: macOS verifies the app; Windows installs the setup silently into a scratch folder, verifies it and probes each worker and the app with no SDK on `PATH`. The artifact is kept 7 days.
+- **Why:** a debug `cargo test` never runs `tauri build`. This catches config, capability, icon, resource and frontend-embedding breakage, and a package that would need a developer SDK or crash without a GPU driver. Each check and the failure it prevents are in [docs/dictation.md](dictation.md#checks-and-what-each-prevents). The runners have no GPU, so this is not hardware validation.
 - **When / where:** `bundle` lane on PRs (Tauri config or capabilities, icons, bundle resources, manifests and lockfiles, build scripts, the build workflow); **always** on `main` and `release/**`, so no commit is released without a proven bundle.
-- **Local:** `node tools/check.mjs` builds your OS's bundle. It reports the other OS's bundle as skipped.
+- **Local:** `node tools/check.mjs` builds your OS's bundle and runs its package checks; on Windows it first stages the GPU workers (`node tools/dictation-package.mjs stage`, which needs the Vulkan SDK and CUDA Toolkit from `node tools/dictation-package.mjs setup` and loads the Visual Studio x64 environment itself). It reports the other OS's bundle, and the silent install that only CI does, as skipped.
 
 ### `gate`
 
@@ -148,8 +148,8 @@ disk usage" for cache maintenance and output locations. CI keeps its existing
 | --- | --- |
 | `rust` | crates, Cargo manifests or lock, the toolchain file, Cargo config, the nextest config, the shared Rust setup action, the generated bindings |
 | `web` | the web app, `.node-version` |
-| `bundle` | Tauri config or capabilities, icons, bundle resources, Cargo or web manifests and lockfiles, build scripts, the shared build workflow, `.node-version` |
-| `supplyChain` | any manifest or lockfile, `web/pnpm-workspace.yaml`, `deny.toml` |
+| `bundle` | Tauri config or capabilities, icons, bundle resources, Cargo or web manifests and lockfiles, build scripts, the GPU worker crates and the dictation build/package scripts, the shared build workflow, `.node-version` |
+| `supplyChain` | any manifest or lockfile (including the GPU workers' lockfiles), `web/pnpm-workspace.yaml`, `deny.toml` |
 | `automation` | `.github/`, `tools/` |
 
 Docs, research and UI-review screenshots match no lane, so a docs-only PR runs `changes`, `pr-title` and `gate` only. The exception is `docs/licenses/`, which is bundled as app resources and turns on `bundle`.
@@ -178,8 +178,19 @@ nextest runs each test in its own process with the settings in [`.config/nextest
   - `release: false` (CI): unsigned, caches allowed, no updater artifacts.
   - `release: true`: no caches at all, frozen installs, the updater config (`tauri.updater.conf.json`) and `TAURI_SIGNING_PRIVATE_KEY`. It fails if that key is missing. Apple signing and notarization switch on by themselves when the Apple secrets exist; without them the macOS build is ad-hoc signed (Apple Silicon refuses to launch an app with no signature) and the notes say so.
 - **Why:** PR bundles and release bundles come from one definition, so what `main` proves is what ships. It declares the `release` environment itself, because a job that calls a reusable workflow can't name one, and the approval must guard the job that reads the secrets.
-- **Bundles:** macOS `app,dmg`; Windows `nsis` only (the updater's Windows package is the NSIS setup). Default features only: CPU dictation on Windows, Metal on macOS. `dictation-vulkan` is never built here.
+- **Bundles:** macOS `app,dmg` (CPU and Metal dictation); Windows `nsis` only (the updater's Windows package is the NSIS setup) with CPU, Vulkan and CUDA dictation. On Windows the job installs the pinned Vulkan SDK and CUDA Toolkit (`node tools/dictation-package.mjs setup`), stages the release workers and their runtime (loading and checking the MSVC 14.44 environment with `vcvars64.bat -vcvars_ver=14.44` to avoid CUDA 12.9 frontend crashes with MSVC 14.51), and bundles with `crates/oxide-app/tauri.windows-gpu.conf.json`. `GGML_NATIVE=OFF` keeps native code portable instead of tuned to the runner. The Windows job has 180 minutes because it compiles CUDA kernels for every supported architecture.
 - **Local:** `node tools/check.mjs` builds an unsigned bundle for your OS. Signed builds are never made locally.
+
+Windows CI keeps a separate cache of `target/vw` and `target/cw`, including the
+CMake intermediates. Its key covers the runner image, Rust toolchain, Cargo
+manifests and locks, SDK pins and native compiler settings
+(`node tools/ci/cli.mjs dictation-cache`, policy in `dictationBuildCache`). It is
+saved immediately after staging, before installer and smoke checks, so a later
+packaging failure can reuse the completed GPU compilation. GitHub scopes PR
+caches to that PR; after the first successful worker build, subsequent attempts
+can reuse it. A cache miss still requires the full CUDA compilation. Both restore
+and save are disabled for releases. The CUDA worker uses Cargo's very verbose
+output so the underlying CMake/nvcc progress is visible during long builds.
 
 ### `release.yml` (Release)
 
@@ -242,6 +253,8 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
    cargo test -p oxide-provider --test agy_live_smoke -- --ignored
    ```
 
+   Dictation GPU support is a separate gate: CI proves the packages load, not that a GPU is used. When a release changes dictation, its packaging or its native dependencies, install the draft's builds on the physical hardware and attach evidence of actual offload (NVIDIA CUDA and Vulkan, AMD Vulkan, Apple Silicon Metal) as described in #235. Missing hardware leaves that row unverified in the notes.
+
 6. **Publish.** Edit the notes, then click Publish. The release becomes immutable and, if stable, the updater feed goes live.
 7. **Watch** the *Verify release* run. If it opens an issue, roll forward.
 
@@ -278,6 +291,7 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
 | actionlint (version and SHA-256) | `ci.yml`, `automation` job | by hand |
 | check-jsonschema | `ci.yml`, `automation` job | by hand |
 | Runner images (`ubuntu-24.04`, `macos-15`, `windows-2025`) | workflow `runs-on` | by hand, when GitHub announces a deprecation |
+| CUDA Toolkit (12.9.1) and Vulkan SDK (1.4.363.0), with SHA-256 | `GPU_BUILD_SDKS` in `tools/ci/policy.mjs` | by hand. CUDA stays on 12.x (13 drops compute capability below 7.5); a new CUDA major also renames the runtime DLLs, which the tests check |
 
 When bumping a tool by hand, change it everywhere it appears (`grep` for the version) and keep the local install instructions in CONTRIBUTING in step.
 

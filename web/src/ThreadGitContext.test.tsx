@@ -87,7 +87,7 @@ it("has no Git target in the Board view and does not reuse the previous Thread's
   await act(async () => root.render(<App />));
   await flush();
   expect(container.querySelector(".git-header")).not.toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Thread Board"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Thread Board of Project"]')!.click());
   await flush();
   expect(container.querySelector(".git-header")).toBeNull();
 });

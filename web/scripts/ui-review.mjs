@@ -29,7 +29,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
     const commandCounts = {};
     window.__OXIDE_REVIEW_COMMAND_COUNTS__ = commandCounts;
     const project = { id: 1, name: "oxide", path: "/Users/demo/Developer/projects/oxide", hidden: false, open: true, missing: false };
-    const projects = scenario === "palette"
+    const projects = scenario === "no-project" ? [] : scenario === "palette"
       ? [project, { ...project, id: 2, name: "uni", path: "/Users/demo/Developer/uni", open: false }]
       : [project];
     const base = { projectId: 1, provider: "claude", model: "claude-sonnet-4-6", effort: "medium", permissionMode: "auto-edit", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sessionLost: false, continuedFrom: null, continuedIn: null, branch: null, worktreePath: null, setupOutput: null, issueNumber: null };
@@ -54,6 +54,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
         if (command === "plugin:event|listen") return ++callbackId;
         if (["plugin:event|unlisten", "remember_selection", "resize_terminal", "close_terminal", "write_terminal"].includes(command)) return null;
         if (command === "list_projects" || command === "rescan_projects") return projects;
+        if (command === "last_selection" && scenario === "no-project") return null;
         if (command === "last_selection") return { projectId: 1, threadId: ({ completed: 1, approval: 2, working: 3, error: 4, empty: null })[scenario] };
         if (command === "list_threads") return scenario === "empty" ? [] : threads.filter((thread) => thread.projectId === args.projectId);
         if (command === "create_thread") {
@@ -88,7 +89,13 @@ export async function openReview(engine = "chromium", scenario = "completed", in
         if (command === "git_status") return { branch: "fix/desktop-ui-consistency", upstream: "origin/main", ahead: 0, behind: 0, added: 42, removed: 12, changedFiles: 4, pickerDisabledReason: null, protected: false, unpublished: false };
         if (command === "fetch_project") return false;
         if (command === "list_branches") return [{ name: "main", current: false }, { name: "fix/desktop-ui-consistency", current: true }];
-        if (command === "start_terminal") return { id: 1 };
+        if (command === "start_terminal" || command === "start_block_terminal") return { id: 1 };
+        if (command === "git_diff" || command === "git_turn_diff") return { base: "main", files: [] };
+        if (command === "issues_state" || command === "pull_requests_state" || command === "github_state") return { availability: "ready", guidance: null };
+        if (["list_pull_requests", "list_issues", "language_tools", "find_files", "subscribe_board"].includes(command)) return [];
+        if (command === "set_editor_dirty") return null;
+        if (command === "read_file") return { path: args.path, content: '{"name":"oxide"}', size: 16, binary: false, truncated: false };
+        if (command === "subscribe_usage_limits") return null;
         if (command === "list_dir") return [
           { name: "src", path: "src", isDir: true },
           { name: "package.json", path: "package.json", isDir: false },
@@ -101,7 +108,7 @@ export async function openReview(engine = "chromium", scenario = "completed", in
           const running = ["working", "needs-input"].includes(thread.status);
           return {
             thread, capabilities: { reasoningText: true, imageAttachments: true }, turnOffset: 0, turnCount: 1, lastSeq: 0, supportedPermissionModes: caps.supportedPermissionModes,
-            turns: [{ id: 1, turnIndex: 0, prompt: "Review the desktop workspace and shared controls.", model: "claude-sonnet-4-6", effort: "medium", status: running ? "running" : thread.status === "error" ? "error" : "completed", startedAt: new Date().toISOString(), completedAt: running ? null : new Date().toISOString(),
+            turns: [{ id: 1, turnIndex: 0, segments: [{ kind: "text", text: "Review the desktop workspace and shared controls." }], model: "claude-sonnet-4-6", effort: "medium", status: running ? "running" : thread.status === "error" ? "error" : "completed", startedAt: new Date().toISOString(), completedAt: running ? null : new Date().toISOString(),
               error: thread.status === "error" ? { message: "Provider connection interrupted.", stderrTail: "Connection closed before the response completed." } : null,
               approvals: thread.status === "needs-input" ? [{ id: 1, approvalId: "review-command", kind: "command", summary: "git diff --stat", options: [], decision: null, createdAt: new Date().toISOString() }] : [], attachments: [], unknownEvents: [],
               items: [{ id: 1, itemIndex: 0, kind: "agent_message", status: "completed", content: "The workspace keeps Projects, Threads and Git actions close at hand. Check contrast, keyboard focus and long labels while preserving the compact layout." }] }],
@@ -113,14 +120,16 @@ export async function openReview(engine = "chromium", scenario = "completed", in
   }, { scenario, dictationCatalogue });
   await page.goto(process.env.OXIDE_REVIEW_URL ?? "http://127.0.0.1:1420");
   if (inputOnly) { await page.locator(".header").waitFor(); return { browser, page, errors }; }
-  await page.locator(".thread-title").waitFor();
-  if (scenario !== "empty") await page.locator(".agent-message").waitFor();
-  for (const name of ["Toggle tools panel", "Toggle Terminal"]) {
-    const toggle = page.getByRole("button", { name, exact: true });
-    if (await toggle.getAttribute("aria-pressed") !== "true") await toggle.click();
+  if (scenario === "empty" || scenario === "no-project") {
+    await page.locator(".project-overview, .empty-thread").waitFor();
+    return { browser, page, errors };
   }
+  await page.locator(".thread-title").waitFor();
+  await page.locator(".agent-message").waitFor();
+  const toggle = page.getByRole("button", { name: "Toggle tools panel", exact: true });
+  if (await toggle.getAttribute("aria-pressed") !== "true") await toggle.click();
+  await page.getByRole("tab", { name: "Files", exact: true }).click();
   await page.locator(".files-row").first().waitFor();
-  await page.locator(".terminal-host .xterm").waitFor();
   await waitForLayout(page);
   return { browser, page, errors };
 }

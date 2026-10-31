@@ -173,6 +173,9 @@ jobs:
           tool: cargo-deny@0.20.2
       # Advisories are not checked here: the daily Advisories workflow does.
       - run: cargo deny --locked check bans licenses sources
+      # The GPU workers ship in the Windows installer but have their own lockfiles.
+      - run: cargo deny --locked --manifest-path crates/oxide-vulkan-worker/Cargo.toml check bans licenses sources
+      - run: cargo deny --locked --manifest-path crates/oxide-cuda-worker/Cargo.toml check bans licenses sources
       - name: Dependency review
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

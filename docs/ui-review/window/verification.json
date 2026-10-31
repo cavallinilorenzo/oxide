@@ -1,0 +1,16 @@
+{
+  "sizes": [
+    [
+      1440,
+      900
+    ],
+    [
+      900,
+      560
+    ]
+  ],
+  "modesRemoved": true,
+  "stableDock": true,
+  "draftRetained": true,
+  "errors": []
+}

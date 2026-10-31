@@ -104,6 +104,8 @@ pnpm --dir web install
 .\web\node_modules\.bin\tauri.cmd build --bundles nsis
 ```
 
+That installer has CPU dictation only. The released installer also contains the Vulkan and CUDA dictation workers; to build it, follow [Packaging and distribution](docs/dictation.md#packaging-and-distribution). Neither needs an SDK on the user's machine; GPU dictation needs only the GPU vendor's driver.
+
 Run the Tauri CLI from the repository root so it can find `crates/oxide-app/tauri.conf.json`. To build an MSI instead, use `--bundles msi`; if that fails with a `light.exe` error, enable the **VBScript** optional Windows feature and try again.
 
 ## Tests

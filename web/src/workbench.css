@@ -818,9 +818,10 @@
 .terminal-tabbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg2); }
 .terminal-tab-strip { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
 .terminal-tab { display: flex; align-items: center; flex: none; max-width: 220px; border-bottom: 2px solid transparent; color: var(--dim); }
-.terminal-tab.active { border-bottom-color: var(--accent, currentColor); color: var(--fg); }
+.terminal-tab.active { border-bottom-color: var(--acc2); color: var(--fg); }
 .terminal-tab > [role="tab"] { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 4px 7px 8px; background: none; border: 0; color: inherit; font-size: 12px; cursor: pointer; }
 .terminal-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-tab-running { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent, currentColor); }
-.terminal-tab-mismatch { flex: none; padding: 0 5px; border: 1px solid currentColor; border-radius: 8px; font-size: 10px; color: var(--warn, #d29922); }
+.terminal-tab-running { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--acc2); }
+.terminal-tab-mismatch { flex: none; padding: 0 5px; border: 1px solid currentColor; border-radius: 8px; font-size: 10px; color: var(--yellow); }
 .terminal-tab-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.delete-shells { margin: 0 0 8px; padding-left: 18px; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }

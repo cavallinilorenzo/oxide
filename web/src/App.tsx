@@ -31,7 +31,7 @@ import { isBoardThread } from "./dispatch";
 import { DiffOpenContext } from "./diffOpen";
 import { defaultDiffScope, type PanelScope } from "./diffScope";
 import {
-  closeTab, describeAffectedTabs, emptyTerminals, openTab, removeThreadTabs, selectTab, setRunning, tabsOfThread,
+  allTabsOfThread, closeTab, describeAffectedTabs, emptyTerminals, focusCheckoutTab, openTab, removeThreadTabsEverywhere, selectTab, setRunning,
   type TerminalsByProject,
 } from "./terminalTabs";
 import { performThreadDelete, selectionAfterDelete, threadsAfterDelete } from "./deleteThread";
@@ -175,6 +175,8 @@ export function App() {
   }, [workbenchContext]);
   const runInstallCommand = (command: string) => {
     setInstallCommand({ id: ++installSequence.current, command }); selectSurface("Terminal");
+    // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
+    if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
   const openCodeFile = (path: string, diff?: DiffFile) => {
     if (!workbenchContext) return;
@@ -413,13 +415,13 @@ export function App() {
 
   const deleteThread = useCallback((threadId: number) => {
     const title = threadTitle(threads?.find((t) => t.id === threadId) ?? { id: threadId, title: null });
-    const affected = Object.keys(terminals).flatMap((project) => describeAffectedTabs(tabsOfThread(terminals, Number(project), threadId)));
+    const affected = describeAffectedTabs(allTabsOfThread(terminals, threadId));
     overlays.current?.openDelete(threadId, title, affected);
   }, [threads, terminals]);
 
   const onThreadDeleted = useCallback((deletedId: number) => {
     setWorkbenches((contexts) => contexts.filter((context) => context.threadId !== deletedId));
-    setTerminals((previous) => Object.keys(previous).reduce((next, project) => removeThreadTabs(next, Number(project), deletedId), previous));
+    setTerminals((previous) => removeThreadTabsEverywhere(previous, deletedId));
     setThreads((prev) => threadsAfterDelete(prev, deletedId));
     setSelectedThreadId((current) => selectionAfterDelete(current, deletedId));
   }, []);
@@ -427,7 +429,7 @@ export function App() {
   // An empty Thread (no Turn yet) closes at once; any other one asks first.
   const closeThread = useCallback(async (threadId: number) => {
     const turns = await commands.listTurns(threadId, 0, 1);
-    const ownsShells = Object.keys(terminals).some((project) => tabsOfThread(terminals, Number(project), threadId).length > 0);
+    const ownsShells = allTabsOfThread(terminals, threadId).length > 0;
     if (turns.status === "ok" && turns.data.turnCount === 0 && !ownsShells) {
       const result = await performThreadDelete(threadId, false, commands.deleteThread);
       if (result.status === "deleted") {
@@ -813,11 +815,11 @@ export function App() {
               {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
-              const projectId = Number(id); const here = projectId === selected?.id;
-              return <Suspense key={id} fallback={here && dockVisible && activeTool === "Terminal" ? <Skeleton kind="code" label="Loading Terminal…" /> : null}>
-                <TerminalSurface projectId={projectId} terminals={state} checkout={here ? workbenchContext : null}
-                  visible={here && dockVisible && activeTool === "Terminal"}
-                  queuedCommand={here ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)}
+              const projectId = Number(id); const isSelectedProject = projectId === selected?.id;
+              return <Suspense key={id} fallback={isSelectedProject && dockVisible && activeTool === "Terminal" ? <Skeleton kind="code" label="Loading Terminal…" /> : null}>
+                <TerminalSurface projectId={projectId} terminals={state} checkout={isSelectedProject ? workbenchContext : null}
+                  visible={isSelectedProject && dockVisible && activeTool === "Terminal"}
+                  queuedCommand={isSelectedProject ? installCommand : null} onCommandConsumed={() => setInstallCommand(null)}
                   onOpenTab={openTerminalTab}
                   onSelectTab={(tabId) => setTerminals((previous) => selectTab(previous, projectId, tabId))}
                   onCloseTab={(tabId) => setTerminals((previous) => closeTab(previous, projectId, tabId))}

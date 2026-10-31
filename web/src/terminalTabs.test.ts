@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  closeTab, describeAffectedTabs, isMismatched, openTab, removeThreadTabs, selectTab, setRunning, tabsOfThread,
+  closeTab, focusCheckoutTab, describeAffectedTabs, isMismatched, openTab, removeThreadTabs, selectTab, setRunning, tabsOfThread,
   type TerminalCheckout, type TerminalsByProject,
 } from "./terminalTabs";
 
@@ -10,6 +10,19 @@ const featureB: TerminalCheckout = { key: "1:6", threadId: 6, rootPath: "/repo-w
 
 const opened = (...checkouts: TerminalCheckout[]) =>
   checkouts.reduce<TerminalsByProject>((state, checkout) => openTab(state, 1, checkout), {});
+
+describe("running a command for the selected checkout", () => {
+  it("reuses a tab already in that checkout, else opens one, and leaves other tabs alone", () => {
+    let state = opened(main, featureA);
+    const mainId = state[1].tabs[0].id;
+    state = focusCheckoutTab(state, 1, main);
+    expect(state[1].selectedId).toBe(mainId);
+    state = focusCheckoutTab(state, 1, featureB);
+    expect(state[1].tabs.map((tab) => tab.key)).toEqual(["1:main", "1:5", "1:6"]);
+    expect(state[1].tabs.find((tab) => tab.id === state[1].selectedId)?.key).toBe("1:6");
+    expect(focusCheckoutTab(state, 1, featureB)).toBe(state);
+  });
+});
 
 describe("Project terminal tabs", () => {
   it("opens and selects a tab that keeps its checkout", () => {

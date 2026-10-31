@@ -23,24 +23,24 @@ export type TerminalsByProject = Record<number, ProjectTerminals>;
 
 export const emptyTerminals: ProjectTerminals = { tabs: [], selectedId: null, nextId: 1 };
 
-const of = (state: TerminalsByProject, projectId: number) => state[projectId] ?? emptyTerminals;
+const projectTerminals = (state: TerminalsByProject, projectId: number) => state[projectId] ?? emptyTerminals;
 
 /** Opens a tab in `checkout` and selects it. Only an explicit user action calls this. */
 export function openTab(state: TerminalsByProject, projectId: number, checkout: TerminalCheckout): TerminalsByProject {
-  const project = of(state, projectId);
+  const project = projectTerminals(state, projectId);
   const tab: TerminalTab = { ...checkout, id: project.nextId, running: null };
   return { ...state, [projectId]: { tabs: [...project.tabs, tab], selectedId: tab.id, nextId: project.nextId + 1 } };
 }
 
 export function selectTab(state: TerminalsByProject, projectId: number, tabId: number): TerminalsByProject {
-  const project = of(state, projectId);
+  const project = projectTerminals(state, projectId);
   if (!project.tabs.some((tab) => tab.id === tabId)) return state;
   return { ...state, [projectId]: { ...project, selectedId: tabId } };
 }
 
 /** Closing the selected tab selects its neighbour; other tabs never change. */
 export function closeTab(state: TerminalsByProject, projectId: number, tabId: number): TerminalsByProject {
-  const project = of(state, projectId);
+  const project = projectTerminals(state, projectId);
   const index = project.tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return state;
   const tabs = project.tabs.filter((tab) => tab.id !== tabId);
@@ -49,7 +49,7 @@ export function closeTab(state: TerminalsByProject, projectId: number, tabId: nu
 }
 
 export function setRunning(state: TerminalsByProject, projectId: number, tabId: number, running: string | null): TerminalsByProject {
-  const project = of(state, projectId);
+  const project = projectTerminals(state, projectId);
   const tab = project.tabs.find((candidate) => candidate.id === tabId);
   if (!tab || tab.running === running) return state;
   return { ...state, [projectId]: { ...project, tabs: project.tabs.map((candidate) => candidate.id === tabId ? { ...candidate, running } : candidate) } };
@@ -57,12 +57,30 @@ export function setRunning(state: TerminalsByProject, projectId: number, tabId: 
 
 /** The tabs a Board Thread's worktree owns: what deleting that Thread closes. */
 export function tabsOfThread(state: TerminalsByProject, projectId: number, threadId: number): TerminalTab[] {
-  return of(state, projectId).tabs.filter((tab) => tab.threadId === threadId);
+  return projectTerminals(state, projectId).tabs.filter((tab) => tab.threadId === threadId);
 }
 
 /** Drops the tabs of a deleted Board Thread's worktree and leaves every sibling alone. */
 export function removeThreadTabs(state: TerminalsByProject, projectId: number, threadId: number): TerminalsByProject {
   return tabsOfThread(state, projectId, threadId).reduce((next, tab) => closeTab(next, projectId, tab.id), state);
+}
+
+/** Selects the Project's tab in `checkout`, opening one only when none exists there. */
+export function focusCheckoutTab(state: TerminalsByProject, projectId: number, checkout: TerminalCheckout): TerminalsByProject {
+  const existing = projectTerminals(state, projectId);
+  const selected = existing.tabs.find((tab) => tab.id === existing.selectedId);
+  if (selected?.key === checkout.key) return state;
+  const match = existing.tabs.find((tab) => tab.key === checkout.key);
+  return match ? selectTab(state, projectId, match.id) : openTab(state, projectId, checkout);
+}
+
+/** Every Project's tabs owned by a Board Thread's worktree (Thread ids are unique across Projects). */
+export function allTabsOfThread(state: TerminalsByProject, threadId: number): TerminalTab[] {
+  return Object.values(state).flatMap((project) => project.tabs.filter((tab) => tab.threadId === threadId));
+}
+
+export function removeThreadTabsEverywhere(state: TerminalsByProject, threadId: number): TerminalsByProject {
+  return Object.keys(state).reduce((next, project) => removeThreadTabs(next, Number(project), threadId), state);
 }
 
 /** A tab outside the selected Thread's checkout is flagged; with no selection nothing is. */

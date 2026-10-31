@@ -520,8 +520,10 @@ impl Dictation {
     /// User-chosen CPU retry of the audio kept after an explicit GPU failure. Never runs implicitly.
     /// The audio is kept if the CPU attempt fails so the user can try again or discard it.
     pub fn retry_on_cpu(&self, home: &Path, settings: &DictationSettings) -> Result<String> {
+        // Same lock order as start/stop: recording, then busy.
+        let recording = self.recording.lock().unwrap();
         let mut busy = self.busy.lock().unwrap();
-        if *busy || self.recording.lock().unwrap().is_some() {
+        if *busy || recording.is_some() {
             return Err(err("Dictation is already active."));
         }
         if !settings.enabled {
@@ -536,6 +538,7 @@ impl Dictation {
             .ok_or_else(|| err("No recording to retry."))?;
         *busy = true;
         drop(busy);
+        drop(recording);
 
         let cancelled = Arc::new(AtomicBool::new(false));
         *self.cancellation.lock().unwrap() = Some(cancelled.clone());

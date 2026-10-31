@@ -476,8 +476,14 @@ fn file_writes_stay_in_their_checkout_and_a_deleted_worktree_never_falls_back_to
     let (project, id) = (f.project.id, thread.id);
 
     // The same relative path is two documents: a write in the worktree leaves main alone.
+    // Line endings depend on the platform's checkout, so the buffer is what Core reads.
+    let opened = f
+        .core
+        .read_file(project, Some(id), "a.txt")
+        .unwrap()
+        .content;
     f.core
-        .write_file(project, Some(id), "a.txt", "committed\n", "worktree edit\n")
+        .write_file(project, Some(id), "a.txt", &opened, "worktree edit\n")
         .unwrap();
     assert_eq!(read(worktree.join("a.txt")), "worktree edit\n");
     assert_eq!(read(f.work.join("a.txt")), "committed\n");
@@ -490,7 +496,7 @@ fn file_writes_stay_in_their_checkout_and_a_deleted_worktree_never_falls_back_to
     );
     assert!(
         f.core
-            .write_file(project, Some(id), "a.txt", "committed\n", "stale write\n")
+            .write_file(project, Some(id), "a.txt", &opened, "stale write\n")
             .is_err()
     );
     assert!(f.core.create_file(project, Some(id), "new.txt").is_err());

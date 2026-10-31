@@ -5,6 +5,8 @@ export { REFRESH_INTERVAL_MS };
 
 interface PullRequestPanelProps {
   projectId: number;
+  /** The selected Thread: a new pull request is opened from its checkout. */
+  threadId: number | null;
   createRequest?: number;
   onCreateHandled?: () => void;
   /** Changes after the user's own Git changes (commit, push, pull, checkout), which refresh the panel. */

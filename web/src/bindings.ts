@@ -116,35 +116,35 @@ export const commands = {
 	/**  Reads a file of a Thread's checkout, capped at 1 MiB. */
 	readFile: (projectId: number, threadId: number | null, path: string) => typedError<FileContent, AppError>(__TAURI_INVOKE("read_file", { projectId, threadId, path })),
 	/**  Branch, ahead/behind and uncommitted-change counts of the main checkout. */
-	gitStatus: (projectId: number) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId })),
-	listBranches: (projectId: number) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId })),
+	gitStatus: (projectId: number, threadId: number | null) => typedError<GitStatus_Serialize, AppError>(__TAURI_INVOKE("git_status", { projectId, threadId })),
+	listBranches: (projectId: number, threadId: number | null) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId, threadId })),
 	/**  The changes of the main checkout in one scope, from Git. */
-	gitDiff: (projectId: number, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, scope })),
+	gitDiff: (projectId: number, threadId: number | null, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, threadId, scope })),
 	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
 	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
-	checkoutBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, name })),
+	checkoutBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, threadId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
-	createBranch: (projectId: number, name: string) => typedError<null, AppError>(__TAURI_INVOKE("create_branch", { projectId, name })),
+	createBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("create_branch", { projectId, threadId, name })),
 	/**  Background fetch; returns whether it ran (it is throttled). */
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
-	pull: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId })),
+	pull: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId, threadId })),
 	/**  Commits exactly the given files; other staged state is untouched. */
-	commit: (projectId: number, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, paths, message })),
+	commit: (projectId: number, threadId: number | null, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, threadId, paths, message })),
 	/**  Pushes the current branch; never forced. */
-	push: (projectId: number, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, allowProtected })),
+	push: (projectId: number, threadId: number | null, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, threadId, allowProtected })),
 	/**
 	 *  Whether `gh` works and the branch's open pull request. Runs `gh` only when
 	 *  asked; the Surface decides when to refresh.
 	 */
-	pullRequestState: (projectId: number) => typedError<PullRequestState_Serialize, AppError>(__TAURI_INVOKE("pull_request_state", { projectId })),
+	pullRequestState: (projectId: number, threadId: number | null) => typedError<PullRequestState_Serialize, AppError>(__TAURI_INVOKE("pull_request_state", { projectId, threadId })),
 	/**  The repository's branches on GitHub, for choosing a pull request's base. */
 	pullRequestBaseBranches: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("pull_request_base_branches", { projectId })),
 	/**  Title, body and base prefilled from the branch's commits. */
-	pullRequestDraft: (projectId: number) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId })),
+	pullRequestDraft: (projectId: number, threadId: number | null) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId, threadId })),
 	/**  Pushes the branch if needed, then opens a pull request for it. */
-	createPullRequest: (projectId: number, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, title, body, base, draft })),
+	createPullRequest: (projectId: number, threadId: number | null, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, threadId, title, body, base, draft })),
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
 	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
 	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),

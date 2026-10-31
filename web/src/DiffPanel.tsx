@@ -72,7 +72,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
           ? await commands.pullRequestDetail(projectId, reviewedPr!).then((r) =>
               r.status === "ok" ? { status: "ok" as const, data: r.data.diff } : r,
             )
-          : await commands.gitDiff(projectId, scope);
+          : await commands.gitDiff(projectId, threadId, scope);
     },
     `${refreshKey}#${focusTick}`,
   );
@@ -82,7 +82,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
   const [message, setMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
-  const push = usePushFlow(projectId, onChanged, onOpenPullRequest);
+  const push = usePushFlow(projectId, threadId, onChanged, onOpenPullRequest);
 
   const files = loaded.state === "ready" ? loaded.diff.files : [];
   const focused = matchDiffFile(files, focus);
@@ -90,7 +90,7 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
   const selected = commitPaths(files, unchecked);
   const ready = selected.length > 0 && message.trim() !== "" && !committing && !push.busy;
 
-  const commit = () => commands.commit(projectId, selected, message);
+  const commit = () => commands.commit(projectId, threadId, selected, message);
   async function runCommit(andPush: boolean) {
     setCommitError(null);
     if (andPush) {

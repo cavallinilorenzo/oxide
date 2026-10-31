@@ -40,7 +40,7 @@ export function DispatchDialog({ projectId, issue, onClose, onDispatched }: Disp
 
   useEffect(() => {
     let active = true;
-    void Promise.all([commands.getSettings(), commands.gitStatus(projectId), commands.listBranches(projectId)]).then(
+    void Promise.all([commands.getSettings(), commands.gitStatus(projectId, null), commands.listBranches(projectId, null)]).then(
       ([state, status, list]) => {
         if (!active) return;
         const current = status.status === "ok" ? status.data.branch : null;

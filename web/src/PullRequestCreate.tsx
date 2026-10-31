@@ -13,10 +13,13 @@ import { MarkdownEditor } from "./MarkdownEditor";
 
 export function PullRequestCreate({
   projectId,
+  threadId,
   onCancel,
   onCreated,
 }: {
   projectId: number;
+  /** The Thread whose checkout the pull request is opened from. */
+  threadId: number | null;
   onCancel: () => void;
   onCreated: (pr: PullRequest) => void;
 }) {
@@ -35,7 +38,7 @@ export function PullRequestCreate({
     let active = true;
     void (async () => {
       try {
-        const git = await commands.gitStatus(projectId);
+        const git = await commands.gitStatus(projectId, threadId);
         if (!active) return;
         if (git.status === "error") throw new Error(git.error.message);
         setHead(git.data.branch ?? "detached HEAD");
@@ -43,7 +46,7 @@ export function PullRequestCreate({
         setBlocked(reason);
         if (reason) return;
         const [defaults, bases] = await Promise.all([
-          commands.pullRequestDraft(projectId),
+          commands.pullRequestDraft(projectId, threadId),
           commands.pullRequestBaseBranches(projectId),
         ]);
         if (!active) return;
@@ -64,7 +67,7 @@ export function PullRequestCreate({
     return () => {
       active = false;
     };
-  }, [projectId, retry]);
+  }, [projectId, threadId, retry]);
   async function submit() {
     if (busy || loading || blocked || !title.trim() || !base || base === head)
       return;
@@ -73,6 +76,7 @@ export function PullRequestCreate({
     try {
       const result = await commands.createPullRequest(
         projectId,
+        threadId,
         title.trim(),
         body,
         base,

@@ -7,8 +7,9 @@ type Outcome = { status: "ok"; data: unknown } | { status: "error"; error: AppEr
 type Pending = { before: () => Promise<Outcome> | null };
 
 /** Runs an optional step (a commit) and then pushes, asking first when the
- *  branch is `main`: push there, or branch off and push the new branch. */
-export function usePushFlow(projectId: number, onDone: () => void, onOpenPullRequest?: () => void) {
+ *  branch is `main`: push there, or branch off and push the new branch.
+ *  `threadId` names the checkout every step acts on; `null` is the Project's main checkout. */
+export function usePushFlow(projectId: number, threadId: number | null, onDone: () => void, onOpenPullRequest?: () => void) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,8 +21,8 @@ export function usePushFlow(projectId: number, onDone: () => void, onOpenPullReq
     setBusy(true);
     setError(null);
     const steps: (() => Promise<Outcome> | null)[] = [];
-    if ("branch" in mode) steps.push(() => commands.createBranch(projectId, mode.branch));
-    steps.push(before, () => commands.push(projectId, "main" in mode && mode.main));
+    if ("branch" in mode) steps.push(() => commands.createBranch(projectId, threadId, mode.branch));
+    steps.push(before, () => commands.push(projectId, threadId, "main" in mode && mode.main));
     let failed = false;
     try {
       for (const step of steps) {
@@ -46,7 +47,7 @@ export function usePushFlow(projectId: number, onDone: () => void, onOpenPullReq
   async function start(before: () => Promise<Outcome> | null) {
     setError(null);
     let result;
-    try { result = await commands.gitStatus(projectId); }
+    try { result = await commands.gitStatus(projectId, threadId); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return; }
     if (result.status === "error") return setError(result.error.message);
     const blocked = pushBlockedReason(result.data);

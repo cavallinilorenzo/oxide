@@ -39,6 +39,8 @@ import { pullRequestFixPrompt } from "./fixPullRequest";
 
 interface PullRequestBrowserProps {
   projectId: number;
+  /** The Thread whose checkout a new pull request is opened from. */
+  threadId: number | null;
   /** Changes after the user's own Git changes, which reload the list. */
   refreshKey: number;
   /** Called after a checkout or merge, so other Git views reload. */
@@ -70,7 +72,7 @@ function Branches({ head, base }: { head: string; base: string }) {
 }
 
 /** Open pull requests of the repository: list, search, and one pull request to review. */
-export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewFiles, onFixPullRequest, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
+export function PullRequestBrowser({ projectId, threadId, refreshKey, onChanged, onReviewFiles, onFixPullRequest, createRequest = 0, onCreateHandled }: PullRequestBrowserProps) {
   const [creating, setCreating] = useState(createRequest > 0);
   const [seenCreateRequest, setSeenCreateRequest] = useState(createRequest);
   if (seenCreateRequest !== createRequest) {
@@ -98,7 +100,7 @@ export function PullRequestBrowser({ projectId, refreshKey, onChanged, onReviewF
     return () => clearTimeout(timer);
   }, [outcome]);
 
-  if (creating) return <PullRequestCreate projectId={projectId} onCancel={() => setCreating(false)} onCreated={(pr) => {
+  if (creating) return <PullRequestCreate projectId={projectId} threadId={threadId} onCancel={() => setCreating(false)} onCreated={(pr) => {
     setCreating(false); setOpened(pr.number); onChanged();
   }} />;
 
@@ -232,7 +234,7 @@ export function PullRequestReview({
     async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus }>> => {
       const [detail, git] = await Promise.all([
         commands.pullRequestDetail(projectId, number),
-        commands.gitStatus(projectId),
+        commands.gitStatus(projectId, null),
       ]);
       if (detail.status === "error") return detail;
       if (git.status === "error") return git;

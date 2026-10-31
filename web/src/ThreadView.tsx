@@ -1,7 +1,7 @@
 import { toggleDictation, useDictationState } from "./dictation";
 import { Skeleton } from "./Skeleton";
 import { LruCache } from "./lru";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -93,6 +93,8 @@ interface ThreadViewProps {
   projectId: number;
   /** The Project's checkout, shown in the header for a Thread that has no worktree of its own. */
   projectPath: string;
+  /** The selected Thread's Git controls, shown under its title. Absent without a Thread. */
+  gitControls?: ReactNode;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   onClearThread?: () => void;
@@ -174,6 +176,7 @@ export function ThreadView({
   threadId,
   projectId,
   projectPath,
+  gitControls,
   draft,
   onDraftChange,
   onClearThread,
@@ -212,7 +215,9 @@ export function ThreadView({
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
-  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  // The live branch of the checkout this Thread works in, tagged with the Thread it answers for.
+  const [liveBranch, setLiveBranch] = useState<{ threadId: number | null; branch: string } | null>(null);
+  const gitBranch = liveBranch && liveBranch.threadId === (threadId ?? null) ? liveBranch.branch : null;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -454,15 +459,15 @@ export function ThreadView({
 
   useEffect(() => {
     let active = true;
-    void commands.gitStatus(projectId).then((res) => {
+    void commands.gitStatus(projectId, threadId ?? null).then((res) => {
       if (active && res.status === "ok") {
-        setGitBranch(res.data.branch ?? "detached HEAD");
+        setLiveBranch({ threadId: threadId ?? null, branch: res.data.branch ?? "detached HEAD" });
       }
     });
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, threadId]);
 
   // Load defaults from settings for a fresh thread
   useEffect(() => {
@@ -1061,6 +1066,7 @@ export function ThreadView({
         model={currentModel}
         effort={currentEffort}
         projectPath={projectPath}
+        gitControls={gitControls}
         reportsUsage={providerCaps?.reportsUsageLimits ?? false}
         editing={isEditingTitle}
         editTitle={editTitle}
@@ -1302,8 +1308,8 @@ export function ThreadView({
           </span>
         )}
         <span className="grow" />
-        <span className="branch-badge mono" title={(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}>
-          <GitBranchIcon size={12} /> <span className="branch-badge-text">{(thread && isBoardThread(thread) ? thread.branch : gitBranch) ?? "main"}</span>
+        <span className="branch-badge mono" title={gitBranch ?? (thread && isBoardThread(thread) ? thread.branch : null) ?? "main"}>
+          <GitBranchIcon size={12} /> <span className="branch-badge-text">{gitBranch ?? (thread && isBoardThread(thread) ? thread.branch : null) ?? "main"}</span>
         </span>
       </div>
       </div>

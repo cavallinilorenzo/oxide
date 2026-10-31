@@ -463,3 +463,37 @@ fn opening_a_project_prunes_worktrees_deleted_by_hand() {
 
     assert!(!git(&f.work, &["worktree", "list"]).contains("stale"));
 }
+
+fn read(path: PathBuf) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
+#[test]
+fn file_writes_stay_in_their_checkout_and_a_deleted_worktree_never_falls_back_to_main() {
+    let f = fixture();
+    let thread = f.core.dispatch_thread(request(&f, "Edit files")).unwrap();
+    let worktree = PathBuf::from(thread.worktree_path.clone().unwrap());
+    let (project, id) = (f.project.id, thread.id);
+
+    // The same relative path is two documents: a write in the worktree leaves main alone.
+    f.core
+        .write_file(project, Some(id), "a.txt", "committed\n", "worktree edit\n")
+        .unwrap();
+    assert_eq!(read(worktree.join("a.txt")), "worktree edit\n");
+    assert_eq!(read(f.work.join("a.txt")), "committed\n");
+
+    // Once the Thread and its worktree are gone its context is stale: writes are refused
+    // and the main checkout keeps its content.
+    assert_eq!(
+        f.core.delete_thread(id, true).unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(
+        f.core
+            .write_file(project, Some(id), "a.txt", "committed\n", "stale write\n")
+            .is_err()
+    );
+    assert!(f.core.create_file(project, Some(id), "new.txt").is_err());
+    assert!(!f.work.join("new.txt").exists());
+    assert_eq!(read(f.work.join("a.txt")), "committed\n");
+}

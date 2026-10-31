@@ -13,12 +13,16 @@ export function EditorFileTree({
   threadId,
   selected,
   onOpen,
+  onKeep,
   revision,
 }: {
   projectId: number;
   threadId: number | null;
   selected: string | null;
+  /** Single click: opens or previews the file. */
   onOpen: (path: string) => void;
+  /** Double click: keeps the file open. */
+  onKeep?: (path: string) => void;
   revision: number;
 }) {
   const [directories, setDirectories] = useState<Record<string, FileEntry[]>>(
@@ -51,6 +55,22 @@ export function EditorFileTree({
       active = false;
     };
   }, [revision, projectId, threadId]);
+  // The selected file's folders open so it is visible in the list.
+  const [revealed, setRevealed] = useState<string | null>(null);
+  if (selected !== revealed) {
+    setRevealed(selected);
+    const parts = (selected ?? "").split("/").slice(0, -1);
+    const folders = parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+    if (folders.some((f) => !expanded.has(f))) setExpanded(new Set([...expanded, ...folders]));
+  }
+  useEffect(() => {
+    const parts = (selected ?? "").split("/").slice(0, -1);
+    parts.forEach((_, i) => {
+      const folder = parts.slice(0, i + 1).join("/");
+      if (!directories[folder]) void load(folder);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
   function toggle(path: string) {
     setExpanded((previous) => {
       const next = new Set(previous);
@@ -77,6 +97,9 @@ export function EditorFileTree({
           onClick={() =>
             entry.isDir ? toggle(entry.path) : onOpen(entry.path)
           }
+          onDoubleClick={() => {
+            if (!entry.isDir) onKeep?.(entry.path);
+          }}
           onKeyDown={(e) => {
             if (
               entry.isDir &&

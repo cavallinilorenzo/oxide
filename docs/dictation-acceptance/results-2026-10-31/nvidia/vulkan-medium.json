@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "requestedBackend": "vulkan",
+  "requestedModel": "medium",
+  "failure": null,
+  "elapsedMs": 6437,
+  "executableSha256": "2fa837be0af3fbb6e911442f8dc23b0856a5a2fa468b15e406f4647a27e80215",
+  "hostSha256": "b564c49708c7643314761eed59d06ab52f12faa685af4efff7e52fca62ab0e3c",
+  "result": {
+    "fixtureVersion": "jfk-16khz-pcm-v1",
+    "model": "medium",
+    "measurement": {
+      "key": {
+        "modelSha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+        "backend": "vulkan",
+        "adapterId": "vulkan:8e75221ccf0d162efaff030f2eec89ef",
+        "driverVersion": "NVIDIA: 617.14 (raw 2588114944)",
+        "runtimeVersion": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); oxide 0.1.0; benchmark-v1; release",
+        "policyVersion": 1,
+        "catalogueVersion": 1,
+        "cpu": {
+          "architecture": "x86_64",
+          "model": "AMD Ryzen 5 3600 6-Core Processor              ",
+          "usableCores": 12,
+          "instructionCompatible": true
+        }
+      },
+      "recordedAtSecs": 1793448576,
+      "audioDurationMs": 11000,
+      "warmInferenceMs": [
+        597,
+        607,
+        620
+      ],
+      "coldLoadMs": 1813
+    },
+    "execution": {
+      "backend": "vulkan",
+      "adapter": "NVIDIA GeForce RTX 2060 SUPER",
+      "offloaded": true,
+      "offloadEvidence": "whisper.cpp 1.8.3 (whisper-rs-sys 0.15.0); whisper_backend_init_gpu: using Vulkan0 backend; native compute kernel timestamps"
+    }
+  },
+  "memory": {
+    "method": "Windows process high-water marks + sampled GPU Process Memory byte gauges; lower bounds, not calibration",
+    "requestedIntervalMs": 100,
+    "maxObservedGapMs": 5695,
+    "processSamples": 3,
+    "gpuSamples": 3,
+    "peakWorkingSetBytes": 333471744,
+    "peakPrivateCommitBytes": 2837442560,
+    "sampledDedicatedBytes": 2156765184,
+    "sampledSharedBytes": 133373952
+  }
+}

@@ -153,6 +153,31 @@ Sampled memory (lower bounds from 100 ms polling, not calibration, so no model i
 dedicated GPU memory 903 MB; Small/CUDA peak working set 444 MB, private commit
 1.95 GB, dedicated 976 MB; Small/CPU timed out at peak working set 832 MB.
 
+Larger models on the same host (16 GB RAM, 8 GB VRAM), Vulkan and CUDA, same procedure:
+
+| Model / backend | Cold load (ms) | Three warm runs (ms) | Median (ms) | Median RTF | Result |
+| --- | ---: | --- | ---: | ---: | --- |
+| Medium / Vulkan | 1813 | 597 / 607 / 620 | 607 | 0.0552 | offload verified; sampled dedicated GPU 2.16 GB, private commit 2.84 GB |
+| Medium / CUDA | 1384 | 673 / 670 / 648 | 670 | 0.0609 | offload verified (31 graphs, 0 failures in every run); sampled dedicated GPU 2.22 GB, private commit 3.19 GB |
+| Large v3 Turbo / Vulkan, CUDA | n/a | n/a | n/a | n/a | **refused before loading** by the unchanged RAM guard: 9,862,819,021 bytes needed including headroom, 9,292,505,088 available. Not a performance result |
+| Large v3 / Vulkan, CUDA | n/a | n/a | n/a | n/a | same category (recorded as `worker-or-resource-failure`); catalogue peak estimate 10 GiB exceeds what 16 GB leaves free. Not a performance result |
+
+The Turbo and Large v3 rows stay **unverified for performance**; the guard was not
+lowered, and a run with more free RAM could still be attempted. Catalogue peak
+estimates keep `measured: false`.
+
+Manual pass on the same host, **development build** (`tauri dev`, Small, Italian,
+using the installed CUDA/Vulkan workers; not an installed package): dictation starts,
+transcribes and inserts text. Accuracy with the PC's microphone was poor on short
+phrases (Tiny: wrong language and words; Small: partly understood). The tester
+could not separate model quality from microphone quality, so this records that
+dictation functions but is **not** an accuracy or CPU-versus-GPU comparison.
+The earlier installed build flashed a console window on every CUDA worker call;
+that was fixed in the source (the CUDA worker now uses `CREATE_NO_WINDOW`, as the
+Vulkan one did) and checked only in the development run, not in a rebuilt package.
+Still open: missing/incompatible driver and OOM flows, offline use, Esc/disable
+during recording, terminal insertion, model switching/corrupt download passes.
+
 Observed gaps: the Vulkan Tiny run's maximum sampling gap was 5.6 s (the first run,
 likely driver shader compilation), so its memory numbers are especially unreliable.
 Vulkan reports carry native timestamps but not the CUDA-style per-run dispatch

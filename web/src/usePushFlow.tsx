@@ -7,8 +7,8 @@ type Outcome = { status: "ok"; data: unknown } | { status: "error"; error: AppEr
 type Pending = { before: () => Promise<Outcome> | null };
 
 /** Runs an optional step (a commit) and then pushes, asking first when the
- *  branch is `main`: push there, or branch off and push the new branch. */
-/** `threadId` names the checkout every step acts on; `null` is the Project's main checkout. */
+ *  branch is `main`: push there, or branch off and push the new branch.
+ *  `threadId` names the checkout every step acts on; `null` is the Project's main checkout. */
 export function usePushFlow(projectId: number, threadId: number | null, onDone: () => void, onOpenPullRequest?: () => void) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);

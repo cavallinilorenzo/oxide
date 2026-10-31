@@ -673,6 +673,7 @@ export function App() {
             }}
             onSelect={(p) => {
               restore.current = null;
+              pendingThread.current = null;
               setShowSettings(false);
               setSelectedId(p.id);
               setThreads(null);

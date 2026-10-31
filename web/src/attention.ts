@@ -9,12 +9,11 @@ export function summarizeAttention(cards: CardsByProject): AttentionSummary {
   const sum: AttentionSummary = { approvals: 0, needsInput: 0, error: 0, interrupted: 0, total: 0 };
   for (const list of Object.values(cards)) {
     for (const { thread, pendingApprovals } of list) {
-      if (thread.status === "needs-input") sum.needsInput++;
+      if (thread.status === "needs-input") { sum.needsInput++; if (pendingApprovals.length > 0) sum.approvals++; }
       else if (thread.status === "error") sum.error++;
       else if (thread.status === "interrupted") sum.interrupted++;
       else continue;
       sum.total++;
-      if (pendingApprovals.length > 0) sum.approvals++;
     }
   }
   return sum;

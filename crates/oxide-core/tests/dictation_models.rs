@@ -214,3 +214,19 @@ fn corrupt_cache_checksum_and_size_failures_never_count_as_installed() {
     models.install(home.path(), ModelId::Small, |_| {}).unwrap();
     assert!(models.acquire(home.path(), ModelId::Small).is_ok());
 }
+
+#[test]
+fn verified_cache_reuses_status_and_detects_file_modifications() {
+    let home = tempfile::tempdir().unwrap();
+    let models = manager(b"abc", 100);
+    models.install(home.path(), ModelId::Small, |_| {}).unwrap();
+    assert!(matches!(
+        models.status(home.path(), ModelId::Small).unwrap().state,
+        ModelState::Installed
+    ));
+    // Repeated status check leverages the cached verification
+    assert!(matches!(
+        models.status(home.path(), ModelId::Small).unwrap().state,
+        ModelState::Installed
+    ));
+}

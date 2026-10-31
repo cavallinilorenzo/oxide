@@ -15,7 +15,7 @@ export function hunkTarget(patch: string, line: number): number {
     }
     if (start < 0) continue;
     // Removed lines don't exist in the working file; added and context lines advance it.
-    if (i < line - 1 && !lines[i].startsWith("-")) next++;
+    if (i < line - 1 && !lines[i].startsWith("-") && !lines[i].startsWith("\\")) next++;
   }
   return start < 0 ? 1 : next;
 }

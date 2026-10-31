@@ -68,7 +68,13 @@ fn settle(core: &Core, thread_id: u32) {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("Thread {thread_id} never settled");
+    let snapshot = core.get_thread_snapshot(thread_id).unwrap();
+    panic!(
+        "Thread {thread_id} never settled: {:?}, {} turns, setup output {:?}",
+        snapshot.thread.status,
+        snapshot.turns.len(),
+        snapshot.thread.setup_output
+    );
 }
 
 fn fixture() -> Fixture {
@@ -79,6 +85,10 @@ fn fixture() -> Fixture {
     let work = root.join("scan").join("work");
     std::fs::create_dir_all(&work).unwrap();
     git(&work, &["init", "-q", "-b", "main"]);
+    // Core's own commits run Git without the helper's environment, so the identity lives in the
+    // repository (worktrees share it); CI runners have no global one.
+    git(&work, &["config", "user.name", "T"]);
+    git(&work, &["config", "user.email", "t@example.com"]);
     std::fs::write(work.join("a.txt"), "one\n").unwrap();
     git(&work, &["add", "a.txt"]);
     git(&work, &["commit", "-qm", "first"]);

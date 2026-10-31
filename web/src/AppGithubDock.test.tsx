@@ -37,11 +37,13 @@ const calls: { command: string; args: Record<string, unknown> }[] = [];
 const called = (command: string) => calls.filter((call) => call.command === command).map((call) => call.args);
 let selection: { projectId: number; threadId: number | null };
 let fail: string | null;
+let statusFail: string | null;
 
 beforeEach(() => {
   clearQueryCache();
   calls.length = 0;
   fail = null;
+  statusFail = null;
   selection = { projectId: 1, threadId: 2 };
   host = document.createElement("div");
   document.body.append(host);
@@ -55,6 +57,7 @@ beforeEach(() => {
       case "list_threads": return selection.threadId === null ? [] : threads;
       case "git_diff": case "git_turn_diff": return { base: "main", files: [] };
       case "git_status": {
+        if (statusFail) throw { message: statusFail };
         const owner = threads.find((t) => t.id === args.threadId);
         return { branch: owner ? owner.branch ?? "main" : "main", upstream: null, ahead: 0, behind: 0, added: 0, removed: 0, changedFiles: 0, protected: false, unpublished: false, pickerDisabledReason: null };
       }
@@ -82,7 +85,7 @@ afterEach(async () => {
 });
 
 /** Lets the IPC round trips and their renders finish. */
-const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
 const click = async (element: Element | null | undefined) => {
   expect(element).toBeTruthy();
   await act(async () => (element as HTMLElement).click());
@@ -178,4 +181,14 @@ it("starts a fix Thread from a failing pull request and selects it", async () =>
   expect(called("create_thread")).toHaveLength(1);
   expect(called("send_prompt")[0]?.threadId).toBe(10);
   expect(host.querySelector('[data-thread="10"]')).not.toBeNull();
+});
+
+it("keeps the remote review readable when the Thread's checkout cannot be read", async () => {
+  await open("Pull request");
+  statusFail = "Worktree was deleted";
+  await click(byText("Fix the thing"));
+  expect(text()).toContain("remote-topic");
+  expect(text()).toContain("Worktree was deleted");
+  expect((byText("Check out") as HTMLButtonElement).disabled).toBe(true);
+  expect(byText("Review files")).toBeTruthy();
 });

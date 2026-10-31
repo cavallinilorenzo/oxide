@@ -224,7 +224,7 @@ export function PullRequestBrowser({ projectId, projectName, threadId, refreshKe
 type Loaded =
   | { state: "loading" }
   | { state: "error"; message: string }
-  | { state: "ready"; detail: PullRequestDetail; git: GitStatus | null };
+  | { state: "ready"; detail: PullRequestDetail; git: GitStatus | null; gitError: string | null };
 
 interface PullRequestReviewProps {
   projectId: number;
@@ -256,14 +256,14 @@ export function PullRequestReview({
   const [reload, setReload] = useState(0);
   const query = useQuery(
     `p${projectId}:prs:detail:${number}:${threadId ?? "none"}`,
-    async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus | null }>> => {
+    async (): Promise<QueryResult<{ detail: PullRequestDetail; git: GitStatus | null; gitError: string | null }>> => {
       const [detail, git] = await Promise.all([
         commands.pullRequestDetail(projectId, number),
         threadId === null ? Promise.resolve(null) : commands.gitStatus(projectId, threadId),
       ]);
       if (detail.status === "error") return detail;
-      if (git?.status === "error") return git;
-      return { status: "ok", data: { detail: detail.data, git: git?.data ?? null } };
+      // An unreadable checkout disables "Check out" only: the remote review needs no checkout.
+      return { status: "ok", data: { detail: detail.data, git: git?.status === "ok" ? git.data : null, gitError: git?.status === "error" ? git.error.message : null } };
     },
     refreshKey + reload,
   );
@@ -336,7 +336,7 @@ export function PullRequestReview({
     );
   }
 
-  const { detail, git } = loaded;
+  const { detail, git, gitError } = loaded;
   const pr = detail.pullRequest;
   const phase = merged ? "merged" : detail.phase;
   const live = phase === "open" || phase === "draft";
@@ -491,7 +491,7 @@ export function PullRequestReview({
             </button>
           )}
         </div>
-        {live && git === null && <p className="pr-note">Select a Thread to check this branch out in its checkout. Reviewing files needs no checkout.</p>}
+        {live && git === null && <p className="pr-note">{gitError ? `The selected Thread's checkout is unavailable: ${gitError}` : "Select a Thread to check this branch out in its checkout."} Reviewing files needs no checkout.</p>}
         {live && git?.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
 
         {detail.body.trim() && <Description body={detail.body} />}

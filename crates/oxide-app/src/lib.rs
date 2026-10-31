@@ -2352,7 +2352,7 @@ async fn edit_pull_request(
     .await
 }
 
-/// Checks the pull request's branch out in the main checkout.
+/// Checks the pull request's branch out in a Thread's checkout (`None`: the main one).
 #[tauri::command]
 #[specta::specta]
 async fn checkout_pull_request(

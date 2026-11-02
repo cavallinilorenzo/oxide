@@ -1,0 +1,2 @@
+# The runtime fixture is signed byte for byte: a CRLF checkout on Windows would invalidate the signature.
+crates/oxide-core/tests/fixtures/runtimes/** -text

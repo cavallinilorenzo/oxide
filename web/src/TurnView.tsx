@@ -5,6 +5,8 @@ import { AttachmentChip } from "./AttachmentChip";
 import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
 import { ActivityView } from "./ActivityView";
+import { ChatMarkdown } from "./ChatMarkdown";
+import { isReviewComments } from "./reviewPrompt";
 import { liveStatus } from "./activity";
 import type { TranscriptTurn } from "./transcript";
 import { formatTime, groupTurnItems, modelEffortLabel, type Block } from "./transcriptView";
@@ -151,7 +153,11 @@ export const TurnView = memo(function TurnView({
         <div className="user-bubble">
           {turn.segments.map((segment, i) =>
             segment.kind === "text" ? (
-              <span key={i}>{segment.text}</span>
+              isReviewComments(segment.text) ? (
+                <div key={i} className="review-comments"><ChatMarkdown text={segment.text} /></div>
+              ) : (
+                <span key={i}>{segment.text}</span>
+              )
             ) : (
               <AttachmentChip key={i}name={segment.name} kind={segment.attachmentKind} sizeBytes={segment.sizeBytes} />
             ),

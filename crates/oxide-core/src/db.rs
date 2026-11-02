@@ -136,6 +136,21 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE turns ADD COLUMN segments TEXT;
 ",
+    // Line comments: drafts on a Diff line, kept per Thread until sent.
+    "
+    CREATE TABLE line_comments (
+        id INTEGER PRIMARY KEY,
+        thread_id INTEGER NOT NULL REFERENCES threads(id),
+        scope TEXT NOT NULL,
+        path TEXT NOT NULL,
+        side TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX line_comments_by_thread ON line_comments(thread_id, id);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

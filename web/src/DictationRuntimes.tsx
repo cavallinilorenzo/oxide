@@ -41,6 +41,7 @@ export function DictationRuntimes({ onChanged }: { onChanged: () => void }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const active = useRef(true);
   const pending = useRef(new Set<BackendId>());
+  const cancelling = useRef(new Set<BackendId>());
 
   const load = useCallback(async () => {
     try {
@@ -77,15 +78,15 @@ export function DictationRuntimes({ onChanged }: { onChanged: () => void }) {
     } catch (cause) {
       const text = message(cause);
       if (active.current) {
-        if (/cancelled/i.test(text)) setNotice(`${name} download cancelled. Nothing was changed.`);
+        if (cancelling.current.delete(backend)) setNotice(`${name} download cancelled. Nothing was changed.`);
         else setErrors(old => ({ ...old, [backend]: text }));
       }
     } finally {
-      pending.current.delete(backend);
+      pending.current.delete(backend); cancelling.current.delete(backend);
       if (active.current) { setBusy(new Set(pending.current)); setProgress(old => ({ ...old, [backend]: undefined })); void load(); }
     }
   };
-  const cancel = (backend: BackendId) => { void commands.dictationRuntimeCancel(backend); };
+  const cancel = (backend: BackendId) => { cancelling.current.add(backend); void commands.dictationRuntimeCancel(backend); };
   const remove = async (backend: BackendId, name: string) => {
     if (pending.current.has(backend)) return;
     pending.current.add(backend);

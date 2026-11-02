@@ -81,16 +81,16 @@ export function ThreadHeader({
             )}
           </div>
         )}
+        {gitControls ? (
+          <div className="thread-git">{gitControls}</div>
+        ) : (
+          thread?.worktreePath && thread.branch && (
+            <span className="thread-folder-branch">
+              <GitBranchIcon size={12} /> {thread.branch}
+            </span>
+          )
+        )}
       </div>
-      {gitControls ? (
-        <div className="thread-git">{gitControls}</div>
-      ) : (
-        thread?.worktreePath && thread.branch && (
-          <span className="thread-folder-branch">
-            <GitBranchIcon size={12} /> {thread.branch}
-          </span>
-        )
-      )}
       <UsageRing provider={provider} reportsUsage={reportsUsage} />
     </div>
   );

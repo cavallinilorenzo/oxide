@@ -668,7 +668,9 @@ export function CodeWorkbench({
                 const doc = records.current.get(next);
                 if (doc) select(doc);
                 requestAnimationFrame(() => {
-                  root.current?.querySelector<HTMLElement>(`.editor-tab[data-path="${CSS.escape(next)}"] [role="tab"]`)?.focus();
+                  const tab = root.current?.querySelector<HTMLElement>(`.editor-tab[data-path="${CSS.escape(next)}"] [role="tab"]`);
+                  tab?.focus();
+                  tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
                 });
               }
             }

@@ -542,7 +542,9 @@ export function App() {
         e.preventDefault();
         selectSurface(next);
         requestAnimationFrame(() => {
-          surfaceTabsRef.current?.querySelector<HTMLElement>(`[role="tab"][aria-label="${next}"]`)?.focus();
+          const tab = surfaceTabsRef.current?.querySelector<HTMLElement>(`[role="tab"][aria-label="${next}"]`);
+          tab?.focus();
+          tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
         });
       }
     }
@@ -621,7 +623,7 @@ export function App() {
         selectSurface(tool);
         requestAnimationFrame(() => focusRegion("dock"));
       } else if (action === "toggleTools") {
-        const willShow = showSettings || !showTools;
+        const willShow = !dockVisible;
         setShowTools(willShow);
         setRegionPriority("tools");
         setShowBoard(false);
@@ -1351,6 +1353,14 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
   const [error, setError] = useState<string | null>(null);
   const invoker = useRef<HTMLElement | null>(null);
 
+  const restoreFocus = () => {
+    if (invoker.current && invoker.current.isConnected) {
+      invoker.current.focus();
+    } else {
+      document.querySelector<HTMLElement>('#workspace-sidebar .thread-item, #workspace-sidebar input')?.focus();
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     openPalette: () => {
       invoker.current = document.activeElement as HTMLElement | null;
@@ -1365,12 +1375,12 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
     dismissTopmost: () => {
       if (pending) {
         setPending(null);
-        invoker.current?.focus();
+        restoreFocus();
         return true;
       }
       if (showPalette) {
         setShowPalette(false);
-        invoker.current?.focus();
+        restoreFocus();
         return true;
       }
       return false;
@@ -1393,14 +1403,14 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
       const result = await performThreadDelete(pending.id, pending.discardChanges, commands.deleteThread);
       if (result.status === "error") setError(result.message);
       else if (result.status === "needs-confirmation") setPending((current) => current ? { ...current, discardChanges: true } : null);
-      else { onThreadDeleted(pending.id); setPending(null); invoker.current?.focus(); }
+      else { onThreadDeleted(pending.id); setPending(null); restoreFocus(); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setDeleting(false); }
   }
 
   const cancelDelete = () => {
     setPending(null);
-    invoker.current?.focus();
+    restoreFocus();
   };
 
   return <>
@@ -1419,7 +1429,7 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
         </div>
       </div>
     </div>}
-    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => { setShowPalette(false); invoker.current?.focus(); }}
+    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => { setShowPalette(false); restoreFocus(); }}
       onStartThread={onStartThread} onOpenProject={onOpenProject} />}
   </>;
 }

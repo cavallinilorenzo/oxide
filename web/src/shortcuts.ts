@@ -26,7 +26,9 @@ export type ShortcutAction =
   | "closeThread"
   | "toggleTools"
   | "toggleBoard"
-  | "openSettings";
+  | "openSettings"
+  | "toggleSidebar"
+  | "maximizeSurface";
 
 /** An accelerator such as `Mod+Shift+M`: `Mod` is ⌘ on macOS and Ctrl elsewhere. */
 export type Shortcuts = Record<ShortcutAction, string>;
@@ -48,6 +50,8 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   toggleTools: "Mod+\\",
   toggleBoard: "Mod+B",
   openSettings: "Mod+,",
+  toggleSidebar: "Mod+Shift+E",
+  maximizeSurface: "Mod+Shift+Enter",
 };
 
 /** The actions in the order Settings lists them, with their labels. */
@@ -65,6 +69,8 @@ export const SHORTCUT_ACTIONS: { action: ShortcutAction; label: string; group: s
   { action: "issues", label: "Issues", group: "Panels" },
   { action: "terminal", label: "Terminal", group: "Panels" },
   { action: "toggleTools", label: "Tools panel", group: "Panels" },
+  { action: "toggleSidebar", label: "Toggle sidebar", group: "Panels" },
+  { action: "maximizeSurface", label: "Maximize / restore Surface", group: "Panels" },
   { action: "toggleBoard", label: "Chat / Board", group: "Panels" },
   { action: "openSettings", label: "Settings", group: "Panels" },
 ];

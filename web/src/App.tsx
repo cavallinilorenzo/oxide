@@ -512,6 +512,12 @@ export function App() {
         setRegionPriority("tools");
         setShowBoard(false);
         setShowSettings(false);
+      } else if (action === "toggleSidebar") {
+        setShowSidebar(!layout.sidebarVisible);
+        setRegionPriority("sidebar");
+        setMaximized(false);
+      } else if (action === "maximizeSurface") {
+        if (dockVisible) setMaximized((v) => !v);
       } else if (action === "toggleBoard") {
         setMaximized(false);
         setShowBoard((v) => !v);
@@ -522,7 +528,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -599,7 +605,7 @@ export function App() {
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); void startNewThread(); }} />}
-        <button className="icon-btn" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={layout.sidebarVisible}
+        <button className="icon-btn" aria-label="Toggle sidebar" title={`Toggle sidebar (${keys("toggleSidebar")})`} aria-pressed={layout.sidebarVisible}
           onClick={() => { setShowSidebar(!layout.sidebarVisible); setRegionPriority("sidebar"); setMaximized(false); }}><RepoIcon size={16} /></button>
         <button className="icon-btn" aria-label="Open a Project" title={`Open a Project (${keys("openProject")})`} onClick={() => overlays.current?.openPalette()}><PlusIcon size={16} /></button>
         <div className="header-project" data-tauri-drag-region>
@@ -821,7 +827,7 @@ export function App() {
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title={maximized ? "Restore Surface" : "Maximize Surface"} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => setMaximized(!maximized)}><ProjectIcon size={14} /></button>
+              <button className="icon-btn sm" title={`${maximized ? "Restore Surface" : "Maximize Surface"} (${keys("maximizeSurface")})`} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => setMaximized(!maximized)}><ProjectIcon size={14} /></button>
               <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
                 <XIcon size={14} />
               </button>

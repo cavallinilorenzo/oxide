@@ -335,6 +335,46 @@ mod settings {
     }
 
     #[test]
+    fn sidebar_and_surface_maximize_shortcuts_have_defaults_and_accept_enter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+        let defaults = core.settings().settings.shortcuts;
+        assert_eq!(defaults.toggle_sidebar, "Mod+Shift+E");
+        assert_eq!(defaults.maximize_surface, "Mod+Shift+Enter");
+
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "shortcuts": { "toggleSidebar": "Mod+Alt+E", "maximizeSurface": "Mod+Enter" } }"#,
+        )
+        .unwrap();
+        let state = next(&rx);
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert_eq!(state.settings.shortcuts.toggle_sidebar, "Mod+Alt+E");
+        assert_eq!(state.settings.shortcuts.maximize_surface, "Mod+Enter");
+    }
+
+    #[test]
+    fn existing_custom_binding_keeps_its_keys_when_a_new_default_collides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "shortcuts": { "terminal": "Mod+Shift+E", "files": "Mod+Shift+Enter" } }"#,
+        )
+        .unwrap();
+        let state = next(&rx);
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert_eq!(state.settings.shortcuts.terminal, "Mod+Shift+E");
+        assert_eq!(state.settings.shortcuts.files, "Mod+Shift+Enter");
+        // The new actions yield instead of reassigning or breaking the user's settings.
+        assert_eq!(state.settings.shortcuts.toggle_sidebar, "");
+        assert_eq!(state.settings.shortcuts.maximize_surface, "");
+    }
+
+    #[test]
     fn bad_and_conflicting_shortcuts_are_reported_per_field() {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::open(tmp.path()).unwrap();

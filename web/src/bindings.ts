@@ -1369,6 +1369,8 @@ export type Shortcuts = {
 	toggleTools: string,
 	toggleBoard: string,
 	openSettings: string,
+	toggleSidebar: string,
+	maximizeSurface: string,
 };
 
 export type SlashCommand = SlashCommand_Serialize | SlashCommand_Deserialize;

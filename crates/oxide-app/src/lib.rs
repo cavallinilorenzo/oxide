@@ -1727,6 +1727,50 @@ async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Dif
         .map(|diff| convert(&diff))
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RevertScope {
+    Uncommitted,
+    Turn,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertHunk {
+    pub index: u32,
+    /// The `@@` line the Diff showed, so a diff that moved on is refused.
+    pub header: String,
+}
+
+/// Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout.
+#[tauri::command]
+#[specta::specta]
+async fn revert_diff(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    scope: RevertScope,
+    path: String,
+    hunk: Option<RevertHunk>,
+    confirm_delete: bool,
+) -> Result<(), AppError> {
+    let scope = match scope {
+        RevertScope::Uncommitted => oxide_core::RevertScope::Uncommitted,
+        RevertScope::Turn => oxide_core::RevertScope::Turn,
+    };
+    let target = oxide_core::RevertTarget {
+        path,
+        hunk: hunk.map(|h| oxide_core::RevertHunk {
+            index: h.index as usize,
+            header: h.header,
+        }),
+    };
+    git_blocking(&core, move |core| {
+        core.revert_in(project_id, thread_id, scope, &target, confirm_delete)
+    })
+    .await
+}
+
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
 #[tauri::command]
 #[specta::specta]
@@ -3092,6 +3136,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_branches,
         git_diff,
         git_turn_diff,
+        revert_diff,
         checkout_branch,
         create_branch,
         fetch_project,

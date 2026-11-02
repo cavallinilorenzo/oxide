@@ -1028,6 +1028,7 @@ export function App() {
                   projectId={selected.id}
                   threadId={currentThreadId}
                   board={diffThread.board}
+                  turnRunning={threads?.some((thread) => thread.status === "working" && (diffThread.board ? thread.id === currentThreadId : !isBoardThread(thread))) ?? false}
                   scope={diffScope}
                   reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}
                   onScopeChange={(scope) => {

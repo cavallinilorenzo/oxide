@@ -17,6 +17,8 @@ interface DiffPanelProps {
   threadId: number | null;
   /** Board Threads work in their own worktree, so nothing else edits it. */
   board: boolean;
+  /** A Turn is running in this checkout, so its files are not ours to revert. */
+  turnRunning?: boolean;
   scope: PanelScope;
   /** The pull request whose files the PR scope shows, once one was opened for review. */
   reviewedPr: number | null;
@@ -45,14 +47,19 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
   untracked: "U",
 };
 
-type Loaded = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; diff: Diff };
+interface RevertRequest {
+  path: string;
+  hunk: { index: number; header: string } | null;
+}
+
+type Loaded ={ state: "loading" } | { state: "error"; message: string } | { state: "ready"; diff: Diff };
 
 /** Git's view of a Project's changes. State belongs to one Project, so a different one, or another scope, remounts it. */
 export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -118,6 +125,28 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
   const setPicked = (path: string) => setPick({ path, focus });
   const added = files.reduce((n, f) => n + f.added, 0);
   const removed = files.reduce((n, f) => n + f.removed, 0);
+
+  // Revert: Uncommitted and Turn only, never under a running Turn.
+  const canRevert = (scope === "uncommitted" || (scope === "turn" && threadId !== null)) && !turnRunning;
+  const [reverting, setReverting] = useState(false);
+  const [revertError, setRevertError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<RevertRequest | null>(null);
+  async function revert(request: RevertRequest, confirmDelete: boolean) {
+    if (scope !== "uncommitted" && scope !== "turn") return;
+    const status = files.find((f) => f.path === request.path)?.status;
+    if (!confirmDelete && (status === "added" || status === "untracked")) {
+      setRevertError(null);
+      setConfirming(request);
+      return;
+    }
+    setConfirming(null);
+    setRevertError(null);
+    setReverting(true);
+    const result = await commands.revertDiff(projectId, threadId, scope, request.path, request.hunk, confirmDelete);
+    setReverting(false);
+    if (result.status === "error") return setRevertError(result.error.message);
+    onChanged();
+  }
 
   const toggleChecked = (path: string, checked: boolean) =>
     setUnchecked((prev) => {
@@ -206,10 +235,47 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
                   <span className="diff-counts">
                     <span className="add">+{file.added}</span> <span className="del">−{file.removed}</span>
                   </span>
+                  {canRevert && (
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-label={`Revert ${file.path}`}
+                      disabled={reverting}
+                      onClick={(e) => { e.stopPropagation(); void revert({ path: file.path, hunk: null }, false); }}
+                    >
+                      Revert
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ul>
+          {canRevert && current && current.hunks.length > 1 && (
+            <ul className="diff-hunks" aria-label={`Hunks of ${current.path}`}>
+              {current.hunks.map((hunk, index) => (
+                <li key={`${index}:${hunk.header}`} className="diff-hunk-row">
+                  <span className="mono">{hunk.header}</span>
+                  <button
+                    type="button"
+                    className="btn"
+                    aria-label={`Revert hunk ${hunk.header} of ${current.path}`}
+                    disabled={reverting}
+                    onClick={() => void revert({ path: current.path, hunk: { index, header: hunk.header } }, false)}
+                  >
+                    Revert hunk
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {confirming && (
+            <div className="surface-note" role="alertdialog" aria-label="Confirm revert">
+              <span>Reverting {confirming.path} deletes the file.</span>
+              <button type="button" className="btn primary" onClick={() => void revert(confirming, true)}>Delete file</button>
+              <button type="button" className="btn" onClick={() => setConfirming(null)}>Cancel</button>
+            </div>
+          )}
+          {revertError && <div className="error" role="alert">{revertError}</div>}
         </div>
       )}
       {canCommit ? (

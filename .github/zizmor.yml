@@ -5,7 +5,7 @@ rules:
       # composite action or reusable workflow, and actionlint understands it.
       - ci.yml:121
       - ci.yml:255
-      - build.yml:82
+      - build.yml:93
       - release.yml:80
   secrets-inherit:
     ignore:

@@ -750,6 +750,10 @@ section.terminal.terminal-hidden { display: none; }
 .diff-files { list-style: none; margin: 0; padding: 4px 0; overflow: auto; border-right: 1px solid var(--line); }
 .diff-file-row { display: flex; align-items: center; gap: 7px; padding: 4px 8px; cursor: pointer; font-size: 12.5px; }
 .diff-file-row:hover { background: var(--bg3); }
+.diff-file-row .btn { margin-left: auto; padding: 1px 8px; font-size: 11.5px; }
+.diff-hunks { list-style: none; margin: 0; padding: 4px 0; border-top: 1px solid var(--border, currentColor); }
+.diff-hunk-row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; font-size: 11.5px; }
+.diff-hunk-row .btn { margin-left: auto; padding: 1px 8px; font-size: 11.5px; }
 .diff-file-row[aria-selected="true"] { background: var(--bg4); }
 .diff-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
 .diff-file-dir { color: var(--faint); }
@@ -1386,6 +1390,10 @@ section.terminal.terminal-hidden { display: none; }
 .project-overview-recent button { width: 100%; border: 0; background: transparent; padding: 12px 8px; text-align: left; }
 .project-overview-recent button > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .project-overview-recent time { font-size: 12px; }
+.review-ledger h2 { font-size: 14px; font-weight: 600; margin: 28px 0 12px; }
+.review-ledger ul { list-style: none; padding: 0; margin: 12px 0; }
+.review-ledger li { display: flex; gap: 12px; padding: 6px 8px; }
+.review-ledger li > span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .project-overview-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
 .project-overview-links button { background: none; border: 0; color: var(--acc2); padding: 0 4px; }
 .provider-tab:disabled { opacity: .4; background: transparent; border-color: transparent; cursor: not-allowed; }

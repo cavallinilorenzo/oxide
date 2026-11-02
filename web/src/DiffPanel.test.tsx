@@ -79,6 +79,72 @@ it("remembers each scope's own diff", async () => {
   expect(host.textContent).toContain("first.rs");
 });
 
+const hunk = (header: string) => ({ header, lines: [{ kind: "added" as const, text: "x" }] });
+const fileOf = (path: string, status: "modified" | "added" | "untracked", hunks = [hunk("@@ -1 +1 @@")]) => ({
+  path, oldPath: null, status, added: 1, removed: 0, binary: false, hunks,
+});
+
+function renderRevert(
+  props: { scope?: "uncommitted" | "branch" | "turn"; turnRunning?: boolean; threadId?: number | null; onChanged?: () => void } = {},
+) {
+  const scope = props.scope ?? "uncommitted";
+  return act(async () =>
+    root.render(
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={props.threadId ?? 7} board={false} turnRunning={props.turnRunning} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={props.onChanged ?? (() => {})} onOpenPullRequest={() => {}} />,
+    ),
+  );
+}
+
+const click = (el: Element | null) => act(async () => { el!.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+
+it("reverts a file from the Diff and refreshes it", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: null, files: [fileOf("src/a.rs", "modified")] } } as never);
+  const revert = vi.spyOn(commands, "revertDiff").mockResolvedValue({ status: "ok", data: null } as never);
+  const onChanged = vi.fn();
+  await renderRevert({ onChanged });
+  await click(host.querySelector('[aria-label="Revert src/a.rs"]'));
+  expect(revert).toHaveBeenCalledWith(1, 7, "uncommitted", "src/a.rs", null, false);
+  expect(onChanged).toHaveBeenCalled();
+});
+
+it("reverts one hunk of the selected file", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: null, files: [fileOf("src/a.rs", "modified", [hunk("@@ -1 +1 @@"), hunk("@@ -40 +40 @@")])] } } as never);
+  const revert = vi.spyOn(commands, "revertDiff").mockResolvedValue({ status: "ok", data: null } as never);
+  await renderRevert();
+  await click(host.querySelector('[aria-label="Revert hunk @@ -40 +40 @@ of src/a.rs"]'));
+  expect(revert).toHaveBeenCalledWith(1, 7, "uncommitted", "src/a.rs", { index: 1, header: "@@ -40 +40 @@" }, false);
+});
+
+it("asks before a revert deletes a file", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: null, files: [fileOf("new.rs", "untracked")] } } as never);
+  const revert = vi.spyOn(commands, "revertDiff").mockResolvedValue({ status: "ok", data: null } as never);
+  await renderRevert();
+  await click(host.querySelector('[aria-label="Revert new.rs"]'));
+  expect(revert).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain("deletes the file");
+  await click(Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "Delete file")!);
+  expect(revert).toHaveBeenCalledWith(1, 7, "uncommitted", "new.rs", null, true);
+});
+
+it("reports why a revert failed and does not refresh", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: null, files: [fileOf("src/a.rs", "modified")] } } as never);
+  vi.spyOn(commands, "revertDiff").mockResolvedValue({ status: "error", error: { message: "Nothing was reverted." } } as never);
+  const onChanged = vi.fn();
+  await renderRevert({ onChanged });
+  await click(host.querySelector('[aria-label="Revert src/a.rs"]'));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Nothing was reverted.");
+  expect(onChanged).not.toHaveBeenCalled();
+});
+
+it("offers no revert in Branch scope or while a Turn is running", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: "main", files: [fileOf("src/a.rs", "modified")] } } as never);
+  await renderRevert({ scope: "branch" });
+  expect(host.textContent).toContain("a.rs");
+  expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
+  await renderRevert({ scope: "uncommitted", turnRunning: true });
+  expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
+});
+
 const picks = [
   { turnIndex: 0, prompt: "Add the parser", checkpointed: true },
   { turnIndex: 1, prompt: "Rename it", checkpointed: true },
@@ -132,4 +198,13 @@ it("falls back to the latest Turn when the Thread changes", async () => {
   await renderTurn(6);
   expect(picker().value).toBe("1");
   expect(commands.gitTurnDiff).toHaveBeenLastCalledWith(6, 1);
+});
+
+it("offers Revert on the latest Turn only, since Core reverts the latest", async () => {
+  mockTurns(picks.slice(0, 2));
+  vi.spyOn(commands, "gitTurnDiff").mockResolvedValue({ status: "ok", data: { base: null, files: [{ path: "a.rs", oldPath: null, status: "modified", added: 1, removed: 0, binary: false, hunks: [] }] } } as never);
+  await renderTurn(5);
+  expect(host.querySelector('[aria-label="Revert a.rs"]')).not.toBeNull();
+  await choose("0");
+  expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
 });

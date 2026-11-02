@@ -59,13 +59,13 @@ pub(crate) fn has_start(cwd: &Path, thread_id: u32, turn_index: u32) -> bool {
     run(cwd, &["rev-parse", "--verify", "--quiet", &name]).is_ok()
 }
 
-/// What the Turn changed: its two Checkpoints diffed. While the Turn runs, its
-/// end is the working tree right now; a Turn with no start Checkpoint has no diff.
-pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<Diff> {
-    let empty = || Diff {
-        base: None,
-        files: Vec::new(),
-    };
+/// The two revisions a Turn is diffed between. While the Turn runs, its end is
+/// the working tree right now; a Turn with no start Checkpoint has none.
+pub(crate) fn turn_revs(
+    cwd: &Path,
+    thread_id: u32,
+    turn_index: u32,
+) -> Result<Option<(String, String)>> {
     let resolve = |phase| {
         run(
             cwd,
@@ -80,16 +80,22 @@ pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<D
         .map(|s| s.trim().to_string())
     };
     let Some(start) = resolve(Phase::Start) else {
-        return Ok(empty());
+        return Ok(None);
     };
     let end = match resolve(Phase::End) {
         Some(end) => end,
         None => snapshot(cwd)?,
     };
-    Ok(Diff {
-        base: None,
-        files: diff_against(cwd, &[&start, &end])?,
-    })
+    Ok(Some((start, end)))
+}
+
+/// What the Turn changed: its two Checkpoints diffed.
+pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<Diff> {
+    let files = match turn_revs(cwd, thread_id, turn_index)? {
+        Some((start, end)) => diff_against(cwd, &[&start, &end])?,
+        None => Vec::new(),
+    };
+    Ok(Diff { base: None, files })
 }
 
 /// A parentless commit of the working tree, written without touching the real index.

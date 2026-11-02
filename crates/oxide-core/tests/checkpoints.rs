@@ -1,6 +1,7 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use oxide_core::{
-    Core, DiffStatus, PermissionMode, SequencedThreadEvent, ThreadEvent, ThreadStatus,
+    Core, DiffStatus, PermissionMode, RevertScope, RevertTarget, SequencedThreadEvent, ThreadEvent,
+    ThreadStatus,
 };
 use oxide_provider::{FakeProvider, ProviderEvent, TurnStatus};
 use std::collections::HashMap;
@@ -249,6 +250,108 @@ fn a_turn_without_checkpoints_has_an_empty_diff() {
     let f = fixture();
     let thread_id = new_thread(&f);
     assert!(f.core.turn_diff(thread_id, 7).unwrap().files.is_empty());
+}
+
+fn turn_target(path: &str) -> RevertTarget {
+    RevertTarget {
+        path: path.into(),
+        hunk: None,
+    }
+}
+
+fn read(f: &Fixture, name: &str) -> String {
+    // Git on Windows may write CRLF.
+    std::fs::read_to_string(f.work.join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
+}
+
+#[test]
+fn reverting_a_file_of_the_turn_leaves_the_rest_of_the_turn_and_earlier_work_alone() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    std::fs::write(f.work.join("b.txt"), "keep\nbefore\n").unwrap();
+    let work = f.work.clone();
+    run_turn(&f, thread_id, move || {
+        std::fs::write(work.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(work.join("new.txt"), "fresh\n").unwrap();
+    });
+
+    let revert = |path: &str, confirm| {
+        f.core.revert_in(
+            f.project_id,
+            Some(thread_id),
+            RevertScope::Turn,
+            &turn_target(path),
+            confirm,
+        )
+    };
+    revert("a.txt", false).unwrap();
+    assert_eq!(read(&f, "a.txt"), "one\n");
+    assert_eq!(read(&f, "new.txt"), "fresh\n");
+    assert_eq!(read(&f, "b.txt"), "keep\nbefore\n");
+
+    // A file the Turn created is deleted, after a confirmation.
+    revert("new.txt", false).unwrap_err();
+    assert!(f.work.join("new.txt").exists());
+    revert("new.txt", true).unwrap();
+    assert!(!f.work.join("new.txt").exists());
+}
+
+#[test]
+fn a_turn_revert_that_conflicts_with_later_edits_changes_nothing_and_says_why() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(&f, thread_id, move || {
+        std::fs::write(work.join("a.txt"), "one\ntwo\n").unwrap();
+    });
+    // The user rewrote the Turn's change after it ended.
+    std::fs::write(f.work.join("a.txt"), "completely different\n").unwrap();
+
+    let err = f
+        .core
+        .revert_in(
+            f.project_id,
+            Some(thread_id),
+            RevertScope::Turn,
+            &turn_target("a.txt"),
+            false,
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("a.txt"), "{err}");
+    assert!(err.to_string().contains("Nothing was reverted"), "{err}");
+    assert_eq!(read(&f, "a.txt"), "completely different\n");
+}
+
+#[test]
+fn nothing_is_reverted_while_a_turn_is_running_in_the_checkout() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let (_, rx) = f.core.subscribe_thread(thread_id).unwrap();
+    f.core.send_prompt(thread_id, "go").unwrap();
+    f.core.tick_thread(thread_id);
+    wait_for(&rx, is_started);
+    std::fs::write(f.work.join("a.txt"), "one\nmid-turn\n").unwrap();
+
+    let err = f
+        .core
+        .revert_in(
+            f.project_id,
+            None,
+            RevertScope::Uncommitted,
+            &turn_target("a.txt"),
+            false,
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("working"), "{err}");
+    assert_eq!(read(&f, "a.txt"), "one\nmid-turn\n");
+
+    f.gates.lock().unwrap()[&thread_id]
+        .send(Box::new(|| {}))
+        .unwrap();
+    f.core.tick_thread(thread_id);
+    wait_for(&rx, is_completed);
 }
 
 #[test]

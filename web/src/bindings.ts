@@ -123,6 +123,8 @@ export const commands = {
 	gitDiff: (projectId: number, threadId: number | null, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, threadId, scope })),
 	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
 	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
+	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
+	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, threadId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -1292,6 +1294,14 @@ export type ResourceSnapshot_Serialize = {
 	baselineBytes: number | null,
 	freeDiskBytes: number | null,
 };
+
+export type RevertHunk = {
+	index: number,
+	/**  The `@@` line the Diff showed, so a diff that moved on is refused. */
+	header: string,
+};
+
+export type RevertScope = "uncommitted" | "turn";
 
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
 

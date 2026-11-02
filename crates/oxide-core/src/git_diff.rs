@@ -1,8 +1,8 @@
 //! The Diff Surface's data: Git's own diff of a Project's main checkout,
 //! parsed into files and hunks.
 
-use crate::Result;
 use crate::git::{MAX_COUNTED_BYTES, ref_exists, run};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
@@ -352,4 +352,133 @@ fn read_text(path: &Path) -> Option<String> {
         return None;
     }
     String::from_utf8(bytes).ok()
+}
+
+/// Which diff a revert acts on. Branch and PR scopes are history, not edits to undo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevertScope {
+    /// Staged, unstaged and untracked changes against HEAD.
+    Uncommitted,
+    /// What a Thread's latest Turn changed between its two Checkpoints.
+    Turn,
+}
+
+/// A hunk as the Diff showed it: its position and `@@` line, so a diff that has
+/// changed since is refused instead of reverting a different hunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevertHunk {
+    pub index: usize,
+    pub header: String,
+}
+
+/// A file, or one hunk of it, to take out of a diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevertTarget {
+    pub path: String,
+    pub hunk: Option<RevertHunk>,
+}
+
+/// Undoes `target` in the working tree by applying its patch in reverse. The
+/// patch is checked first, so one that does not apply cleanly changes nothing.
+/// `revs` are the revisions the diff was taken between (one: against the working tree).
+pub(crate) fn revert(
+    cwd: &Path,
+    revs: &[&str],
+    include_untracked: bool,
+    target: &RevertTarget,
+    confirm_delete: bool,
+) -> Result<()> {
+    let path = target.path.as_str();
+    let mut files = diff_against(cwd, revs)?;
+    if include_untracked {
+        files.extend(untracked_files(cwd)?);
+    }
+    let Some(file) = files.iter().find(|f| f.path == path) else {
+        return Err(Error::Git(format!(
+            "{path} has no changes to revert any more."
+        )));
+    };
+    if matches!(file.status, DiffStatus::Added | DiffStatus::Untracked) && !confirm_delete {
+        return Err(Error::Git(format!(
+            "Reverting {path} deletes the file. Confirm to continue."
+        )));
+    }
+    if let Some(hunk) = &target.hunk
+        && file.hunks.get(hunk.index).map(|h| h.header.as_str()) != Some(hunk.header.as_str())
+    {
+        return Err(Error::Git(format!(
+            "The changes in {path} moved on since they were shown. Nothing was reverted."
+        )));
+    }
+    if file.status == DiffStatus::Untracked {
+        // `path` came from Git's own listing, so it stays inside the checkout.
+        return std::fs::remove_file(cwd.join(path))
+            .map_err(|e| Error::Git(format!("Could not delete {path}: {e}")));
+    }
+
+    let mut args = vec![
+        "--no-optional-locks",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--binary",
+        "-M",
+    ];
+    args.extend(revs);
+    args.extend(["--", path]);
+    if let Some(old) = file.old_path.as_deref() {
+        args.push(old);
+    }
+    let mut patch = run(cwd, &args)?;
+    if let Some(hunk) = &target.hunk {
+        patch = single_hunk(&patch, hunk.index)
+            .ok_or_else(|| Error::Git(format!("Could not find that hunk of {path}.")))?;
+    }
+
+    let git_dir = std::path::PathBuf::from(run(cwd, &["rev-parse", "--absolute-git-dir"])?.trim());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let patch_file = git_dir.join(format!("oxide-revert-{}-{nanos}.patch", std::process::id()));
+    std::fs::write(&patch_file, patch).map_err(|e| Error::Git(format!("Could not revert: {e}")))?;
+    let patch_arg = patch_file.to_string_lossy().into_owned();
+    let applied = run(
+        cwd,
+        &["apply", "-R", "--check", "--whitespace=nowarn", &patch_arg],
+    )
+    .and_then(|_| run(cwd, &["apply", "-R", "--whitespace=nowarn", &patch_arg]));
+    let _ = std::fs::remove_file(&patch_file);
+    applied.map_err(|e| {
+        Error::Git(format!(
+            "Could not revert {path}: the file no longer matches this change. Nothing was reverted. ({e})"
+        ))
+    })?;
+
+    // A file the change added is gone from the working tree; drop it from the
+    // index too, so it does not linger as a staged addition.
+    if !cwd.join(path).exists() && run(cwd, &["cat-file", "-e", &format!("HEAD:{path}")]).is_err() {
+        run(
+            cwd,
+            &["rm", "-q", "--cached", "--ignore-unmatch", "--", path],
+        )?;
+    }
+    Ok(())
+}
+
+/// The file header of a one-file patch with only its `index`th hunk.
+fn single_hunk(patch: &str, index: usize) -> Option<String> {
+    let mut header = String::new();
+    let mut hunk = String::new();
+    let mut seen = 0usize;
+    for line in patch.split_inclusive('\n') {
+        if line.starts_with("@@") {
+            seen += 1;
+        }
+        match seen {
+            0 => header.push_str(line),
+            n if n == index + 1 => hunk.push_str(line),
+            _ => {}
+        }
+    }
+    (!hunk.is_empty()).then(|| header + &hunk)
 }

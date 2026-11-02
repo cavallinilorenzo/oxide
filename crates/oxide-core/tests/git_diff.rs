@@ -1,4 +1,7 @@
-use oxide_core::{Core, DiffHunk, DiffKind, DiffScope, DiffStatus, ProjectSummary};
+use oxide_core::{
+    Core, DiffHunk, DiffKind, DiffScope, DiffStatus, ProjectSummary, RevertHunk, RevertScope,
+    RevertTarget,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
@@ -174,4 +177,119 @@ fn branch_prefers_the_remote_default_branch_and_is_empty_on_the_base_itself() {
     let diff = f.core.diff(f.project.id, DiffScope::Branch).unwrap();
     assert_eq!(diff.base.as_deref(), Some("origin/trunk"));
     assert_eq!(diff.files.len(), 1);
+}
+
+fn numbered(n: std::ops::RangeInclusive<u32>) -> String {
+    n.map(|i| format!("line{i}\n")).collect()
+}
+
+fn read(f: &Fixture, name: &str) -> String {
+    std::fs::read_to_string(f.work.join(name)).unwrap()
+}
+
+fn file_target(path: &str) -> RevertTarget {
+    RevertTarget {
+        path: path.into(),
+        hunk: None,
+    }
+}
+
+#[test]
+fn reverting_a_hunk_leaves_the_other_hunks_of_the_file_untouched() {
+    let f = fixture();
+    commit_file(&f.work, "long.txt", &numbered(1..=30));
+    let edited = numbered(1..=30)
+        .replace("line2\n", "TWO\n")
+        .replace("line28\n", "TWENTY-EIGHT\n");
+    std::fs::write(f.work.join("long.txt"), edited).unwrap();
+
+    let diff = f.core.diff(f.project.id, DiffScope::Uncommitted).unwrap();
+    let hunks = &diff.files[0].hunks;
+    assert_eq!(hunks.len(), 2);
+    let target = RevertTarget {
+        path: "long.txt".into(),
+        hunk: Some(RevertHunk {
+            index: 1,
+            header: hunks[1].header.clone(),
+        }),
+    };
+    f.core
+        .revert_in(f.project.id, None, RevertScope::Uncommitted, &target, false)
+        .unwrap();
+
+    let expected = numbered(1..=30).replace("line2\n", "TWO\n");
+    assert_eq!(read(&f, "long.txt"), expected);
+}
+
+fn revert(f: &Fixture, path: &str, confirm: bool) -> oxide_core::Result<()> {
+    f.core.revert_in(
+        f.project.id,
+        None,
+        RevertScope::Uncommitted,
+        &file_target(path),
+        confirm,
+    )
+}
+
+#[test]
+fn reverting_a_file_restores_it_and_leaves_other_files_alone() {
+    let f = fixture();
+    std::fs::write(f.work.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+    git(&f.work, &["add", "a.txt"]);
+    std::fs::write(f.work.join("a.txt"), "ONE\nTWO\nthree\n").unwrap();
+    std::fs::write(f.work.join("b.txt"), "keep\nmore\n").unwrap();
+
+    revert(&f, "a.txt", false).unwrap();
+
+    assert_eq!(read(&f, "a.txt"), "one\ntwo\nthree\n");
+    assert_eq!(read(&f, "b.txt"), "keep\nmore\n");
+    let diff = f.core.diff(f.project.id, DiffScope::Uncommitted).unwrap();
+    let paths: Vec<_> = diff.files.iter().map(|d| d.path.as_str()).collect();
+    assert_eq!(paths, ["b.txt"]);
+}
+
+#[test]
+fn reverting_a_stale_hunk_is_refused_instead_of_reverting_another_one() {
+    let f = fixture();
+    commit_file(&f.work, "long.txt", &numbered(1..=30));
+    let edited = numbered(1..=30).replace("line2\n", "TWO\n");
+    std::fs::write(f.work.join("long.txt"), &edited).unwrap();
+    let target = RevertTarget {
+        path: "long.txt".into(),
+        hunk: Some(RevertHunk {
+            index: 0,
+            header: "@@ -9,9 +9,9 @@".into(),
+        }),
+    };
+    f.core
+        .revert_in(f.project.id, None, RevertScope::Uncommitted, &target, false)
+        .unwrap_err();
+    assert_eq!(read(&f, "long.txt"), edited);
+}
+
+#[test]
+fn deleting_an_untracked_or_added_file_needs_confirmation() {
+    let f = fixture();
+    std::fs::write(f.work.join("new.txt"), "x\n").unwrap();
+    std::fs::write(f.work.join("staged.txt"), "y\n").unwrap();
+    git(&f.work, &["add", "staged.txt"]);
+
+    for path in ["new.txt", "staged.txt"] {
+        let err = revert(&f, path, false).unwrap_err();
+        assert!(err.to_string().contains("deletes"), "{err}");
+        assert!(f.work.join(path).exists());
+
+        revert(&f, path, true).unwrap();
+        assert!(!f.work.join(path).exists());
+    }
+    let diff = f.core.diff(f.project.id, DiffScope::Uncommitted).unwrap();
+    assert!(diff.files.is_empty());
+}
+
+#[test]
+fn reverting_a_deleted_file_brings_it_back() {
+    let f = fixture();
+    std::fs::remove_file(f.work.join("b.txt")).unwrap();
+    revert(&f, "b.txt", false).unwrap();
+    assert_eq!(read(&f, "b.txt"), "keep\n");
 }

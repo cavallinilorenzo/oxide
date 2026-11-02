@@ -520,8 +520,27 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
         return;
       }
       const range = selection.getRangeAt(0);
-      const rect = range.startContainer.nodeType === Node.TEXT_NODE ? range.getClientRects()[0] : undefined;
-      if (!rect || rect.height === 0) return native();
+      // A collapsed range's own rectangle is unreliable (it can land inside the previous glyph),
+      // so measure the glyph next to the caret and take its trailing (or, at the start, leading) edge.
+      let rect: { top: number; bottom: number; height: number; x: number } | undefined;
+      const node = range.startContainer;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const length = node.textContent?.length ?? 0;
+        const at = range.startOffset;
+        const glyph = document.createRange();
+        if (at > 0) {
+          glyph.setStart(node, at - 1);
+          glyph.setEnd(node, at);
+        } else if (length > 0) {
+          glyph.setStart(node, 0);
+          glyph.setEnd(node, 1);
+        }
+        const box = Array.from(glyph.getClientRects()).pop();
+        if (box && box.width > 0 && box.height > 0) {
+          rect = { top: box.top, bottom: box.bottom, height: box.height, x: at > 0 ? box.right : box.left };
+        }
+      }
+      if (!rect) return native();
       const host = box.getBoundingClientRect();
       const area = el.getBoundingClientRect();
       if (rect.top < area.top || rect.bottom > area.bottom) return native();
@@ -529,8 +548,8 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
       const fontSize = parseFloat(getComputedStyle(el).fontSize) || 14;
       const height = Math.round(fontSize * 0.8);
       mark.style.height = `${height}px`;
-      mark.style.transform = `translate(${rect.right - host.left + 1}px, ${rect.top - host.top + (rect.height - height) / 2 + fontSize * 0.06}px)`;
-      const key = `${rect.right}:${rect.top}`;
+      mark.style.transform = `translate(${rect.x - host.left + 1}px, ${rect.top - host.top + (rect.height - height) / 2 + fontSize * 0.06}px)`;
+      const key = `${rect.x}:${rect.top}`;
       if (key !== lastKey) {
         // A caret that has just moved is solid, then blinks again.
         lastKey = key;

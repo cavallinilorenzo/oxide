@@ -1657,3 +1657,7 @@ section.terminal.terminal-hidden { display: none; }
 .comment-form-code { margin: 0; padding: 4px 8px; background: var(--bg3); border-radius: 4px; white-space: pre-wrap; color: var(--dim); }
 .user-bubble .review-comments { font-size: 13px; }
 .user-bubble .review-comments pre { white-space: pre-wrap; }
+
+.dictation-runtimes { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.dictation-runtimes:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 4px; }
+.link-action { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }

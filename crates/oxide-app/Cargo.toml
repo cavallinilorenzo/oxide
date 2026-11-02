@@ -39,3 +39,6 @@ tauri-build = { version = "2.7.4", features = [] }
 [features]
 dictation-vulkan = ["oxide-core/dictation-vulkan"]
 dictation-cuda = ["oxide-core/dictation-cuda"]
+
+[dev-dependencies]
+tempfile = "3.27.0"

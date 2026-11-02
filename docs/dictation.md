@@ -76,8 +76,25 @@ Vulkan/CUDA workers are separate packages installed into `~/.oxide/runtimes/<bac
   restarting the app. Windows only for now; Linux GPU is outside this slice.
 - Runtimes live outside the app folder and survive uninstalling the app; removing one deletes
   its folder. macOS (Metal is in the binary) is not part of this scheme.
-- Not yet in place: the app UI, the CI that builds/signs packages and the published index
-  (see issue #311); the real signing key and index URL are supplied by that work.
+- Settings → Dictation → **GPU runtimes** (`web/src/DictationRuntimes.tsx`) lists Vulkan and CUDA
+  with installed version, published version, size and driver requirements. Actions: install,
+  update (offered when the index has a newer version, or the installed one speaks another worker
+  protocol), remove, and cancel while downloading, with byte progress. An installed runtime
+  whose protocol is not `PROTOCOL_VERSION` is shown as an error and is never used. If the index
+  cannot be read (offline, bad signature) installed runtimes are still listed and the reason is
+  shown. Hash, signature and protocol failures are shown on the runtime row; CPU stays usable.
+  After an install the dictation status and probes refresh, and `gpu_compiled()` counts an
+  installed runtime, so no restart is needed. A build that only has CPU shows a prompt that
+  links to this section.
+- Tauri commands (`crates/oxide-app/src/dictation_runtimes.rs`): `dictation_runtimes`,
+  `dictation_runtime_install` (also update), `dictation_runtime_cancel`,
+  `dictation_runtime_remove`; progress is the `dictation-runtime-progress` event
+  (`{backend, received, total}`).
+- The index URL and minisign public key are compiled in from the environment variables
+  `OXIDE_RUNTIME_INDEX_URL` and `OXIDE_RUNTIME_PUBLIC_KEY`. Without them downloads report
+  "not configured in this build" (CPU is unaffected). The CI that builds/signs packages and
+  publishes the index, and sets these two variables for release builds, is a separate
+  sub-issue of #311.
 
 ## Recoverable runtime architecture and extension points
 

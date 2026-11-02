@@ -3,7 +3,12 @@
 
 mod dictation_advice;
 mod dictation_benchmark;
+mod dictation_runtimes;
 use dictation_benchmark::{dictation_cancel_performance, dictation_check_performance};
+use dictation_runtimes::{
+    dictation_runtime_cancel, dictation_runtime_install, dictation_runtime_remove,
+    dictation_runtimes,
+};
 mod system;
 mod updates;
 use updates::{app_update_status, check_app_update, install_app_update};
@@ -3157,6 +3162,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         dictation_stop,
         dictation_retry_on_cpu,
         dictation_cancel,
+        dictation_runtimes,
+        dictation_runtime_install,
+        dictation_runtime_cancel,
+        dictation_runtime_remove,
         list_projects,
         rescan_projects,
         add_project,
@@ -3294,6 +3303,7 @@ pub fn run() {
         .manage(Arc::new(oxide_core::dictation::Dictation::default()))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(updates::Updates::default()))
+        .manage(Arc::new(dictation_runtimes::RuntimeOps::default()))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler({

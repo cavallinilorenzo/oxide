@@ -72,7 +72,8 @@ Vulkan/CUDA workers are separate packages installed into `~/.oxide/runtimes/<bac
   A new version replaces older ones only after it is in place.
 - Worker lookup order: `OXIDE_VULKAN_WORKER` / `OXIDE_CUDA_WORKER`, the executable's folder,
   then the highest compatible installed runtime. `PATH` is never searched. Lookup runs at each
-  use, so a freshly installed runtime works without restarting the app.
+  use (including the platform-default runtime), so a freshly installed runtime works without
+  restarting the app. Windows only for now; Linux GPU is outside this slice.
 - Runtimes live outside the app folder and survive uninstalling the app; removing one deletes
   its folder. macOS (Metal is in the binary) is not part of this scheme.
 - Not yet in place: the app UI, the CI that builds/signs packages and the published index

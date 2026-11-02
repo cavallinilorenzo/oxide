@@ -286,3 +286,22 @@ fn reinstall_replaces_existing_version() {
     install(&m, dir.path()).unwrap();
     assert_eq!(runtimes::list(dir.path()).len(), 1);
 }
+
+#[test]
+fn worker_path_picks_up_a_runtime_installed_after_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    unsafe { std::env::remove_var("OXIDE_VULKAN_WORKER") };
+    runtimes::set_home(dir.path());
+    let before = oxide_core::dictation::vulkan::worker_path();
+    assert!(!before.starts_with(dir.path()));
+    let (m, _) = setup(
+        package("vulkan", "1.0.0", PROTOCOL_VERSION, false, None),
+        PROTOCOL_VERSION,
+        None,
+    );
+    let installed = install(&m, &runtimes::runtimes_dir(dir.path())).unwrap();
+    assert_eq!(
+        oxide_core::dictation::vulkan::worker_path(),
+        installed.worker
+    );
+}

@@ -216,6 +216,9 @@ pub struct Dictation {
     retry: Mutex<Option<RetryAudio>>,
     runtime: Arc<dyn WhisperBackendRuntime>,
     cpu_runtime: Arc<dyn WhisperBackendRuntime>,
+    /// True when `runtime` is the platform default: re-resolved at use so a runtime installed
+    /// from Settings works without restarting the app.
+    dynamic_default: bool,
     memory_checker: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
     resource_provider: Option<Arc<dyn Fn() -> resources::ResourceSnapshot + Send + Sync>>,
 }
@@ -268,6 +271,7 @@ impl Default for Dictation {
             retry: Mutex::new(None),
             runtime: default_runtime(),
             cpu_runtime: Arc::new(CpuRuntime),
+            dynamic_default: true,
             memory_checker: None,
             resource_provider: None,
         }
@@ -292,6 +296,7 @@ impl Dictation {
             retry: Mutex::new(None),
             runtime,
             cpu_runtime: Arc::new(CpuRuntime),
+            dynamic_default: false,
             memory_checker: None,
             resource_provider: None,
         }
@@ -313,6 +318,7 @@ impl Dictation {
             retry: Mutex::new(None),
             runtime,
             cpu_runtime: Arc::new(CpuRuntime),
+            dynamic_default: false,
             memory_checker: Some(memory_checker),
             resource_provider: None,
         }
@@ -421,7 +427,7 @@ impl Dictation {
         let lease = self.models.acquire(home, settings.model)?;
         if settings.device == Device::Gpu && !gpu_compiled() {
             return Err(err(
-                "No GPU runtime is installed. Install one in Settings or choose CPU.",
+                "This build has CPU support only. Choose CPU in Settings.",
             ));
         }
         let mut backend = settings.backend;
@@ -697,6 +703,7 @@ impl Dictation {
                 snapshot.adapter_id.clone(),
             )),
             Some(BackendId::Metal) => Arc::new(MetalRuntime),
+            None if self.dynamic_default => default_runtime(),
             None => self.runtime.clone(),
         };
         let transcribe_primary = || {

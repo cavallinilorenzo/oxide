@@ -265,7 +265,9 @@ impl CudaRuntime {
             )));
         }
         let response = response.map_err(|e| BackendError::InitializationFailed(e.to_string()))?;
-        if response.protocol_version != 1 || response.engine_version != ENGINE_VERSION {
+        if response.protocol_version != super::runtimes::PROTOCOL_VERSION
+            || response.engine_version != ENGINE_VERSION
+        {
             return Err(BackendError::InitializationFailed(
                 "Incompatible CUDA worker protocol or native version".into(),
             ));

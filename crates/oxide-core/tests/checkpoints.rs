@@ -260,7 +260,10 @@ fn turn_target(path: &str) -> RevertTarget {
 }
 
 fn read(f: &Fixture, name: &str) -> String {
-    std::fs::read_to_string(f.work.join(name)).unwrap()
+    // Git on Windows may write CRLF.
+    std::fs::read_to_string(f.work.join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 #[test]

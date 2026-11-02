@@ -184,7 +184,10 @@ fn numbered(n: std::ops::RangeInclusive<u32>) -> String {
 }
 
 fn read(f: &Fixture, name: &str) -> String {
-    std::fs::read_to_string(f.work.join(name)).unwrap()
+    // Git on Windows may write CRLF.
+    std::fs::read_to_string(f.work.join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 fn file_target(path: &str) -> RevertTarget {
@@ -286,6 +289,8 @@ fn deleting_an_untracked_or_added_file_needs_confirmation() {
     assert!(diff.files.is_empty());
 }
 
+// `*` is not a valid character in a Windows file name.
+#[cfg(unix)]
 #[test]
 fn a_file_named_like_a_glob_reverts_only_itself() {
     let f = fixture();

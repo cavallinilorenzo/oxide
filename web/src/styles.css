@@ -209,6 +209,8 @@ html.macos .header,
 .header .project-label strong { color: var(--fg-bright); }
 .header-project, .header-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .header-actions { justify-content: flex-end; }
+.header-folder { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: 6px; font: 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
+.header-folder > span { overflow: hidden; text-overflow: ellipsis; }
 .header-actions > .icon-btn, .header-actions > .seg { flex: none; }
 .window.windows .header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); padding-right: 0; }
 .window.windows .header-project { justify-content: center; }
@@ -385,7 +387,7 @@ html.macos .header,
 .thread-avatar { position: relative; flex: none; display: flex; align-items: center; justify-content: center; min-width: 44px; color: var(--fg-bright); }
 .thread-avatar .status-dot { position: absolute; right: -4px; bottom: -3px; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--bg); }
 .provider-avatar { display: block; flex: none; }
-.thread-header-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.thread-header-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 1 auto; }
 .thread-title-display { height: 22px; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .thread-title { font-size: 16px; font-weight: 700; line-height: 22px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; color: var(--fg-bright); }
 .thread-title-input {
@@ -396,27 +398,15 @@ html.macos .header,
 .thread-title-input:focus-visible { outline: none; }
 .rename-thread-btn { opacity: 0; }
 .thread-header-bar:is(:hover, :focus-within) .rename-thread-btn { opacity: 1; }
-.thread-meta-line { line-height: 18px; font-size: 12.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-folder-line { line-height: 18px; height: 18px; display: flex; align-items: center; gap: 6px; min-width: 0; font: 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
-.thread-folder-path { overflow: hidden; text-overflow: ellipsis; }
 .thread-folder-branch { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.thread-header-actions { display: flex; align-items: center; gap: 0; flex: 0 1 auto; margin-left: auto; max-width: 100%; }
-/* Narrow centre: the whole actions block drops under the title (the bar wraps) and the Git controls stay on one line, the branch name shrinking first. */
-.thread-git { min-width: 0; flex: 0 1 auto; margin-right: 32px; }
-.thread-git + .usage-rings { gap: 14px; padding-left: 24px; border-left: 1px solid var(--line); }
-.thread-git .git-header { flex-wrap: nowrap; margin-left: 0; gap: 6px; justify-content: flex-end; }
+/* Title first, then the branch and Git action beside it; the usage rings sit at the far right. The bar wraps only when the centre is very narrow. */
+.thread-git { min-width: 0; flex: 0 1 auto; }
+.thread-header-bar > .usage-rings { margin-left: auto; gap: 14px; padding-left: 24px; border-left: 1px solid var(--line); }
+.thread-git .git-header { flex-wrap: nowrap; margin-left: 0; gap: 6px; }
 .thread-git .git-header > .branch-picker { flex: 0 1 auto; max-width: 100%; }
 .thread-git .branch-button { width: auto; max-width: 100%; }
 .thread-git .branch-button .branch-name { max-width: min(220px, 40vw); }
 .thread-git .git-error { min-width: 0; max-width: 100%; }
-/* Narrow centre (tool panel open): avatar, title and usage stay on the first row, branch and Git action sit centred on a second row. */
-@container (max-width: 1320px) {
-  .thread-header-actions { display: contents; }
-  .thread-header-text { flex: 1 1 0; }
-  .thread-git + .usage-rings { order: 2; padding-left: 0; border-left: 0; }
-  .thread-git { order: 3; flex: 0 0 100%; margin: 0; display: flex; justify-content: center; }
-  .thread-git .git-header { justify-content: center; }
-}
 .usage-rings { display: flex; align-items: center; gap: 4px; }
 .usage-item { position: relative; display: inline-flex; }
 .usage-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-color: transparent; background: none; font-size: 12px; color: var(--dim); }

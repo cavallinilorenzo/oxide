@@ -50,7 +50,7 @@ import { SettingsView } from "./SettingsView";
 import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
-import { readablePath } from "./headerLines";
+import { displayPath, middleEllipsis, readablePath } from "./headerLines";
 import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
@@ -774,13 +774,20 @@ export function App() {
             }}><RepoIcon size={16} /></button>
         )}
         <div className="header-project" data-tauri-drag-region>
-        {selected ? (
+        {selected ? (<>
           <span className="title project-label" data-tauri-drag-region title={`Project: ${readablePath(selected.path)}`}>
             <RepoIcon size={13} />
             <strong>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
-        ) : !isWindows ? (
+          {selectedThread && !showBoard && !showSettings && (() => {
+            const folder = selectedThread.worktreePath ?? selected.path;
+            return <span className="header-folder" data-tauri-drag-region title={readablePath(folder)}>
+              <FileDirectoryIcon size={12} />
+              <span>{middleEllipsis(displayPath(folder), 52)}</span>
+            </span>;
+          })()}
+        </>) : !isWindows ? (
           <span className="title" data-tauri-drag-region>
             <strong>Oxide</strong>
           </span>
@@ -926,7 +933,6 @@ export function App() {
                   }}
                   threadId={selectedThreadId}
                   projectId={selected.id}
-                  projectPath={selected.path}
                   gitControls={currentThreadId !== null && !selected.missing ? (
                     <GitHeader
                       projectId={selected.id}

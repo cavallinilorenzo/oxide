@@ -50,6 +50,15 @@ pub(crate) fn forget(cwd: &Path, thread_id: u32) {
     }
 }
 
+/// Whether the Turn has a start Checkpoint, so there is something to diff.
+pub(crate) fn has_start(cwd: &Path, thread_id: u32, turn_index: u32) -> bool {
+    let name = format!(
+        "{}^{{commit}}",
+        ref_name(thread_id, turn_index, Phase::Start)
+    );
+    run(cwd, &["rev-parse", "--verify", "--quiet", &name]).is_ok()
+}
+
 /// What the Turn changed: its two Checkpoints diffed. While the Turn runs, its
 /// end is the working tree right now; a Turn with no start Checkpoint has no diff.
 pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<Diff> {

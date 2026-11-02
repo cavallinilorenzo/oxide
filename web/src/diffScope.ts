@@ -13,6 +13,12 @@ export function defaultDiffScope(thread: DiffThreadKind): PanelScope {
   return thread.board ? "branch" : "turn";
 }
 
+/** How the Turn picker names a Turn: its position and the start of its prompt. */
+export function turnLabel(turn: { turnIndex: number; prompt: string }): string {
+  const prompt = turn.prompt.replace(/\s+/g, " ").trim();
+  return `Turn ${turn.turnIndex + 1} · ${prompt.length > 60 ? `${prompt.slice(0, 59)}…` : prompt}`;
+}
+
 /** Chat Threads share the checkout, so a Turn's diff may hold other Threads' edits. */
 export function showsConcurrencyNote(scope: PanelScope, thread: DiffThreadKind): boolean {
   return scope === "turn" && !thread.board;

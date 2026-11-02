@@ -3,9 +3,9 @@ import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
 import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon } from "@primer/octicons-react";
-import { commands, type Diff, type DiffFile } from "./bindings";
+import { commands, type Diff, type DiffFile, type TurnPick } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
-import { showsConcurrencyNote, type PanelScope } from "./diffScope";
+import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
@@ -60,14 +60,26 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
     window.addEventListener("focus", bump);
     return () => window.removeEventListener("focus", bump);
   }, []);
+  // The Turn scope lists the Thread's Turns; the latest is the default, and a pick holds only for its Thread.
+  const turnsQuery = useQuery(
+    `p${projectId}:turns:${scope === "turn" ? (threadId ?? "") : "-"}`,
+    async (): Promise<QueryResult<TurnPick[]>> =>
+      scope === "turn" && threadId !== null ? await commands.listTurnPicks(threadId) : { status: "ok", data: [] },
+    `${refreshKey}#${focusTick}`,
+  );
+  const turns = turnsQuery.state === "ready" ? (turnsQuery.data ?? []) : [];
+  const [chosenTurn, setChosenTurn] = useState<{ threadId: number | null; turnIndex: number } | null>(null);
+  const turn =
+    turns.find((t) => chosenTurn?.threadId === threadId && t.turnIndex === chosenTurn.turnIndex) ?? turns[turns.length - 1] ?? null;
+  const noCheckpoints = scope === "turn" && turn !== null && !turn.checkpointed;
   const query = useQuery(
-    `p${projectId}:diff:${scope}:${threadId ?? ""}:${reviewedPr ?? ""}`,
+    `p${projectId}:diff:${scope}:${threadId ?? ""}:${reviewedPr ?? ""}:${scope === "turn" ? (turn?.turnIndex ?? "") : ""}`,
     async (): Promise<QueryResult<Diff>> => {
-      if ((scope === "turn" && threadId === null) || (scope === "pr" && reviewedPr === null)) {
+      if ((scope === "turn" && (threadId === null || turn === null || noCheckpoints)) || (scope === "pr" && reviewedPr === null)) {
         return { status: "ok", data: { base: null, files: [] } };
       }
       return scope === "turn"
-        ? await commands.gitTurnDiff(threadId!)
+        ? await commands.gitTurnDiff(threadId!, turn!.turnIndex)
         : scope === "pr"
           ? await commands.pullRequestDetail(projectId, reviewedPr!).then((r) =>
               r.status === "ok" ? { status: "ok" as const, data: r.data.diff } : r,
@@ -142,6 +154,20 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
             </button>
           ))}
         </div>
+        {scope === "turn" && turns.length > 0 && turn !== null && (
+          <select
+            className="turn-pick"
+            aria-label="Turn"
+            value={turn.turnIndex}
+            onChange={(e) => setChosenTurn({ threadId, turnIndex: Number(e.target.value) })}
+          >
+            {turns.map((t) => (
+              <option key={t.turnIndex} value={t.turnIndex}>
+                {turnLabel(t)}
+              </option>
+            ))}
+          </select>
+        )}
         {(scope === "branch" || scope === "pr") && loaded.state === "ready" && loaded.diff.base && (
           <span className="diff-base mono">vs {loaded.diff.base}</span>
         )}
@@ -168,7 +194,9 @@ function DiffBody({ projectId, threadId, board, scope, reviewedPr, onScopeChange
             ? "No base branch found."
             : scope === "turn" && threadId === null
               ? "Select a Thread to see its Turn."
-              : "No changes."}
+              : noCheckpoints
+                ? "This Turn has no Checkpoints, so there is no diff to show."
+                : "No changes."}
         </div>
       )}
       {files.length > 0 && (

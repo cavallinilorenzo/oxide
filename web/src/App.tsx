@@ -54,6 +54,7 @@ import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { createDefaultThread } from "./createDefaultThread";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
+import { rovingTab } from "./editorTabs";
 
 
 const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|od|ad)/i.test(navigator.userAgent || navigator.platform);
@@ -97,7 +98,9 @@ export function App() {
   const shortcuts = useShortcuts();
   const keys = (action: ShortcutAction) => formatAccelerator(shortcuts[action]);
   const [showTools, setShowTools] = useState(false);
-  const [activeTool, setActiveTool] = useState<string | null>("Diff");
+  const [fallbackTool, setFallbackTool] = useState<string>("Diff");
+  const [activeToolsByProject, setActiveToolsByProject] = useState<Record<number, string>>({});
+  const selectedThreadsByProject = useRef<Record<number, number | null>>({});
   // The user's pick, for the Thread it was made in: elsewhere that Thread's default applies.
   const [chosenDiffScope, setChosenDiffScope] = useState<{ threadId: number | null; scope: PanelScope } | null>(null);
   const [diffFocus, setDiffFocus] = useState<string | null>(null);
@@ -136,6 +139,19 @@ export function App() {
   // Derived, so it always reflects the latest list (missing badge) and
   // disappears when the Project is hidden.
   const selected = projects?.find((p) => p.id === selectedId && !p.hidden) ?? null;
+  const activeTool = (selected ? activeToolsByProject[selected.id] : null) ?? fallbackTool;
+  const setActiveTool = useCallback((name: string) => {
+    setFallbackTool(name);
+    if (selectedId !== null) {
+      setActiveToolsByProject((prev) => (prev[selectedId] === name ? prev : { ...prev, [selectedId]: name }));
+    }
+  }, [selectedId]);
+  const selectThread = useCallback((threadId: number | null) => {
+    setSelectedThreadId(threadId);
+    if (selectedId !== null) {
+      selectedThreadsByProject.current[selectedId] = threadId;
+    }
+  }, [selectedId]);
   const openProjectIds = useMemo(() => sidebarProjects(projects ?? []).map((project) => project.id), [projects]);
   const attentionCards = useAttention(openProjectIds);
   const attention = summarizeAttention(attentionCards);
@@ -169,12 +185,13 @@ export function App() {
     setWorkbenches([...workbenches, workbenchContext]);
   }
   const selectSurface = useCallback((name: string, explicit = true) => {
-    setActiveTool(name); setShowTools(true); setShowSettings(false); setShowBoard(false); setRegionPriority("tools");
+    setActiveTool(name);
+    setShowTools(true); setShowSettings(false); setShowBoard(false); setRegionPriority("tools");
     // The first explicit visit opens the Project's first shell; later visits and Thread changes never spawn one.
     if (name === "Terminal" && explicit && workbenchContext) {
       setTerminals((previous) => (previous[workbenchContext.projectId]?.tabs.length ?? 0) > 0 ? previous : openTab(previous, workbenchContext.projectId, workbenchContext));
     }
-  }, [workbenchContext]);
+  }, [setActiveTool, workbenchContext]);
   // A Project's shells stay mounted while hidden; the selected Project shows the empty state once visited.
   const terminalSurfaces: TerminalsByProject = Object.fromEntries(
     Object.entries(terminals).filter(([, state]) => state.tabs.length > 0)
@@ -197,7 +214,7 @@ export function App() {
     if (!selected || threads === null) return;
     if (legacySurface.current) { setActiveTool(legacySurface.current); setShowTools(true); legacySurface.current = null; }
     try { localStorage.removeItem("oxide:work-mode"); } catch { /* Presentation still migrates without storage. */ }
-  }, [selected, threads]);
+  }, [selected, threads, setActiveTool]);
   const diffThread = {
     board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
   };
@@ -258,7 +275,7 @@ export function App() {
     setActiveTool("Diff");
     setChosenDiffScope({ threadId: currentThreadRef.current, scope: "uncommitted" });
     setDiffFocus(hint ?? null);
-  }, []);
+  }, [setActiveTool]);
 
   // The pull request whose files the Diff Surface's PR scope shows.
   const [reviewedPr, setReviewedPr] = useState<{ projectId: number; number: number } | null>(null);
@@ -269,7 +286,7 @@ export function App() {
     setActiveTool("Diff");
     setChosenDiffScope({ threadId: currentThreadRef.current, scope: "pr" });
     setDiffFocus(null);
-  }, []);
+  }, [setActiveTool]);
 
   const openPullRequest = useCallback(() => {
     setShowSettings(false);
@@ -277,7 +294,7 @@ export function App() {
     setRegionPriority("tools");
     setActiveTool("Pull request");
     setCreatePrRequest((n) => n + 1);
-  }, []);
+  }, [setActiveTool]);
 
   useEffect(() => {
     void commands.lastSelection().then((res) => {
@@ -478,9 +495,107 @@ export function App() {
     deleteThread(threadId);
   }, [deleteThread, onThreadDeleted, terminals]);
 
+  const surfaceTabsRef = useRef<HTMLElement>(null);
+  const focusRegion = useCallback((region: "sidebar" | "centre" | "dock") => {
+    if (region === "sidebar") {
+      const sidebar = document.querySelector<HTMLElement>('#workspace-sidebar');
+      if (sidebar && !sidebar.hidden) {
+        const target = sidebar.querySelector<HTMLElement>(
+          'input[type="search"], .thread-item[aria-current="true"], .sidebar-actions button, button'
+        );
+        target?.focus();
+      } else {
+        const handle = document.querySelector<HTMLElement>('button[aria-label="Toggle sidebar"]');
+        handle?.focus();
+      }
+    } else if (region === "centre") {
+      const centre = document.querySelector<HTMLElement>('.centre-column');
+      if (centre && !centre.hidden) {
+        const settings = centre.querySelector<HTMLElement>('.settings-view button, .settings-view input');
+        const board = centre.querySelector<HTMLElement>('.board-view button, .board-view [tabindex="0"]');
+        const thread = centre.querySelector<HTMLElement>('.centre [role="textbox"], .centre textarea, .centre .empty-state button, .centre button');
+        (settings ?? board ?? thread)?.focus();
+      } else {
+        const handle = document.querySelector<HTMLElement>('.thread-restore-handle, button[aria-label="Restore Thread"]');
+        handle?.focus();
+      }
+    } else if (region === "dock") {
+      const dock = document.querySelector<HTMLElement>('#workspace-tools');
+      if (dock && !dock.hidden) {
+        const activeTab = dock.querySelector<HTMLElement>(
+          '[role="tablist"][aria-label="Surfaces"] [role="tab"][aria-selected="true"]'
+        );
+        const firstTab = dock.querySelector<HTMLElement>('[role="tablist"][aria-label="Surfaces"] [role="tab"]');
+        (activeTab ?? firstTab)?.focus();
+      } else {
+        const handle = document.querySelector<HTMLElement>('button[aria-label="Toggle tools panel"]');
+        handle?.focus();
+      }
+    }
+  }, []);
+
+  const onSurfaceTabsKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    const names = TOOL_TABS.map((t) => t.name);
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
+      const next = rovingTab(names, activeTool, e.key);
+      if (next && next !== activeTool) {
+        e.preventDefault();
+        selectSurface(next);
+        requestAnimationFrame(() => {
+          const tab = surfaceTabsRef.current?.querySelector<HTMLElement>(`[role="tab"][aria-label="${next}"]`);
+          tab?.focus();
+          tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        });
+      }
+    }
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+
+      if (e.key === "F6") {
+        e.preventDefault();
+        const active = document.activeElement;
+        let current: "sidebar" | "centre" | "dock" = "centre";
+        if (active?.closest('#workspace-sidebar') || active?.matches?.('button[aria-label="Toggle sidebar"]')) {
+          current = "sidebar";
+        } else if (active?.closest('.tools') || active?.matches?.('button[aria-label="Toggle tools panel"]')) {
+          current = "dock";
+        } else if (active?.closest('.centre-column') || active?.matches?.('.thread-restore-handle, button[aria-label="Restore Thread"]')) {
+          current = "centre";
+        }
+        const order: ("sidebar" | "centre" | "dock")[] = ["sidebar", "centre", "dock"];
+        const idx = order.indexOf(current);
+        const next = e.shiftKey ? order[(idx - 1 + order.length) % order.length] : order[(idx + 1) % order.length];
+        focusRegion(next);
+        return;
+      }
+
+      if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const active = document.activeElement;
+        if (active?.closest?.(".monaco-editor, .xterm, .terminal")) {
+          return;
+        }
+        if (overlays.current?.hasOverlay()) {
+          e.preventDefault();
+          overlays.current.dismissTopmost();
+          return;
+        }
+        if (showSettings) {
+          e.preventDefault();
+          setShowSettings(false);
+          requestAnimationFrame(() => focusRegion("centre"));
+          return;
+        }
+        if (maximized && dockVisible) {
+          e.preventDefault();
+          setMaximized(false);
+          requestAnimationFrame(() => focusRegion("centre"));
+          return;
+        }
+      }
+
       const action = actionForKey(e, shortcuts);
       // The Model picker belongs to the open Thread, which handles it.
       if (!action || action === "modelPicker") return;
@@ -502,27 +617,65 @@ export function App() {
         setShowSettings(false);
         setShowBoard(false);
         setMaximized(false);
-        setSelectedThreadId(next);
-
+        selectThread(next);
       } else if (action === "files" || action === "diff" || action === "pullRequests" || action === "issues" || action === "terminal") {
         const tool = { files: "Files", diff: "Diff", pullRequests: "Pull request", issues: "Issues", terminal: "Terminal" }[action];
         selectSurface(tool);
+        requestAnimationFrame(() => focusRegion("dock"));
       } else if (action === "toggleTools") {
-        setShowTools(showSettings || !showTools);
+        const willShow = !dockVisible;
+        setShowTools(willShow);
         setRegionPriority("tools");
         setShowBoard(false);
         setShowSettings(false);
+        if (willShow) {
+          requestAnimationFrame(() => focusRegion("dock"));
+        } else {
+          const active = document.activeElement;
+          if (active?.closest('.tools')) {
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLElement>('button[aria-label="Toggle tools panel"]')?.focus();
+            });
+          }
+        }
+      } else if (action === "toggleSidebar") {
+        const willShow = !layout.sidebarVisible;
+        setShowSidebar(willShow);
+        setRegionPriority("sidebar");
+        setMaximized(false);
+        if (willShow) {
+          requestAnimationFrame(() => focusRegion("sidebar"));
+        } else {
+          const active = document.activeElement;
+          if (active?.closest('#workspace-sidebar')) {
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLElement>('button[aria-label="Toggle sidebar"]')?.focus();
+            });
+          }
+        }
+      } else if (action === "maximizeSurface") {
+        if (dockVisible) {
+          const next = !maximized;
+          setMaximized(next);
+          if (!next) {
+            requestAnimationFrame(() => focusRegion("centre"));
+          } else {
+            requestAnimationFrame(() => focusRegion("dock"));
+          }
+        }
       } else if (action === "toggleBoard") {
         setMaximized(false);
         setShowBoard((v) => !v);
         setShowSettings(false);
+        requestAnimationFrame(() => focusRegion("centre"));
       } else {
         setShowSettings(true);
+        requestAnimationFrame(() => focusRegion("centre"));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, maximized, focusRegion, selectThread]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -570,19 +723,21 @@ export function App() {
         const wanted = restore.current;
         const jump = pendingThread.current;
         pendingThread.current = null;
+        const remembered = selectedThreadsByProject.current[selected.id];
         const initialThreadId = jump !== null && res.data.some((thread) => thread.id === jump) ? jump
-          : wanted?.projectId === selected.id
-          ? (res.data.some((thread) => thread.id === wanted.threadId) ? wanted.threadId : null)
+          : wanted?.projectId === selected.id && res.data.some((thread) => thread.id === wanted.threadId)
+          ? wanted.threadId
+          : remembered !== undefined && (remembered === null || res.data.some((thread) => thread.id === remembered))
+          ? remembered
           : res.data[0]?.id ?? null;
-        setSelectedThreadId(initialThreadId);
-
+        selectThread(initialThreadId);
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [selected, createThreadIn, threadReload]);
+  }, [selected, createThreadIn, threadReload, selectThread]);
 
   const starting = !projectsLoaded || !lastSelectionLoaded || (selected !== null && threads === null);
 
@@ -599,8 +754,14 @@ export function App() {
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); void startNewThread(); }} />}
-        <button className="icon-btn" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={layout.sidebarVisible}
-          onClick={() => { setShowSidebar(!layout.sidebarVisible); setRegionPriority("sidebar"); setMaximized(false); }}><RepoIcon size={16} /></button>
+        <button className="icon-btn" aria-label="Toggle sidebar" title={`Toggle sidebar (${keys("toggleSidebar")})`} aria-pressed={layout.sidebarVisible}
+          onClick={() => {
+            const willShow = !layout.sidebarVisible;
+            setShowSidebar(willShow);
+            setRegionPriority("sidebar");
+            setMaximized(false);
+            if (willShow) requestAnimationFrame(() => focusRegion("sidebar"));
+          }}><RepoIcon size={16} /></button>
         <button className="icon-btn" aria-label="Open a Project" title={`Open a Project (${keys("openProject")})`} onClick={() => overlays.current?.openPalette()}><PlusIcon size={16} /></button>
         <div className="header-project" data-tauri-drag-region>
         {selected ? (
@@ -629,7 +790,14 @@ export function App() {
           aria-pressed={dockVisible}
           title={`Surfaces: Diff, Files, Terminal, Pull request, Issues (${keys("toggleTools")})`}
           aria-label="Toggle tools panel"
-          onClick={() => { setShowTools(!dockVisible); setRegionPriority("tools"); setShowSettings(false); setShowBoard(false); }}
+          onClick={() => {
+            const willShow = !dockVisible;
+            setShowTools(willShow);
+            setRegionPriority("tools");
+            setShowSettings(false);
+            setShowBoard(false);
+            if (willShow) requestAnimationFrame(() => focusRegion("dock"));
+          }}
         >
           <ToolsIcon size={16} />
         </button>
@@ -676,8 +844,7 @@ export function App() {
               setMaximized(false);
               setShowSettings(false);
               setShowBoard(false);
-              setSelectedThreadId(threadId);
-
+              selectThread(threadId);
             }}
             onDeleteThread={(threadId) => void deleteThread(threadId)}
             onNewThread={() => {
@@ -705,7 +872,10 @@ export function App() {
           <ResizeHandle label="Resize sidebar" controls="workspace-sidebar" axis="x" edge="end"
             {...layout.sidebar} onResize={sidebarSize.resize} onCommit={sidebarSize.commit} onReset={sidebarSize.reset} onCancel={sidebarSize.cancel} />
         </div>
-        {maximized && dockVisible && <button className="thread-restore-handle" aria-label="Restore Thread" title="Restore Thread" onClick={() => setMaximized(false)}><ChevronRightIcon size={16} /></button>}
+        {maximized && dockVisible && <button className="thread-restore-handle" aria-label="Restore Thread" title="Restore Thread" onClick={() => {
+          setMaximized(false);
+          requestAnimationFrame(() => focusRegion("centre"));
+        }}><ChevronRightIcon size={16} /></button>}
         <div className="centre-column" hidden={maximized && dockVisible}>
           {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
           <div className="chat-workbench" hidden={showSettings}>
@@ -719,8 +889,7 @@ export function App() {
               projectId={selected.id}
               onOpenThread={(id) => {
                 setShowBoard(false);
-                setSelectedThreadId(id);
-
+                selectThread(id);
               }}
               onDeleteThread={(id) => void deleteThread(id)}
               onDispatched={(thread) =>
@@ -730,7 +899,7 @@ export function App() {
           ) : selected && currentThreadId === null ? (
             <ProjectOverview project={selected} threads={threads ?? []}
               onNewThread={() => void startNewThread()}
-              onOpenThread={(id) => { setSelectedThreadId(id); }}
+              onOpenThread={(id) => { selectThread(id); }}
               onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
               onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (
@@ -806,7 +975,7 @@ export function App() {
           <aside className="tools" aria-label="Tools panel" id="workspace-tools" hidden={!dockVisible}>
             {!maximized && <ResizeHandle label="Resize Tools" controls="workspace-tools" axis="x" edge="start" direction={-1}
               {...layout.tools} onResize={toolsSize.resize} onCommit={toolsSize.commit} onReset={toolsSize.reset} onCancel={toolsSize.cancel} />}
-            <nav className="tabs" role="tablist" aria-label="Surfaces">
+            <nav className="tabs" role="tablist" aria-label="Surfaces" ref={surfaceTabsRef} onKeyDown={onSurfaceTabsKeyDown}>
               {TOOL_TABS.map(({ name, Icon }) => (
                 <button
                   key={name}
@@ -815,14 +984,24 @@ export function App() {
                   aria-label={name}
                   title={`${name} (${keys(TOOL_TAB_ACTION[name])})`}
                   aria-selected={activeTool === name}
+                  tabIndex={activeTool === name ? 0 : -1}
                   onClick={() => selectSurface(name)}
                 >
                   <Icon size={14} /> <span className="tool-tab-label">{name}</span>
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title={maximized ? "Restore Surface" : "Maximize Surface"} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => setMaximized(!maximized)}><ProjectIcon size={14} /></button>
-              <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => setShowTools(false)}>
+              <button className="icon-btn sm" title={`${maximized ? "Restore Surface" : "Maximize Surface"} (${keys("maximizeSurface")})`} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => {
+                const next = !maximized;
+                setMaximized(next);
+                requestAnimationFrame(() => focusRegion(next ? "dock" : "centre"));
+              }}><ProjectIcon size={14} /></button>
+              <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => {
+                setShowTools(false);
+                requestAnimationFrame(() => {
+                  document.querySelector<HTMLElement>('button[aria-label="Toggle tools panel"]')?.focus();
+                });
+              }}>
                 <XIcon size={14} />
               </button>
             </nav>
@@ -862,7 +1041,7 @@ export function App() {
               </Suspense></div>
             )}
             {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench {...context} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
               const projectId = Number(id); const isSelectedProject = projectId === selected?.id;
@@ -1153,7 +1332,12 @@ function WindowResizeHandles() {
   </div>;
 }
 
-type WorkspaceOverlaysHandle = { openPalette: () => void; openDelete: (id: number, title: string, shells: string[]) => void };
+type WorkspaceOverlaysHandle = {
+  openPalette: () => void;
+  openDelete: (id: number, title: string, shells: string[]) => void;
+  hasOverlay: () => boolean;
+  dismissTopmost: () => boolean;
+};
 
 function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, onOpenProject, onThreadDeleted }: {
   ref: Ref<WorkspaceOverlaysHandle>;
@@ -1167,10 +1351,42 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
   const [pending, setPending] = useState<{ id: number; title: string; discardChanges: boolean; shells: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const invoker = useRef<HTMLElement | null>(null);
+
+  const restoreFocus = () => {
+    if (invoker.current && invoker.current.isConnected) {
+      invoker.current.focus();
+    } else {
+      document.querySelector<HTMLElement>('#workspace-sidebar .thread-item, #workspace-sidebar input')?.focus();
+    }
+  };
+
   useImperativeHandle(ref, () => ({
-    openPalette: () => setShowPalette(true),
-    openDelete: (id, title, shells) => { setError(null); setPending({ id, title, discardChanges: false, shells }); },
-  }), []);
+    openPalette: () => {
+      invoker.current = document.activeElement as HTMLElement | null;
+      setShowPalette(true);
+    },
+    openDelete: (id, title, shells) => {
+      invoker.current = document.activeElement as HTMLElement | null;
+      setError(null);
+      setPending({ id, title, discardChanges: false, shells });
+    },
+    hasOverlay: () => Boolean(pending || showPalette),
+    dismissTopmost: () => {
+      if (pending) {
+        setPending(null);
+        restoreFocus();
+        return true;
+      }
+      if (showPalette) {
+        setShowPalette(false);
+        restoreFocus();
+        return true;
+      }
+      return false;
+    },
+  }), [pending, showPalette]);
+
   useEffect(() => {
     if (!showPalette) return;
     let active = true;
@@ -1179,6 +1395,7 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
     });
     return () => { active = false; };
   }, [showPalette, onProjectsScanned]);
+
   async function confirmDelete() {
     if (!pending || deleting) return;
     setDeleting(true); setError(null);
@@ -1186,12 +1403,18 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
       const result = await performThreadDelete(pending.id, pending.discardChanges, commands.deleteThread);
       if (result.status === "error") setError(result.message);
       else if (result.status === "needs-confirmation") setPending((current) => current ? { ...current, discardChanges: true } : null);
-      else { onThreadDeleted(pending.id); setPending(null); }
+      else { onThreadDeleted(pending.id); setPending(null); restoreFocus(); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setDeleting(false); }
   }
+
+  const cancelDelete = () => {
+    setPending(null);
+    restoreFocus();
+  };
+
   return <>
-    {pending && <div className="modal-backdrop">
+    {pending && <div className="modal-backdrop" onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); cancelDelete(); } }}>
       <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-thread-title">
         <h2 id="delete-thread-title">{pending.discardChanges ? "Discard worktree changes and delete?" : `Delete “${pending.title}”?`}</h2>
         <p>{pending.discardChanges ? "This Thread's worktree has uncommitted changes. Deleting removes the worktree and discards them; the branch is kept." : "Its conversation is removed permanently."}</p>
@@ -1201,12 +1424,12 @@ function WorkspaceOverlays({ ref, projects, onProjectsScanned, onStartThread, on
         </>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button onClick={() => setPending(null)} disabled={deleting}>Cancel</button>
+          <button onClick={cancelDelete} disabled={deleting}>Cancel</button>
           <button autoFocus className="danger" onClick={() => void confirmDelete()} disabled={deleting}>{deleting ? "Deleting…" : "Delete Thread"}</button>
         </div>
       </div>
     </div>}
-    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => setShowPalette(false)}
+    {showPalette && <ProjectPalette projects={projects} defaultParent="~/Developer" onClose={() => { setShowPalette(false); restoreFocus(); }}
       onStartThread={onStartThread} onOpenProject={onOpenProject} />}
   </>;
 }

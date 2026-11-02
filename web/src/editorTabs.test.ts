@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchCloseTargets, neighborAfterClose, previewToReplace } from "./editorTabs";
+import { batchCloseTargets, neighborAfterClose, previewToReplace, rovingTab } from "./editorTabs";
 
 describe("neighborAfterClose", () => {
   const order = ["a", "b", "c"];
@@ -26,5 +26,23 @@ describe("batchCloseTargets", () => {
   it("closes all but the kept one, or everything", () => {
     expect(batchCloseTargets(order, "others", "b")).toEqual(["a", "c"]);
     expect(batchCloseTargets(order, "all", "b")).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("rovingTab", () => {
+  const tabs = ["a", "b", "c"];
+  it("steps with arrows and wraps", () => {
+    expect(rovingTab(tabs, "b", "ArrowRight")).toBe("c");
+    expect(rovingTab(tabs, "c", "ArrowRight")).toBe("a");
+    expect(rovingTab(tabs, "a", "ArrowLeft")).toBe("c");
+    expect(rovingTab(tabs, "b", "ArrowLeft")).toBe("a");
+  });
+  it("jumps with Home and End", () => {
+    expect(rovingTab(tabs, "b", "Home")).toBe("a");
+    expect(rovingTab(tabs, "b", "End")).toBe("c");
+  });
+  it("handles empty or missing", () => {
+    expect(rovingTab([], "a", "ArrowRight")).toBeNull();
+    expect(rovingTab(tabs, "x", "ArrowRight")).toBe("a");
   });
 });

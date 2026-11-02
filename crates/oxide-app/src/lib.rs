@@ -232,6 +232,8 @@ pub struct Shortcuts {
     toggle_tools: String,
     toggle_board: String,
     open_settings: String,
+    toggle_sidebar: String,
+    maximize_surface: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

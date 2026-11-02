@@ -92,7 +92,7 @@ export function ProjectPalette({
   const activeIndex = Math.min(highlight, Math.max(0, rowCount - 1));
 
   useEffect(() => {
-    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, rowCount, stage, query]);
 
   useEffect(() => {

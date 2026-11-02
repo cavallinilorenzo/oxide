@@ -90,6 +90,8 @@ pub struct Shortcuts {
     pub toggle_tools: String,
     pub toggle_board: String,
     pub open_settings: String,
+    pub toggle_sidebar: String,
+    pub maximize_surface: String,
 }
 
 impl Default for Shortcuts {
@@ -111,13 +113,15 @@ impl Default for Shortcuts {
             toggle_tools: s("Mod+\\"),
             toggle_board: s("Mod+B"),
             open_settings: s("Mod+,"),
+            toggle_sidebar: s("Mod+Shift+E"),
+            maximize_surface: s("Mod+Shift+Enter"),
         }
     }
 }
 
 impl Shortcuts {
     /// Every shortcut as `(settings key, accelerator)`.
-    fn slots(&mut self) -> [(&'static str, &mut String); 15] {
+    fn slots(&mut self) -> [(&'static str, &mut String); 17] {
         [
             ("dictation", &mut self.dictation),
             ("newThread", &mut self.new_thread),
@@ -134,6 +138,8 @@ impl Shortcuts {
             ("toggleTools", &mut self.toggle_tools),
             ("toggleBoard", &mut self.toggle_board),
             ("openSettings", &mut self.open_settings),
+            ("toggleSidebar", &mut self.toggle_sidebar),
+            ("maximizeSurface", &mut self.maximize_surface),
         ]
     }
 }
@@ -163,24 +169,27 @@ fn accelerator_problem(accelerator: &str) -> Option<String> {
     if !primary {
         return Some("a shortcut must include Mod (⌘ on macOS, Ctrl elsewhere)".into());
     }
-    let named = matches!(key, "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight")
-        || key
-            .strip_prefix('F')
-            .and_then(|n| n.parse::<u8>().ok())
-            .is_some_and(|n| (1..=12).contains(&n));
+    let named = matches!(
+        key,
+        "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter"
+    ) || key
+        .strip_prefix('F')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=12).contains(&n));
     let mut chars = key.chars();
     let single = matches!(
         (chars.next(), chars.next()),
         (Some(c), None) if c.is_ascii_graphic() && !c.is_ascii_lowercase()
     );
     (!named && !single).then(|| {
-        format!("`{key}` is not a key; use one capital letter, digit or symbol, an arrow or F1-F12")
+        format!("`{key}` is not a key; use one capital letter, digit or symbol, an arrow, Enter or F1-F12")
     })
 }
 
 fn shortcuts(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> Shortcuts {
     let mut obj = obj.unwrap_or_default();
     let mut shortcuts = Shortcuts::default();
+    let in_file: Vec<String> = obj.keys().cloned().collect();
     for (key, slot) in shortcuts.slots() {
         let default = slot.clone();
         *slot = field(&mut obj, "shortcuts", key, default, errors);
@@ -189,11 +198,25 @@ fn shortcuts(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> S
 
     let mut taken: Vec<(&str, String)> = vec![];
     for (key, accelerator) in shortcuts.slots() {
+        // An empty accelerator is an unbound action: it never conflicts.
+        if accelerator.is_empty() {
+            continue;
+        }
+        let taken_by = taken
+            .iter()
+            .find(|(_, other)| other.eq_ignore_ascii_case(accelerator))
+            .map(|(other, _)| *other);
+        // A default newer than the user's file yields to their binding instead of
+        // reassigning it or invalidating their settings.
+        if taken_by.is_some()
+            && matches!(key, "toggleSidebar" | "maximizeSurface")
+            && !in_file.iter().any(|k| k == key)
+        {
+            accelerator.clear();
+            continue;
+        }
         let problem = accelerator_problem(accelerator).or_else(|| {
-            taken
-                .iter()
-                .find(|(_, other)| other.eq_ignore_ascii_case(accelerator))
-                .map(|(other, _)| format!("`{accelerator}` is already used by `{other}`"))
+            taken_by.map(|other| format!("`{accelerator}` is already used by `{other}`"))
         });
         match problem {
             Some(message) => errors.push(FieldError {

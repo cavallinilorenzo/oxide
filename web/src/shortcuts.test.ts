@@ -70,6 +70,12 @@ describe("actionForKey with the default shortcuts", () => {
     expect(action({ key: "\\" })).toBe("toggleTools");
     expect(action({ key: "b" })).toBe("toggleBoard");
     expect(action({ key: "," })).toBe("openSettings");
+    expect(action({ key: "E", shiftKey: true })).toBe("toggleSidebar");
+    expect(action({ key: "Enter", shiftKey: true })).toBe("maximizeSurface");
+  });
+  it("leaves an unbound action (empty accelerator) unreachable", () => {
+    const unbound = { ...DEFAULT_SHORTCUTS, toggleSidebar: "" };
+    expect(actionForKey(press({ key: "E", metaKey: true, shiftKey: true }), unbound)).toBeNull();
   });
   it("ignores other keys", () => {
     expect(action({ key: "x" })).toBeNull();
@@ -89,12 +95,14 @@ describe("acceleratorFromEvent", () => {
     expect(acceleratorFromEvent(press({ key: "ß", code: "KeyS", metaKey: true, altKey: true }))).toBe("Mod+Alt+S");
     expect(acceleratorFromEvent(press({ key: "!", code: "Digit1", metaKey: true, shiftKey: true }))).toBe("Mod+Shift+1");
     expect(acceleratorFromEvent(press({ key: "F5", metaKey: true }))).toBe("Mod+F5");
+    expect(acceleratorFromEvent(press({ key: "Enter", metaKey: true, shiftKey: true }))).toBe("Mod+Shift+Enter");
+    expect(acceleratorFromEvent(press({ key: "Enter", ctrlKey: true }))).toBe("Mod+Enter");
   });
   it("waits for a real key and requires ⌘ or Ctrl", () => {
     expect(acceleratorFromEvent(press({ key: "Meta", metaKey: true }))).toBeNull();
     expect(acceleratorFromEvent(press({ key: "Shift", metaKey: true, shiftKey: true }))).toBeNull();
     expect(acceleratorFromEvent(press({ key: "m", shiftKey: true }))).toBeNull();
-    expect(acceleratorFromEvent(press({ key: "Enter", metaKey: true }))).toBeNull();
+    expect(acceleratorFromEvent(press({ key: "Tab", metaKey: true }))).toBeNull();
     expect(acceleratorFromEvent(press({ key: "Escape", metaKey: true }))).toBeNull();
   });
   it("round-trips through matchesAccelerator", () => {

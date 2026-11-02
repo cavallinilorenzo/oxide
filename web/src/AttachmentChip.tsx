@@ -1,6 +1,6 @@
 import {
-  BookIcon,
   DeviceCameraVideoIcon,
+  DeviceDesktopIcon,
   FileBinaryIcon,
   FileCodeIcon,
   FileIcon,
@@ -8,7 +8,7 @@ import {
   ImageIcon,
   MarkdownIcon,
   NoteIcon,
-  ProjectIcon,
+  RepoIcon,
   TableIcon,
   TypographyIcon,
   UnmuteIcon,
@@ -20,9 +20,9 @@ import { chipLabel, formatSize, iconFor, shortenName, type ChipIcon } from "./at
 
 const ICONS: Record<ChipIcon, Icon> = {
   image: ImageIcon,
-  pdf: BookIcon,
+  pdf: RepoIcon,
   document: NoteIcon,
-  presentation: ProjectIcon,
+  presentation: DeviceDesktopIcon,
   table: TableIcon,
   markdown: MarkdownIcon,
   text: FileIcon,

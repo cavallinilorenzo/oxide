@@ -145,6 +145,9 @@ _Avoid_: Tab, pane, widget
 What the Diff Surface compares: Uncommitted (staged, unstaged and untracked changes against HEAD), Branch (commits since the merge-base with the base branch) or Turn (the files changed between a Turn's two Checkpoints; a Turn of a Thread in a shared checkout may include concurrent changes from other Threads), all computed by Git; or PR, the changed files of a pull request opened for review, as GitHub reports them through `gh`. The default is Turn for Threads in the main checkout and Branch for Threads in a worktree of their own; PR is offered only once a pull request was opened for review.
 _Avoid_: Diff mode, diff type
 
+**Revert**:
+Taking one file, or one hunk of it, out of the Uncommitted or Turn Diff by applying its patch in reverse to the selected Thread's checkout, leaving the rest of the change untouched. All-or-nothing: a patch that no longer applies cleanly changes nothing and says why. Deleting a file asks first, and it is refused while a Turn is running in that checkout. Not a Checkpoint restore, which rewinds the whole checkout to before a Turn.
+
 **Base branch**:
 The branch the Branch scope compares against: the remote's default branch, else `main`, `master` or `dev` (remote copy first).
 _Avoid_: Target branch, parent branch

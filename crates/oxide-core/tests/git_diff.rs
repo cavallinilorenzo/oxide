@@ -287,6 +287,19 @@ fn deleting_an_untracked_or_added_file_needs_confirmation() {
 }
 
 #[test]
+fn a_file_named_like_a_glob_reverts_only_itself() {
+    let f = fixture();
+    commit_file(&f.work, "*.txt", "star\n");
+    std::fs::write(f.work.join("*.txt"), "star\nedited\n").unwrap();
+    std::fs::write(f.work.join("a.txt"), "one\ntwo\nthree\nmore\n").unwrap();
+
+    revert(&f, "*.txt", false).unwrap();
+
+    assert_eq!(read(&f, "*.txt"), "star\n");
+    assert_eq!(read(&f, "a.txt"), "one\ntwo\nthree\nmore\n");
+}
+
+#[test]
 fn reverting_a_deleted_file_brings_it_back() {
     let f = fixture();
     std::fs::remove_file(f.work.join("b.txt")).unwrap();

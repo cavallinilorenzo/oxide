@@ -416,7 +416,9 @@ pub(crate) fn revert(
             .map_err(|e| Error::Git(format!("Could not delete {path}: {e}")));
     }
 
+    // A file named like a glob or pathspec magic must match only itself.
     let mut args = vec![
+        "--literal-pathspecs",
         "--no-optional-locks",
         "diff",
         "--no-color",

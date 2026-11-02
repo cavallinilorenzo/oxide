@@ -133,8 +133,8 @@ function DiffBody({ projectId, threadId, board, turnRunning = false, scope, revi
   const [confirming, setConfirming] = useState<RevertRequest | null>(null);
   async function revert(request: RevertRequest, confirmDelete: boolean) {
     if (scope !== "uncommitted" && scope !== "turn") return;
-    const deletes = files.find((f) => f.path === request.path)?.status;
-    if (!confirmDelete && (deletes === "added" || deletes === "untracked")) {
+    const status = files.find((f) => f.path === request.path)?.status;
+    if (!confirmDelete && (status === "added" || status === "untracked")) {
       setRevertError(null);
       setConfirming(request);
       return;

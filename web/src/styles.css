@@ -409,6 +409,14 @@ html.macos .header,
 .thread-git .branch-button { width: auto; max-width: 100%; }
 .thread-git .branch-button .branch-name { max-width: min(220px, 40vw); }
 .thread-git .git-error { min-width: 0; max-width: 100%; }
+/* Narrow centre (tool panel open): avatar, title and usage stay on the first row, branch and Git action sit centred on a second row. */
+@container (max-width: 1320px) {
+  .thread-header-actions { display: contents; }
+  .thread-header-text { flex: 1 1 0; }
+  .thread-git + .usage-rings { order: 2; padding-left: 0; border-left: 0; }
+  .thread-git { order: 3; flex: 0 0 100%; margin: 0; display: flex; justify-content: center; }
+  .thread-git .git-header { justify-content: center; }
+}
 .usage-rings { display: flex; align-items: center; gap: 4px; }
 .usage-item { position: relative; display: inline-flex; }
 .usage-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-color: transparent; background: none; font-size: 12px; color: var(--dim); }

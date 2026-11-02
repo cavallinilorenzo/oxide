@@ -5,8 +5,24 @@ import { AttachmentChip } from "./AttachmentChip";
 import { ItemContent } from "./ItemContent";
 import { ProviderMark } from "./ProviderMark";
 import { ActivityView } from "./ActivityView";
-import { ChatMarkdown } from "./ChatMarkdown";
-import { isReviewComments } from "./reviewPrompt";
+import { isReviewComments, parseReviewComments } from "./reviewPrompt";
+
+/** A batch of Line comments the user sent: each with its file and line, quoted code and comment. */
+function SentComments({ text }: { text: string }) {
+  const { intro, comments } = parseReviewComments(text);
+  return (
+    <div className="review-comments">
+      <p>{intro}</p>
+      {comments.map((c, i) => (
+        <section key={i} className="sent-comment">
+          <div role="heading" aria-level={4} className="mono">{c.where}</div>
+          {c.code && <pre className="mono">{c.code}</pre>}
+          <p>{c.body}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
 import { liveStatus } from "./activity";
 import type { TranscriptTurn } from "./transcript";
 import { formatTime, groupTurnItems, modelEffortLabel, type Block } from "./transcriptView";
@@ -154,7 +170,7 @@ export const TurnView = memo(function TurnView({
           {turn.segments.map((segment, i) =>
             segment.kind === "text" ? (
               isReviewComments(segment.text) ? (
-                <div key={i} className="review-comments"><ChatMarkdown text={segment.text} /></div>
+                <SentComments key={i} text={segment.text} />
               ) : (
                 <span key={i}>{segment.text}</span>
               )

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { CommentIcon, PencilIcon, TrashIcon, PaperAirplaneIcon } from "@primer/octicons-react";
 import { commands, type LineComment } from "./bindings";
 import { invalidateQueries, useQuery, type QueryResult } from "./queryCache";
@@ -25,8 +25,7 @@ export function LineComments({ projectId, threadId, working, refreshKey }: Props
   const [editing, setEditing] = useState<{ id: number; body: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const editor = useRef<HTMLTextAreaElement>(null);
-  const comments = query.state === "ready" ? query.data : [];
+  const comments = query.state === "ready" ? (query.data ?? []) : [];
   if (comments.length === 0) return null;
 
   const refresh = () => invalidateQueries(commentsPrefix(projectId));
@@ -89,7 +88,6 @@ export function LineComments({ projectId, threadId, working, refreshKey }: Props
                 }}
               >
                 <textarea
-                  ref={editor}
                   autoFocus
                   aria-label={`Edit comment on ${c.path} line ${c.line}`}
                   rows={2}

@@ -79,6 +79,17 @@ jobs:
             exit 1
           fi
 
+      - name: Require the runtime signing key
+        if: inputs.release && inputs.platform == 'windows-x64'
+        env:
+          RUNTIME_SIGNING_KEY: ${{ secrets.RUNTIME_SIGNING_KEY }}
+        # Without it the release would publish an unsigned index that no installed app accepts.
+        run: |
+          if [ -z "$RUNTIME_SIGNING_KEY" ]; then
+            echo "::error::RUNTIME_SIGNING_KEY is missing from the 'release' environment. Without it the GPU runtimes cannot be signed and no installed app could download them."
+            exit 1
+          fi
+
       - uses: ./.github/actions/setup-rust
         with:
           # A release is a clean build: it neither reads nor writes a cache.
@@ -175,10 +186,20 @@ jobs:
             target/vw
             target/cw
 
-      - name: Build and stage the Vulkan and CUDA workers (Windows)
+      - name: Build the Vulkan and CUDA workers once and stage their runtimes (Windows)
         if: inputs.platform == 'windows-x64'
         # stage loads the x64 MSVC environment (vcvars64.bat) itself.
         run: node tools/dictation-package.mjs stage
+
+      - name: Package the downloadable runtimes (Windows)
+        if: inputs.platform == 'windows-x64'
+        # One flat zip per backend with its manifest. Refuses a package the app would refuse.
+        run: node tools/dictation-runtimes.mjs package
+
+      - name: Probe the staged workers (Windows)
+        if: inputs.platform == 'windows-x64'
+        # Each worker starts with no SDK on PATH and answers the probe, as on a user's machine.
+        run: node tools/dictation-package.mjs probe
 
       # Save before the installer and smoke checks: a packaging failure should
       # not throw away a completed CUDA compilation. Releases never use this cache.
@@ -191,6 +212,17 @@ jobs:
             target/vw
             target/cw
 
+      - name: Index and sign the runtimes (release, Windows)
+        if: inputs.release && inputs.platform == 'windows-x64'
+        env:
+          RUNTIME_SIGNING_KEY: ${{ secrets.RUNTIME_SIGNING_KEY }}
+          TAG: ${{ github.ref_name }}
+        # The index lists this release's asset URLs, so it is made here, once, from the zips just built.
+        # verify checks the result exactly as an installed app does: signature, then each zip.
+        run: |
+          node tools/dictation-runtimes.mjs index target/dictation-runtime/packages "$TAG" "$GITHUB_REPOSITORY"
+          node tools/dictation-runtimes.mjs verify target/dictation-runtime/packages "$TAG"
+
       - name: Build the Windows installer
         if: inputs.platform == 'windows-x64'
         env:
@@ -200,7 +232,7 @@ jobs:
         run: |
           extra=()
           if [ "$RELEASE" = "true" ]; then extra=(--config crates/oxide-app/tauri.updater.conf.json); fi
-          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json "${extra[@]}" -- --locked
+          web/node_modules/.bin/tauri.cmd build --ci --bundles nsis "${extra[@]}" -- --locked
 
       - name: Install the setup into a scratch folder (Windows)
         if: inputs.platform == 'windows-x64'
@@ -214,9 +246,9 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "The setup exited $($install.ExitCode)." }
           "OXIDE_INSTALLED=$dir" >> $env:GITHUB_ENV
 
-      - name: Verify and probe the installed dictation backends (Windows)
+      - name: Verify the installed CPU-only package and start the app (Windows)
         if: inputs.platform == 'windows-x64'
-        # Files, imports and notices; then each worker and the app start with no SDK on PATH.
+        # No worker or GPU DLL in the install; the app starts with no SDK on PATH and no runtime installed.
         run: |
           node tools/dictation-package.mjs verify windows-x64 "$OXIDE_INSTALLED"
           node tools/dictation-package.mjs smoke "$OXIDE_INSTALLED" --launch
@@ -253,6 +285,8 @@ jobs:
           else
             cp "$bundle/nsis/Oxide_${version}_x64-setup.exe" staged/
             cp "$bundle/nsis/Oxide_${version}_x64-setup.exe.sig" staged/
+            # The signed index and the packages it lists; the app downloads them from this release.
+            cp target/dictation-runtime/packages/oxide-runtime-*.zip target/dictation-runtime/packages/runtimes-index.json target/dictation-runtime/packages/runtimes-index.json.minisig staged/
             notice="The Windows installer is not Authenticode-signed: SmartScreen may warn on first run (More info → Run anyway). Verify the download against SHA256SUMS.txt."
           fi
           printf '%s\n' "$notice" > "staged/NOTICE-${PLATFORM}.txt"
@@ -276,5 +310,6 @@ jobs:
             target/release/bundle/macos/Oxide.app
             target/release/bundle/dmg/*.dmg
             target/release/bundle/nsis/*-setup.exe
+            target/dictation-runtime/packages/*.zip
           if-no-files-found: error
           retention-days: 7

@@ -44,9 +44,9 @@ download. See [resource policy and examples](dictation-resources.md).
 ## GPU and building
 
 CPU works on all supported desktop platforms. macOS builds include Metal.
-The Windows x64 installer ships `oxide-vulkan-worker.exe` for Vulkan, the shared
-AMD/NVIDIA path without ROCm/HIP, and `oxide-cuda-worker.exe` for NVIDIA CUDA,
-with their runtime; see [Packaging and distribution](#packaging-and-distribution).
+The Windows x64 installer is CPU only. `oxide-vulkan-worker.exe` for Vulkan, the shared
+AMD/NVIDIA path without ROCm/HIP, and `oxide-cuda-worker.exe` for NVIDIA CUDA are
+downloadable runtime packages with their DLLs; see [Packaging and distribution](#packaging-and-distribution).
 RX 5600 XT inference is physically validated (development build);
 NVIDIA inference remains unvalidated. The application itself links CPU Whisper only:
 a missing Vulkan loader, incompatible driver or worker crash leaves CPU usable.
@@ -57,9 +57,10 @@ does not import `vulkan-1.dll`, while the isolated worker does.
 
 ### Downloadable GPU runtimes
 
-Target model (the installer change lands in a later PR): the installer is CPU only and
-Vulkan/CUDA workers are separate packages installed into `~/.oxide/runtimes/<backend>/<version>/`
-(`oxide_core::dictation::runtimes`).
+The installer is CPU only and carries no worker. Vulkan/CUDA workers are separate packages
+installed into `~/.oxide/runtimes/<backend>/<version>/` (`oxide_core::dictation::runtimes`).
+The release pipeline builds each worker once and publishes the packages, the index and its
+signature as assets of the GitHub release ([how](devops.md#runtime-packages)).
 
 - A package is a flat zip: `manifest.json` (backend, version, `protocolVersion`, worker name,
   SHA-256 of every file), the worker, its DLLs and licences. Unlisted files are refused.
@@ -90,11 +91,17 @@ Vulkan/CUDA workers are separate packages installed into `~/.oxide/runtimes/<bac
   `dictation_runtime_install` (also update), `dictation_runtime_cancel`,
   `dictation_runtime_remove`; progress is the `dictation-runtime-progress` event
   (`{backend, received, total}`).
-- The index URL and minisign public key are compiled in from the environment variables
-  `OXIDE_RUNTIME_INDEX_URL` and `OXIDE_RUNTIME_PUBLIC_KEY`. Without them downloads report
-  "not configured in this build" (CPU is unaffected). The CI that builds/signs packages and
-  publishes the index, and sets these two variables for release builds, is a separate
-  sub-issue of #311.
+- The app reads `RUNTIME_INDEX_URL` (`https://github.com/cavallinilorenzo/oxide/releases/latest/download/runtimes-index.json`,
+  so the newest published release) and trusts `RUNTIME_PUBLIC_KEY`, both constants in
+  `crates/oxide-core/src/dictation/runtimes.rs`. The matching secret key is the
+  `RUNTIME_SIGNING_KEY` secret of the `release` environment.
+- Package names are `oxide-runtime-<backend>-windows-x64-<version>.zip`; `<version>` is the app
+  version. Each is flat: the worker, only the DLLs that worker imports (CUDA runtime, Visual C++
+  runtime), `LICENSE-*.txt` notices and `manifest.json`. An index entry carries the platform
+  (`windows-x86_64`, as `runtimes::platform()` reports), URL, size, SHA-256, protocol version and
+  the driver / compute-capability requirement.
+- Prerelease and draft releases are never served by `releases/latest`, so apps only see published
+  stable runtimes.
 
 ## Recoverable runtime architecture and extension points
 
@@ -140,8 +147,9 @@ check runner keep their existing temporary-build behavior.
 The worker has an independent Cargo workspace/lockfile so its Vulkan feature
 cannot unify into the CPU host during a workspace build. The legacy
 `dictation-vulkan` and `dictation-cuda` app features are compatibility markers;
-enabling them alone does not build or package a worker. Installers get the
-workers from `node tools/dictation-package.mjs stage` (see
+enabling them alone does not build or package a worker. The downloadable runtime
+packages (and the opt-in offline package) get the workers from
+`node tools/dictation-package.mjs stage` (see
 [Packaging and distribution](#packaging-and-distribution)). End users of a packaged
 worker need a compatible graphics driver, not a developer SDK or shader compiler.
 
@@ -331,19 +339,24 @@ back to CPU or Vulkan dictation without crashing.
   checks. Verification on physical NVIDIA hardware remains an explicit validation gap
   carried to the final acceptance ticket #235.
 - **Redistribution and packaging**:
-  End users do not install the CUDA Toolkit. The installer places `cudart64_12.dll`,
+  End users do not install the CUDA Toolkit. The CUDA runtime package (not the installer) places `cudart64_12.dll`,
   `cublas64_12.dll` and `cublasLt64_12.dll` beside `oxide-cuda-worker.exe`, with the
   NVIDIA notice in `licenses/cuda.txt`. See [Packaging and distribution](#packaging-and-distribution).
 
 ## Packaging and distribution
 
-Installers contain every dictation backend of their platform. End users install
-only a graphics driver: never Visual Studio, CMake, Python, the Vulkan SDK, the
+The Windows installer is CPU only and macOS apps contain Metal; Vulkan and CUDA
+workers are downloaded on demand (see [Downloadable GPU runtimes](#downloadable-gpu-runtimes)).
+Offline machines can use the opt-in offline package, which keeps the workers beside
+the app. End users install only a graphics driver: never Visual Studio, CMake, Python, the Vulkan SDK, the
 CUDA Toolkit or a Cargo feature. Model weights are not bundled.
 
 | Package | Backends | Beside the app | The user needs |
 | --- | --- | --- | --- |
-| Windows x64 setup (NSIS) | CPU (in the app), Vulkan (`oxide-vulkan-worker.exe`), CUDA (`oxide-cuda-worker.exe`) | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, any Visual C++ runtime DLL a worker imports, `dictation-runtime.json`, `licenses/` | Windows 10 1803 or later. Vulkan: the GPU vendor's driver with Vulkan 1.2. CUDA: an NVIDIA driver that supports CUDA 12.9 (see [NVIDIA's CUDA 12.9 release notes](https://docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/)) and compute capability 5.0 or later |
+| Windows x64 setup (NSIS) | CPU (in the app) | `licenses/` | Windows 10 1803 or later. Nothing else: no worker, GPU DLL or driver ships |
+| Windows runtime package `oxide-runtime-vulkan-windows-x64-<v>.zip` | Vulkan (`oxide-vulkan-worker.exe`) | the Visual C++ runtime DLLs the worker imports, notices, `manifest.json` | The GPU vendor's driver with Vulkan 1.2 |
+| Windows runtime package `oxide-runtime-cuda-windows-x64-<v>.zip` | CUDA (`oxide-cuda-worker.exe`) | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, the Visual C++ runtime DLLs the worker imports, notices, `manifest.json` | An NVIDIA driver that supports CUDA 12.9 (see [NVIDIA's CUDA 12.9 release notes](https://docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/)) and compute capability 5.0 or later |
+| Windows offline package (opt-in, `tauri.windows-offline.conf.json`) | CPU, Vulkan, CUDA | both workers, `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, the Visual C++ runtime DLLs, `dictation-runtime.json`, `licenses/` | As the two runtime packages |
 | macOS Apple Silicon (`.app`, `.dmg`) | CPU and Metal, both in the app | `Resources/licenses/` | macOS 11 or later on Apple Silicon. Nothing to install |
 
 **The user needs** column lists what the packages are built to require, not minimum
@@ -355,7 +368,8 @@ user's machine; compatibility outside recorded rows remains unknown.
 
 ### Runtime discovery
 
-- **Workers** are found beside the app executable (`current_exe()`), never through
+- **Workers** are found beside the app executable (`current_exe()`; only the offline
+  package has them there), then in the highest compatible installed runtime, never through
   `PATH`. `OXIDE_VULKAN_WORKER` and `OXIDE_CUDA_WORKER` are development overrides.
 - **Runtime DLLs** sit beside the workers. Windows loads a process's imports from
   its own folder first, so the bundled CUDA runtime is used whatever CUDA Toolkit
@@ -370,7 +384,7 @@ user's machine; compatibility outside recorded rows remains unknown.
 - **Metal** is linked into the app. Its shaders are compiled into the binary
   (`GGML_METAL_EMBED_LIBRARY`, section `__DATA,__ggml_metallib`), so no `.metallib`
   or developer tool is looked up at run time.
-- **`dictation-runtime.json`**, beside the app executable on Windows, is the
+- **`dictation-runtime.json`**, beside the app executable in the offline package only, is the
   diagnostic build manifest for support and the package checks: whisper-rs,
   whisper-rs-sys and whisper.cpp versions, build settings (portable native code,
   CUDA Toolkit and Vulkan SDK versions), each backend and what it requires, and
@@ -406,25 +420,35 @@ set CARGO_TARGET_DIR=C:\oxide-build
 set GGML_NATIVE=OFF
 pnpm --dir web install --frozen-lockfile
 node tools/dictation-package.mjs stage
-web\node_modules\.bin\tauri.cmd build --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json
+node tools/dictation-package.mjs probe
+node tools/dictation-runtimes.mjs package
+web\node_modules\.bin\tauri.cmd build --bundles nsis
 node tools/dictation-package.mjs verify windows-x64
-node tools/dictation-package.mjs smoke
 ```
 
 `stage` builds both workers in release mode (in `CARGO_TARGET_DIR`'s `vw` and `cw`),
-then stages them, the DLLs they import (found by reading their import tables) and
-the manifest in `target/dictation-runtime/windows-x64/`.
+then stages one flat folder per backend in `target/dictation-runtime/windows-x64/<backend>/`:
+the worker, the DLLs it imports (found by reading its import tables) and its notices
+(`LICENSE-*.txt`), plus `build.json` with the native versions. `probe` starts each staged
+worker with no SDK on `PATH`. `node tools/dictation-runtimes.mjs package` writes each folder's
+`manifest.json` (SHA-256 of every file), refuses a folder the app would refuse
+(`checkRuntimePackage`) and zips it to `target/dictation-runtime/packages/`.
 CUDA builds log the native compiler commands as they run. The full architecture
 list can take a long time on a hosted runner. CI caches the worker build
 directories after staging, keyed by native build inputs and the runner image;
 the first build or a cache miss still compiles everything. Release builds use
 no cache. See [the build workflow guide](devops.md#buildyml-shared-build).
-`tauri.windows-gpu.conf.json` adds that folder and the extra notices to the installer;
-without staging, the bundle fails with a missing resource. `verify` and `smoke` check
-the built tree; pass an install folder to check an installation instead. Omit
-`GGML_NATIVE=OFF` only for a build you run on the same machine.
-`node tools/check.mjs` runs `stage`, the bundle, `verify` and `smoke` on Windows,
-so the full local tier there needs these SDKs.
+The installer bundles no worker. For an **offline package**, run
+`node tools/dictation-package.mjs offline` after `stage` (it merges both runtimes into
+`target/dictation-runtime/windows-x64-offline/`), bundle with
+`--config crates/oxide-app/tauri.windows-offline.conf.json`, and check it with
+`verify windows-x64-offline`; the app finds the workers beside itself, no download needed.
+`verify` checks the built tree; pass an install folder to check an installation instead.
+Omit `GGML_NATIVE=OFF` only for a build you run on the same machine.
+`node tools/check.mjs` runs `stage`, `package`, `probe`, the bundle and `verify` on Windows,
+so the full local tier there needs these SDKs. Indexing and signing run only in the
+Release workflow (the secret key never leaves it); `verify` there checks the result like an
+installed app would.
 
 For development, `tauri dev` and `node tools/dictation-build.mjs <cpu|vulkan|cuda>`
 (above) need no staging. On macOS, `pnpm --dir web build:app` builds the app; check
@@ -434,9 +458,12 @@ it with `node tools/dictation-package.mjs verify macos-aarch64 <path to Oxide.ap
 
 | Check | Runs in | Prevents |
 | --- | --- | --- |
-| `verify windows-x64` | local runner (built tree); `bundle (windows)` CI job (installed copy) | a missing worker, runtime DLL, notice or manifest; a bundled driver DLL; the app importing a GPU library (it would not start without that driver); a worker or DLL import that is neither a Windows system DLL nor bundled (it would fail on a clean machine); a staged file changing before packaging |
-| `smoke` | local runner; CI on the installed copy | a worker that crashes or speaks another protocol or engine version once SDK variables and developer `PATH` are gone; for CUDA, which starts without a driver, a bundled runtime DLL that fails to load. A missing driver passes: it only disables that backend. The SDKs stay installed on the machine, so a Vulkan loader the SDK placed in the system folder may still be found |
-| `smoke --launch` | CI only (no GPU, no NVIDIA driver) | the installed app failing to start without a usable GPU runtime. It proves startup only: new installations have dictation disabled, and CPU transcription without workers is covered by the Rust dictation tests |
+| `verify windows-x64` | local runner (built tree); `bundle (windows)` CI job (installed copy) | a worker, CUDA DLL or runtime manifest in the installer (GPU code must come from a download); a missing notice; a bundled driver DLL; the app importing a GPU library (it would not start without that driver); an import that is neither a Windows system DLL nor bundled |
+| `dictation-runtimes.mjs package` (`checkRuntimePackage`) | local runner; `bundle (windows)` CI job | a runtime package the app would refuse: a missing worker, DLL or notice; a file the manifest does not list or lists with another hash; a folder in the zip; a protocol or backend mismatch; a bundled driver DLL; a worker or DLL import that is neither a Windows system DLL nor bundled (it would fail on a clean machine) |
+| `dictation-package.mjs probe` | local runner; `bundle (windows)` CI job | a staged worker that crashes or speaks another protocol or engine version once SDK variables and developer `PATH` are gone; for CUDA, which starts without a driver, a bundled runtime DLL that fails to load. A missing driver passes: it only disables that backend. The SDKs stay installed on the machine, so a Vulkan loader the SDK placed in the system folder may still be found |
+| `dictation-runtimes.mjs verify` | Release `build (windows-x64)` job | an unsigned index, a signature that the key embedded in the app rejects (wrong or rotated secret), a version that is not the tag, a package whose size or SHA-256 differs from the index |
+| `tests/dictation_runtimes_ci.rs` | `rust` CI job | the core refusing what the tools produce (format drift between `tools/` and `runtimes.rs`), or accepting an altered package, index or signature |
+| `smoke --launch` | CI only (no GPU, no NVIDIA driver) | the installed app failing to start without a usable GPU runtime. It proves startup only: new installations have dictation disabled, and CPU transcription without workers is covered by the Rust dictation tests. On an offline package it also probes the workers beside the app |
 | `verify macos-aarch64` | local runner; `bundle (macos)` CI job | linking a library outside macOS (such as Homebrew's), a missing embedded Metal library, missing notices or microphone description |
 | `cargo deny` on both worker lockfiles | `supply-chain` CI job | a worker dependency under a licence or from a source `deny.toml` does not allow |
 | `releaseWorker` tests | tooling suite | packaged workers tuned to the build machine's CPU or GPU |

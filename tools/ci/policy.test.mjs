@@ -488,14 +488,29 @@ describe("localPlan", () => {
     assert.ok(plan.skipped.some(({ id }) => id === "bundle-windows"));
   });
 
-  test("Windows stages the GPU runtime before its bundle, then verifies and probes what was packaged", () => {
+  test("Windows builds the workers once, packages and probes them, then bundles a CPU-only installer and verifies it", () => {
     const run = lines(localPlan("win32"));
-    const stage = run.indexOf("node tools/dictation-package.mjs stage");
-    const bundle = run.indexOf("web/node_modules/.bin/tauri.cmd build --ci --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json");
-    const verify = run.indexOf("node tools/dictation-package.mjs verify windows-x64");
-    const smoke = run.indexOf("node tools/dictation-package.mjs smoke");
-    assert.ok(stage >= 0 && bundle > stage && verify > bundle && smoke > verify, run.join("\n"));
+    const at = (line) => run.indexOf(line);
+    const stage = at("node tools/dictation-package.mjs stage");
+    const probe = at("node tools/dictation-package.mjs probe");
+    const packages = at("node tools/dictation-runtimes.mjs package");
+    const bundle = at("web/node_modules/.bin/tauri.cmd build --ci --bundles nsis");
+    const verify = at("node tools/dictation-package.mjs verify windows-x64");
+    assert.ok(stage >= 0 && probe > stage && packages > stage && bundle > packages && verify > bundle, run.join("\n"));
+    assert.ok(!run.some((line) => line.includes("tauri.windows-gpu.conf.json") || line.includes("windows-offline")), "the installer is not built with a GPU config");
     assert.match(localPlan("win32").skipped.find(({ id }) => id === "dictation-install")?.reason ?? "", /CI only/);
+  });
+
+  test("the signed index is a release-only step: its secret never reaches a pull request", () => {
+    const plan = localPlan("win32");
+    assert.ok(!lines(plan).some((line) => line.includes("dictation-runtimes.mjs index")));
+    assert.match(plan.skipped.find(({ id }) => id === "runtimes-index")?.reason ?? "", /Release/);
+  });
+
+  test("the offline package still builds from the staged workers", () => {
+    const config = JSON.parse(readFileSync(fileURLToPath(new URL("../../crates/oxide-app/tauri.windows-offline.conf.json", import.meta.url)), "utf8"));
+    assert.ok(Object.keys(config.bundle.resources).includes("../../target/dictation-runtime/windows-x64-offline"));
+    assert.ok(!existsSync(fileURLToPath(new URL("../../crates/oxide-app/tauri.windows-gpu.conf.json", import.meta.url))));
   });
 
   test("macOS verifies its app bundle and runs no Windows packaging", () => {
@@ -566,13 +581,13 @@ describe("checkDictationPackage", () => {
   };
 
   test("a complete Windows install passes", () => {
-    const result = checkDictationPackage("windows-x64", WINDOWS);
+    const result = checkDictationPackage("windows-x64-offline", WINDOWS);
     assert.equal(result.ok, true, result.message);
   });
 
   test("a missing worker or CUDA runtime DLL fails and names it", () => {
     for (const file of ["oxide-cuda-worker.exe", "cublasLt64_12.dll", "licenses/cuda.txt", "licenses/msvc-runtime.txt"]) {
-      const result = checkDictationPackage("windows-x64", { ...WINDOWS, files: WINDOWS.files.filter((name) => name !== file) });
+      const result = checkDictationPackage("windows-x64-offline", { ...WINDOWS, files: WINDOWS.files.filter((name) => name !== file) });
       assert.equal(result.ok, false);
       assert.match(result.message, new RegExp(`${file.replace(".", "\\.")} is missing`));
     }
@@ -580,7 +595,7 @@ describe("checkDictationPackage", () => {
 
   test("a bundled graphics driver fails: drivers come from the GPU vendor, never from Oxide", () => {
     for (const driver of ["nvcuda.dll", "vulkan-1.dll"]) {
-      const result = checkDictationPackage("windows-x64", { ...WINDOWS, files: [...WINDOWS.files, driver] });
+      const result = checkDictationPackage("windows-x64-offline", { ...WINDOWS, files: [...WINDOWS.files, driver] });
       assert.equal(result.ok, false);
       assert.match(result.message, new RegExp(`${driver.replace(".", "\\.")} is a graphics driver`));
     }
@@ -592,7 +607,7 @@ describe("checkDictationPackage", () => {
     // PR #265's installed workers both import pdh.dll from Windows.
     for (const worker of ["oxide-cuda-worker.exe", "oxide-vulkan-worker.exe"]) {
       for (const dll of ["pdh.dll", "PDH.DLL"]) {
-        const result = checkDictationPackage("windows-x64", importing(worker, dll));
+        const result = checkDictationPackage("windows-x64-offline", importing(worker, dll));
         assert.equal(result.ok, true, result.message);
       }
     }
@@ -600,45 +615,45 @@ describe("checkDictationPackage", () => {
 
   test("the host never loads a GPU runtime or driver, so it starts on any machine", () => {
     for (const dll of ["vulkan-1.dll", "NVCUDA.dll", "cudart64_12.dll", "cublas64_12.dll"]) {
-      const result = checkDictationPackage("windows-x64", importing("oxide-app.exe", dll));
+      const result = checkDictationPackage("windows-x64-offline", importing("oxide-app.exe", dll));
       assert.equal(result.ok, false, dll);
       assert.match(result.message, /oxide-app\.exe imports .* only a GPU worker may load it/i);
     }
   });
 
   test("a worker may load only its own backend's driver", () => {
-    const result = checkDictationPackage("windows-x64", importing("oxide-vulkan-worker.exe", "nvcuda.dll"));
+    const result = checkDictationPackage("windows-x64-offline", importing("oxide-vulkan-worker.exe", "nvcuda.dll"));
     assert.equal(result.ok, false);
     assert.match(result.message, /oxide-vulkan-worker\.exe imports nvcuda\.dll/);
   });
 
   test("the CUDA worker must delay-load nvcuda.dll, so it can answer on a machine without the driver", () => {
-    const result = checkDictationPackage("windows-x64", importing("oxide-cuda-worker.exe", "nvcuda.dll"));
+    const result = checkDictationPackage("windows-x64-offline", importing("oxide-cuda-worker.exe", "nvcuda.dll"));
     assert.equal(result.ok, false);
     assert.match(result.message, /oxide-cuda-worker\.exe imports nvcuda\.dll directly: delay-load it/);
   });
 
   test("a worker's non-system import must be bundled beside it", () => {
-    const result = checkDictationPackage("windows-x64", importing("oxide-cuda-worker.exe", "cufft64_11.dll"));
+    const result = checkDictationPackage("windows-x64-offline", importing("oxide-cuda-worker.exe", "cufft64_11.dll"));
     assert.equal(result.ok, false);
     assert.match(result.message, /oxide-cuda-worker\.exe imports cufft64_11\.dll, which is neither a Windows system DLL nor bundled/);
   });
 
   test("a worker that needs the Visual C++ runtime passes only with it bundled beside it", () => {
     for (const dll of ["VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll"]) {
-      const result = checkDictationPackage("windows-x64", importing("oxide-vulkan-worker.exe", dll));
+      const result = checkDictationPackage("windows-x64-offline", importing("oxide-vulkan-worker.exe", dll));
       assert.equal(result.ok, false, dll);
       assert.match(result.message, /Visual C\+\+ runtime: stage it beside the worker/);
     }
     const bundled = importing("oxide-vulkan-worker.exe", "MSVCP140.dll");
     bundled.files = [...bundled.files, "msvcp140.dll", "vcruntime140.dll"];
     bundled.imports = { ...bundled.imports, "msvcp140.dll": ["VCRUNTIME140.dll", "KERNEL32.dll"], "vcruntime140.dll": ["KERNEL32.dll"] };
-    const result = checkDictationPackage("windows-x64", bundled);
+    const result = checkDictationPackage("windows-x64-offline", bundled);
     assert.equal(result.ok, true, result.message);
   });
 
   test("a bundled DLL's own imports must resolve too", () => {
-    const result = checkDictationPackage("windows-x64", {
+    const result = checkDictationPackage("windows-x64-offline", {
       ...WINDOWS, files: WINDOWS.files.filter((file) => file !== "cublasLt64_12.dll"),
     });
     assert.match(result.message, /cublas64_12\.dll imports cublaslt64_12\.dll, which is neither a Windows system DLL nor bundled/);
@@ -646,7 +661,7 @@ describe("checkDictationPackage", () => {
 
   test("an executable whose imports could not be read fails instead of passing unchecked", () => {
     const { "oxide-cuda-worker.exe": _, ...rest } = WINDOWS.imports;
-    const result = checkDictationPackage("windows-x64", { ...WINDOWS, imports: rest });
+    const result = checkDictationPackage("windows-x64-offline", { ...WINDOWS, imports: rest });
     assert.equal(result.ok, false);
     assert.match(result.message, /oxide-cuda-worker\.exe: imports were not read/);
   });
@@ -765,7 +780,7 @@ describe("GPU_BUILD_SDKS", () => {
 
   test("the CUDA Toolkit major version matches the runtime DLLs the Windows package requires", () => {
     const major = GPU_BUILD_SDKS.cuda.version.split(".")[0];
-    const required = checkDictationPackage("windows-x64", { files: [], imports: {} }).problems.join(" ");
+    const required = checkDictationPackage("windows-x64-offline", { files: [], imports: {} }).problems.join(" ");
     for (const dll of ["cudart", "cublas", "cublasLt"].map((name) => `${name}64_${major}.dll`)) {
       assert.match(required, new RegExp(`${dll.replace(".", "\\.")} is missing`));
     }

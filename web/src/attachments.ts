@@ -186,14 +186,21 @@ export function decodeDraft(draft: string): ComposerSegment[] {
 // --- Chip display -------------------------------------------------------------------------
 
 /** The icon family for a file name, from its extension. */
-export type ChipIcon = "image" | "pdf" | "markdown" | "text" | "code" | "table" | "archive" | "file";
+export type ChipIcon =
+  | "image" | "pdf" | "document" | "presentation" | "table" | "markdown" | "text" | "code"
+  | "audio" | "video" | "archive" | "font" | "file";
 
 const ICONS_BY_EXTENSION: Record<string, ChipIcon> = {
-  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", bmp: "image", svg: "image", heic: "image", tiff: "image", ico: "image",
+  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", bmp: "image", svg: "image", heic: "image", heif: "image", avif: "image", tif: "image", tiff: "image", ico: "image",
   pdf: "pdf",
   md: "markdown", markdown: "markdown", mdx: "markdown",
-  txt: "text", log: "text", rtf: "text",
-  csv: "table", tsv: "table", xls: "table", xlsx: "table", ods: "table", numbers: "table",
+  doc: "document", docx: "document", dot: "document", dotx: "document", odt: "document", ott: "document", pages: "document", rtf: "document", wpd: "document",
+  ppt: "presentation", pptx: "presentation", pps: "presentation", ppsx: "presentation", odp: "presentation", key: "presentation",
+  csv: "table", tsv: "table", xls: "table", xlsx: "table", xlsm: "table", ods: "table", numbers: "table",
+  txt: "text", log: "text",
+  mp3: "audio", wav: "audio", flac: "audio", aac: "audio", ogg: "audio", m4a: "audio", opus: "audio", aiff: "audio",
+  mp4: "video", mov: "video", mkv: "video", avi: "video", webm: "video", m4v: "video",
+  ttf: "font", otf: "font", woff: "font", woff2: "font",
   zip: "archive", tar: "archive", gz: "archive", tgz: "archive", bz2: "archive", xz: "archive", "7z": "archive", rar: "archive",
   json: "code", yaml: "code", yml: "code", toml: "code", xml: "code", html: "code", css: "code", js: "code", jsx: "code", ts: "code", tsx: "code",
   rs: "code", py: "code", go: "code", java: "code", kt: "code", swift: "code", c: "code", h: "code", cpp: "code", hpp: "code", cs: "code",

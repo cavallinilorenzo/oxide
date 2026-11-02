@@ -113,6 +113,13 @@ describe("chip display", () => {
     expect(iconFor("main.rs")).toBe("code");
     expect(iconFor("data.xlsx")).toBe("table");
     expect(iconFor("backup.tar")).toBe("archive");
+    expect(iconFor("cv.docx")).toBe("document");
+    expect(iconFor("letter.odt")).toBe("document");
+    expect(iconFor("deck.pptx")).toBe("presentation");
+    expect(iconFor("deck.key")).toBe("presentation");
+    expect(iconFor("song.mp3")).toBe("audio");
+    expect(iconFor("clip.mov")).toBe("video");
+    expect(iconFor("Inter.woff2")).toBe("font");
     expect(iconFor("Makefile")).toBe("file");
     expect(iconFor("weird.zzz")).toBe("file");
   });

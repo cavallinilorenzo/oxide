@@ -32,7 +32,7 @@ import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
 import { hunkTarget, patchDocument, type CodeOpenRequest } from "./codeOpen";
-import { batchCloseTargets, neighborAfterClose, previewToReplace } from "./editorTabs";
+import { batchCloseTargets, neighborAfterClose, previewToReplace, rovingTab } from "./editorTabs";
 
 /** Dock width below which the file list becomes a toggled overlay. */
 const COMPACT_WIDTH = 560;
@@ -655,7 +655,25 @@ export function CodeWorkbench({
             <ListUnorderedIcon size={14} />
           </button>
         )}
-        <div className="editor-tabs" role="tablist" aria-label="Open files">
+        <div
+          className="editor-tabs"
+          role="tablist"
+          aria-label="Open files"
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
+              const paths = documents.map((d) => d.path);
+              const next = rovingTab(paths, active, e.key);
+              if (next && next !== active) {
+                e.preventDefault();
+                const doc = records.current.get(next);
+                if (doc) select(doc);
+                requestAnimationFrame(() => {
+                  root.current?.querySelector<HTMLElement>(`.editor-tab[data-path="${CSS.escape(next)}"] [role="tab"]`)?.focus();
+                });
+              }
+            }
+          }}
+        >
           {documents.map((doc) => (
             <div
               className={`editor-tab${active === doc.path ? " active" : ""}${doc.preview ? " preview" : ""}`}
@@ -674,6 +692,7 @@ export function CodeWorkbench({
               <button
                 role="tab"
                 aria-selected={active === doc.path}
+                tabIndex={active === doc.path ? 0 : -1}
                 title={doc.path}
                 onClick={() => select(records.current.get(doc.path)!)}
                 onDoubleClick={() => {

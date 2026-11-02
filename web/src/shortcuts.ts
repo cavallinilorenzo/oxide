@@ -129,7 +129,7 @@ export function actionForKey(e: KeyPress, shortcuts: Shortcuts): ShortcutAction 
 }
 
 const MODIFIER_KEYS = new Set(["Meta", "Control", "Alt", "Shift", "AltGraph", "CapsLock", "OS"]);
-const BINDABLE_NAMED_KEYS = /^(Arrow(Up|Down|Left|Right)|F([1-9]|1[0-2]))$/;
+const BINDABLE_NAMED_KEYS = /^(Arrow(Up|Down|Left|Right)|Enter|F([1-9]|1[0-2]))$/;
 
 /**
  * The accelerator a key press spells, or `null` while it is only a modifier or not bindable

@@ -55,3 +55,10 @@ it("needs ⌘ or Ctrl in a new shortcut", async () => {
   expect(seen.shortcuts.diff).toBe("Mod+Shift+D");
   expect(container.textContent).toContain("Include ⌘");
 });
+
+it("records Enter combinations such as Mod+Enter or Mod+Shift+Enter", async () => {
+  await act(async () => root.render(<Harness />));
+  act(() => keyButton("Maximize / restore Surface").click());
+  await press(keyButton("Maximize / restore Surface"), { key: "Enter", code: "Enter", metaKey: true });
+  expect(seen.shortcuts.maximizeSurface).toBe("Mod+Enter");
+});

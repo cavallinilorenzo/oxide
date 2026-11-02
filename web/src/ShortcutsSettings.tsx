@@ -36,7 +36,7 @@ export function ShortcutsSettings({ shortcuts, onChange, errorsFor }: {
     const accelerator = acceleratorFromEvent(e.nativeEvent);
     if (!accelerator) {
       if (!["Meta", "Control", "Alt", "Shift"].includes(e.key)) {
-        setConflict({ action, message: "Include ⌘ (Ctrl on Windows and Linux), then a letter, digit, symbol, arrow or F-key." });
+        setConflict({ action, message: "Include ⌘ (Ctrl on Windows and Linux), then a letter, digit, symbol, arrow, Enter or F-key." });
       }
       return;
     }

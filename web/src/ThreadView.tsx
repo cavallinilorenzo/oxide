@@ -9,11 +9,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
-  FileDirectoryIcon,
-  GitBranchIcon,
   LockIcon,
   PaperclipIcon,
-  RepoIcon,
   ShieldCheckIcon,
   SquareFillIcon,
   UnlockIcon,
@@ -57,7 +54,6 @@ import {
   type ComposerSegment,
 } from "./attachments";
 import { ThreadHeader } from "./ThreadHeader";
-import { isBoardThread } from "./dispatch";
 import { getClaudeCodeHint } from "./providerHints";
 import { createFrameBatcher } from "./frameBatcher";
 import { pageRequest, pagesToLoad, turnAt, type TranscriptPages } from "./transcriptPages";
@@ -215,9 +211,6 @@ export function ThreadView({
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [providerCapsEntry, setProviderCaps] = useState<{ provider: string; caps: ProviderCapabilities } | null>(null);
   const [providerDetection, setProviderDetection] = useState<Detection | null>(null);
-  // The live branch of the checkout this Thread works in, tagged with the Thread it answers for.
-  const [liveBranch, setLiveBranch] = useState<{ threadId: number | null; branch: string } | null>(null);
-  const gitBranch = liveBranch && liveBranch.threadId === (threadId ?? null) ? liveBranch.branch : null;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -456,18 +449,6 @@ export function ThreadView({
       unlisten?.();
     };
   }, []);
-
-  useEffect(() => {
-    let active = true;
-    void commands.gitStatus(projectId, threadId ?? null).then((res) => {
-      if (active && res.status === "ok") {
-        setLiveBranch({ threadId: threadId ?? null, branch: res.data.branch ?? "detached HEAD" });
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, threadId]);
 
   // Load defaults from settings for a fresh thread
   useEffect(() => {
@@ -1213,8 +1194,8 @@ export function ThreadView({
             isTurnActive
               ? "Working… (Esc to stop)"
               : turnCount === 0
-                ? "Ask for changes, or attach files  (/model, /effort, /clear)"
-                : "Send a follow-up  (/clear starts a new Thread)"
+                ? "Ask anything, or type / for commands"
+                : "Send a follow-up…"
           }
           onKeyDown={(e) => {
             if (slashMatches.length > 0 && !e.nativeEvent.isComposing) {
@@ -1297,21 +1278,6 @@ export function ThreadView({
         </div>
       </form>
       )}
-      <div className="composer-footer" aria-label="Thread checkout and branch">
-        {thread && isBoardThread(thread) ? (
-          <span className="checkout-badge" title={thread.worktreePath ?? undefined}>
-            <FileDirectoryIcon size={12} /> Own worktree
-          </span>
-        ) : (
-          <span className="checkout-badge">
-            <RepoIcon size={12} /> Main checkout
-          </span>
-        )}
-        <span className="grow" />
-        <span className="branch-badge mono" title={gitBranch ?? (thread && isBoardThread(thread) ? thread.branch : null) ?? "main"}>
-          <GitBranchIcon size={12} /> <span className="branch-badge-text">{gitBranch ?? (thread && isBoardThread(thread) ? thread.branch : null) ?? "main"}</span>
-        </span>
-      </div>
       </div>
 
       {modelPickerOpen && (

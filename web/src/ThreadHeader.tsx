@@ -115,9 +115,9 @@ export function ThreadHeader({
             </span>
           )}
         </div>
-        {gitControls && <div className="thread-git">{gitControls}</div>}
       </div>
       <div className="thread-header-actions">
+        {gitControls && <div className="thread-git">{gitControls}</div>}
         <UsageRing provider={provider} reportsUsage={reportsUsage} />
       </div>
     </div>

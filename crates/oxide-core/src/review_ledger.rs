@@ -85,13 +85,16 @@ impl LedgerStore {
                 "INSERT OR IGNORE INTO review_ledger
                      (project_id, thread_id, pull_request, provider, model, turn_completed_at, merged_at)
                  SELECT t.project_id, t.id, ?2, t.provider, t.model,
-                        CAST(strftime('%s', (SELECT MAX(u.completed_at) FROM turns u
-                                             WHERE u.thread_id = t.id AND u.status = 'completed')) AS INTEGER),
+                        (SELECT MAX(CAST(strftime('%s', u.completed_at) AS INTEGER)) FROM turns u
+                          WHERE u.thread_id = t.id AND u.status = 'completed'
+                            AND CAST(strftime('%s', u.completed_at) AS INTEGER) <= CAST(strftime('%s', ?3) AS INTEGER)),
                         CAST(strftime('%s', ?3) AS INTEGER)
                  FROM threads t
                  WHERE t.id = ?1
-                   AND EXISTS (SELECT 1 FROM turns u WHERE u.thread_id = t.id AND u.status = 'completed')
-                   AND strftime('%s', ?3) IS NOT NULL",
+                   AND strftime('%s', ?3) IS NOT NULL
+                   AND (SELECT MAX(CAST(strftime('%s', u.completed_at) AS INTEGER)) FROM turns u
+                         WHERE u.thread_id = t.id AND u.status = 'completed'
+                           AND CAST(strftime('%s', u.completed_at) AS INTEGER) <= CAST(strftime('%s', ?3) AS INTEGER)) IS NOT NULL",
                 rusqlite::params![thread_id, pull_request, merged_at],
             )?;
             Ok(())

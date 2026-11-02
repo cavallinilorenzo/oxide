@@ -182,6 +182,22 @@ fn a_pull_request_that_is_still_open_records_nothing() {
 }
 
 #[test]
+fn a_merge_dated_before_any_finished_turn_records_nothing() {
+    let f = fixture();
+    let thread = f.finished_thread("Add search");
+    let branch = thread.branch.clone().unwrap();
+    f.set_gh(serde_json::json!({
+        "auth": "ok",
+        "prs": { branch.clone(): pr(&branch, 4, "MERGED", Some("2001-01-01T00:00:00Z")) },
+    }));
+
+    let _board = f.core.subscribe_board(f.project).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+
+    assert!(f.ledger().entries.is_empty());
+}
+
+#[test]
 fn a_merge_made_through_oxide_is_recorded() {
     let f = fixture();
     let thread = f.finished_thread("Add search");

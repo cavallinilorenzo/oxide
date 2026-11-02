@@ -482,7 +482,8 @@ impl Gh {
     }
 }
 
-const PR_FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,author,createdAt";
+const PR_FIELDS: &str =
+    "number,title,url,state,isDraft,baseRefName,headRefName,author,createdAt,mergedAt";
 
 /// Most pull requests the list shows.
 const MAX_LISTED: &str = "100";
@@ -863,9 +864,33 @@ pub fn list_pull_requests(
         .unwrap_or_default())
 }
 
+/// The head branch and merge time (ISO 8601, UTC) of a pull request; the time is `None` while it
+/// is not merged.
+pub fn merged_head(gh: &Gh, cwd: &Path, number: u32) -> Result<Option<(String, Option<String>)>> {
+    gh.require_ready(cwd)?;
+    let v = parse(&gh.run(
+        cwd,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "headRefName,mergedAt",
+        ],
+    )?)?;
+    let merged_at = v["mergedAt"].as_str().map(str::to_string);
+    Ok(v["headRefName"]
+        .as_str()
+        .map(|head| (head.to_string(), merged_at)))
+}
+
 /// The pull request of `branch`, whatever its state: an open one if there is one, else the
-/// latest. `None` when the branch has none.
-pub fn branch_pull_request(gh: &Gh, cwd: &Path, branch: &str) -> Result<Option<BranchPullRequest>> {
+/// latest, with its merge time (ISO 8601, UTC) when merged. `None` when the branch has none.
+pub fn branch_pull_request(
+    gh: &Gh,
+    cwd: &Path,
+    branch: &str,
+) -> Result<Option<(BranchPullRequest, Option<String>)>> {
     gh.require_ready(cwd)?;
     let fields = format!("{PR_FIELDS},statusCheckRollup");
     let list = parse(&gh.run(
@@ -893,14 +918,18 @@ pub fn branch_pull_request(gh: &Gh, cwd: &Path, branch: &str) -> Result<Option<B
             CheckState::Pending => 2,
         }] += 1;
     }
-    Ok(Some(BranchPullRequest {
-        number: v["number"].as_u64().unwrap_or(0) as u32,
-        url: text(&v["url"]),
-        phase,
-        checks_passed: tally[0],
-        checks_failed: tally[1],
-        checks_pending: tally[2],
-    }))
+    let merged_at = v["mergedAt"].as_str().map(str::to_string);
+    Ok(Some((
+        BranchPullRequest {
+            number: v["number"].as_u64().unwrap_or(0) as u32,
+            url: text(&v["url"]),
+            phase,
+            checks_passed: tally[0],
+            checks_failed: tally[1],
+            checks_pending: tally[2],
+        },
+        merged_at,
+    )))
 }
 
 /// One pull request with its description, checks, conversation, the merge

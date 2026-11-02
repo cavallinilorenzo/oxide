@@ -524,7 +524,8 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
       // so measure the glyph next to the caret and take its trailing (or, at the start, leading) edge.
       let rect: { top: number; bottom: number; height: number; x: number } | undefined;
       const node = range.startContainer;
-      if (node.nodeType === Node.TEXT_NODE) {
+      // Environments without layout (tests) cannot measure: they keep the native caret.
+      if (node.nodeType === Node.TEXT_NODE && typeof Range.prototype.getClientRects === "function") {
         const length = node.textContent?.length ?? 0;
         const at = range.startOffset;
         const glyph = document.createRange();

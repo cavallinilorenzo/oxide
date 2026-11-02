@@ -778,6 +778,32 @@ pub struct UsageLimits {
     pub weekly: Option<UsageLimitWindow>,
 }
 
+/// One merged pull request of a Thread, kept after the Thread is deleted. No Transcript text.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewLedgerEntry {
+    pub project_id: u32,
+    pub thread_id: u32,
+    pub pull_request: u32,
+    pub provider: String,
+    pub model: Option<String>,
+    /// Seconds since the Unix epoch (UTC).
+    pub turn_completed_at: f64,
+    /// Seconds since the Unix epoch (UTC).
+    pub merged_at: f64,
+}
+
+/// A Project's wait between a finished Turn and the merge.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewLedger {
+    /// Median wait in seconds; none without entries.
+    pub median_secs: Option<f64>,
+    pub count: u32,
+    /// The most recent entries, newest merge first.
+    pub entries: Vec<ReviewLedgerEntry>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
@@ -2796,6 +2822,20 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+/// The Review ledger of a Project: median wait and recent entries.
+#[tauri::command]
+#[specta::specta]
+fn review_ledger(core: State<'_, Arc<Core>>, project_id: u32) -> Result<ReviewLedger, AppError> {
+    Ok(convert(&core.review_ledger(project_id)?))
+}
+
+/// Removes every entry of the Review ledger.
+#[tauri::command]
+#[specta::specta]
+fn clear_review_ledger(core: State<'_, Arc<Core>>) -> Result<(), AppError> {
+    Ok(core.clear_review_ledger()?)
+}
+
 /// A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`.
 #[tauri::command]
 #[specta::specta]
@@ -3024,6 +3064,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         subscribe_thread_debug,
         subscribe_board,
         subscribe_usage_limits,
+        review_ledger,
+        clear_review_ledger,
         start_terminal,
         start_block_terminal,
         write_file,

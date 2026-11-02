@@ -136,6 +136,22 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE turns ADD COLUMN segments TEXT;
 ",
+    // The Review ledger (ADR-0010): one row per merged pull request of a Thread. Identifiers,
+    // Provider, Model and timestamps only, no Transcript text and no foreign key, so a row
+    // outlives its Thread.
+    "
+    CREATE TABLE review_ledger (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        pull_request INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT,
+        turn_completed_at INTEGER NOT NULL,
+        merged_at INTEGER NOT NULL,
+        UNIQUE (project_id, pull_request)
+    );
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

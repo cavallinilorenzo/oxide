@@ -7,6 +7,7 @@ import {
   RepoIcon,
 } from "@primer/octicons-react";
 import type { Project, Thread } from "./bindings";
+import { ReviewLedgerSummary } from "./ReviewLedgerSummary";
 import { relativeAge, threadTitle } from "./threadList";
 
 export function ProjectOverview({
@@ -83,6 +84,7 @@ export function ProjectOverview({
             </ul>
           </section>
         )}
+        <ReviewLedgerSummary key={project.id} projectId={project.id} />
         <nav className="project-overview-links" aria-label="Project tools">
           <button onClick={onOpenDiff}>
             <FileDiffIcon size={16} /> Review changes

@@ -5,6 +5,7 @@ pub mod metal;
 pub mod models;
 pub mod resources;
 pub mod runtime;
+pub mod runtimes;
 pub mod types;
 pub mod vulkan;
 
@@ -420,7 +421,7 @@ impl Dictation {
         let lease = self.models.acquire(home, settings.model)?;
         if settings.device == Device::Gpu && !gpu_compiled() {
             return Err(err(
-                "This build has CPU support only. Choose CPU in Settings.",
+                "No GPU runtime is installed. Install one in Settings or choose CPU.",
             ));
         }
         let mut backend = settings.backend;

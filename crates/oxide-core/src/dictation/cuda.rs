@@ -76,14 +76,19 @@ pub fn write_frame(mut output: impl Write, value: &impl Serialize) -> std::io::R
     output.flush()
 }
 
+/// Development override, then the folder of the executable, then a downloaded runtime.
+/// `PATH` is never searched.
 pub fn worker_path() -> PathBuf {
-    std::env::var_os("OXIDE_CUDA_WORKER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .unwrap_or_default()
-                .with_file_name(format!("oxide-cuda-worker{}", std::env::consts::EXE_SUFFIX))
-        })
+    if let Some(path) = std::env::var_os("OXIDE_CUDA_WORKER") {
+        return PathBuf::from(path);
+    }
+    let beside = std::env::current_exe()
+        .unwrap_or_default()
+        .with_file_name(format!("oxide-cuda-worker{}", std::env::consts::EXE_SUFFIX));
+    if beside.is_file() {
+        return beside;
+    }
+    super::runtimes::installed_worker(BackendId::Cuda).unwrap_or(beside)
 }
 
 /// Provisional conservative working set, separate from model file size.

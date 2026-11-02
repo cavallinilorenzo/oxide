@@ -3166,6 +3166,7 @@ pub fn run() {
                 .home_dir()
                 .expect("no home directory")
                 .join(".oxide");
+            oxide_core::dictation::runtimes::set_home(&home);
             let core = Core::open(home)?;
             let handle = app.handle().clone();
             let dictation = app

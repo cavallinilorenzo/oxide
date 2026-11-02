@@ -13,7 +13,6 @@ import {
   FileIcon,
   ChevronDownIcon,
   FoldIcon,
-  GearIcon,
   ListUnorderedIcon,
   PlusIcon,
   SearchIcon,
@@ -24,7 +23,6 @@ import { commands } from "./bindings";
 import { monaco, editorLanguage, serverLanguage } from "./editorRuntime";
 import { EditorLanguages } from "./editorLanguages";
 import { EditorFileTree } from "./EditorFileTree";
-import { LanguageTools } from "./LanguageTools";
 import { LanguageSupportNotice } from "./LanguageSupport";
 import { Skeleton } from "./Skeleton";
 import { fontStyle, getAppearance } from "./appearance";
@@ -67,7 +65,10 @@ interface Props {
   contextKey: string;
   visible: boolean;
   onChanged: () => void;
-  onRunCommand: (command: string) => void;
+  /** Opens the application Settings at the Language tools section. */
+  onOpenLanguageSettings: () => void;
+  /** Reports whether any file is open, so the host can offer full-screen editing. */
+  onOpenFilesChange?: (open: boolean) => void;
   /** Shows the Diff Surface again, where the comparison, file and scroll were left. */
   onBackToDiff?: () => void;
 }
@@ -79,7 +80,8 @@ export function CodeWorkbench({
   contextKey,
   visible,
   onChanged,
-  onRunCommand,
+  onOpenLanguageSettings,
+  onOpenFilesChange,
   openRequest,
   onBackToDiff,
 }: Props) {
@@ -92,7 +94,7 @@ export function CodeWorkbench({
   const [active, setActive] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tools, setTools] = useState(false);
+  useEffect(() => { onOpenFilesChange?.(documents.length > 0); }, [documents.length, onOpenFilesChange]);
   const [quickOpen, setQuickOpen] = useState(false);
   const [newFile, setNewFile] = useState<string | null>(null);
   const [treeRevision, setTreeRevision] = useState(0);
@@ -787,17 +789,6 @@ export function CodeWorkbench({
             </div>
           )}
         </div>
-        <div className="editor-tabs-actions">
-          <span className="grow" />
-          <button
-            className="icon-btn sm"
-            aria-label="Language tools"
-            title="Language tools"
-            onClick={() => setTools((v) => !v)}
-          >
-            <GearIcon size={15} />
-          </button>
-        </div>
         </div>
         {current && (
           <div className="editor-breadcrumb">
@@ -857,7 +848,7 @@ export function CodeWorkbench({
           <LanguageSupportNotice
             key={language}
             language={language}
-            onConfigure={() => setTools(true)}
+            onConfigure={() => onOpenLanguageSettings()}
           />
         )}
         {error && (
@@ -903,7 +894,7 @@ export function CodeWorkbench({
                   <ListUnorderedIcon size={14} /> Browse files
                 </button>
               )}
-              <button className="link" onClick={() => setTools(true)}>
+              <button className="link" onClick={() => onOpenLanguageSettings()}>
                 Set up language tools
               </button>
             </div>
@@ -950,7 +941,7 @@ export function CodeWorkbench({
           </span>
           <button
             title={language ? states[language] : undefined}
-            onClick={() => setTools(true)}
+            onClick={() => onOpenLanguageSettings()}
           >
             <CodeIcon size={12} />{" "}
             {current?.model.getLanguageId() ?? "Plain text"}
@@ -959,15 +950,6 @@ export function CodeWorkbench({
           </button>
         </footer>
       </div>
-      {tools && (
-        <div className="editor-language-panel">
-          <LanguageTools
-            onClose={() => setTools(false)}
-            onRunCommand={onRunCommand}
-            onChanged={() => languages.current?.reconnect()}
-          />
-        </div>
-      )}
       {quickOpen && (
         <QuickOpen
           projectId={projectId}

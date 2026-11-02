@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mockIPC, clearMocks } from "@tauri-apps/api/mocks";
 import { clearQueryCache } from "./queryCache";
@@ -16,7 +17,13 @@ vi.mock("./ThreadView", () => ({
 vi.mock("./GitHeader", () => ({ GitHeader: () => null }));
 vi.mock("./QuitDialog", () => ({ QuitDialog: () => null }));
 vi.mock("./dictation", () => ({ DictationController: () => null }));
-vi.mock("./CodeWorkbench", () => ({ CodeWorkbench: () => <div className="code-workbench">Editor</div> }));
+vi.mock("./CodeWorkbench", () => ({
+  CodeWorkbench: ({ onOpenFilesChange }: { onOpenFilesChange?: (open: boolean) => void }) => {
+    // The editor reports a file as open, as it does once the user picks one.
+    useEffect(() => { onOpenFilesChange?.(true); }, [onOpenFilesChange]);
+    return <div className="code-workbench">Editor</div>;
+  },
+}));
 vi.mock("./TerminalSurface", () => ({ TerminalSurface: () => <div className="terminal-surface">Terminal</div> }));
 vi.mock("./DiffPanel", () => ({ DiffPanel: () => <div className="diff-panel">Diff content</div> }));
 vi.mock("./PullRequestPanel", () => ({ PullRequestPanel: () => <div className="pr-panel">PR content</div> }));
@@ -152,6 +159,10 @@ it("handles Escape hierarchy: closes topmost overlay, else restores maximization
   await act(async () => toolsToggle.click());
   await settle();
 
+  // Full screen is for editing: no button on Diff, only on Files with a file open.
+  expect(host.querySelector('button[aria-label="Maximize Surface"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Files"]')!.click());
+  await settle();
   const maxBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Maximize Surface"]')!;
   await act(async () => maxBtn.click());
   await settle();

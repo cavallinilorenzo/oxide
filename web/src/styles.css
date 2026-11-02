@@ -209,6 +209,8 @@ html.macos .header,
 .header .project-label strong { color: var(--fg-bright); }
 .header-project, .header-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .header-actions { justify-content: flex-end; }
+.header-folder { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: 6px; font: 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
+.header-folder > span { overflow: hidden; text-overflow: ellipsis; }
 .header-actions > .icon-btn, .header-actions > .seg { flex: none; }
 .window.windows .header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); padding-right: 0; }
 .window.windows .header-project { justify-content: center; }
@@ -381,11 +383,11 @@ html.macos .header,
 
 /* ── Thread view ──────────────────────────────────────────── */
 .thread-container { display: flex; flex-direction: column; height: 100%; min-height: 0; container-type: inline-size; }
-.thread-header-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 24px; border-bottom: 1px solid var(--line); min-height: var(--panel-bar-height); flex: none; }
+.thread-header-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px 14px; padding: 10px 24px; border-bottom: 1px solid var(--line); min-height: var(--panel-bar-height); flex: none; }
 .thread-avatar { position: relative; flex: none; display: flex; align-items: center; justify-content: center; min-width: 44px; color: var(--fg-bright); }
 .thread-avatar .status-dot { position: absolute; right: -4px; bottom: -3px; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--bg); }
 .provider-avatar { display: block; flex: none; }
-.thread-header-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.thread-header-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 0; }
 .thread-title-display { height: 22px; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .thread-title { font-size: 16px; font-weight: 700; line-height: 22px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; color: var(--fg-bright); }
 .thread-title-input {
@@ -396,15 +398,11 @@ html.macos .header,
 .thread-title-input:focus-visible { outline: none; }
 .rename-thread-btn { opacity: 0; }
 .thread-header-bar:is(:hover, :focus-within) .rename-thread-btn { opacity: 1; }
-.thread-meta-line { line-height: 18px; font-size: 12.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-folder-line { line-height: 18px; height: 18px; display: flex; align-items: center; gap: 6px; min-width: 0; font: 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
-.thread-folder-path { overflow: hidden; text-overflow: ellipsis; }
 .thread-folder-branch { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.thread-header-actions { display: flex; align-items: center; gap: 0; flex: 0 1 auto; margin-left: auto; min-width: 0; }
-/* The Thread's Git controls wrap onto another line before the branch name, counters or actions are cut off. */
-.thread-git { min-width: 0; margin-right: 32px; }
-.thread-git + .usage-rings { gap: 14px; padding-left: 24px; border-left: 1px solid var(--line); }
-.thread-git .git-header { flex-wrap: wrap; margin-left: 0; gap: 6px; row-gap: 4px; justify-content: flex-end; }
+/* The branch and Git action sit under the title; the usage rings stay at the far right of the same row. */
+.thread-git { min-width: 0; }
+.thread-header-bar > .usage-rings { flex: none; margin-left: auto; gap: 14px; padding-left: 24px; border-left: 1px solid var(--line); }
+.thread-git .git-header { flex-wrap: nowrap; margin-left: -8px; gap: 6px; }
 .thread-git .git-header > .branch-picker { flex: 0 1 auto; max-width: 100%; }
 .thread-git .branch-button { width: auto; max-width: 100%; }
 .thread-git .branch-button .branch-name { max-width: min(220px, 40vw); }

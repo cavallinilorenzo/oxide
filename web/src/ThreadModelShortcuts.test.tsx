@@ -41,7 +41,7 @@ function setup(opts: { threadId: number | null; status?: string; turnCount?: num
   return calls;
 }
 const render = (threadId: number | null, draft = "") => act(async () => root.render(
-  <ThreadView threadId={threadId} projectId={1} projectPath="/test" draft={draft}
+  <ThreadView threadId={threadId} projectId={1} draft={draft}
     onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
     onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
 const composer = () => container.querySelector<HTMLElement>('[role="textbox"]')!;

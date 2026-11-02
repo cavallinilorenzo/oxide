@@ -1,18 +1,14 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { FileDirectoryIcon, GitBranchIcon, PencilIcon } from "@primer/octicons-react";
-import { commands, type ModelInfo, type Thread } from "./bindings";
+import type { ReactNode } from "react";
+import { GitBranchIcon, PencilIcon } from "@primer/octicons-react";
+import type { Thread } from "./bindings";
 import { ProviderAvatar } from "./ProviderAvatar";
 import { UsageRing } from "./UsageRing";
-import { threadHeaderLines } from "./headerLines";
 
 interface ThreadHeaderProps {
   threadId: number | null;
   thread: Thread | null;
   title: string;
   provider: string;
-  model: string | null;
-  effort: string | null;
-  projectPath: string;
   /** The Thread's Git controls: they replace the dispatch-time branch label with the live one. */
   gitControls?: ReactNode;
   reportsUsage: boolean;
@@ -24,15 +20,15 @@ interface ThreadHeaderProps {
   onCancelRename: () => void;
 }
 
-/** The banner at the top of a Thread: Provider avatar, title, Model, folder and usage ring. */
+/**
+ * The banner at the top of a Thread: Provider avatar, title, branch and Git actions, usage ring.
+ * The Model lives in the composer and the folder in the app header.
+ */
 export function ThreadHeader({
   threadId,
   thread,
   title,
   provider,
-  model,
-  effort,
-  projectPath,
   gitControls,
   reportsUsage,
   editing,
@@ -42,26 +38,6 @@ export function ThreadHeader({
   onSaveRename,
   onCancelRename,
 }: ThreadHeaderProps) {
-  const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
-  useEffect(() => {
-    let active = true;
-    void commands.getModelCatalog(provider, false).then((res) => {
-      if (active && res.status === "ok") setCatalog({ provider, models: res.data });
-    });
-    return () => {
-      active = false;
-    };
-  }, [provider]);
-
-  const lines = threadHeaderLines({
-    provider,
-    model,
-    effort,
-    thread,
-    projectPath,
-    catalog: catalog?.provider === provider ? catalog.models : null,
-  });
-
   return (
     <div className="thread-header-bar">
       <div className="thread-avatar">
@@ -105,21 +81,17 @@ export function ThreadHeader({
             )}
           </div>
         )}
-        <div className="thread-meta-line">{lines.modelLine}</div>
-        <div className="thread-folder-line" title={lines.folder.path}>
-          <FileDirectoryIcon size={12} />
-          <span className="thread-folder-path">{lines.folder.text}</span>
-          {!gitControls && lines.folder.branch && (
+        {gitControls ? (
+          <div className="thread-git">{gitControls}</div>
+        ) : (
+          thread?.worktreePath && thread.branch && (
             <span className="thread-folder-branch">
-              <GitBranchIcon size={12} /> {lines.folder.branch}
+              <GitBranchIcon size={12} /> {thread.branch}
             </span>
-          )}
-        </div>
+          )
+        )}
       </div>
-      <div className="thread-header-actions">
-        {gitControls && <div className="thread-git">{gitControls}</div>}
-        <UsageRing provider={provider} reportsUsage={reportsUsage} />
-      </div>
+      <UsageRing provider={provider} reportsUsage={reportsUsage} />
     </div>
   );
 }

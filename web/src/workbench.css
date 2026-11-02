@@ -269,16 +269,6 @@
   color: var(--dim);
   font-size: 11px;
 }
-.editor-language-panel {
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: min(600px, 100%);
-  z-index: 25;
-  overflow: auto;
-  background: var(--bg2);
-  border-left: 1px solid var(--line);
-  box-shadow: -12px 0 40px #0004;
-}
 .editor-quick-open {
   width: min(600px, 90vw);
   padding: 10px;
@@ -310,6 +300,9 @@
 
 .language-tools {
   padding: 20px;
+}
+.language-tools.embedded {
+  padding: 0;
 }
 .language-tools > header {
   display: flex;

@@ -75,9 +75,7 @@ it("cycles major visible regions with F6 and Shift+F6 in visual order", async ()
   await settle();
 
   // Initially: sidebar and centre are visible; tools dock is closed.
-  const sidebarToggle = host.querySelector<HTMLButtonElement>('button[aria-label="Toggle sidebar"]')!;
   const toolsToggle = host.querySelector<HTMLButtonElement>('button[aria-label="Toggle tools panel"]')!;
-  expect(sidebarToggle).toBeTruthy();
   expect(toolsToggle).toBeTruthy();
 
   // Focus starts or moves into sidebar
@@ -183,7 +181,6 @@ it("collapsing and restoring sidebar moves focus to handle and back into sidebar
   await act(async () => root.render(<App />));
   await settle();
 
-  const sidebarToggle = host.querySelector<HTMLButtonElement>('button[aria-label="Toggle sidebar"]')!;
   const searchInput = host.querySelector<HTMLInputElement>('.sidebar-search input')!;
   searchInput.focus();
   expect(document.activeElement).toBe(searchInput);
@@ -192,7 +189,7 @@ it("collapsing and restoring sidebar moves focus to handle and back into sidebar
   await press("E", { ctrlKey: true, shiftKey: true });
   await settle();
   expect(host.querySelector('#workspace-sidebar')?.hasAttribute("hidden")).toBe(true);
-  expect(document.activeElement).toBe(sidebarToggle);
+  expect(document.activeElement).toBe(host.querySelector('button[aria-label="Toggle sidebar"]'));
 
   // Restore sidebar with Mod+Shift+E deliberately restores focus into sidebar
   await press("E", { ctrlKey: true, shiftKey: true });

@@ -1,5 +1,5 @@
 import { useDictationTarget } from "./dictation";
-import { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AttachmentChip } from "./AttachmentChip";
 import { attachmentPreview } from "./attachmentPreview";
@@ -495,7 +495,72 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
 
   useDictationTarget(root, insertText, !disabled);
 
+  // The caret is drawn by us: the native one is as tall as the whole line and sits flush against
+  // glyphs such as "/". Wherever we cannot measure it (an empty line, a selection, IME
+  // composition) the native caret is used instead.
+  const field = useRef<HTMLDivElement>(null);
+  const caretEl = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    const box = field.current;
+    const mark = caretEl.current;
+    if (!el || !box || !mark) return;
+    let lastKey = "";
+    const native = () => {
+      mark.hidden = true;
+      delete el.dataset.caret;
+    };
+    const update = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || !selection.isCollapsed || composing.current ||
+          document.activeElement !== el || !el.contains(selection.anchorNode)) {
+        // Not focused or a range is selected: no caret to draw (the native one is hidden then too).
+        mark.hidden = true;
+        if (document.activeElement !== el || composing.current) delete el.dataset.caret;
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.startContainer.nodeType === Node.TEXT_NODE ? range.getClientRects()[0] : undefined;
+      if (!rect || rect.height === 0) return native();
+      const host = box.getBoundingClientRect();
+      const area = el.getBoundingClientRect();
+      if (rect.top < area.top || rect.bottom > area.bottom) return native();
+      // Sized to the letters (about their cap height), not to the font's full ascent and descent.
+      const fontSize = parseFloat(getComputedStyle(el).fontSize) || 14;
+      const height = Math.round(fontSize * 0.8);
+      mark.style.height = `${height}px`;
+      mark.style.transform = `translate(${rect.right - host.left + 1}px, ${rect.top - host.top + (rect.height - height) / 2 + fontSize * 0.06}px)`;
+      const key = `${rect.right}:${rect.top}`;
+      if (key !== lastKey) {
+        // A caret that has just moved is solid, then blinks again.
+        lastKey = key;
+        mark.style.animation = "none";
+        void mark.offsetWidth;
+        mark.style.animation = "";
+      }
+      mark.hidden = false;
+      el.dataset.caret = "custom";
+    };
+    document.addEventListener("selectionchange", update);
+    el.addEventListener("scroll", update);
+    el.addEventListener("focus", update);
+    el.addEventListener("blur", update);
+    el.addEventListener("input", update);
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      document.removeEventListener("selectionchange", update);
+      el.removeEventListener("scroll", update);
+      el.removeEventListener("focus", update);
+      el.removeEventListener("blur", update);
+      el.removeEventListener("input", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
   return (
+    <div className="composer-field" ref={field}>
+    <span ref={caretEl} className="composer-caret" aria-hidden="true" hidden />
     <div
       ref={root}
       className={className ?? "composer-input"}
@@ -535,5 +600,6 @@ export const ComposerInput = forwardRef<ComposerHandle, ComposerInputProps>(func
       onClick={handleClick}
       onDrop={(e) => e.preventDefault()}
     />
+    </div>
   );
 });

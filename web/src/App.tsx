@@ -754,19 +754,21 @@ export function App() {
         onStartThread={startThreadIn} onOpenProject={openProject} onThreadDeleted={onThreadDeleted} />
       <header className="header" data-tauri-drag-region>
         {isWindows && <AppMenu onNewThread={() => { setShowSettings(false); void startNewThread(); }} />}
-        <button className="icon-btn" aria-label="Toggle sidebar" title={`Toggle sidebar (${keys("toggleSidebar")})`} aria-pressed={layout.sidebarVisible}
-          onClick={() => {
-            const willShow = !layout.sidebarVisible;
-            setShowSidebar(willShow);
-            setRegionPriority("sidebar");
-            setMaximized(false);
-            if (willShow) requestAnimationFrame(() => focusRegion("sidebar"));
-          }}><RepoIcon size={16} /></button>
-        <button className="icon-btn" aria-label="Open a Project" title={`Open a Project (${keys("openProject")})`} onClick={() => overlays.current?.openPalette()}><PlusIcon size={16} /></button>
+        {/* The sidebar already holds New Thread and Open a Project; the header only offers the way back when it is hidden. */}
+        {!layout.sidebarVisible && (
+          <button className="icon-btn" aria-label="Toggle sidebar" title={`Show sidebar (${keys("toggleSidebar")})`} aria-pressed={false}
+            onClick={() => {
+              setShowSidebar(true);
+              setRegionPriority("sidebar");
+              setMaximized(false);
+              requestAnimationFrame(() => focusRegion("sidebar"));
+            }}><RepoIcon size={16} /></button>
+        )}
         <div className="header-project" data-tauri-drag-region>
         {selected ? (
-          <span className="title" data-tauri-drag-region>
-            <strong title={readablePath(selected.path)}>{selected.name}</strong>
+          <span className="title project-label" data-tauri-drag-region title={`Project: ${readablePath(selected.path)}`}>
+            <RepoIcon size={13} />
+            <strong>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
         ) : !isWindows ? (

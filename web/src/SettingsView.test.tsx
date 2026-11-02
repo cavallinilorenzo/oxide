@@ -36,9 +36,12 @@ it("offers supported defaults and saves appearance, dictation and each Provider 
     if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;
     throw new Error(`Unexpected command ${command}`);
   });
-  await act(async () => root.render(<SettingsView onClose={() => {}} />));
+  await act(async () => root.render(<SettingsView onRunCommand={() => {}} onClose={() => {}} />));
   expect(container.querySelector('nav[aria-label="Settings sections"] a[href="#settings-dictation"]')?.textContent).toBe("Dictation");
   expect(container.querySelector('[aria-label^="Default Provider:"]')).not.toBeNull();
+  // Language tools live here, no longer behind a gear in the Files editor.
+  expect(container.querySelector('nav[aria-label="Settings sections"] a[href="#settings-language"]')?.textContent).toBe("Language tools");
+  expect(container.querySelector('#settings-language')).not.toBeNull();
   expect(container.textContent).not.toContain("Open in editor");
   const dictation = container.querySelector<HTMLInputElement>('[aria-labelledby="settings-dictation"] input[type="checkbox"]')!;
   act(() => dictation.click());
@@ -108,7 +111,7 @@ it("groups model effort variants while keeping the saved effort selectable", asy
     if (command === "plugin:event|unlisten" || command === "dictation_cancel") return null;
     throw new Error(`Unexpected command ${command}`);
   });
-  await act(async () => root.render(<SettingsView onClose={() => {}} />));
+  await act(async () => root.render(<SettingsView onRunCommand={() => {}} onClose={() => {}} />));
   const model = container.querySelector<HTMLButtonElement>('button[aria-label="Antigravity CLI Model: Gemini Pro"]')!;
   expect(model).toBeTruthy();
   act(() => model.click());

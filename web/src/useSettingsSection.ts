@@ -2,7 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 
 export const SETTINGS_SECTIONS = [
   ["appearance", "Appearance"], ["dictation", "Dictation"], ["general", "General"], ["providers", "Providers"],
-  ["github", "GitHub tools"], ["shortcuts", "Keyboard shortcuts"], ["updates", "Updates"],
+  ["github", "GitHub tools"], ["language", "Language tools"], ["shortcuts", "Keyboard shortcuts"], ["updates", "Updates"],
 ] as const;
 
 /** Track headings inside the Settings scroller, including layout changes. */

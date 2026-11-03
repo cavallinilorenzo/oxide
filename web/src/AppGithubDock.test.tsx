@@ -15,6 +15,12 @@ vi.mock("./QuitDialog", () => ({ QuitDialog: () => null }));
 vi.mock("./FilesPanel", () => ({ FilesPanel: () => null }));
 vi.mock("./TerminalPanel", () => ({ TerminalPanel: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
+// jsdom does not implement HTMLCanvasElement.getContext(); some components touch it during render.
+class MockCanvasElement extends HTMLElement {
+  getContext() { return null; }
+  toDataURL() { return ""; }
+}
+Object.defineProperty(globalThis, "HTMLCanvasElement", { value: MockCanvasElement, writable: true, configurable: true });
 Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
 
 let host: HTMLDivElement;

@@ -893,7 +893,24 @@ fn explicit_gpu_failure_fixture() -> (
         calls: AtomicUsize::new(0),
         samples_seen: Default::default(),
     });
-    let dictation = Dictation::with_runtime(gpu.clone()).with_cpu_runtime(cpu.clone());
+    let dictation = Dictation::with_runtime(gpu.clone())
+        .with_cpu_runtime(cpu.clone())
+        .with_resources(Arc::new(|| {
+            use oxide_core::dictation::resources::*;
+            ResourceSnapshot {
+                captured_at_secs: now_secs(),
+                cpu: CpuResources {
+                    architecture: "x86_64".into(),
+                    model: "CPU".into(),
+                    usable_cores: 8,
+                    instruction_compatible: Some(true),
+                },
+                total_ram_bytes: Some(16 << 30),
+                available_ram_bytes: Some(8 << 30),
+                baseline_bytes: Some(1 << 29),
+                free_disk_bytes: None,
+            }
+        }));
     dictation.inject_recording_for_test(
         RecordingSnapshot {
             language: "auto".into(),

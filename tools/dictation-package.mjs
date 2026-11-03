@@ -2,13 +2,16 @@
 // what an installer or app bundle actually contains. See docs/dictation.md#packaging-and-distribution.
 //
 //   node tools/dictation-package.mjs setup                       Windows, elevated: install the pinned CUDA Toolkit and Vulkan SDK
-//   node tools/dictation-package.mjs stage                       Windows (loads the x64 MSVC environment): build the release workers and
-//                                                                stage them with their runtime for tauri.windows-gpu.conf.json
-//   node tools/dictation-package.mjs verify windows-x64 [dir]    an installed folder (default: the built <target>/release)
+//   node tools/dictation-package.mjs stage                       Windows (loads the x64 MSVC environment): build the release workers once and
+//                                                                stage one flat runtime folder per backend (worker, DLLs, licences)
+//   node tools/dictation-package.mjs probe [staged-dir]          Windows: start each staged worker with no SDK on PATH and check its answer
+//   node tools/dictation-package.mjs offline                     merge the staged runtimes beside the app for tauri.windows-offline.conf.json
+//   node tools/dictation-package.mjs verify windows-x64 [dir]    the CPU-only installed folder (default: the built <target>/release)
+//   node tools/dictation-package.mjs verify windows-x64-offline [dir]   the same with both workers and their runtime beside the app
 //   node tools/dictation-package.mjs verify macos-aarch64 [app]  default: <target>/release/bundle/macos/Oxide.app
-//   node tools/dictation-package.mjs smoke [dir] [--launch]      Windows: probe each packaged worker with no SDK on PATH;
-//                                                                --launch also starts the app (CI)
+//   node tools/dictation-package.mjs smoke [dir] [--launch]      Windows: start the installed app (CI); probe any worker beside it
 //
+// The runtime packages themselves are zipped, indexed and signed by tools/dictation-runtimes.mjs.
 // <target> is CARGO_TARGET_DIR, or target/ in the repository.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -22,13 +25,16 @@ import { assertBuildSpace } from "./checks/build-space.mjs";
 import { peImports } from "./checks/pe-imports.mjs";
 import { msvcEnv } from "./checks/msvc-env.mjs";
 import {
-  checkAppLaunch, checkDictationPackage, checkWorkerProbe, CUDA_RUNTIME, DICTATION_WORKER_NAMES, GPU_BUILD_SDKS, runtimeManifestProblems,
+  checkAppLaunch, checkDictationPackage, checkWorkerProbe, CUDA_RUNTIME, DICTATION_WORKER_NAMES, GPU_BUILD_SDKS, RUNTIME_BACKENDS, runtimeManifestProblems,
 } from "./ci/policy.mjs";
 import { releaseWorker } from "./dictation-build.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-// Fixed, so tauri.windows-gpu.conf.json can name each staged file.
+// One folder per backend under STAGING, packaged by dictation-runtimes.mjs.
 export const STAGING = join(repoRoot, "target", "dictation-runtime", "windows-x64");
+// Fixed, so tauri.windows-offline.conf.json can name it.
+export const OFFLINE = join(repoRoot, "target", "dictation-runtime", "windows-x64-offline");
+const BUILD_INFO = "build.json";
 const MANIFEST = "dictation-runtime.json";
 // Redistributable per the NVIDIA CUDA EULA (Attachment A); see docs/licenses/cuda.txt.
 const CUDA_REDISTRIBUTABLE = new Set(CUDA_RUNTIME.map((dll) => dll.toLowerCase()));
@@ -134,7 +140,7 @@ function nativeVersions() {
   return { whisperRs: version("whisper-rs"), whisperRsSys: version("whisper-rs-sys"), whisperCpp: engine };
 }
 
-/** Build both release workers and stage them, their runtime and the manifest. */
+/** Build both release workers once and stage one flat runtime folder per backend. */
 function stage() {
   requireWindows("stage");
   for (const variable of ["CUDA_PATH", "VULKAN_SDK"]) {
@@ -147,7 +153,7 @@ function stage() {
   for (const tool of ["cl.exe", "cmake.exe", "ninja.exe", "glslc.exe", "nvcc.exe"]) {
     if (spawnSync("where.exe", [tool], { stdio: "ignore", env }).status !== 0) throw new Error(`Missing ${tool}: see docs/dictation.md#packaging-and-distribution`);
   }
-  const workers = ["vulkan", "cuda"].map((backend) => releaseWorker(backend, env));
+  const workers = Object.keys(RUNTIME_BACKENDS).map((backend) => releaseWorker(backend, env));
   for (const worker of workers) {
     assertBuildSpace(repoRoot);
     run("cargo", worker.args, { cwd: repoRoot, env: worker.env });
@@ -156,27 +162,53 @@ function stage() {
   assertBuildSpace(repoRoot);
 
   rmSync(STAGING, { recursive: true, force: true });
-  mkdirSync(STAGING, { recursive: true });
-  const runtime = runtimeFiles(built, runtimeSources(env), (path) => peImports(readFileSync(path)));
-  for (const from of built) copyFileSync(from, join(STAGING, basename(from)));
-  for (const { name, from } of runtime) copyFileSync(from, join(STAGING, name));
-
-  const files = readdirSync(STAGING).sort().map((path) => ({ path, bytes: statSync(join(STAGING, path)).size, sha256: sha256(join(STAGING, path)) }));
-  const manifest = {
-    schema: 1,
+  const sources = runtimeSources(env);
+  const importsOf = (path) => peImports(readFileSync(path));
+  for (const [index, backend] of Object.keys(RUNTIME_BACKENDS).entries()) {
+    const folder = join(STAGING, backend);
+    mkdirSync(folder, { recursive: true });
+    copyFileSync(built[index], join(folder, basename(built[index])));
+    // Each package carries only what its own worker loads.
+    for (const { name, from } of runtimeFiles([built[index]], sources, importsOf)) copyFileSync(from, join(folder, name));
+    for (const license of RUNTIME_BACKENDS[backend].licenses) copyFileSync(join(repoRoot, "docs", "licenses", license.replace(/^LICENSE-/, "")), join(folder, license));
+    for (const name of readdirSync(folder).sort()) console.log(`${String(statSync(join(folder, name)).size).padStart(12)}  ${backend}/${name}`);
+  }
+  const info = {
+    schema: 2,
     platform: "windows-x64",
     native: nativeVersions(),
     build: { ggmlNative: workers[0].env.GGML_NATIVE, cudaToolkit: basename(process.env.CUDA_PATH), vulkanSdk: basename(process.env.VULKAN_SDK) },
     backends: [
       { id: "cpu", in: "the app", requires: "an x64 CPU with AVX2, FMA and F16C" },
-      { id: "vulkan", worker: basename(built[0]), requires: "a Vulkan 1.2 driver with 16-bit storage and timestamp queries" },
-      { id: "cuda", worker: basename(built[1]), requires: `an NVIDIA driver for CUDA ${GPU_BUILD_SDKS.cuda.version} and compute capability 5.0 or later` },
+      ...Object.keys(RUNTIME_BACKENDS).map((id) => ({ id, worker: RUNTIME_BACKENDS[id].worker, requires: RUNTIME_BACKENDS[id].requires })),
     ],
-    files,
   };
-  writeFileSync(join(STAGING, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(join(STAGING, BUILD_INFO), `${JSON.stringify(info, null, 2)}\n`);
+  console.log(`Staged in ${STAGING}. Package with: node tools/dictation-runtimes.mjs package`);
+}
+
+/**
+ * The opt-in offline layout: both workers and their runtime merged beside the app, as before
+ * runtimes were downloadable. Bundle with tauri.windows-offline.conf.json.
+ */
+function offline() {
+  requireWindows("offline");
+  const info = JSON.parse(readFileSync(join(STAGING, BUILD_INFO), "utf8"));
+  rmSync(OFFLINE, { recursive: true, force: true });
+  mkdirSync(OFFLINE, { recursive: true });
+  for (const backend of Object.keys(RUNTIME_BACKENDS)) {
+    for (const name of readdirSync(join(STAGING, backend)).filter((file) => !file.startsWith("LICENSE-") && file !== "manifest.json")) {
+      const from = join(STAGING, backend, name);
+      const to = join(OFFLINE, name);
+      // The Visual C++ DLLs are shared by both packages and must be the same file.
+      if (existsSync(to) && sha256(to) !== sha256(from)) throw new Error(`${name} differs between the Vulkan and CUDA runtimes.`);
+      copyFileSync(from, to);
+    }
+  }
+  const files = readdirSync(OFFLINE).sort().map((path) => ({ path, bytes: statSync(join(OFFLINE, path)).size, sha256: sha256(join(OFFLINE, path)) }));
+  writeFileSync(join(OFFLINE, MANIFEST), `${JSON.stringify({ ...info, files }, null, 2)}\n`);
   for (const { path, bytes } of files) console.log(`${String(bytes).padStart(12)}  ${path}`);
-  console.log(`Staged in ${STAGING}. Bundle with: tauri build --bundles nsis --config crates/oxide-app/tauri.windows-gpu.conf.json`);
+  console.log(`Merged in ${OFFLINE}. Bundle with: tauri build --bundles nsis --config crates/oxide-app/tauri.windows-offline.conf.json`);
 }
 
 function listFiles(root, directory = root) {
@@ -217,6 +249,12 @@ function macosInventory(app) {
 
 function verify(platform, location) {
   if (platform === "windows-x64") {
+    // The one installer is CPU only: no worker, no GPU runtime, no runtime manifest.
+    const dir = windowsDir(location);
+    const result = checkDictationPackage(platform, windowsInventory(dir));
+    return report(result.problems, result.message, dir);
+  }
+  if (platform === "windows-x64-offline") {
     const dir = windowsDir(location);
     const result = checkDictationPackage(platform, windowsInventory(dir));
     const manifest = readManifest(dir);
@@ -230,7 +268,7 @@ function verify(platform, location) {
     const result = checkDictationPackage(platform, macosInventory(app));
     return report(result.problems, result.message, app);
   }
-  throw new Error(`Unknown platform "${platform}": use windows-x64 or macos-aarch64.`);
+  throw new Error(`Unknown platform "${platform}": use windows-x64, windows-x64-offline or macos-aarch64.`);
 }
 
 function report(problems, message, where) {
@@ -279,31 +317,48 @@ async function launchApp(dir, env) {
   return checkAppLaunch({ app, running: !ended, ...ended, seconds: LAUNCH_SECONDS });
 }
 
+/** Start one worker as an end user's machine would and judge its answer. */
+function probeWorker(path, worker, env, engineVersion) {
+  const result = spawnSync(path, ["--stdio"], { cwd: tmpdir(), env, input: frame("Probe"), timeout: 30_000, windowsHide: true });
+  const verdict = checkWorkerProbe({ worker, status: result.status, response: parseFrame(result.stdout), engineVersion });
+  if (verdict.ok) console.log(verdict.message);
+  else console.error(`${verdict.message}\n${String(result.stderr ?? "").slice(0, 4000)}`);
+  return verdict.ok;
+}
+
+/** Probe the staged runtime folders: each worker with no SDK and no developer PATH. */
+function probe(location) {
+  requireWindows("probe");
+  const staged = resolve(location ?? STAGING);
+  let engineVersion;
+  try { engineVersion = JSON.parse(readFileSync(join(staged, BUILD_INFO), "utf8")).native?.whisperCpp; } catch { /* reported below */ }
+  if (!engineVersion) return report([`${join(staged, BUILD_INFO)} is missing or names no whisper.cpp version: run stage first`], "", staged);
+  const env = endUserEnv();
+  let failed = 0;
+  for (const [backend, { worker }] of Object.entries(RUNTIME_BACKENDS)) {
+    const path = join(staged, backend, worker);
+    if (!existsSync(path)) {
+      console.error(`${worker}: missing from ${join(staged, backend)}`);
+      failed++;
+    } else if (!probeWorker(path, worker, env, engineVersion)) failed++;
+  }
+  return failed > 0 ? 1 : 0;
+}
+
 /**
- * Probe each packaged worker as an end user's machine would: no SDK, no developer
- * PATH. `--launch` also starts the installed app (CI does, on a machine with no GPU).
+ * Start the installed app with no GPU runtime it could load (`--launch`, CI does, on a machine
+ * with no GPU). The installer ships no worker; an offline package's workers are probed too.
  */
 async function smoke(location, { launch = false } = {}) {
   requireWindows("smoke");
   const dir = windowsDir(location);
-  const engineVersion = readManifest(dir)?.native?.whisperCpp;
-  if (!engineVersion) return report([`${MANIFEST} is missing or names no whisper.cpp version`], "", dir);
   const env = endUserEnv();
   let failed = 0;
-  for (const worker of DICTATION_WORKER_NAMES) {
-    const path = join(dir, worker);
-    if (!existsSync(path)) {
-      console.error(`${worker}: missing from ${dir}`);
-      failed++;
-      continue;
-    }
-    const result = spawnSync(path, ["--stdio"], { cwd: tmpdir(), env, input: frame("Probe"), timeout: 30_000, windowsHide: true });
-    const verdict = checkWorkerProbe({ worker, status: result.status, response: parseFrame(result.stdout), engineVersion });
-    if (verdict.ok) console.log(verdict.message);
-    else {
-      console.error(`${verdict.message}\n${String(result.stderr ?? "").slice(0, 4000)}`);
-      failed++;
-    }
+  const beside = DICTATION_WORKER_NAMES.filter((worker) => existsSync(join(dir, worker)));
+  if (beside.length > 0) {
+    const engineVersion = readManifest(dir)?.native?.whisperCpp;
+    if (!engineVersion) return report([`${MANIFEST} is missing or names no whisper.cpp version`], "", dir);
+    for (const worker of beside) if (!probeWorker(join(dir, worker), worker, env, engineVersion)) failed++;
   }
   if (launch) {
     const verdict = await launchApp(dir, env);
@@ -321,12 +376,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (command === "setup") await setup();
     else if (command === "stage") stage();
+    else if (command === "offline") offline();
+    else if (command === "probe") process.exitCode = probe(args[0]);
     else if (command === "verify") process.exitCode = verify(args[0], args[1]);
     else if (command === "smoke") {
       const launch = args.includes("--launch");
       process.exitCode = await smoke(args.find((arg) => arg !== "--launch"), { launch });
     } else {
-      console.error("Usage: node tools/dictation-package.mjs setup | stage | verify <windows-x64|macos-aarch64> [path] | smoke [dir] [--launch]");
+      console.error("Usage: node tools/dictation-package.mjs setup | stage | probe [staged] | offline | verify <windows-x64|windows-x64-offline|macos-aarch64> [path] | smoke [dir] [--launch]");
       process.exitCode = 2;
     }
   } catch (error) {

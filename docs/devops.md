@@ -127,10 +127,10 @@ disk usage" for cache maintenance and output locations. CI keeps its existing
 
 ### `bundle (macos)` and `bundle (windows)`
 
-- **What:** call the shared [`build.yml`](../.github/workflows/build.yml) with `release: false`: an unsigned release-profile `tauri build` (macOS `.app` + `.dmg`; Windows NSIS with the Vulkan and CUDA dictation workers), then the dictation package checks: macOS verifies the app; Windows installs the setup silently into a scratch folder, verifies it and probes each worker and the app with no SDK on `PATH`. The artifact is kept 7 days.
+- **What:** call the shared [`build.yml`](../.github/workflows/build.yml) with `release: false`: an unsigned release-profile `tauri build` (macOS `.app` + `.dmg`; Windows NSIS, CPU only), then the dictation package checks: macOS verifies the app; Windows builds the Vulkan and CUDA workers once, packages them as runtime zips and probes them, then installs the setup silently into a scratch folder, verifies it has no worker and starts the app with no SDK on `PATH`. The runtime zips are kept 7 days with the installer. The artifact is kept 7 days.
 - **Why:** a debug `cargo test` never runs `tauri build`. This catches config, capability, icon, resource and frontend-embedding breakage, and a package that would need a developer SDK or crash without a GPU driver. Each check and the failure it prevents are in [docs/dictation.md](dictation.md#checks-and-what-each-prevents). The runners have no GPU, so this is not hardware validation.
 - **When / where:** `bundle` lane on PRs (Tauri config or capabilities, icons, bundle resources, manifests and lockfiles, build scripts, the build workflow); **always** on `main` and `release/**`, so no commit is released without a proven bundle.
-- **Local:** `node tools/check.mjs` builds your OS's bundle and runs its package checks; on Windows it first stages the GPU workers (`node tools/dictation-package.mjs stage`, which needs the Vulkan SDK and CUDA Toolkit from `node tools/dictation-package.mjs setup` and loads the Visual Studio x64 environment itself). It reports the other OS's bundle, and the silent install that only CI does, as skipped.
+- **Local:** `node tools/check.mjs` builds your OS's bundle and runs its package checks; on Windows it first builds and packages the GPU workers (`node tools/dictation-package.mjs stage` and `node tools/dictation-runtimes.mjs package`, which need the Vulkan SDK and CUDA Toolkit from `node tools/dictation-package.mjs setup` and loads the Visual Studio x64 environment itself). It reports the other OS's bundle, and the silent install that only CI does, as skipped.
 
 ### `gate`
 
@@ -148,7 +148,7 @@ disk usage" for cache maintenance and output locations. CI keeps its existing
 | --- | --- |
 | `rust` | crates, Cargo manifests or lock, the toolchain file, Cargo config, the nextest config, the shared Rust setup action, the generated bindings |
 | `web` | the web app, `.node-version` |
-| `bundle` | Tauri config or capabilities, icons, bundle resources, Cargo or web manifests and lockfiles, build scripts, the GPU worker crates and the dictation build/package scripts, the shared build workflow, `.node-version` |
+| `bundle` | Tauri config or capabilities, icons, bundle resources, Cargo or web manifests and lockfiles, build scripts, the GPU worker crates and the dictation build/package/runtime scripts, the shared build workflow, `.node-version` |
 | `supplyChain` | any manifest or lockfile (including the GPU workers' lockfiles), `web/pnpm-workspace.yaml`, `deny.toml` |
 | `automation` | `.github/`, `tools/` |
 
@@ -176,9 +176,9 @@ nextest runs each test in its own process with the settings in [`.config/nextest
 
 - **What:** the one place installers are built. Inputs: `platform` (`macos-aarch64` or `windows-x64`) and `release`.
   - `release: false` (CI): unsigned, caches allowed, no updater artifacts.
-  - `release: true`: no caches at all, frozen installs, the updater config (`tauri.updater.conf.json`) and `TAURI_SIGNING_PRIVATE_KEY`. It fails if that key is missing. Apple signing and notarization switch on by themselves when the Apple secrets exist; without them the macOS build is ad-hoc signed (Apple Silicon refuses to launch an app with no signature) and the notes say so.
+  - `release: true`: no caches at all, frozen installs, the updater config (`tauri.updater.conf.json`) and `TAURI_SIGNING_PRIVATE_KEY`. It fails if that key is missing, and on Windows if `RUNTIME_SIGNING_KEY` is. Apple signing and notarization switch on by themselves when the Apple secrets exist; without them the macOS build is ad-hoc signed (Apple Silicon refuses to launch an app with no signature) and the notes say so.
 - **Why:** PR bundles and release bundles come from one definition, so what `main` proves is what ships. It declares the `release` environment itself, because a job that calls a reusable workflow can't name one, and the approval must guard the job that reads the secrets.
-- **Bundles:** macOS `app,dmg` (CPU and Metal dictation); Windows `nsis` only (the updater's Windows package is the NSIS setup) with CPU, Vulkan and CUDA dictation. On Windows the job installs the pinned Vulkan SDK and CUDA Toolkit (`node tools/dictation-package.mjs setup`), stages the release workers and their runtime (loading and checking the MSVC 14.44 environment with `vcvars64.bat -vcvars_ver=14.44` to avoid CUDA 12.9 frontend crashes with MSVC 14.51), and bundles with `crates/oxide-app/tauri.windows-gpu.conf.json`. `GGML_NATIVE=OFF` keeps native code portable instead of tuned to the runner. The Windows job has 180 minutes because it compiles CUDA kernels for every supported architecture.
+- **Bundles:** macOS `app,dmg` (CPU and Metal dictation); Windows `nsis` only (the updater's Windows package is the NSIS setup), CPU dictation, **no worker in the installer**. On Windows the job installs the pinned Vulkan SDK and CUDA Toolkit (`node tools/dictation-package.mjs setup`), builds the release workers once and stages one runtime folder per backend (loading and checking the MSVC 14.44 environment with `vcvars64.bat -vcvars_ver=14.44` to avoid CUDA 12.9 frontend crashes with MSVC 14.51), zips them (`node tools/dictation-runtimes.mjs package`), probes the workers, and bundles the plain installer. With `release: true` it then indexes and signs the runtimes ([Runtime packages](#runtime-packages)). `GGML_NATIVE=OFF` keeps native code portable instead of tuned to the runner. The Windows job has 180 minutes because it compiles CUDA kernels for every supported architecture.
 - **Local:** `node tools/check.mjs` builds an unsigned bundle for your OS. Signed builds are never made locally.
 
 Windows CI keeps a separate cache of `target/vw` and `target/cw`, including the
@@ -198,7 +198,7 @@ Trigger: a `v*.*.*` tag. Concurrency is per tag and never cancelled.
 
 1. **`verify`** (read-only): the tagged commit is an ancestor of `main` or a `release/*` branch; `checkReleaseVersion` finds the tag equal to the versions in `Cargo.toml`, `crates/oxide-app/tauri.conf.json` and `web/package.json`; `gate` succeeded on that commit's push run. *Why the last one:* the ruleset doesn't require up-to-date branches, so two individually green PRs can break together. Each refusal says what failed and how to fix it.
 2. **`build`** (both platforms in parallel, `release: true`) waits for approval of the `release` environment.
-3. **`publish`** (the only job with `contents`, `id-token` and `attestations: write`; it holds no signing secrets): names the deliverables (`Oxide_<v>_aarch64.dmg`, `Oxide_<v>_aarch64.app.tar.gz` + `.sig`, `Oxide_<v>_x64-setup.exe` + `.sig`), generates `latest.json` and `SHA256SUMS.txt`, attests build provenance for every file, exports the SPDX SBOM from the dependency graph, drafts the notes, and creates a **draft** release (a pre-release when the tag has a suffix such as `-rc.1`).
+3. **`publish`** (the only job with `contents`, `id-token` and `attestations: write`; it holds no signing secrets): names the deliverables (`Oxide_<v>_aarch64.dmg`, `Oxide_<v>_aarch64.app.tar.gz` + `.sig`, `Oxide_<v>_x64-setup.exe` + `.sig`, and the runtime assets `oxide-runtime-{vulkan,cuda}-windows-x64-<v>.zip`, `runtimes-index.json` and `runtimes-index.json.minisig`), generates `latest.json` and `SHA256SUMS.txt`, attests build provenance for every file, exports the SPDX SBOM from the dependency graph, drafts the notes, and creates a **draft** release (a pre-release when the tag has a suffix such as `-rc.1`).
 
 **Why rebuild at release instead of promoting `main`'s CI bundle:** signing happens inside `tauri build`, so promoting would mean giving every `main` push the signing secrets without approval. A clean, cache-free rebuild of the same commit, with locked dependencies and a pinned toolchain, is the safer trade.
 
@@ -229,6 +229,46 @@ Trigger: a `v*.*.*` tag. Concurrency is per tag and never cancelled.
 - **Why a GitHub App token:** a merge made with `GITHUB_TOKEN` triggers no `push` workflow, so the merge commit would never get a `gate` result and could never be released. The App credentials are the Dependabot secrets `AUTOMERGE_APP_ID` and `AUTOMERGE_APP_PRIVATE_KEY`. Without them the workflow only labels and comments.
 - **Config:** [`.github/dependabot.yml`](../.github/dependabot.yml) covers Cargo, the pnpm web app, GitHub Actions and the Rust toolchain, weekly on Monday at 07:00 Europe/Rome, with cooldowns (Cargo: 3 days patch, 7 minor, 14 major; pnpm: 7, 7, 14, to match `minimumReleaseAge`; Actions and the toolchain: 7; security updates are not delayed) and groups for packages that break when moved alone. The `supply-chain` job rejects Tauri drift if only half of a bump lands. [CONTRIBUTING](../CONTRIBUTING.md#dependencies-and-supply-chain-policy) has the details.
 - **pnpm:** `web/pnpm-workspace.yaml` sets `minimumReleaseAge` (7 days) and an explicit `allowBuilds` list, because Dependabot's cooldown only protects the updates Dependabot makes.
+
+### Runtime packages
+
+The Vulkan and CUDA workers are not in the installer. Each release publishes them as assets, and
+the app downloads and verifies them (`oxide_core::dictation::runtimes`).
+
+- **What:** the Windows `build` job of a release builds both workers once, then
+  `node tools/dictation-runtimes.mjs package` makes one flat zip per backend (worker, only the
+  DLLs that worker imports, `LICENSE-*.txt`, `manifest.json` with the SHA-256 of every file).
+  `index` writes `runtimes-index.json` (version, protocol, platform `windows-x86_64`, asset URL,
+  size, SHA-256, driver requirement per package) and signs it with `RUNTIME_SIGNING_KEY`
+  into `runtimes-index.json.minisig` (minisign format, so `minisign -V` checks it too).
+  `verify` then re-reads the published files like an installed app. `publish` uploads zips, index
+  and signature with the other assets, so `SHA256SUMS.txt` and the build attestation cover them.
+- **Why one signed index instead of trusting GitHub:** the installer carries only the public key
+  (`RUNTIME_PUBLIC_KEY`). A tampered asset, a redirected download or a swapped index fails the
+  signature or the size and SHA-256 the app checks before it installs anything.
+- **Where the app looks:** `RUNTIME_INDEX_URL` points at `releases/latest/download/runtimes-index.json`,
+  so apps see the newest published stable release. Each release's index lists its own assets;
+  a draft or pre-release is invisible until published. An app of an older protocol ignores
+  packages with another `protocolVersion` and keeps CPU.
+- **Why signing is in `build`, not `publish`:** `build` already holds the approved `release`
+  environment; `publish` deliberately holds no signing secret. The URLs in the index are known
+  before the release exists (`releases/download/<tag>/<asset>`), and a draft's assets are not
+  public, so nothing is served before a human publishes.
+- **Pull requests** build and check the zips (`package` refuses a package the app would
+  refuse) but never index or sign: they have no secret. `tests/dictation_runtimes_ci.rs` feeds
+  tool-made bytes to the core, so a format drift fails there, not in a release.
+- **Local:** `node tools/dictation-runtimes.mjs package` after `node tools/dictation-package.mjs stage`;
+  `verify <dir> [tag]` on a folder of release assets (for example a downloaded draft).
+- **Offline package:** `node tools/dictation-package.mjs offline`, then
+  `tauri build --bundles nsis --config crates/oxide-app/tauri.windows-offline.conf.json`
+  makes an installer with both workers beside the app (see [docs/dictation.md](dictation.md#build-prerequisites-and-commands)).
+  It is not part of the release; build it on demand.
+- **Rotating the key:** run `node tools/dictation-runtimes.mjs keygen <file>`, store the file's
+  contents as the `RUNTIME_SIGNING_KEY` secret of the `release` environment
+  (`gh secret set RUNTIME_SIGNING_KEY --env release < <file>`), delete the file, put the printed
+  public key in `RUNTIME_PUBLIC_KEY` and ship an app release. Until users update, their apps
+  reject the new index, so keep GPU downloads working by releasing the app first.
+  The release job refuses to sign when the secret and the embedded key differ.
 
 ## Release runbook
 
@@ -273,8 +313,9 @@ Only a Release Manager does this. Hotfixes on `release/x.y` branches follow the 
 
 ## Secrets and the fork/PR threat model
 
-- **Signing secrets exist only in the `release` environment:** `TAURI_SIGNING_PRIVATE_KEY` (and `_PASSWORD`), and, when available, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_PRIVATE_KEY`. They are readable only by a job for a `v*` tag after a Release Manager approves.
+- **Signing secrets exist only in the `release` environment:** `TAURI_SIGNING_PRIVATE_KEY` (and `_PASSWORD`), `RUNTIME_SIGNING_KEY` (the minisign key for the dictation runtime index), and, when available, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_PRIVATE_KEY`. They are readable only by a job for a `v*` tag after a Release Manager approves.
 - **The updater key** is the root of trust for every installed app: apps accept only packages signed by it, and the matching public key is in `crates/oxide-app/tauri.conf.json`. Keep an encrypted offline backup. If it is lost, installed apps can never be updated again. Never commit it or replace the public key casually.
+- **The runtime key** signs the index the app trusts to download native code (the GPU workers). Anyone who holds it can ship code to every app that enables a GPU runtime, so it exists only as that environment secret, with no copy on disk. Losing it means rotating (see [Runtime packages](#runtime-packages)).
 - **Fork PRs** run on `pull_request` with a read-only token and no secrets. Actions settings require approval for first-time contributors.
 - **No `pull_request_target` workflow checks out PR code.** Untrusted code never gets a write token.
 - **Every workflow starts from `contents: read`** (auto-merge from none) and grants more per job: `publish` alone writes releases and attestations, `verify-release` and `advisories` alone write issues, and the auto-merge job alone writes pull requests. Auto-merge also mints a short-lived GitHub App token, scoped to contents, pull requests and workflows, only for low-risk Dependabot PRs.

@@ -21,6 +21,13 @@ use std::{
 
 /// Worker wire protocol this app speaks. Packages with another value are refused.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// Where the app reads the signed index: the newest published GitHub release.
+/// `tools/ci/policy.mjs` (`runtimeIndexUrl`) builds the same URL for the release pipeline.
+pub const RUNTIME_INDEX_URL: &str =
+    "https://github.com/cavallinilorenzo/oxide/releases/latest/download/runtimes-index.json";
+/// minisign public key of the runtime index. The matching secret key is the
+/// `RUNTIME_SIGNING_KEY` secret of the `release` environment; rotating it ships with an app update.
+pub const RUNTIME_PUBLIC_KEY: &str = "RWQzp4rMqwJqdtrHva7LxoE60AY2eNiY6fX9et2tMv3mobgdPYbbN8vI";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_INDEX_BYTES: u64 = 1024 * 1024;
 
@@ -199,6 +206,7 @@ pub fn remove(root: &Path, backend: BackendId) -> Result<()> {
 pub struct RuntimeManager {
     source: Box<dyn RuntimeSource>,
     public_key: String,
+    platform: String,
 }
 
 impl RuntimeManager {
@@ -206,7 +214,24 @@ impl RuntimeManager {
         Self {
             source,
             public_key: public_key.into(),
+            platform: platform(),
         }
+    }
+
+    /// The manager every app instance uses: the published index and the key embedded in the app.
+    pub fn official() -> Self {
+        Self::new(
+            Box::new(HttpRuntimeSource {
+                index_url: RUNTIME_INDEX_URL.into(),
+            }),
+            RUNTIME_PUBLIC_KEY,
+        )
+    }
+
+    /// Offer the entries of another platform (tests that read packages built for Windows on any OS).
+    pub fn for_platform(mut self, platform: impl Into<String>) -> Self {
+        self.platform = platform.into();
+        self
     }
 
     /// Verified index entries for this platform and protocol.
@@ -217,12 +242,12 @@ impl RuntimeManager {
         }
         verify_signature(&self.public_key, &bytes, &signature)?;
         let index: RuntimeIndex = serde_json::from_slice(&bytes).map_err(err)?;
-        let platform = platform();
+        let platform = &self.platform;
         Ok(index
             .runtimes
             .into_iter()
             .filter(|e| {
-                e.platform == platform
+                e.platform == *platform
                     && e.protocol_version == PROTOCOL_VERSION
                     && dir_name(e.backend).is_ok()
                     && valid_version(&e.version)

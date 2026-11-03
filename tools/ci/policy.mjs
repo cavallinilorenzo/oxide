@@ -35,7 +35,7 @@ const PATH_RULES = [
   [/^(Cargo\.toml|Cargo\.lock|crates\/[^/]+\/Cargo\.toml|web\/package\.json|web\/pnpm-lock\.yaml)$/, ["bundle", "supplyChain"]],
   [/^(crates\/[^/]+\/build\.rs|tools\/build\.mjs|tools\/checks\/.*)$/, ["bundle"]],
   // The GPU workers are outside the workspace: only Windows packaging builds them.
-  [/^(crates\/oxide-(vulkan|cuda)-worker\/|tools\/dictation-(build|package)\.mjs$)/, ["bundle"]],
+  [/^(crates\/oxide-(vulkan|cuda)-worker\/|tools\/dictation-(build|package|runtimes)\.mjs$)/, ["bundle"]],
   [/^crates\/oxide-(vulkan|cuda)-worker\/Cargo\.lock$/, ["supplyChain"]],
   [new RegExp(`^${escapeRegExp(BUILD_WORKFLOW)}$`), ["bundle"]],
   [/^(web\/pnpm-workspace\.yaml|deny\.toml)$/, ["supplyChain"]],
@@ -390,8 +390,19 @@ const WINDOWS_SYSTEM_DLLS = new Set([
 ]);
 const isWindowsSystemDll = (dll) => WINDOWS_SYSTEM_DLLS.has(dll) || /^(api|ext)-ms-win-[\w-]+\.dll$/.test(dll);
 const DICTATION_NOTICES = ["licenses/whisper.txt", "licenses/dictation-fixture.txt"];
+const GPU_RUNTIME_FILES = new Set([...Object.keys(DICTATION_WORKERS), ...CUDA_RUNTIME, "dictation-runtime.json"].map((file) => file.toLowerCase()));
 const DICTATION_PACKAGES = {
+  // The one installer: CPU Whisper in the app. GPU workers arrive as downloadable runtime packages.
   "windows-x64": {
+    required: ["licenses/whisper.txt", "licenses/dictation-fixture.txt"],
+    problems: (inventory) => [
+      ...inventory.files.filter((file) => GPU_RUNTIME_FILES.has(file.toLowerCase())).map((file) => `${file} is part of a GPU runtime: it is downloaded, not installed`),
+      ...windowsPackageProblems(inventory),
+    ],
+    success: "The windows-x64 installer is CPU only: the app, its notices, no GPU worker or driver.",
+  },
+  // The opt-in offline package: the installer plus both workers and their runtime beside the app.
+  "windows-x64-offline": {
     required: [
       ...Object.keys(DICTATION_WORKERS), ...CUDA_RUNTIME, "dictation-runtime.json",
       ...DICTATION_NOTICES, "licenses/cuda.txt", "licenses/msvc-runtime.txt",
@@ -414,13 +425,13 @@ const DICTATION_PACKAGES = {
  */
 export function checkDictationPackage(platform, inventory = {}) {
   const spec = Object.hasOwn(DICTATION_PACKAGES, platform) ? DICTATION_PACKAGES[platform] : undefined;
-  if (!spec) throw new Error(`Unknown package platform "${platform}": use windows-x64 or macos-aarch64.`);
+  if (!spec) throw new Error(`Unknown package platform "${platform}": use windows-x64, windows-x64-offline or macos-aarch64.`);
   const files = (inventory.files ?? []).map((file) => file.replaceAll("\\", "/"));
   const present = new Set(files.map((file) => file.toLowerCase()));
   const problems = spec.required.filter((file) => !present.has(file.toLowerCase())).map((file) => `${file} is missing`);
   problems.push(...spec.problems({ ...inventory, files, present }));
   if (problems.length > 0) return { ok: false, problems, message: `The ${platform} package is incomplete: ${problems.join("; ")}.` };
-  return { ok: true, problems, message: `The ${platform} package has every dictation backend, its runtime and its notices.` };
+  return { ok: true, problems, message: spec.success ?? `The ${platform} package has every dictation backend, its runtime and its notices.` };
 }
 
 function windowsPackageProblems({ files, present, imports = {} }) {
@@ -545,6 +556,120 @@ export function checkAppLaunch({ app, running, exitCode, error, seconds }) {
   return { ok: false, message: `${app} exited 0x${(exitCode >>> 0).toString(16)} during startup` };
 }
 
+// Downloadable GPU runtimes: one flat zip per backend, listed in a signed index published
+// beside the app on GitHub Releases. The core (oxide_core::dictation::runtimes) is the other
+// half of this contract; runtimes.test.mjs pins the constants both sides must agree on.
+export const RUNTIME_PROTOCOL = WORKER_PROTOCOL;
+// What `runtimes::platform()` returns on Windows x64: Rust's OS and ARCH.
+export const RUNTIME_PLATFORM = "windows-x86_64";
+const RUNTIME_MANIFEST_FILE = "manifest.json";
+const CUDA_MINOR = GPU_BUILD_SDKS.cuda.version.split(".").slice(0, 2).join(".");
+export const RUNTIME_BACKENDS = {
+  vulkan: {
+    worker: "oxide-vulkan-worker.exe",
+    dlls: [],
+    licenses: ["LICENSE-whisper.txt", "LICENSE-msvc-runtime.txt"],
+    requires: "a Vulkan 1.2 driver with 16-bit storage and timestamp queries",
+  },
+  cuda: {
+    worker: "oxide-cuda-worker.exe",
+    dlls: CUDA_RUNTIME,
+    licenses: ["LICENSE-whisper.txt", "LICENSE-cuda.txt", "LICENSE-msvc-runtime.txt"],
+    requires: `an NVIDIA driver for CUDA ${CUDA_MINOR} and compute capability 5.0 or later`,
+  },
+};
+const RUNTIME_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+const SHA256 = /^[0-9a-f]{64}$/i;
+const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
+const FOLDER = /[\\/]/;
+
+const sortedKeys = (object) => Object.keys(object).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+function runtimeSpec(backend) {
+  if (!Object.hasOwn(RUNTIME_BACKENDS, backend)) throw new Error(`Unknown runtime backend "${backend}": use ${Object.keys(RUNTIME_BACKENDS).join(" or ")}.`);
+  return RUNTIME_BACKENDS[backend];
+}
+
+/** The release asset holding a backend's package. */
+export function runtimeAssetName(backend, version) {
+  runtimeSpec(backend);
+  if (!RUNTIME_VERSION.test(String(version))) throw new Error(`Invalid runtime version "${version}".`);
+  return `oxide-runtime-${backend}-windows-x64-${version}.zip`;
+}
+
+/** `manifest.json` of a package. `hashes` maps each file besides the manifest to its SHA-256. */
+export function runtimePackageManifest({ backend, version, hashes }) {
+  const { worker } = runtimeSpec(backend);
+  if (!RUNTIME_VERSION.test(String(version))) throw new Error(`Invalid runtime version "${version}".`);
+  return {
+    backend, version, protocolVersion: RUNTIME_PROTOCOL, worker,
+    files: Object.fromEntries(sortedKeys(hashes).map((name) => [name, hashes[name]])),
+  };
+}
+
+/**
+ * Whether a package folder is what the core accepts: a flat set of files, each listed in
+ * `manifest.json` with its SHA-256, holding the worker, its runtime and its licences, and
+ * loadable with only a graphics driver. `files` are the names present (the manifest
+ * included), `hashes` their SHA-256, `imports` the DLLs each executable or DLL loads.
+ */
+export function checkRuntimePackage(backend, { manifest, files = [], hashes = {}, imports = {} }) {
+  const spec = runtimeSpec(backend);
+  const fail = (problems) => ({ ok: false, problems, message: `The ${backend} runtime package is not valid: ${problems.join("; ")}.` });
+  if (!manifest || typeof manifest !== "object") return fail([`${RUNTIME_MANIFEST_FILE} is missing or unreadable`]);
+  const present = new Set(files.map((file) => file.toLowerCase()));
+  const content = files.filter((file) => file !== RUNTIME_MANIFEST_FILE);
+  const problems = [];
+  if (!present.has(RUNTIME_MANIFEST_FILE)) problems.push(`${RUNTIME_MANIFEST_FILE} is missing`);
+  if (manifest.backend !== backend) problems.push(`${RUNTIME_MANIFEST_FILE} is for backend ${manifest.backend}, not ${backend}`);
+  if (manifest.protocolVersion !== RUNTIME_PROTOCOL) problems.push(`${RUNTIME_MANIFEST_FILE} has protocol ${manifest.protocolVersion}, expected ${RUNTIME_PROTOCOL}`);
+  if (manifest.worker !== spec.worker) problems.push(`${RUNTIME_MANIFEST_FILE} names worker ${manifest.worker}, expected ${spec.worker}`);
+  for (const file of [spec.worker, ...spec.dlls, ...spec.licenses]) {
+    if (!present.has(file.toLowerCase())) problems.push(`${file} is missing`);
+  }
+  const listed = manifest.files ?? {};
+  for (const file of content) {
+    if (FOLDER.test(file)) problems.push(`${file} is not a flat file name`);
+    else if (!(file in listed)) problems.push(`${file} is not listed in ${RUNTIME_MANIFEST_FILE}`);
+    else if (String(hashes[file] ?? "").toLowerCase() !== String(listed[file]).toLowerCase()) problems.push(`${file} differs from ${RUNTIME_MANIFEST_FILE}`);
+  }
+  for (const file of Object.keys(listed)) {
+    if (!content.includes(file) && !problems.includes(`${file} is missing`)) problems.push(`${file} is missing`);
+  }
+  problems.push(...windowsPackageProblems({ files: content.filter((file) => !FOLDER.test(file)), present, imports }));
+  if (problems.length > 0) return fail(problems);
+  return { ok: true, problems, message: `The ${backend} runtime package lists ${Object.keys(listed).length} files and loads with only a graphics driver.` };
+}
+
+/**
+ * `runtimes-index.json`: every package of a release, with the asset URL, size and SHA-256
+ * the core checks. `packages` are `{ backend, bytes, sha256 }` of the zips as built.
+ */
+export function runtimeIndex(packages, { repository, tag }) {
+  if (!REPOSITORY.test(String(repository ?? ""))) throw new Error(`Invalid repository "${repository ?? ""}": expected owner/name.`);
+  if (!TAG.test(String(tag ?? ""))) throw new Error(`Invalid tag "${tag ?? ""}": expected vX.Y.Z or vX.Y.Z-rc.N.`);
+  const version = tag.slice(1);
+  const runtimes = Object.keys(RUNTIME_BACKENDS).sort().map((backend) => {
+    const built = packages.filter((entry) => entry.backend === backend);
+    if (built.length !== 1) throw new Error(`Expected exactly one ${backend} package, found ${built.length}.`);
+    const [{ bytes, sha256 }] = built;
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error(`The ${backend} package has an invalid size ${bytes}.`);
+    if (!SHA256.test(String(sha256))) throw new Error(`The ${backend} package has an invalid SHA-256.`);
+    return {
+      backend, version, protocolVersion: RUNTIME_PROTOCOL, platform: RUNTIME_PLATFORM,
+      url: `https://github.com/${repository}/releases/download/${tag}/${runtimeAssetName(backend, version)}`,
+      bytes, sha256: sha256.toLowerCase(), requirements: RUNTIME_BACKENDS[backend].requires,
+    };
+  });
+  return { version: 1, runtimes };
+}
+
+/** Where the app looks for the index: the newest published release. */
+export function runtimeIndexUrl(repository) {
+  if (!REPOSITORY.test(String(repository ?? ""))) throw new Error(`Invalid repository "${repository ?? ""}": expected owner/name.`);
+  return `https://github.com/${repository}/releases/latest/download/runtimes-index.json`;
+}
+
 // Node platform names and how the plan names them.
 const OS_NAMES = { darwin: "macOS", win32: "Windows", linux: "Linux" };
 const EVERY_OS = Object.keys(OS_NAMES);
@@ -568,15 +693,15 @@ const CHECKS = [
   { id: "bindings", tiers: ["pr"], platforms: RUST_OS, command: ["git", "diff", "--exit-code", "web/src/bindings.ts"] },
   { id: "bundle-macos", tiers: ["pr"], platforms: ["darwin"], command: ["web/node_modules/.bin/tauri", "build", "--ci", "--bundles", "app,dmg"] },
   { id: "dictation-package-macos", tiers: ["pr"], platforms: ["darwin"], command: ["node", "tools/dictation-package.mjs", "verify", "macos-aarch64"] },
-  // The Vulkan and CUDA workers and their runtime, staged for the installer.
+  // The Vulkan and CUDA workers are built once, then packaged for download and probed.
   { id: "dictation-runtime", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "stage"] },
-  {
-    id: "bundle-windows", tiers: ["pr"], platforms: ["win32"],
-    command: ["web/node_modules/.bin/tauri.cmd", "build", "--ci", "--bundles", "nsis", "--config", "crates/oxide-app/tauri.windows-gpu.conf.json"],
-  },
+  { id: "dictation-runtimes-package", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-runtimes.mjs", "package"] },
+  { id: "dictation-runtimes-probe", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "probe"] },
+  // The installer is CPU only: no worker, no GPU runtime.
+  { id: "bundle-windows", tiers: ["pr"], platforms: ["win32"], command: ["web/node_modules/.bin/tauri.cmd", "build", "--ci", "--bundles", "nsis"] },
   { id: "dictation-package-windows", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "verify", "windows-x64"] },
-  { id: "dictation-smoke", tiers: ["pr"], platforms: ["win32"], command: ["node", "tools/dictation-package.mjs", "smoke"] },
-  { id: "dictation-install", tiers: ["pr"], platforms: ["win32"], ci: CI_JOB_ONLY("bundle (windows)", "installs the setup silently into a scratch folder, then verifies and probes the installed copy") },
+  { id: "dictation-install", tiers: ["pr"], platforms: ["win32"], ci: CI_JOB_ONLY("bundle (windows)", "installs the setup silently into a scratch folder, then verifies and launches the installed copy") },
+  { id: "runtimes-index", tiers: ["pr"], platforms: ["win32"], ci: "CI only: the Release workflow's build job signs and verifies the runtime index with a secret no pull request can read" },
   { id: "cargo-deny", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("supply-chain", "installs cargo-deny and checks bans, licences and sources") },
   { id: "dependency-review", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("supply-chain", "asks GitHub to review dependencies the PR adds") },
   { id: "actionlint", tiers: ["pr"], platforms: EVERY_OS, ci: CI_JOB_ONLY("automation", "installs actionlint") },

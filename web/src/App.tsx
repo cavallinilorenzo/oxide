@@ -5,7 +5,7 @@ import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus, type DiffFile } from "./bindings";
-import type { CodeOpenRequest } from "./codeOpen";
+import type { CodeOpenRequest, ReviewTarget } from "./codeOpen";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -213,9 +213,9 @@ export function App() {
     // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
     if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
-  const openCodeFile = (path: string, diff?: DiffFile, remote = false) => {
+  const openCodeFile = (path: string, diff?: DiffFile, remote = false, review?: ReviewTarget) => {
     if (!workbenchContext) return;
-    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, contextKey: workbenchContext.key });
+    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, review, contextKey: workbenchContext.key });
     selectSurface("Files");
   };
   useEffect(() => {
@@ -1039,7 +1039,8 @@ export function App() {
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
-                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr")}
+                  threadWorking={selectedThread?.status === "working"}
+                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr", diffScope !== "pr" && currentThreadId !== null ? { threadId: currentThreadId, scope: diffScope } : undefined)}
                 />
               </Suspense></div>
             )}

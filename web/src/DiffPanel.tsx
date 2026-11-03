@@ -9,6 +9,7 @@ import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
+import { LineComments } from "./LineComments";
 
 interface DiffPanelProps {
   projectId: number;
@@ -17,6 +18,8 @@ interface DiffPanelProps {
   threadId: number | null;
   /** Board Threads work in their own worktree, so nothing else edits it. */
   board: boolean;
+  /** The selected Thread is running a Turn, so its draft comments can't be sent yet. */
+  threadWorking?: boolean;
   /** A Turn is running in this checkout, so its files are not ours to revert. */
   turnRunning?: boolean;
   scope: PanelScope;
@@ -59,7 +62,7 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, threadWorking = false, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -308,6 +311,7 @@ function DiffBody({ projectId, threadId, board, turnRunning = false, scope, revi
           {revertError && <div className="error" role="alert">{revertError}</div>}
         </div>
       )}
+      {threadId !== null && <LineComments projectId={projectId} threadId={threadId} working={threadWorking} refreshKey={`${refreshKey}#${focusTick}`} />}
       {canCommit ? (
         <form
           className="commit-form"

@@ -29,7 +29,8 @@ import { fontStyle, getAppearance } from "./appearance";
 import { registerEditorSave } from "./editorSaves";
 import { invalidateQueries } from "./queryCache";
 import { shortcutLabel } from "./shortcuts";
-import { hunkTarget, patchDocument, type CodeOpenRequest } from "./codeOpen";
+import { hunkTarget, patchDocument, type CodeOpenRequest, type ReviewTarget } from "./codeOpen";
+import { CommentComposer } from "./CommentComposer";
 import { batchCloseTargets, neighborAfterClose, previewToReplace, rovingTab } from "./editorTabs";
 
 /** Dock width below which the file list becomes a toggled overlay. */
@@ -51,6 +52,8 @@ interface Document {
   remote?: boolean;
   /** Opened from a Diff hunk, so Back to Diff is offered. */
   fromDiff?: boolean;
+  /** Set when lines of this patch can be commented on for a Thread. */
+  review?: ReviewTarget;
   listener?: monaco.IDisposable;
 }
 interface Problem {
@@ -96,6 +99,7 @@ export function CodeWorkbench({
   const [loading, setLoading] = useState(false);
   useEffect(() => { onOpenFilesChange?.(documents.length > 0); }, [documents.length, onOpenFilesChange]);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [commenting, setCommenting] = useState(false);
   const [newFile, setNewFile] = useState<string | null>(null);
   const [treeRevision, setTreeRevision] = useState(0);
   const [closing, setClosing] = useState<string | null>(null);
@@ -356,6 +360,16 @@ export function CodeWorkbench({
       stickyScroll: { enabled: true },
     });
     editor.current = instance;
+    const commentAction = instance.addAction({
+      id: "oxide.commentOnLine",
+      label: "Comment on line",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyM],
+      run: () => {
+        const model = instance.getModel();
+        const doc = [...records.current.values()].find((d) => d.model === model);
+        if (doc?.review) setCommenting(true);
+      },
+    });
     const appearance=()=>instance.updateOptions({fontFamily:getAppearance().fonts.code, fontSize:fontStyle("code").size, fontWeight:String(fontStyle("code").weight)});
     window.addEventListener("oxide-appearance-changed",appearance);
     const bridge = new EditorLanguages(
@@ -429,6 +443,7 @@ export function CodeWorkbench({
       unregister();
       window.removeEventListener("oxide-appearance-changed",appearance);
       window.removeEventListener("oxide-language-tools-changed", reconnect);
+      commentAction.dispose();
       cursorChange.dispose();
       markers.dispose();
       opener.dispose();
@@ -457,9 +472,9 @@ export function CodeWorkbench({
     const path = `Changes: ${openRequest.path}`;
     const content = patchDocument(openRequest.diff);
     let doc = records.current.get(path);
-    if (doc) { doc.model.setValue(content); doc.saved = content; }
+    if (doc) { doc.model.setValue(content); doc.saved = content; doc.review = openRequest.review; }
     else {
-      doc = { path, model: monaco.editor.createModel(content, "diff"), saved: content, dirty: false, view: null, saving: false, readOnly: true, sourcePath: openRequest.diff.status === "deleted" ? undefined : openRequest.path, remote: openRequest.remote };
+      doc = { path, model: monaco.editor.createModel(content, "diff"), saved: content, dirty: false, view: null, saving: false, readOnly: true, sourcePath: openRequest.diff.status === "deleted" ? undefined : openRequest.path, remote: openRequest.remote, review: openRequest.review };
       records.current.set(path, doc);
     }
     publish();
@@ -795,6 +810,11 @@ export function CodeWorkbench({
             <span title={current.path}>{current.path}</span>
             {current.readOnly && <span className="chip">Git patch · read-only</span>}
             <span className="grow" />
+            {current.review && (
+              <button className="btn sm" title={`Comment on the cursor's line (${shortcutLabel}+Alt+M)`} onClick={() => setCommenting(true)}>
+                Comment on line
+              </button>
+            )}
             {current.sourcePath && (
               <button
                 className="btn sm"
@@ -843,6 +863,17 @@ export function CodeWorkbench({
               Save
             </button>
           </div>
+        )}
+        {current?.review && commenting && (
+          <CommentComposer
+            key={`${current.path}:${cursor.lineNumber}`}
+            projectId={projectId}
+            path={current.path.replace(/^Changes: /, "")}
+            patch={current.model.getValue()}
+            line={cursor.lineNumber}
+            review={current.review}
+            onClose={() => { setCommenting(false); editor.current?.focus(); }}
+          />
         )}
         {language && (
           <LanguageSupportNotice

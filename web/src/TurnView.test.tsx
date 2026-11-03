@@ -64,6 +64,15 @@ const worked = [
   item(3, "agent_message", "All done."),
 ];
 
+it("shows sent Line comments as formatted text with the quoted code, not as raw markdown", async () => {
+  const text = "I reviewed your changes and left 1 comment. Please address each one.\n\n### src/a.ts:2\n```\nconst x = 1;\n```\nWhy this value?\n";
+  await render(turn({ segments: [{ kind: "text", text }] }));
+  const shown = container.querySelector(".review-comments")!;
+  expect(shown.querySelector('[role="heading"]')?.textContent).toBe("src/a.ts:2");
+  expect(shown.querySelector("pre")?.textContent).toContain("const x = 1;");
+  expect(shown.textContent).not.toContain("```");
+});
+
 it("ends collapsed on a summary with the time worked, the final message staying outside", async () => {
   await render(turn({ items: worked }));
   const summary = buttonWith("Explored 1 file · Edited 1 file · Ran 1 command");

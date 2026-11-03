@@ -44,8 +44,12 @@ One unit of a Turn's output: an agent message, reasoning, a tool call, a file ch
 _Avoid_: Step, block, event (when meaning the unit)
 
 **Activity**:
-The compressed, expandable record of what the Provider did in one Turn: a one-line summary of macro actions with counts ("Explored 4 files · Edited 2 files"), expanding into Phases and then Items. A view of the Turn's Items, not a new kind of Item; the agent's messages stay outside it. While the Turn runs it carries a live status line; a Turn with no tool-like Items has no Activity.
+The compressed, expandable record of what the Provider did in one Turn: a one-line summary of macro actions with counts ("Explored 4 files · Edited 2 files"), expanding into Phases and then Items. A view of the Turn's Items, not a new kind of Item; the agent's messages stay outside it. While the Turn runs it carries a live status line; a Turn with no tool-like Items has no Activity. A command the Provider reports as failed is marked even while the Activity is collapsed.
 _Avoid_: Timeline, log, steps
+
+**Command record**:
+What a Provider reported about one command it ran during a Turn: the command line, whether it succeeded, failed or is unknown, and the exit code when reported. Stored on the command's Item and never inferred from the command's output; a Provider that reports nothing leaves the outcome unknown. See **Activity**.
+_Avoid_: Command (alone), command evidence, exit status
 
 **Phase**:
 A run of consecutive Items of the same macro kind within an Activity: reasoning, explore, edit, run, delegate or other. A tool call's kind is assigned by its Provider adapter when it emits the Item (unmapped tools are other); Items stored without one fall back on their Item kind. The same kind returning later starts a new Phase.

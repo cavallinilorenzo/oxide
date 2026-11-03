@@ -50,6 +50,7 @@ fn core_runs_approval_end_to_end_and_persists_in_transcript() {
                 content: "Executed command with approval".into(),
                 parent_item_index: None,
                 category: None,
+                command: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,
@@ -274,6 +275,7 @@ fn core_runs_approval_deny_end_to_end() {
                 content: "Action was denied".into(),
                 parent_item_index: None,
                 category: None,
+                command: None,
             });
             let _ = s.send(ProviderEvent::TurnCompleted {
                 turn_index: 0,

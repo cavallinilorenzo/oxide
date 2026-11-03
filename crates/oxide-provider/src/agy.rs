@@ -7,9 +7,10 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ActivityCategory, ApprovalDecision, Detection, ItemKind, ModelInfo, PermissionMode,
-    PromptSegment, Provider, ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo,
-    SlashRoute, StartContext, TurnStatus, attachment_path_reference,
+    ActivityCategory, ApprovalDecision, CommandOutcome, CommandRecord, Detection, ItemKind,
+    ModelInfo, PermissionMode, PromptSegment, Provider, ProviderCapabilities, ProviderError,
+    ProviderEvent, SlashCommandInfo, SlashRoute, StartContext, TurnStatus,
+    attachment_path_reference,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
@@ -701,6 +702,8 @@ struct OpenItem {
     kind: ItemKind,
     category: Option<ActivityCategory>,
     content: String,
+    /// Set while the Item is a command; its outcome stays unknown until the step reports one.
+    command: Option<CommandRecord>,
 }
 
 impl TurnRun {
@@ -832,8 +835,14 @@ impl TurnRun {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 if !delta.is_empty() {
-                    let item =
-                        self.open(steps, step_index, next_item, ItemKind::AgentMessage, None);
+                    let item = self.open(
+                        steps,
+                        step_index,
+                        next_item,
+                        ItemKind::AgentMessage,
+                        None,
+                        None,
+                    );
                     item.content.push_str(delta);
                     let _ = self.tx.send(ProviderEvent::ItemDelta {
                         item_index: item.item_index,
@@ -841,7 +850,7 @@ impl TurnRun {
                     });
                 }
                 if done {
-                    self.complete(steps, step_index, None);
+                    self.complete(steps, step_index, None, None);
                 }
                 true
             }
@@ -850,10 +859,18 @@ impl TurnRun {
                 let kind = tool_kind(step, info);
                 let category =
                     (kind == ItemKind::ToolCall).then(|| tool_category(tool_name(step, info)));
-                self.open(steps, step_index, next_item, kind, category);
+                let is_command =
+                    kind == ItemKind::ToolCall && tool_name(step, info) == "run_command";
+                let command = is_command.then(|| CommandRecord {
+                    line: command_line(info),
+                    outcome: CommandOutcome::Unknown,
+                    exit_code: None,
+                });
+                self.open(steps, step_index, next_item, kind, category, command);
                 if done {
                     let content = self.tool_content(kind, step, info);
-                    self.complete(steps, step_index, Some(content));
+                    let command = is_command.then(|| agy_command(info));
+                    self.complete(steps, step_index, Some(content), command);
                 }
                 true
             }
@@ -869,6 +886,7 @@ impl TurnRun {
         next_item: &mut u32,
         kind: ItemKind,
         category: Option<ActivityCategory>,
+        command: Option<CommandRecord>,
     ) -> &'a mut OpenItem {
         steps.entry(step_index).or_insert_with(|| {
             let item_index = *next_item;
@@ -884,6 +902,7 @@ impl TurnRun {
                 kind,
                 category,
                 content: String::new(),
+                command,
             }
         })
     }
@@ -894,6 +913,7 @@ impl TurnRun {
         steps: &mut HashMap<u64, OpenItem>,
         step_index: u64,
         content: Option<String>,
+        command: Option<CommandRecord>,
     ) {
         if let Some(item) = steps.remove(&step_index) {
             let _ = self.tx.send(ProviderEvent::ItemCompleted {
@@ -902,6 +922,7 @@ impl TurnRun {
                 content: content.unwrap_or(item.content),
                 parent_item_index: None,
                 category: item.category,
+                command: command.or(item.command),
             });
         }
     }
@@ -916,6 +937,7 @@ impl TurnRun {
                 content: item.content,
                 parent_item_index: None,
                 category: item.category,
+                command: item.command,
             });
         }
     }
@@ -1032,6 +1054,26 @@ fn first_string<'a>(params: &'a Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
         .find_map(|k| params.get(*k).and_then(Value::as_str))
         .filter(|s| !s.is_empty())
+}
+
+/// The command line of a `run_command` tool call.
+fn command_line(info: &Value) -> Option<String> {
+    first_string(&info["parameters"], &["CommandLine", "command"]).map(str::to_string)
+}
+
+/// What Antigravity reported about a finished `run_command` step. It names a failure with an
+/// `error` object and a success with the `output` it produced; anything else stays unknown.
+fn agy_command(info: &Value) -> CommandRecord {
+    let outcome = match info.get("error") {
+        Some(error) if !error.is_null() => CommandOutcome::Failed,
+        _ if info.get("output").and_then(Value::as_str).is_some() => CommandOutcome::Succeeded,
+        _ => CommandOutcome::Unknown,
+    };
+    CommandRecord {
+        line: command_line(info),
+        outcome,
+        exit_code: None,
+    }
 }
 
 fn join_headline(headline: String, detail: &str) -> String {

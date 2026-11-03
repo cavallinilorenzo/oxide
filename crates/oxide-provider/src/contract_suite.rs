@@ -1,6 +1,6 @@
 use crate::{
-    Attachment, AttachmentKind, ItemKind, PromptSegment, Provider, ProviderEvent, StartContext,
-    TurnStatus,
+    Attachment, AttachmentKind, CommandOutcome, ItemKind, PromptSegment, Provider, ProviderEvent,
+    StartContext, TurnStatus,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -167,6 +167,66 @@ pub fn verify_provider_contract<P: Provider, F: FnOnce() -> P>(factory: F) {
         attachment_turn_seen,
         "a prompt with an Attachment must start a Turn that names it"
     );
+
+    // 6. Commands: each Provider reports a succeeded, a failed and an unknown command, and the
+    // outcome comes from what it reported, never from what the command printed.
+    provider
+        .send_prompt("commands_contract")
+        .expect("send_prompt must succeed");
+    let mut commands: Vec<(String, CommandOutcome, Option<i32>)> = Vec::new();
+    let mut commands_turn_seen = false;
+    while let Ok(event) = receiver.recv_timeout(Duration::from_secs(5)) {
+        match event {
+            ProviderEvent::TurnStarted { .. } => commands_turn_seen = true,
+            ProviderEvent::ItemCompleted {
+                command: Some(command),
+                ..
+            } => {
+                let line = command
+                    .line
+                    .expect("a reported command must carry its command line");
+                commands.push((line, command.outcome, command.exit_code));
+            }
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(commands_turn_seen, "the command prompt must start a Turn");
+    let outcome_of = |line: &str| {
+        commands
+            .iter()
+            .filter(|(reported, _, _)| reported == line)
+            .map(|(_, outcome, _)| *outcome)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        outcome_of("contract-succeeds"),
+        vec![CommandOutcome::Succeeded],
+        "a command the Provider reports as completed must be succeeded, whatever it printed"
+    );
+    assert_eq!(
+        outcome_of("contract-fails"),
+        vec![CommandOutcome::Failed],
+        "a command the Provider reports as failed must be failed, whatever it printed"
+    );
+    assert_eq!(
+        outcome_of("contract-unknown"),
+        vec![CommandOutcome::Unknown],
+        "a Provider that reports no outcome must read as unknown"
+    );
+    for (line, outcome, exit_code) in &commands {
+        match (outcome, exit_code) {
+            (CommandOutcome::Succeeded, Some(code)) => assert_eq!(
+                *code, 0,
+                "{line} succeeded, so a reported exit code is zero"
+            ),
+            (CommandOutcome::Failed, Some(code)) => assert_ne!(
+                *code, 0,
+                "{line} failed, so a reported exit code is not zero"
+            ),
+            _ => {}
+        }
+    }
 
     // 7. Shutdown
     provider.shutdown().expect("shutdown must succeed");

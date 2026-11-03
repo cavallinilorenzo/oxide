@@ -8,10 +8,14 @@ import {
   SearchIcon,
   TerminalIcon,
   ToolsIcon,
+  XCircleIcon,
 } from "@primer/octicons-react";
 import {
   PHASE_LABELS,
+  failedCommandCount,
+  failedCommandsIn,
   formatElapsed,
+  isFailedCommand,
   statusPhrase,
   summaryText,
   type Activity,
@@ -56,11 +60,32 @@ function Disclosure({
   );
 }
 
+function failedLabel(count: number): string {
+  return count === 1 ? "Failed" : `${count} failed`;
+}
+
+function failedAriaLabel(count: number): string {
+  return `${count} failed ${count === 1 ? "command" : "commands"}`;
+}
+
+function FailedMark({ count, label }: { count: number; label: string }) {
+  return (
+    <span className="activity-failed" title={label} aria-label={label}>
+      <XCircleIcon size={12} />
+      {failedLabel(count)}
+    </span>
+  );
+}
+
 function ChildItem({ item }: { item: ItemSnapshot }) {
   const { headline, detail } = splitHeadline(item.content);
+  const failed = isFailedCommand(item);
   return (
-    <div className="activity-child">
-      <div className="activity-child-head">{headline}</div>
+    <div className={`activity-child${failed ? " activity-child-failed" : ""}`}>
+      <div className="activity-child-head">
+        {headline}
+        {failed && <FailedMark count={1} label={failedAriaLabel(1)} />}
+      </div>
       {detail && <pre className="tool-detail">{detail}</pre>}
     </div>
   );
@@ -71,6 +96,8 @@ function ItemRow({ entry, kind }: { entry: ActivityItem; kind: PhaseKind }) {
   const [open, setOpen] = useState(false);
   const { item, children } = entry;
   const { headline, detail } = splitHeadline(item.content);
+  const failed = isFailedCommand(item);
+  const failedChildren = children.filter(isFailedCommand).length;
 
   if (item.kind === "file_change" || kind === "edit") {
     return (
@@ -93,15 +120,27 @@ function ItemRow({ entry, kind }: { entry: ActivityItem; kind: PhaseKind }) {
   const expandable = detail !== "" || children.length > 0;
   if (!expandable) {
     return (
-      <div className="activity-item activity-item-plain">
+      <div
+        className={`activity-item activity-item-plain${failed ? " activity-item-failed" : ""}`}
+      >
         <span className="activity-item-text">{headline}</span>
+        {(failed || failedChildren > 0) && (
+          <FailedMark count={failed ? 1 : failedChildren} label={failedAriaLabel(failed ? 1 : failedChildren)} />
+        )}
       </div>
     );
   }
   return (
     <div className="activity-item-group">
-      <Disclosure open={open} onToggle={() => setOpen((v) => !v)} className="activity-item">
+      <Disclosure
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        className={`activity-item${failed ? " activity-item-failed" : ""}`}
+      >
         <span className="activity-item-text">{headline}</span>
+        {(failed || failedChildren > 0) && (
+          <FailedMark count={failed ? 1 : failedChildren} label={failedAriaLabel(failed ? 1 : failedChildren)} />
+        )}
       </Disclosure>
       {open && (
         <div className="activity-item-body">
@@ -118,11 +157,22 @@ function ItemRow({ entry, kind }: { entry: ActivityItem; kind: PhaseKind }) {
 function PhaseRow({ phase }: { phase: Phase }) {
   const [open, setOpen] = useState(false);
   const count = phase.items.length;
+  const failed = failedCommandsIn(phase.items);
   return (
     <div className="activity-phase">
-      <Disclosure open={open} onToggle={() => setOpen((v) => !v)} className="activity-phase-toggle">
+      <Disclosure
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        className={`activity-phase-toggle${failed > 0 ? " activity-phase-failed" : ""}`}
+      >
         {PHASE_ICONS[phase.kind]}
         <span className="collapsible-label">{PHASE_LABELS[phase.kind]}</span>
+        {failed > 0 && (
+          <FailedMark
+            count={failed}
+            label={failedAriaLabel(failed)}
+          />
+        )}
         {phase.kind !== "reasoning" && <span className="activity-count">{count}</span>}
       </Disclosure>
       {open && (
@@ -189,6 +239,7 @@ export function ActivityView({
   workedMs: number | null;
 }) {
   const [open, setOpen] = useState(false);
+  const failed = failedCommandCount(activity);
   return (
     <div className="activity">
       {live && <LiveLine status={live} startedAt={startedAt} />}
@@ -200,8 +251,18 @@ export function ActivityView({
       )}
       {activity && (
         <div className="activity-summary">
-          <Disclosure open={open} onToggle={() => setOpen((v) => !v)} className="activity-summary-toggle">
+          <Disclosure
+            open={open}
+            onToggle={() => setOpen((v) => !v)}
+            className={`activity-summary-toggle${failed > 0 ? " activity-summary-failed" : ""}`}
+          >
             <span className="collapsible-label">{summaryText(activity)}</span>
+            {failed > 0 && (
+              <FailedMark
+                count={failed}
+                label={failedAriaLabel(failed)}
+              />
+            )}
             {!live && !waiting && workedMs !== null && (
               <span className="activity-worked">Worked for {formatElapsed(workedMs)}</span>
             )}

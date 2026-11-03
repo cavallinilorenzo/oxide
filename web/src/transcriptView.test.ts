@@ -11,7 +11,7 @@ function item(
   parentItemIndex: number | null = null,
   category: ItemSnapshot["category"] = null,
 ): ItemSnapshot {
-  return { id: nextId++, itemIndex, kind, content, parentItemIndex, category, createdAt: "2026-10-22T10:00:00Z" };
+  return { id: nextId++, itemIndex, kind, content, parentItemIndex, category, command: { line: null, outcome: "unknown", exitCode: null }, createdAt: "2026-10-22T10:00:00Z" };
 }
 
 function activityOf(items: ItemSnapshot[]): Activity | null {

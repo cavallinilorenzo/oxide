@@ -91,8 +91,9 @@ pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use error::{Error, Result};
 pub use oxide_provider::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, Detection,
-    ItemKind, ModelInfo, PromptSegment, ProviderCapabilities, TurnStatus, UsageStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, CommandOutcome,
+    CommandRecord, Detection, ItemKind, ModelInfo, PromptSegment, ProviderCapabilities, TurnStatus,
+    UsageStatus,
 };
 pub use review_ledger::{RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry};
 use settings::SettingsStore;

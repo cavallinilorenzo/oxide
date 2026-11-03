@@ -760,3 +760,53 @@ mod native_commands {
         provider.shutdown().unwrap();
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn codex_reports_command_status_and_exit_code() {
+    use oxide_provider::{
+        CommandOutcome, CommandRecord, PermissionMode, ProviderEvent, StartContext,
+    };
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/codex/fake_codex.py");
+    let mut provider = CodexProvider::with_command(fake_cli.to_str().unwrap());
+    let rx = provider
+        .start(&StartContext {
+            working_dir: PathBuf::from("."),
+            model: None,
+            effort: None,
+            permission_mode: PermissionMode::AutoEdit,
+        })
+        .unwrap();
+    provider.send_prompt("commands_contract").unwrap();
+
+    let mut commands: Vec<CommandRecord> = Vec::new();
+    while let Ok(event) = rx.recv_timeout(Duration::from_secs(5)) {
+        match event {
+            ProviderEvent::ItemCompleted {
+                command: Some(command),
+                ..
+            } => commands.push(command),
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    let outcomes: Vec<_> = commands
+        .iter()
+        .map(|command| (command.line.as_deref(), command.outcome, command.exit_code))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (
+                Some("contract-succeeds"),
+                CommandOutcome::Succeeded,
+                Some(0)
+            ),
+            (Some("contract-fails"), CommandOutcome::Failed, Some(1)),
+            (Some("contract-unknown"), CommandOutcome::Unknown, None),
+        ]
+    );
+    provider.shutdown().unwrap();
+}

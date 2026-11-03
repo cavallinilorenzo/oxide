@@ -424,16 +424,18 @@ fn claude_tool_use_blocks_become_categorised_tool_calls_and_file_changes() {
                 "Read /work/src/main.rs".to_string(),
                 Some(ActivityCategory::Explore)
             ),
-            (
-                ItemKind::ToolCall,
-                "Bash cargo test".to_string(),
-                Some(ActivityCategory::Run)
-            ),
             (ItemKind::FileChange, "/work/src/main.rs".to_string(), None),
             (
                 ItemKind::ToolCall,
                 "Frobnicate".to_string(),
                 Some(ActivityCategory::Other)
+            ),
+            // A command completes when its `tool_result` arrives, or at the end of the Turn when
+            // the Provider never reports one (this fixture has no results).
+            (
+                ItemKind::ToolCall,
+                "Bash cargo test".to_string(),
+                Some(ActivityCategory::Run)
             ),
         ]
     );
@@ -645,4 +647,49 @@ fn claude_skills_and_custom_commands_only_appear_with_the_skills_customization()
         ..Default::default()
     });
     assert!(names(&provider).contains(&"tdd".to_string()));
+}
+
+#[test]
+fn claude_maps_command_outcomes_from_tool_results() {
+    use oxide_provider::{
+        CommandOutcome, CommandRecord, PermissionMode, ProviderEvent, StartContext,
+    };
+    use std::time::Duration;
+
+    let fake_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/claude/fake_claude.py");
+    let mut provider = ClaudeCodeProvider::with_command(fake_cli.to_str().unwrap());
+    let rx = provider
+        .start(&StartContext {
+            working_dir: PathBuf::from("."),
+            model: None,
+            effort: None,
+            permission_mode: PermissionMode::AutoEdit,
+        })
+        .unwrap();
+    provider.send_prompt("commands_contract").unwrap();
+
+    let mut commands: Vec<CommandRecord> = Vec::new();
+    while let Ok(event) = rx.recv_timeout(Duration::from_secs(5)) {
+        match event {
+            ProviderEvent::ItemCompleted {
+                command: Some(command),
+                ..
+            } => commands.push(command),
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    let outcomes: Vec<_> = commands
+        .iter()
+        .map(|command| (command.line.as_deref(), command.outcome, command.exit_code))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (Some("contract-succeeds"), CommandOutcome::Succeeded, None),
+            (Some("contract-fails"), CommandOutcome::Failed, None),
+            (Some("contract-unknown"), CommandOutcome::Unknown, None),
+        ]
+    );
+    provider.shutdown().unwrap();
 }

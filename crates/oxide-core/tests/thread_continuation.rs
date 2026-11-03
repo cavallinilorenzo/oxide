@@ -55,6 +55,7 @@ fn answering_fake(answer: &'static str) -> FakeProvider {
                 content: "Run cargo test\nTOOL-OUTPUT-NOISE".into(),
                 parent_item_index: None,
                 category: None,
+                command: None,
             },
             ProviderEvent::ItemCompleted {
                 item_index: 1,
@@ -62,6 +63,7 @@ fn answering_fake(answer: &'static str) -> FakeProvider {
                 content: answer.into(),
                 parent_item_index: None,
                 category: None,
+                command: None,
             },
             ProviderEvent::TurnCompleted {
                 turn_index: 0,

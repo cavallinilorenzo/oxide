@@ -1,0 +1,11 @@
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_cmd_0", "name": "Bash", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":\"contract-succeeds\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_cmd_1", "name": "Bash", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":\"contract-fails\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_cmd_2", "name": "Bash", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":\"contract-unknown\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 2}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_cmd_0", "content": "error: every check failed", "is_error": false}, {"type": "tool_result", "tool_use_id": "toolu_cmd_1", "content": "success: all checks passed", "is_error": true}]}}
+{"type": "result", "subtype": "success", "session_id": "claude-session-1234", "result": "", "is_error": false}

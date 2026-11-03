@@ -934,6 +934,22 @@ pub struct ContinuedThread {
     pub recap: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandOutcome {
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandRecord {
+    pub line: Option<String>,
+    pub outcome: CommandOutcome,
+    pub exit_code: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemSnapshot {
@@ -943,6 +959,7 @@ pub struct ItemSnapshot {
     pub content: String,
     pub parent_item_index: Option<u32>,
     pub category: Option<ActivityCategory>,
+    pub command: CommandRecord,
     pub created_at: String,
 }
 
@@ -1027,6 +1044,7 @@ pub struct TurnSnapshot {
     pub prompt: String,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
     pub segments: Vec<PromptSegment>,
     pub status: TurnStatus,
     pub started_at: String,
@@ -1086,6 +1104,7 @@ pub enum ThreadEvent {
         prompt: String,
         model: Option<String>,
         effort: Option<String>,
+        permission_mode: Option<PermissionMode>,
         segments: Vec<PromptSegment>,
     },
     ItemStarted {
@@ -1104,6 +1123,7 @@ pub enum ThreadEvent {
         content: String,
         parent_item_index: Option<u32>,
         category: Option<ActivityCategory>,
+        command: Option<CommandRecord>,
     },
     TurnCompleted {
         turn_index: u32,
@@ -3656,6 +3676,7 @@ mod tests {
                 prompt: "hi".into(),
                 model: None,
                 effort: None,
+                permission_mode: Some(oxide_core::PermissionMode::Ask),
                 segments: vec![oxide_core::PromptSegment::text("hi")],
                 status: oxide_core::TurnStatus::Error,
                 started_at: "a".into(),
@@ -3668,6 +3689,11 @@ mod tests {
                     created_at: "a".into(),
                     parent_item_index: None,
                     category: None,
+                    command: oxide_core::CommandRecord {
+                        line: None,
+                        outcome: oxide_core::CommandOutcome::Unknown,
+                        exit_code: None,
+                    },
                 }],
                 error: Some(error.clone()),
                 approvals: vec![],

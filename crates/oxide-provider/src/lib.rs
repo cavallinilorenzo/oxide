@@ -189,6 +189,67 @@ impl std::str::FromStr for ActivityCategory {
     }
 }
 
+/// How a command a Provider ran ended, as the Provider reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandOutcome {
+    Succeeded,
+    Failed,
+    /// The Provider did not report an outcome, or reported that the command never ran.
+    Unknown,
+}
+
+impl CommandOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            CommandOutcome::Succeeded => "succeeded",
+            CommandOutcome::Failed => "failed",
+            CommandOutcome::Unknown => "unknown",
+        }
+    }
+}
+
+impl std::str::FromStr for CommandOutcome {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "succeeded" => Ok(CommandOutcome::Succeeded),
+            "failed" => Ok(CommandOutcome::Failed),
+            "unknown" => Ok(CommandOutcome::Unknown),
+            _ => Err(()),
+        }
+    }
+}
+
+/// What a Provider reported about one command it ran. Carried by the completed Item only when
+/// the Item is a command; the outcome is never inferred from the command's output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandRecord {
+    /// The command line, when the Provider reported one.
+    #[serde(default)]
+    pub line: Option<String>,
+    pub outcome: CommandOutcome,
+    /// The exit code, when the Provider reported one.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+}
+
+impl CommandRecord {
+    pub fn reported(
+        line: impl Into<String>,
+        outcome: CommandOutcome,
+        exit_code: Option<i32>,
+    ) -> Self {
+        Self {
+            line: Some(line.into()),
+            outcome,
+            exit_code,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -470,6 +531,9 @@ pub enum ProviderEvent {
         parent_item_index: Option<u32>,
         #[serde(default)]
         category: Option<ActivityCategory>,
+        /// Set on a command Item; see [`CommandRecord`]. Absent when the Provider reported none.
+        #[serde(default)]
+        command: Option<CommandRecord>,
     },
     ApprovalRequested {
         id: String,
@@ -561,6 +625,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         kind: ItemKind,
         parent_item_index: Option<u32>,
         content: &str,
+        command: Option<CommandRecord>,
     ) -> [ProviderEvent; 2] {
         let category = (kind == ItemKind::ToolCall).then(|| {
             if content.starts_with("Run ") {
@@ -582,6 +647,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
                 content: content.to_string(),
                 parent_item_index,
                 category,
+                command,
             },
         ]
     }
@@ -595,18 +661,25 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         ItemKind::Reasoning,
         None,
         "The user wants a change; look at the file first.",
+        None,
     ));
     events.extend(item(
         1,
         ItemKind::ToolCall,
         None,
         "Read src/main.rs\nfn main() {}",
+        None,
     ));
     events.extend(item(
         2,
         ItemKind::ToolCall,
         None,
         "Run cargo test\n1 passed",
+        Some(CommandRecord::reported(
+            "cargo test",
+            CommandOutcome::Succeeded,
+            Some(0),
+        )),
     ));
     events.push(ProviderEvent::ItemStarted {
         item_index: 3,
@@ -619,12 +692,14 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         ItemKind::ToolCall,
         Some(3),
         "Grep TODO\nsrc/main.rs:1",
+        None,
     ));
     events.extend(item(
         5,
         ItemKind::AgentMessage,
         Some(3),
         "No other TODOs found.",
+        None,
     ));
     events.push(ProviderEvent::ItemCompleted {
         item_index: 3,
@@ -632,8 +707,9 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         content: "Explore\nSearch the codebase for TODOs".to_string(),
         parent_item_index: None,
         category: None,
+        command: None,
     });
-    events.extend(item(6, ItemKind::FileChange, None, "src/main.rs"));
+    events.extend(item(6, ItemKind::FileChange, None, "src/main.rs", None));
     events.push(ProviderEvent::ItemStarted {
         item_index: 7,
         kind: ItemKind::AgentMessage,
@@ -650,6 +726,7 @@ pub fn scripted_turn(turn_index: u32, prompt: &str) -> Vec<ProviderEvent> {
         content: answer.to_string(),
         parent_item_index: None,
         category: None,
+        command: None,
     });
     events.push(ProviderEvent::TurnCompleted {
         turn_index,

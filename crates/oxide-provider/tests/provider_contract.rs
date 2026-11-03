@@ -1,6 +1,6 @@
 use oxide_provider::{
-    FakeProvider, ItemKind, PermissionMode, Provider, ProviderEvent, TurnStatus,
-    contract_suite::verify_provider_contract,
+    ActivityCategory, CommandOutcome, CommandRecord, FakeProvider, ItemKind, PermissionMode,
+    Provider, ProviderEvent, TurnStatus, contract_suite::verify_provider_contract,
 };
 
 mod support;
@@ -111,8 +111,49 @@ fn fake_provider_passes_shared_contract_suite() {
                 });
                 let _ = s.send(ProviderEvent::TurnStarted {
                     turn_index: 0,
-                    prompt,
+                    prompt: prompt.clone(),
                 });
+                if prompt == "commands_contract" {
+                    let commands = [
+                        (
+                            "contract-succeeds",
+                            CommandOutcome::Succeeded,
+                            Some(0),
+                            "error: every check failed",
+                        ),
+                        (
+                            "contract-fails",
+                            CommandOutcome::Failed,
+                            Some(1),
+                            "success: all checks passed",
+                        ),
+                        ("contract-unknown", CommandOutcome::Unknown, None, "unknown"),
+                    ];
+                    for (index, (line, outcome, exit_code, output)) in
+                        commands.into_iter().enumerate()
+                    {
+                        let index = index as u32;
+                        let _ = s.send(ProviderEvent::ItemStarted {
+                            parent_item_index: None,
+                            category: Some(ActivityCategory::Run),
+                            item_index: index,
+                            kind: ItemKind::ToolCall,
+                        });
+                        let _ = s.send(ProviderEvent::ItemCompleted {
+                            parent_item_index: None,
+                            category: Some(ActivityCategory::Run),
+                            item_index: index,
+                            kind: ItemKind::ToolCall,
+                            content: format!("Run {line}\n{output}"),
+                            command: Some(CommandRecord::reported(line, outcome, exit_code)),
+                        });
+                    }
+                    let _ = s.send(ProviderEvent::TurnCompleted {
+                        turn_index: 0,
+                        status: TurnStatus::Completed,
+                    });
+                    return;
+                }
                 let _ = s.send(ProviderEvent::ItemStarted {
                     parent_item_index: None,
                     category: None,
@@ -133,6 +174,7 @@ fn fake_provider_passes_shared_contract_suite() {
                     item_index: 0,
                     kind: ItemKind::AgentMessage,
                     content: "Hello world!".into(),
+                    command: None,
                 });
                 let _ = s.send(ProviderEvent::Unknown {
                     raw: r#"{"type":"custom_unrecognized_event","data":123}"#.into(),

@@ -33,6 +33,28 @@ function headlineOf(content: string): string {
   return nl < 0 ? content : content.slice(0, nl);
 }
 
+/** A command the Provider reported as failed. */
+export function isFailedCommand(item: ItemSnapshot): boolean {
+  return item.command.outcome === "failed";
+}
+
+/** The failed commands in an Activity, counting Subagent children. */
+export function failedCommandCount(activity: Activity | null): number {
+  if (!activity) return 0;
+  return activity.phases.reduce((count, phase) => count + failedCommandsIn(phase.items), 0);
+}
+
+/** The failed commands among a Phase's Items, counting Subagent children. */
+export function failedCommandsIn(items: ActivityItem[]): number {
+  return items.reduce(
+    (count, entry) =>
+      count +
+      (isFailedCommand(entry.item) ? 1 : 0) +
+      entry.children.filter(isFailedCommand).length,
+    0,
+  );
+}
+
 /**
  * The Phase an Item belongs to, or null when it is not part of an Activity (agent messages and
  * Slash command output). Items stored before categories existed fall back on their kind.

@@ -39,6 +39,7 @@ describe("transcript reducer", () => {
               kind: "agent_message",
               content: "Hi there!",
               parentItemIndex: null,
+              command: { line: null, outcome: "unknown", exitCode: null },
               createdAt: "2026-10-22T10:00:02Z",
             },
           ],
@@ -487,3 +488,56 @@ function startTurn(seq: number, prompt: string): SequencedThreadEvent {
 function completeTurn(seq: number): SequencedThreadEvent {
   return { seq, event: { type: "TurnCompleted", payload: { turn_index: 0, status: "completed", error: null } } };
 }
+
+describe("command evidence", () => {
+  it("keeps the command and the Turn's permission mode from live events", () => {
+    let state = initialTranscriptState(null);
+    state = applyThreadEvent(state, {
+      seq: 1,
+      event: {
+        type: "TurnStarted",
+        payload: {
+          turn_index: 0,
+          prompt: "go",
+          model: null,
+          effort: null,
+          permission_mode: "full-access",
+          segments: [],
+        },
+      },
+    });
+    expect(state.turns[0].permissionMode).toBe("full-access");
+
+    state = applyThreadEvent(state, {
+      seq: 2,
+      event: {
+        type: "ItemStarted",
+        payload: {
+          item_index: 0,
+          kind: "tool_call",
+          parent_item_index: null,
+          category: "run",
+        },
+      },
+    });
+    state = applyThreadEvent(state, {
+      seq: 3,
+      event: {
+        type: "ItemCompleted",
+        payload: {
+          item_index: 0,
+          kind: "tool_call",
+          content: "Run cargo test",
+          parent_item_index: null,
+          category: "run",
+          command: { line: "cargo test", outcome: "failed", exitCode: 1 },
+        },
+      },
+    });
+    expect(state.turns[0].items[0].command).toEqual({
+      line: "cargo test",
+      outcome: "failed",
+      exitCode: 1,
+    });
+  });
+});

@@ -536,6 +536,20 @@ html.macos .header,
 }
 .activity-summary-toggle:hover, .activity-phase-toggle:hover, .activity-item:hover { color: var(--fg); border-color: var(--line); }
 .activity-worked { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+.activity-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--red);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.activity-item-failed { border-color: #f06a6a55; }
+.activity-item-failed .activity-item-text { color: var(--red); }
+.activity-phase-failed > .collapsible-label,
+.activity-summary-failed > .collapsible-label { color: var(--red); }
+.activity-child-failed .activity-child-head { color: var(--red); }
 .activity-phases { padding: 4px 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
 .activity-count { color: var(--faint); font-variant-numeric: tabular-nums; }
 .activity-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-family: var(--mono); }

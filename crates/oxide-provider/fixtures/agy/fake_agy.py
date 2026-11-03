@@ -103,6 +103,8 @@ elif prompt == "/oxide-probe":
     replay("turn_skill.jsonl")
 elif "tools_test" in prompt:
     replay("turn_tools.jsonl")
+elif "commands_contract" in prompt:
+    replay("turn_commands.jsonl")
 elif "error_test" in prompt:
     replay("turn_error.jsonl")
     sys.exit(3)

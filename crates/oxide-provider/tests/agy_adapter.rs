@@ -454,3 +454,39 @@ fn detect_warns_but_does_not_block_outside_the_pinned_range() {
     assert!(detection.available);
     assert!(detection.warning.unwrap().contains("2.0.1"));
 }
+
+#[test]
+fn agy_maps_command_outcomes_from_tool_steps() {
+    use oxide_provider::{CommandOutcome, CommandRecord, PermissionMode, ProviderEvent};
+    use std::time::Duration;
+
+    let fake = fake_agy();
+    let mut provider = AgyProvider::with_command(fake.command());
+    let rx = provider.start(&context(PermissionMode::AutoEdit)).unwrap();
+    provider.send_prompt("commands_contract").unwrap();
+
+    let mut commands: Vec<CommandRecord> = Vec::new();
+    while let Ok(event) = rx.recv_timeout(Duration::from_secs(5)) {
+        match event {
+            ProviderEvent::ItemCompleted {
+                command: Some(command),
+                ..
+            } => commands.push(command),
+            ProviderEvent::TurnCompleted { .. } => break,
+            _ => {}
+        }
+    }
+    let outcomes: Vec<_> = commands
+        .iter()
+        .map(|command| (command.line.as_deref(), command.outcome, command.exit_code))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (Some("contract-succeeds"), CommandOutcome::Succeeded, None),
+            (Some("contract-fails"), CommandOutcome::Failed, None),
+            (Some("contract-unknown"), CommandOutcome::Unknown, None),
+        ]
+    );
+    provider.shutdown().unwrap();
+}

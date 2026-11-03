@@ -3,6 +3,7 @@ import { commands } from "./bindings";
 import { patchLine, type ReviewTarget } from "./codeOpen";
 import { invalidateQueries } from "./queryCache";
 import { commentsPrefix } from "./LineComments";
+import { pullRequestCommentsPrefix } from "./reviewKeys";
 
 interface Props {
   projectId: number;
@@ -23,16 +24,13 @@ export function CommentComposer({ projectId, path, patch, line, review, onClose 
 
   async function add() {
     if (!target || body.trim() === "") return;
-    const result = await commands.addLineComment(review.threadId, {
-      scope: review.scope,
-      path,
-      side: target.side,
-      line: target.line,
-      code: target.code,
-      body: body.trim(),
-    });
+    const comment = { path, side: target.side, line: target.line, code: target.code, body: body.trim() };
+    const result =
+      review.kind === "thread"
+        ? await commands.addLineComment(review.threadId, { scope: review.scope, ...comment })
+        : await commands.addPullRequestLineComment(projectId, review.pullRequest, comment);
     if (result.status === "error") return setError(result.error.message);
-    invalidateQueries(commentsPrefix(projectId));
+    invalidateQueries(review.kind === "thread" ? commentsPrefix(projectId) : pullRequestCommentsPrefix(projectId));
     onClose();
   }
 
@@ -67,7 +65,11 @@ export function CommentComposer({ projectId, path, patch, line, review, onClose 
       <textarea
         autoFocus
         aria-label="Comment"
-        placeholder="Comment for the agent (Cmd/Ctrl+Enter to add, Esc to cancel)"
+        placeholder={
+          review.kind === "pullRequest"
+            ? "Review comment (Cmd/Ctrl+Enter to add, Esc to cancel)"
+            : "Comment for the agent (Cmd/Ctrl+Enter to add, Esc to cancel)"
+        }
         rows={3}
         value={body}
         onChange={(e) => setBody(e.target.value)}

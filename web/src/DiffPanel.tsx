@@ -10,6 +10,8 @@ import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 import { LineComments } from "./LineComments";
+import { PullRequestReviewDrafts } from "./PullRequestReviewDrafts";
+import { reviewThreadsPrefix } from "./reviewKeys";
 import { ReviewThreads } from "./ReviewThreads";
 
 interface DiffPanelProps {
@@ -104,7 +106,7 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
   const loaded: Loaded = query.state === "ready" ? { state: "ready", diff: query.data } : query;
   // Review threads load beside the diff, so a GitHub failure leaves the files readable.
   const threads = useQuery(
-    `p${projectId}:review-threads:${scope}:${reviewedPr ?? ""}`,
+    `${reviewThreadsPrefix(projectId)}${scope}:${reviewedPr ?? ""}`,
     async (): Promise<QueryResult<PullRequestReviewThread[]>> =>
       scope === "pr" && reviewedPr !== null
         ? await commands.pullRequestReviewThreads(projectId, reviewedPr)
@@ -333,6 +335,14 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
         </div>
       )}
       {threadId !== null && <LineComments projectId={projectId} threadId={threadId} working={threadWorking} refreshKey={`${refreshKey}#${focusTick}`} />}
+      {scope === "pr" && reviewedPr !== null && (
+        <PullRequestReviewDrafts
+          projectId={projectId}
+          pullRequest={reviewedPr}
+          refreshKey={`${refreshKey}#${focusTick}`}
+          onSubmitted={onChanged}
+        />
+      )}
       {canCommit ? (
         <form
           className="commit-form"

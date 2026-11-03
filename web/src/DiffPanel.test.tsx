@@ -21,6 +21,7 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: diffOf("src/first.rs") } as never);
+  vi.spyOn(commands, "listPullRequestLineComments").mockResolvedValue({ status: "ok", data: [] } as never);
 });
 afterEach(async () => {
   await act(() => root.unmount());

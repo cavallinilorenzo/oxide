@@ -149,6 +149,13 @@ export const commands = {
 	listLineComments: (threadId: number) => typedError<LineComment[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
 	/**  Sends every draft to the Thread as one prompt. */
 	sendLineComments: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("send_line_comments", { threadId })),
+	addPullRequestLineComment: (projectId: number, pullRequest: number, comment: NewPullRequestLineComment) => typedError<PullRequestLineComment, AppError>(__TAURI_INVOKE("add_pull_request_line_comment", { projectId, pullRequest, comment })),
+	editPullRequestLineComment: (id: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_pull_request_line_comment", { id, body })),
+	deletePullRequestLineComment: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("delete_pull_request_line_comment", { id })),
+	/**  A pull request's draft Line comments, oldest first. */
+	listPullRequestLineComments: (projectId: number, pullRequest: number) => typedError<PullRequestLineComment[], AppError>(__TAURI_INVOKE("list_pull_request_line_comments", { projectId, pullRequest })),
+	/**  Sends every draft as one GitHub review, leaving them in place if GitHub refuses. */
+	submitPullRequestReview: (projectId: number, number: number, verdict: ReviewVerdict, summary: string) => typedError<null, AppError>(__TAURI_INVOKE("submit_pull_request_review", { projectId, number, verdict, summary })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, threadId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -1020,6 +1027,15 @@ export type NewLineComment = {
 	body: string,
 };
 
+/**  A draft Line comment on a pull request's Diff. */
+export type NewPullRequestLineComment = {
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
+};
+
 /**  An Approval the Provider is still waiting on. */
 export type PendingApproval = PendingApproval_Serialize | PendingApproval_Deserialize;
 
@@ -1266,6 +1282,18 @@ export type PullRequestLabel = {
 	color: string,
 };
 
+/**  A draft Line comment on a pull request's Diff, kept until a review is submitted. */
+export type PullRequestLineComment = {
+	id: number,
+	projectId: number,
+	pullRequest: number,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
+};
+
 export type PullRequestPhase = "draft" | "open" | "merged" | "closed";
 
 export type PullRequestReviewThread = PullRequestReviewThread_Serialize | PullRequestReviewThread_Deserialize;
@@ -1458,6 +1486,9 @@ export type ReviewThreadComment = {
 	body: string,
 	createdAt: string,
 };
+
+/**  The decision a submitted review carries. */
+export type ReviewVerdict = "comment" | "approve" | "requestChanges";
 
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
 

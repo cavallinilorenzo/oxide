@@ -4,7 +4,7 @@
 
 use crate::git;
 use crate::git_diff::{Diff, parse_patch};
-use crate::line_comments::CommentSide;
+use crate::line_comments::{CommentSide, PullRequestLineComment};
 use crate::{Error, Result};
 use oxide_provider::command::find_in;
 use serde::{Deserialize, Serialize};
@@ -164,6 +164,25 @@ pub enum ReviewState {
     Dismissed,
 }
 
+/// The decision a submitted review carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewVerdict {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+impl ReviewVerdict {
+    fn event(self) -> &'static str {
+        match self {
+            Self::Comment => "COMMENT",
+            Self::Approve => "APPROVE",
+            Self::RequestChanges => "REQUEST_CHANGES",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReviewer {
@@ -312,6 +331,23 @@ enum GhError {
     Failed(String),
 }
 
+/// Runs `command` with `input` on its standard input, closing it so the child can finish.
+fn pipe_stdin(mut command: Command, input: &str) -> std::io::Result<std::process::Output> {
+    use std::io::Write;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.spawn().and_then(|mut child| {
+        let sent = {
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(input.as_bytes())
+        };
+        let output = child.wait_with_output();
+        sent.and(output)
+    })
+}
+
 /// How `gh` is found: the process PATH plus Homebrew's, unless a search path
 /// replaces it (tests put a fake `gh` alone on it).
 /// Only success is cached: a missing or logged-out `gh` is checked again every time.
@@ -359,6 +395,25 @@ impl Gh {
     }
 
     fn run(&self, cwd: &Path, args: &[&str]) -> std::result::Result<String, GhError> {
+        self.run_with_input(cwd, args, None)
+    }
+
+    /// Runs `gh` with `input` as its standard input, for JSON bodies that arguments can't carry.
+    fn run_with_stdin(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        input: &str,
+    ) -> std::result::Result<String, GhError> {
+        self.run_with_input(cwd, args, Some(input))
+    }
+
+    fn run_with_input(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        input: Option<&str>,
+    ) -> std::result::Result<String, GhError> {
         let path = self.path_var();
         #[cfg(windows)]
         let mut child_path = path.clone();
@@ -401,15 +456,19 @@ impl Gh {
         #[cfg(windows)]
         let mut args = args.to_vec();
         #[cfg(windows)]
-        let body = args.iter().position(|arg| *arg == "--body").and_then(|at| {
-            let body = *args.get(at + 1)?;
-            if !body.contains(['\r', '\n']) {
-                return None;
-            }
-            args[at] = "--body-file";
-            args[at + 1] = "-";
-            Some(body)
-        });
+        let body = if input.is_some() {
+            None
+        } else {
+            args.iter().position(|arg| *arg == "--body").and_then(|at| {
+                let body = *args.get(at + 1)?;
+                if !body.contains(['\r', '\n']) {
+                    return None;
+                }
+                args[at] = "--body-file";
+                args[at + 1] = "-";
+                Some(body)
+            })
+        };
         command
             .args(args)
             .current_dir(cwd)
@@ -417,23 +476,19 @@ impl Gh {
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
             .stdin(Stdio::null());
-        #[cfg(windows)]
-        let output = if let Some(body) = body {
-            use std::io::Write;
-            command
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            command.spawn().and_then(|mut child| {
-                let sent = child.stdin.take().unwrap().write_all(body.as_bytes());
-                let output = child.wait_with_output();
-                sent.and(output)
-            })
-        } else {
-            command.output()
+        let output = match input {
+            Some(input) => pipe_stdin(command, input),
+            None => {
+                #[cfg(windows)]
+                let output = match body {
+                    Some(body) => pipe_stdin(command, body),
+                    None => command.output(),
+                };
+                #[cfg(not(windows))]
+                let output = command.output();
+                output
+            }
         };
-        #[cfg(not(windows))]
-        let output = command.output();
         let output = output.map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => GhError::Missing,
             _ => GhError::Failed(format!("could not run gh: {e}")),
@@ -1249,6 +1304,46 @@ pub fn comment_pull_request(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Res
     }
     gh.require_ready(cwd)?;
     gh.run(cwd, &["pr", "comment", &number.to_string(), "--body", body])?;
+    Ok(())
+}
+
+/// Submits every draft as one review, with the reviewer's decision and summary.
+pub fn submit_review(
+    gh: &Gh,
+    cwd: &Path,
+    number: u32,
+    verdict: ReviewVerdict,
+    summary: &str,
+    comments: &[PullRequestLineComment],
+) -> Result<()> {
+    gh.require_ready(cwd)?;
+    let comments: Vec<serde_json::Value> = comments
+        .iter()
+        .map(|comment| {
+            serde_json::json!({
+                "path": comment.path,
+                "line": comment.line,
+                "side": match comment.side {
+                    CommentSide::Old => "LEFT",
+                    CommentSide::New => "RIGHT",
+                },
+                "body": comment.body,
+            })
+        })
+        .collect();
+    let input = serde_json::to_string(&serde_json::json!({
+        "body": summary.trim(),
+        "event": verdict.event(),
+        "comments": comments,
+    }))
+    .map_err(|e| Error::Github(format!("could not encode the review: {e}")))?;
+    // The latest commit is the one the reviewer read; GitHub picks it when none is given.
+    let path = format!("repos/{{owner}}/{{repo}}/pulls/{number}/reviews");
+    gh.run_with_stdin(
+        cwd,
+        &["api", &path, "--method", "POST", "--input", "-"],
+        &input,
+    )?;
     Ok(())
 }
 

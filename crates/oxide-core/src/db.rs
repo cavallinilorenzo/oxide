@@ -173,6 +173,23 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN threads_in_main_checkout INTEGER NOT NULL DEFAULT 0;
 ",
+    // Line comments drafted on a pull request's Diff, kept per Project and pull request until one
+    // review is submitted. They belong to no checkout, so reviewing never needs one.
+    "
+    CREATE TABLE pull_request_line_comments (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        pull_request INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        side TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX pull_request_line_comments_by_pr
+        ON pull_request_line_comments(project_id, pull_request, id);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

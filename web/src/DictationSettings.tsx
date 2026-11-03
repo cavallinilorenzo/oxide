@@ -4,12 +4,13 @@ import { listen } from "@tauri-apps/api/event";
 import { commands, type AdvicePreference, type BackendCandidate, type CapabilityState, type DictationBenchmarkProgress, type DictationBenchmarkResult, type DictationModelEntry, type DictationModelId, type DictationModelStatus, type DictationSettings as Value, type DictationStatus } from "./bindings";
 import { Dropdown } from "./Dropdown";
 import { cancelDictation, useDictationState } from "./dictation";
+import { DictationRuntimes, focusRuntimes } from "./DictationRuntimes";
 
 const bytes = (n: number | null | undefined) => n == null ? "Unknown" : `${(n / 1073741824).toFixed(2)} GiB`;
 const backendName = (s: string) => s === "cpu" ? "CPU" : s === "gpu" ? "GPU" : s === "auto" ? "Auto" : s[0].toUpperCase() + s.slice(1);
 function capability(state: CapabilityState): string {
   switch (state.status) {
-    case "omittedFromBuild": return "Not included in this build. Install a build with this backend, or use CPU.";
+    case "omittedFromBuild": return "Not included in this build. Install its GPU runtime in the GPU runtimes section above, or use CPU.";
     case "noCompatibleDevice": return "No compatible device. Connect a supported GPU, refresh, or use CPU.";
     case "missingDriverOrRuntime": return "Driver/runtime unavailable. Update the graphics driver, refresh, or use CPU.";
     case "initializationFailure": return `Initialization failed: ${state.details}. Refresh after repairing the driver, or use CPU.`;
@@ -347,6 +348,16 @@ export function DictationSettings({ value, onChange }: { value: Value; onChange:
             })}
           </div>
         </div>
+
+        {status && !status.gpuCompiled && (
+          <p role="status" className="dictation-helper-text">
+            This build has CPU support only.{" "}
+            <button type="button" className="link-action" onClick={focusRuntimes}>Install a GPU runtime</button>{" "}
+            to transcribe on your graphics card, or keep using CPU.
+          </p>
+        )}
+
+        <DictationRuntimes onChanged={() => void refresh()} />
 
         <details className="dictation-advanced-details">
           <summary>Advanced diagnostics, GPU adapters and performance checks</summary>

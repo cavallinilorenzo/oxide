@@ -22,6 +22,11 @@ export const commands = {
 	dictationStop: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_stop")),
 	dictationRetryOnCpu: () => typedError<string, AppError>(__TAURI_INVOKE("dictation_retry_on_cpu")),
 	dictationCancel: () => __TAURI_INVOKE<void>("dictation_cancel"),
+	dictationRuntimes: () => typedError<RuntimeCatalogue_Serialize, AppError>(__TAURI_INVOKE("dictation_runtimes")),
+	/**  Installs the newest published runtime for `backend`; also the update action. */
+	dictationRuntimeInstall: (backend: BackendId) => typedError<InstalledRuntime, AppError>(__TAURI_INVOKE("dictation_runtime_install", { backend })),
+	dictationRuntimeCancel: (backend: BackendId) => __TAURI_INVOKE<void>("dictation_runtime_cancel", { backend }),
+	dictationRuntimeRemove: (backend: BackendId) => typedError<null, AppError>(__TAURI_INVOKE("dictation_runtime_remove", { backend })),
 	listProjects: () => typedError<Project[], AppError>(__TAURI_INVOKE("list_projects")),
 	/**
 	 *  Scans the scan roots for new repositories, then lists all Projects.
@@ -280,6 +285,13 @@ export type Attachment = {
 };
 
 export type AttachmentKind = "image" | "pdf" | "text" | "other";
+
+export type AvailableRuntime = {
+	backend: BackendId,
+	version: string,
+	bytes: number | null,
+	requirements: string,
+};
 
 export type BackendCandidate = BackendCandidate_Serialize | BackendCandidate_Deserialize;
 
@@ -781,6 +793,14 @@ export type GithubRepository = {
 	nameWithOwner: string,
 	description: string,
 	isPrivate: boolean,
+};
+
+export type InstalledRuntime = {
+	backend: BackendId,
+	version: string,
+	protocolVersion: number,
+	compatible: boolean,
+	bytes: number | null,
 };
 
 export type IssueCloseReason = "completed" | "notPlanned";
@@ -1393,6 +1413,36 @@ export type ReviewLedger_Serialize = {
 };
 
 export type ReviewState = "requested" | "approved" | "changesRequested" | "commented" | "dismissed";
+
+export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
+
+export type RuntimeCatalogue_Deserialize = {
+	/**  Protocol the app speaks; installed runtimes with another value are unusable. */
+	protocolVersion: number,
+	installed: InstalledRuntime[],
+	available: AvailableRuntime[],
+	/**
+	 *  Why the published list could not be read (offline, bad signature…). Installed runtimes
+	 *  are still listed.
+	 */
+	indexError?: string | null,
+	/**  Backends being installed right now. */
+	installing: BackendId[],
+};
+
+export type RuntimeCatalogue_Serialize = {
+	/**  Protocol the app speaks; installed runtimes with another value are unusable. */
+	protocolVersion: number,
+	installed: InstalledRuntime[],
+	available: AvailableRuntime[],
+	/**
+	 *  Why the published list could not be read (offline, bad signature…). Installed runtimes
+	 *  are still listed.
+	 */
+	indexError: string | null,
+	/**  Backends being installed right now. */
+	installing: BackendId[],
+};
 
 export type Selection = Selection_Serialize | Selection_Deserialize;
 

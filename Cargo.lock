@@ -3093,6 +3093,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-updater",
  "tauri-specta",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 

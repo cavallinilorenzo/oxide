@@ -148,7 +148,11 @@ pub fn gpu_compiled() -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         let backends = &BuildManifest::current().included_backends;
-        backends.contains(&BackendId::Vulkan) || backends.contains(&BackendId::Cuda)
+        backends.contains(&BackendId::Vulkan)
+            || backends.contains(&BackendId::Cuda)
+            // A downloaded runtime counts without restarting the app.
+            || runtimes::installed_worker(BackendId::Vulkan).is_some()
+            || runtimes::installed_worker(BackendId::Cuda).is_some()
     }
 }
 
@@ -427,7 +431,7 @@ impl Dictation {
         let lease = self.models.acquire(home, settings.model)?;
         if settings.device == Device::Gpu && !gpu_compiled() {
             return Err(err(
-                "This build has CPU support only. Choose CPU in Settings.",
+                "This build has CPU support only. Install a GPU runtime in Settings → Dictation, or choose CPU.",
             ));
         }
         let mut backend = settings.backend;

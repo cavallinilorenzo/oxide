@@ -13,6 +13,7 @@ const root = createRoot(host);
 const changed = vi.fn();
 async function setup(value: Value = { enabled: false, language: "it", device: "cpu", model: "small" }) {
   vi.spyOn(commands, "dictationStatus").mockResolvedValue({ status: "ok", data: { installed: true, gpuCompiled: false, availableMemoryGb: null, cpuThreads: 4, recommendation: "Insufficient data", manifest: { whisperRsVersion: "test", whisperCppPinned: "test", includedBackends: ["cpu"] }, probes: [{ backend: "cpu", adapter: null, state: { status: "available" } }], lastExecution: null } });
+  vi.spyOn(commands, "dictationRuntimes").mockResolvedValue({ status: "ok", data: { protocolVersion: 1, installed: [], available: [], indexError: null, installing: [] } });
   vi.spyOn(commands, "dictationModelCatalogue").mockResolvedValue(catalogue);
   vi.spyOn(commands, "dictationModels").mockResolvedValue({ status: "ok", data: catalogue.models.map(({ id }) => ({ id, state: { status: id === "small" ? "installed" : "missing" } })) });
   await act(async () => root.render(<DictationSettings value={value} onChange={changed} />));
@@ -69,7 +70,7 @@ it.each([
 });
 
 it.each([
-  [{ status: "omittedFromBuild" }, "Install a build"],
+  [{ status: "omittedFromBuild" }, "GPU runtimes section"],
   [{ status: "missingDriverOrRuntime" }, "Update the graphics driver"],
   [{ status: "initializationFailure", details: "device lost" }, "Initialization failed"],
   [{ status: "insufficientMemory", details: { required_bytes: 2048, available_bytes: 0 } }, "select a smaller model"],

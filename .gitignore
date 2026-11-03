@@ -10,8 +10,5 @@ dist
 # Don't include personal Claude Code settings
 .claude/settings.local.json
 
-# Don't include Claude Code worktrees
-.claude/worktrees/
-
 # Don't include Claude Code scheduled task lock
 .claude/scheduled_tasks.lock

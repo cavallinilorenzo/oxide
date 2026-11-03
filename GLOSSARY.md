@@ -21,7 +21,7 @@ _Avoid_: Project switcher, quick open
 ## Threads
 
 **Thread**:
-One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in the sidebar until the user deletes it. A finished Thread is deleted, not archived: deleting removes its Transcript, Approvals, Attachments and Checkpoints for good, and a Board Thread's worktree with them (its branch stays). The Provider's own session files are left to the Provider. See ADR-0005.
+One conversation with a single Provider inside a Project, with its own Model, Effort and context (Model and Effort can change between Turns); it maps one-to-one to the Provider's own session. `/clear` and ⌘N start a new Thread in the same Project; the old one stays in the sidebar until the user deletes it. A finished Thread is deleted, not archived: deleting removes its Transcript, Approvals, Attachments and Checkpoints for good, and its worktree with them (its branch stays). The Provider's own session files are left to the Provider. A new chat Thread works in a worktree of its own by default. See ADR-0005 and ADR-0011.
 _Avoid_: Agent, session, chat, Archived Thread
 
 **Thread status**:
@@ -60,7 +60,7 @@ Oxide's own record of a Thread's Turns and Items, the only thing a Thread is sho
 _Avoid_: History, log, session (when meaning the record)
 
 **Checkpoint**:
-A snapshot of a Thread's files taken when a Turn starts and when it ends, so the Diff Surface can show what that Turn changed. Read-only: nothing is ever restored from a Checkpoint.
+A snapshot of a Thread's files taken when a Turn starts and when it ends, so the Diff Surface can show what that Turn changed and the Thread's files can be restored to how they were before a Turn. Restoring takes a Checkpoint first, so it can be undone, and does not rewind the Provider's session. See ADR-0011.
 _Avoid_: Snapshot, save point
 
 **Setup command**:
@@ -68,12 +68,34 @@ An optional per-Project shell command run in every new worktree before its Threa
 _Avoid_: Init script, bootstrap
 
 **Board Thread**:
-A Thread dispatched from the Thread Board. It works in a git worktree of its own at `~/.oxide/worktrees/<project>/<slug>`, on a new `oxide/<slug>` branch cut from the chosen base branch's local commits (uncommitted changes stay behind), and shows a branch icon in the sidebar. A Thread started from the chat works in the Project's main checkout instead.
+A Thread dispatched from the Thread Board. It works in a git worktree of its own at `~/.oxide/worktrees/<project>/<slug>`, on a new `oxide/<slug>` branch cut from the chosen base branch's local commits (uncommitted changes stay behind), and shows a branch icon in the sidebar. A new Thread started from the chat does the same by default, creating its worktree with its first prompt; a Project can opt out, and then its chat Threads work in the main checkout, as do chat Threads that existed before the default. See ADR-0011.
 _Avoid_: Background agent, background task
 
 **Thread Board**:
 The per-Project view of all its Threads grouped by Thread status into needs input (including error and interrupted), working and completed, from which a Board Thread can be dispatched.
 _Avoid_: Agent view, dashboard
+
+## Review
+
+**Line comment**:
+A draft on one line of a Diff, with the quoted code, written by the user or by a reviewing Provider. It stays a draft until sent, and is then delivered to a Thread as part of one prompt, or to GitHub as part of a review.
+_Avoid_: Inline comment, annotation, note
+
+**Verification command**:
+A command that counts as a check (tests, type checks, lint, build), recognized from built-in patterns plus the Project's own additions. Its state for a change is fresh, stale, failed, never run or unknown.
+_Avoid_: Test command, check script
+
+**Verification Dossier**:
+The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. Also called the Dossier.
+_Avoid_: Report, summary, risk score
+
+**Blind review**:
+A review of a change by a Provider session that received only the diff and the issue, never the original Thread. Its findings become Line comments the user keeps or dismisses.
+_Avoid_: Second opinion, AI review, auto-review
+
+**Review ledger**:
+Local figures about completed work that outlive Threads: identifiers, Provider, Model, timestamps and counts, never Transcript text. It is never sent anywhere and the user can clear it. See ADR-0010.
+_Avoid_: History, analytics, telemetry
 
 ## Providers
 
@@ -120,8 +142,11 @@ One of the five tools in the right dock: Diff, Files, Terminal, Pull request or 
 _Avoid_: Tab, pane, widget
 
 **Diff scope**:
-What the Diff Surface compares: Uncommitted (staged, unstaged and untracked changes against HEAD), Branch (commits since the merge-base with the base branch) or Turn (the files changed between a Turn's two Checkpoints; a chat Thread's Turn may include concurrent changes from other Threads in the shared checkout), all computed by Git; or PR, the changed files of a pull request opened for review, as GitHub reports them through `gh`. The default is Turn for chat Threads and Branch for Board Threads; PR is offered only once a pull request was opened for review.
+What the Diff Surface compares: Uncommitted (staged, unstaged and untracked changes against HEAD), Branch (commits since the merge-base with the base branch) or Turn (the files changed between a Turn's two Checkpoints; a Turn of a Thread in a shared checkout may include concurrent changes from other Threads), all computed by Git; or PR, the changed files of a pull request opened for review, as GitHub reports them through `gh`. The default is Turn for Threads in the main checkout and Branch for Threads in a worktree of their own; PR is offered only once a pull request was opened for review.
 _Avoid_: Diff mode, diff type
+
+**Revert**:
+Taking one file, or one hunk of it, out of the Uncommitted or Turn Diff by applying its patch in reverse to the selected Thread's checkout, leaving the rest of the change untouched. All-or-nothing: a patch that no longer applies cleanly changes nothing and says why. Deleting a file asks first, and it is refused while a Turn is running in that checkout. Not a Checkpoint restore, which rewinds the whole checkout to before a Turn.
 
 **Base branch**:
 The branch the Branch scope compares against: the remote's default branch, else `main`, `master` or `dev` (remote copy first).

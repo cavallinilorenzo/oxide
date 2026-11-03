@@ -3,6 +3,7 @@ import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./mode
 import { useEffect, useRef, useState } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GithubSetup } from "./GithubSetup";
+import { LanguageTools } from "./LanguageTools";
 import { UpdatesSettings } from "./UpdatesSettings";
 import { SETTINGS_SECTIONS, useSettingsSection } from "./useSettingsSection";
 import { getAppearance, saveAppearance, validateAppearance } from "./appearance";
@@ -51,7 +52,7 @@ const withSavedValue = (options: DropdownOption<string>[], value: string | null 
     ? [...options, { value, label: value }]
     : options;
 
-export function SettingsView({ onClose }: { onClose: () => void }) {
+export function SettingsView({ onClose, onRunCommand, section }: { onClose: () => void; onRunCommand: (command: string) => void; section?: string | null }) {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -92,6 +93,11 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       void unlisten.then((f) => f());
     };
   }, []);
+
+  const ready = state !== null && draft !== null;
+  useEffect(() => {
+    if (ready && section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: "start" });
+  }, [ready, section]);
 
   if (!state || !draft)
     return <main className="settings" aria-label="Settings"><Skeleton kind="form" label="Loading settings…"/></main>;
@@ -328,6 +334,8 @@ export function SettingsView({ onClose }: { onClose: () => void }) {
       </section>
 
       <section className="settings-section" aria-labelledby="settings-github"><header className="settings-section-header"><h2 id="settings-github">GitHub tools</h2><p>Prepare this computer for Git and GitHub.</p></header><GithubSetup /></section>
+
+      <section className="settings-section" aria-labelledby="settings-language"><header className="settings-section-header"><h2 id="settings-language">Language tools</h2><p>Local intelligence for your code. No extensions required.</p></header><LanguageTools onRunCommand={onRunCommand} onChanged={() => window.dispatchEvent(new Event("oxide-language-tools-changed"))} /></section>
 
       <ShortcutsSettings
         shortcuts={draft.shortcuts}

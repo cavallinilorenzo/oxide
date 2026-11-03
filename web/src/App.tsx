@@ -5,7 +5,7 @@ import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Project, type Thread, type ThreadStatus, type DiffFile } from "./bindings";
-import type { CodeOpenRequest } from "./codeOpen";
+import type { CodeOpenRequest, ReviewTarget } from "./codeOpen";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -21,7 +21,9 @@ import {
   RepoIcon,
   SearchIcon,
   TerminalIcon,
-  ToolsIcon,
+  SidebarExpandIcon,
+  ScreenFullIcon,
+  ScreenNormalIcon,
   XIcon,
   type Icon,
   TrashIcon,
@@ -48,7 +50,7 @@ import { SettingsView } from "./SettingsView";
 import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
-import { readablePath } from "./headerLines";
+import { displayPath, middleEllipsis, readablePath } from "./headerLines";
 import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
@@ -91,7 +93,9 @@ export function App() {
   })());
   const [showSidebar, setShowSidebar] = useState(true);
   const [regionPriority, setRegionPriority] = useState<"sidebar" | "tools">("tools");
-  const [maximized, setMaximized] = useState(false);
+  const [wantsMaximized, setMaximized] = useState(false);
+  /** Which checkouts have at least one file open in the Files editor. */
+  const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({});
   const [workbenches, setWorkbenches] = useState<WorkbenchContext[]>([]);
   const [installCommand, setInstallCommand] = useState<{ id: number; command: string } | null>(null);
   const installSequence = useRef(0);
@@ -167,11 +171,15 @@ export function App() {
     projectId: selected.id, threadId: selectedThread?.worktreePath ? currentThreadId : null,
     rootPath: selectedThread?.worktreePath ?? selected.path,
   } : null, [selected, currentThreadId, selectedThread?.worktreePath]);
+  /** Full-screen editing only makes sense with a file open in Files. */
+  const canMaximize = activeTool === "Files" && workbenchContext !== null && filesOpen[workbenchContext.key] === true;
+  const maximized = wantsMaximized && canMaximize;
   const dockRequested = showTools && !showSettings && !showBoard;
   const layout = workspaceLayout(bodySize.width, bodySize.height, {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: null,
   }, dockRequested, { sidebarVisible: showSidebar, priority: regionPriority, maximized });
   const dockVisible = layout.toolsVisible;
+  const [settingsSection, setSettingsSection] = useState<string | null>(null);
   const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean }>>({});
   const [terminals, setTerminals] = useState<TerminalsByProject>({});
   const [visitedTools, setVisitedTools] = useState<Record<string, boolean>>({});
@@ -205,9 +213,9 @@ export function App() {
     // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
     if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
-  const openCodeFile = (path: string, diff?: DiffFile, remote = false) => {
+  const openCodeFile = (path: string, diff?: DiffFile, remote = false, review?: ReviewTarget) => {
     if (!workbenchContext) return;
-    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, contextKey: workbenchContext.key });
+    setCodeRequest({ id: ++codeSequence.current, path, diff, remote, review, contextKey: workbenchContext.key });
     selectSurface("Files");
   };
   useEffect(() => {
@@ -654,7 +662,7 @@ export function App() {
           }
         }
       } else if (action === "maximizeSurface") {
-        if (dockVisible) {
+        if (dockVisible && canMaximize) {
           const next = !maximized;
           setMaximized(next);
           if (!next) {
@@ -669,13 +677,14 @@ export function App() {
         setShowSettings(false);
         requestAnimationFrame(() => focusRegion("centre"));
       } else {
+        setSettingsSection(null);
         setShowSettings(true);
         requestAnimationFrame(() => focusRegion("centre"));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, maximized, focusRegion, selectThread]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -765,13 +774,20 @@ export function App() {
             }}><RepoIcon size={16} /></button>
         )}
         <div className="header-project" data-tauri-drag-region>
-        {selected ? (
+        {selected ? (<>
           <span className="title project-label" data-tauri-drag-region title={`Project: ${readablePath(selected.path)}`}>
             <RepoIcon size={13} />
             <strong>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
-        ) : !isWindows ? (
+          {selectedThread && !showBoard && !showSettings && (() => {
+            const folder = selectedThread.worktreePath ?? selected.path;
+            return <span className="header-folder" data-tauri-drag-region title={readablePath(folder)}>
+              <FileDirectoryIcon size={12} />
+              <span>{middleEllipsis(displayPath(folder), 52)}</span>
+            </span>;
+          })()}
+        </>) : !isWindows ? (
           <span className="title" data-tauri-drag-region>
             <strong>Oxide</strong>
           </span>
@@ -801,7 +817,7 @@ export function App() {
             if (willShow) requestAnimationFrame(() => focusRegion("dock"));
           }}
         >
-          <ToolsIcon size={16} />
+          <SidebarExpandIcon size={16} />
         </button>
         {isWindows && <WindowControls />}
         </div>
@@ -868,7 +884,7 @@ export function App() {
               setShowSettings(false);
               setShowBoard(true);
             }}
-            onOpenSettings={() => setShowSettings(true)}
+            onOpenSettings={() => { setSettingsSection(null); setShowSettings(true); }}
             settingsOpen={showSettings}
           />
           <ResizeHandle label="Resize sidebar" controls="workspace-sidebar" axis="x" edge="end"
@@ -879,7 +895,7 @@ export function App() {
           requestAnimationFrame(() => focusRegion("centre"));
         }}><ChevronRightIcon size={16} /></button>}
         <div className="centre-column" hidden={maximized && dockVisible}>
-          {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
+          {showSettings && <SettingsView section={settingsSection} onRunCommand={(command) => { setShowSettings(false); runInstallCommand(command); }} onClose={() => setShowSettings(false)} />}
           <div className="chat-workbench" hidden={showSettings}>
           {threadLoadError && threadLoadError.projectId === selected?.id ? (
             <main className="centre empty-thread" aria-label="Project load error"><p className="error" role="alert">Could not load Threads for {selected?.name}: {threadLoadError.message}</p><button className="btn" onClick={() => { setThreadLoadError(null); setThreadReload((value) => value + 1); }}>Retry</button></main>
@@ -917,7 +933,6 @@ export function App() {
                   }}
                   threadId={selectedThreadId}
                   projectId={selected.id}
-                  projectPath={selected.path}
                   gitControls={currentThreadId !== null && !selected.missing ? (
                     <GitHeader
                       projectId={selected.id}
@@ -993,11 +1008,11 @@ export function App() {
                 </button>
               ))}
               <span className="grow" />
-              <button className="icon-btn sm" title={`${maximized ? "Restore Surface" : "Maximize Surface"} (${keys("maximizeSurface")})`} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => {
+              {canMaximize && <button className="icon-btn sm" title={`${maximized ? "Restore Surface" : "Maximize Surface"} (${keys("maximizeSurface")})`} aria-label={maximized ? "Restore Surface" : "Maximize Surface"} onClick={() => {
                 const next = !maximized;
                 setMaximized(next);
                 requestAnimationFrame(() => focusRegion(next ? "dock" : "centre"));
-              }}><ProjectIcon size={14} /></button>
+              }}>{maximized ? <ScreenNormalIcon size={14} /> : <ScreenFullIcon size={14} />}</button>}
               <button className="icon-btn sm" title={`Close panel (${keys("toggleTools")})`} aria-label="Close tools panel" onClick={() => {
                 setShowTools(false);
                 requestAnimationFrame(() => {
@@ -1013,6 +1028,7 @@ export function App() {
                   projectId={selected.id}
                   threadId={currentThreadId}
                   board={diffThread.board}
+                  turnRunning={threads?.some((thread) => thread.status === "working" && (diffThread.board ? thread.id === currentThreadId : !isBoardThread(thread))) ?? false}
                   scope={diffScope}
                   reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}
                   onScopeChange={(scope) => {
@@ -1023,7 +1039,8 @@ export function App() {
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
-                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr")}
+                  threadWorking={selectedThread?.status === "working"}
+                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr", diffScope !== "pr" && currentThreadId !== null ? { threadId: currentThreadId, scope: diffScope } : undefined)}
                 />
               </Suspense></div>
             )}
@@ -1043,7 +1060,7 @@ export function App() {
               </Suspense></div>
             )}
             {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onRunCommand={runInstallCommand} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onOpenLanguageSettings={() => { setSettingsSection("language"); setMaximized(false); setShowBoard(false); setShowSettings(true); }} onOpenFilesChange={(open) => setFilesOpen((previous) => previous[context.key] === open ? previous : { ...previous, [context.key]: open })} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
               const projectId = Number(id); const isSelectedProject = projectId === selected?.id;

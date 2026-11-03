@@ -15,7 +15,8 @@ export function LanguageTools({
   onRunCommand,
   onChanged,
 }: {
-  onClose: () => void;
+  /** Omitted when the panel sits inside a Settings section that has its own heading. */
+  onClose?: () => void;
   onRunCommand: (command: string) => void;
   onChanged: () => void;
 }) {
@@ -86,8 +87,8 @@ export function LanguageTools({
     }
   }
   return (
-    <section className="language-tools" aria-label="Language tools">
-      <header>
+    <section className={onClose ? "language-tools" : "language-tools embedded"} aria-label="Language tools">
+      {onClose && <header>
         <div>
           <h2>Language tools</h2>
           <p>Local intelligence for your code. No extensions required.</p>
@@ -99,7 +100,7 @@ export function LanguageTools({
         >
           <XIcon size={16} />
         </button>
-      </header>
+      </header>}
       <p className="language-tools-help">
         Download language support into Oxide’s private tools folder. Python and
         TypeScript use a private Node.js runtime when npm is unavailable. You

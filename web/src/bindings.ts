@@ -89,6 +89,10 @@ export const commands = {
 	subscribeBoard: (projectId: number, onEvent: Channel<BoardEvent_Deserialize>) => typedError<BoardCard_Serialize[], AppError>(__TAURI_INVOKE("subscribe_board", { projectId, onEvent })),
 	/**  A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`. */
 	subscribeUsageLimits: (provider: string, onEvent: Channel<UsageLimits_Deserialize>) => typedError<UsageLimits_Serialize | null, AppError>(__TAURI_INVOKE("subscribe_usage_limits", { provider, onEvent })),
+	/**  The Review ledger of a Project: median wait and recent entries. */
+	reviewLedger: (projectId: number) => typedError<ReviewLedger_Serialize, AppError>(__TAURI_INVOKE("review_ledger", { projectId })),
+	/**  Removes every entry of the Review ledger. */
+	clearReviewLedger: () => typedError<null, AppError>(__TAURI_INVOKE("clear_review_ledger")),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	startBlockTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_block_terminal", { projectId, threadId, onOutput })),
 	writeFile: (projectId: number, threadId: number | null, path: string, expected: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("write_file", { projectId, threadId, path, expected, content })),
@@ -123,6 +127,15 @@ export const commands = {
 	gitDiff: (projectId: number, threadId: number | null, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, threadId, scope })),
 	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
 	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
+	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
+	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
+	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
+	editLineComment: (id: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_line_comment", { id, body })),
+	deleteLineComment: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("delete_line_comment", { id })),
+	/**  A Thread's draft comments, each flagged when its line has changed. */
+	listLineComments: (threadId: number) => typedError<LineComment[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
+	/**  Sends every draft to the Thread as one prompt. */
+	sendLineComments: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("send_line_comments", { threadId })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, threadId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -366,6 +379,10 @@ export type ClaudeCustomizations = {
 	mcpServers: boolean,
 	hooks: boolean,
 };
+
+export type CommentScope = "turn" | "uncommitted" | "branch";
+
+export type CommentSide = "old" | "new";
 
 /**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
 export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
@@ -906,6 +923,18 @@ export type LanguageTool_Serialize = {
 	documentation: string,
 };
 
+export type LineComment = {
+	id: number,
+	threadId: number,
+	scope: CommentScope,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
+	outdated: boolean,
+};
+
 export type MemoryPool = MemoryPool_Serialize | MemoryPool_Deserialize;
 
 export type MemoryPool_Deserialize = {
@@ -950,6 +979,16 @@ export type ModelMemoryEstimate = {
 	backend: BackendId,
 	bytes: number | null,
 	measured: boolean,
+};
+
+/**  A draft comment on one line of a Diff. */
+export type NewLineComment = {
+	scope: CommentScope,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
 };
 
 /**  An Approval the Provider is still waiting on. */
@@ -1293,7 +1332,65 @@ export type ResourceSnapshot_Serialize = {
 	freeDiskBytes: number | null,
 };
 
+export type RevertHunk = {
+	index: number,
+	/**  The `@@` line the Diff showed, so a diff that moved on is refused. */
+	header: string,
+};
+
+export type RevertScope = "uncommitted" | "turn";
+
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
+
+/**  A Project's wait between a finished Turn and the merge. */
+export type ReviewLedger = ReviewLedger_Serialize | ReviewLedger_Deserialize;
+
+/**  One merged pull request of a Thread, kept after the Thread is deleted. No Transcript text. */
+export type ReviewLedgerEntry = ReviewLedgerEntry_Serialize | ReviewLedgerEntry_Deserialize;
+
+/**  One merged pull request of a Thread, kept after the Thread is deleted. No Transcript text. */
+export type ReviewLedgerEntry_Deserialize = {
+	projectId: number,
+	threadId: number,
+	pullRequest: number,
+	provider: string,
+	model?: string | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	turnCompletedAt: number | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	mergedAt: number | null,
+};
+
+/**  One merged pull request of a Thread, kept after the Thread is deleted. No Transcript text. */
+export type ReviewLedgerEntry_Serialize = {
+	projectId: number,
+	threadId: number,
+	pullRequest: number,
+	provider: string,
+	model: string | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	turnCompletedAt: number | null,
+	/**  Seconds since the Unix epoch (UTC). */
+	mergedAt: number | null,
+};
+
+/**  A Project's wait between a finished Turn and the merge. */
+export type ReviewLedger_Deserialize = {
+	/**  Median wait in seconds; none without entries. */
+	medianSecs?: number | null,
+	count: number,
+	/**  The most recent entries, newest merge first. */
+	entries: ReviewLedgerEntry_Deserialize[],
+};
+
+/**  A Project's wait between a finished Turn and the merge. */
+export type ReviewLedger_Serialize = {
+	/**  Median wait in seconds; none without entries. */
+	medianSecs: number | null,
+	count: number,
+	/**  The most recent entries, newest merge first. */
+	entries: ReviewLedgerEntry_Serialize[],
+};
 
 export type ReviewState = "requested" | "approved" | "changesRequested" | "commented" | "dismissed";
 

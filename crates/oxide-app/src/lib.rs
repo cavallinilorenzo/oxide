@@ -778,6 +778,32 @@ pub struct UsageLimits {
     pub weekly: Option<UsageLimitWindow>,
 }
 
+/// One merged pull request of a Thread, kept after the Thread is deleted. No Transcript text.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewLedgerEntry {
+    pub project_id: u32,
+    pub thread_id: u32,
+    pub pull_request: u32,
+    pub provider: String,
+    pub model: Option<String>,
+    /// Seconds since the Unix epoch (UTC).
+    pub turn_completed_at: f64,
+    /// Seconds since the Unix epoch (UTC).
+    pub merged_at: f64,
+}
+
+/// A Project's wait between a finished Turn and the merge.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewLedger {
+    /// Median wait in seconds; none without entries.
+    pub median_secs: Option<f64>,
+    pub count: u32,
+    /// The most recent entries, newest merge first.
+    pub entries: Vec<ReviewLedgerEntry>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
@@ -1692,6 +1718,95 @@ async fn git_diff(
     .map(|diff| convert(&diff))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CommentScope {
+    Turn,
+    Uncommitted,
+    Branch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CommentSide {
+    Old,
+    New,
+}
+
+/// A draft comment on one line of a Diff.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewLineComment {
+    scope: CommentScope,
+    path: String,
+    side: CommentSide,
+    line: u32,
+    code: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LineComment {
+    id: u32,
+    thread_id: u32,
+    scope: CommentScope,
+    path: String,
+    side: CommentSide,
+    line: u32,
+    code: String,
+    body: String,
+    outdated: bool,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn add_line_comment(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    comment: NewLineComment,
+) -> Result<LineComment, AppError> {
+    let comment: oxide_core::NewLineComment = convert(&comment);
+    git_blocking(&core, move |core| core.add_line_comment(thread_id, comment))
+        .await
+        .map(|c| convert(&c))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn edit_line_comment(
+    core: State<'_, Arc<Core>>,
+    id: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.edit_line_comment(id, &body)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn delete_line_comment(core: State<'_, Arc<Core>>, id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.delete_line_comment(id)).await
+}
+
+/// A Thread's draft comments, each flagged when its line has changed.
+#[tauri::command]
+#[specta::specta]
+async fn list_line_comments(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<Vec<LineComment>, AppError> {
+    git_blocking(&core, move |core| core.list_line_comments(thread_id))
+        .await
+        .map(|c| c.iter().map(convert).collect())
+}
+
+/// Sends every draft to the Thread as one prompt.
+#[tauri::command]
+#[specta::specta]
+async fn send_line_comments(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.send_line_comments(thread_id)).await
+}
+
 /// What a Thread's latest Turn changed, from its two Checkpoints.
 #[tauri::command]
 #[specta::specta]
@@ -1699,6 +1814,50 @@ async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Dif
     git_blocking(&core, move |core| core.latest_turn_diff(thread_id))
         .await
         .map(|diff| convert(&diff))
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RevertScope {
+    Uncommitted,
+    Turn,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertHunk {
+    pub index: u32,
+    /// The `@@` line the Diff showed, so a diff that moved on is refused.
+    pub header: String,
+}
+
+/// Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout.
+#[tauri::command]
+#[specta::specta]
+async fn revert_diff(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: Option<u32>,
+    scope: RevertScope,
+    path: String,
+    hunk: Option<RevertHunk>,
+    confirm_delete: bool,
+) -> Result<(), AppError> {
+    let scope = match scope {
+        RevertScope::Uncommitted => oxide_core::RevertScope::Uncommitted,
+        RevertScope::Turn => oxide_core::RevertScope::Turn,
+    };
+    let target = oxide_core::RevertTarget {
+        path,
+        hunk: hunk.map(|h| oxide_core::RevertHunk {
+            index: h.index as usize,
+            header: h.header,
+        }),
+    };
+    git_blocking(&core, move |core| {
+        core.revert_in(project_id, thread_id, scope, &target, confirm_delete)
+    })
+    .await
 }
 
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
@@ -2796,6 +2955,20 @@ fn subscribe_thread(
     Ok(convert(&snapshot))
 }
 
+/// The Review ledger of a Project: median wait and recent entries.
+#[tauri::command]
+#[specta::specta]
+fn review_ledger(core: State<'_, Arc<Core>>, project_id: u32) -> Result<ReviewLedger, AppError> {
+    Ok(convert(&core.review_ledger(project_id)?))
+}
+
+/// Removes every entry of the Review ledger.
+#[tauri::command]
+#[specta::specta]
+fn clear_review_ledger(core: State<'_, Arc<Core>>) -> Result<(), AppError> {
+    Ok(core.clear_review_ledger()?)
+}
+
 /// A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`.
 #[tauri::command]
 #[specta::specta]
@@ -3024,6 +3197,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         subscribe_thread_debug,
         subscribe_board,
         subscribe_usage_limits,
+        review_ledger,
+        clear_review_ledger,
         start_terminal,
         start_block_terminal,
         write_file,
@@ -3050,6 +3225,12 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_branches,
         git_diff,
         git_turn_diff,
+        revert_diff,
+        add_line_comment,
+        edit_line_comment,
+        delete_line_comment,
+        list_line_comments,
+        send_line_comments,
         checkout_branch,
         create_branch,
         fetch_project,
@@ -3168,6 +3349,7 @@ pub fn run() {
                 .join(".oxide");
             oxide_core::dictation::runtimes::set_home(&home);
             let core = Core::open(home)?;
+            core.start_usage_poller();
             let handle = app.handle().clone();
             let dictation = app
                 .state::<Arc<oxide_core::dictation::Dictation>>()

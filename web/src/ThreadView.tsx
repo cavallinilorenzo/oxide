@@ -88,7 +88,6 @@ interface ThreadViewProps {
   threadId: number | null;
   projectId: number;
   /** The Project's checkout, shown in the header for a Thread that has no worktree of its own. */
-  projectPath: string;
   /** The selected Thread's Git controls, shown under its title. Absent without a Thread. */
   gitControls?: ReactNode;
   draft?: string;
@@ -171,7 +170,6 @@ export function ThreadView({
   onInitialLoad,
   threadId,
   projectId,
-  projectPath,
   gitControls,
   draft,
   onDraftChange,
@@ -1044,9 +1042,6 @@ export function ThreadView({
         thread={thread}
         title={threadTitle}
         provider={currentProvider}
-        model={currentModel}
-        effort={currentEffort}
-        projectPath={projectPath}
         gitControls={gitControls}
         reportsUsage={providerCaps?.reportsUsageLimits ?? false}
         editing={isEditingTitle}

@@ -19,7 +19,9 @@ mod git_diff;
 mod github;
 mod language_install;
 mod language_server;
+mod line_comments;
 mod project_setup;
+mod review_ledger;
 mod settings;
 mod slash_catalog;
 mod storage_actor;
@@ -30,6 +32,7 @@ pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
 mod thread_actor;
 mod usage;
+mod usage_poll;
 mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
@@ -37,7 +40,10 @@ pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
-pub use git_diff::{Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus};
+pub use git_diff::{
+    Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus, RevertHunk, RevertScope,
+    RevertTarget,
+};
 pub use github::{
     BranchPullRequest, CheckState, GithubAvailability, GithubRepository, IssueCloseReason,
     IssueComment, IssueDetail, IssueEdit, IssueSummary, IssueTemplateFile, IssuesState,
@@ -47,6 +53,7 @@ pub use github::{
     ReviewState,
 };
 pub use language_server::{LanguageServerConfig, LanguageServerSummary, LanguageTool};
+pub use line_comments::{CommentScope, CommentSide, LineComment, NewLineComment};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -75,6 +82,7 @@ pub use oxide_provider::{
     ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, Detection,
     ItemKind, ModelInfo, PromptSegment, ProviderCapabilities, TurnStatus, UsageStatus,
 };
+pub use review_ledger::{RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -136,7 +144,9 @@ pub struct Core {
     gh: Arc<github::Gh>,
     activity: Arc<activity::Activity>,
     board: Arc<board::BoardHub>,
+    ledger: Arc<review_ledger::LedgerStore>,
     usage: Arc<usage::UsageHub>,
+    usage_poller: Mutex<Option<usage_poll::PollerHandle>>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
     slash_catalogs: Mutex<HashMap<String, Vec<oxide_provider::SlashCommandInfo>>>,
     detections: detection_cache::DetectionCache,
@@ -174,6 +184,7 @@ impl Core {
         let storage = StorageHandle::new(home.join(DB_FILE))?;
         let board = Arc::new(board::BoardHub::new(home.join(DB_FILE)));
         let usage = Arc::new(usage::UsageHub::new(home.join(DB_FILE)));
+        let ledger = Arc::new(review_ledger::LedgerStore::new(home.join(DB_FILE)));
         let core = Self {
             home: home.clone(),
             user_home: std::env::var_os("HOME")
@@ -197,7 +208,9 @@ impl Core {
             gh: Arc::new(github::Gh::default()),
             activity: Arc::new(activity::Activity::new(Arc::clone(&board))),
             board,
+            ledger,
             usage,
+            usage_poller: Mutex::new(None),
             model_catalogs: Mutex::new(HashMap::new()),
             detections: detection_cache::DetectionCache::default(),
             slash_catalogs: Mutex::new(
@@ -223,6 +236,14 @@ impl Core {
     /// Shuts every Provider and terminal down, escalating SIGTERM to SIGKILL, and returns once
     /// their processes are gone. Safe to call more than once; also runs when Core is dropped.
     pub fn shutdown(&self) {
+        if let Some(mut poller) = self
+            .usage_poller
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            poller.stop();
+        }
         self.language_servers.shutdown();
         let actors: Vec<_> = self
             .thread_actors
@@ -688,6 +709,10 @@ impl Core {
                     [thread_id],
                 )?;
             }
+            tx.execute(
+                "DELETE FROM line_comments WHERE thread_id = ?1",
+                [thread_id],
+            )?;
             tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
             tx.execute(
                 "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",
@@ -1208,11 +1233,22 @@ impl Core {
         if threads.is_empty() {
             return;
         }
-        let (gh, board) = (Arc::clone(&self.gh), Arc::clone(&self.board));
+        let (gh, board, ledger) = (
+            Arc::clone(&self.gh),
+            Arc::clone(&self.board),
+            Arc::clone(&self.ledger),
+        );
         std::thread::spawn(move || {
             for (thread_id, branch) in threads {
                 match github::branch_pull_request(&gh, &cwd, &branch) {
-                    Ok(pr) => board.set_pull_request(thread_id, pr),
+                    Ok(found) => {
+                        if let Some((pr, Some(merged_at))) = &found
+                            && pr.phase == PullRequestPhase::Merged
+                        {
+                            let _ = ledger.record_merge(thread_id, pr.number, merged_at);
+                        }
+                        board.set_pull_request(thread_id, found.map(|(pr, _)| pr));
+                    }
                     Err(_) => return,
                 }
             }
@@ -1222,6 +1258,19 @@ impl Core {
     /// The last Usage limits Oxide saw for a Provider, shared by all its Threads.
     pub fn usage_limits(&self, provider: &str) -> Option<UsageLimits> {
         self.usage.get(provider)
+    }
+
+    /// Starts polling provider usage limits in the background (Claude, Codex, Antigravity).
+    /// Safe to call multiple times (only one poller is spawned).
+    pub fn start_usage_poller(&self) {
+        let mut poller = self.usage_poller.lock().unwrap_or_else(|e| e.into_inner());
+        if poller.is_some() {
+            return;
+        }
+        *poller = Some(usage_poll::spawn(
+            Arc::clone(&self.usage),
+            self.user_home.clone(),
+        ));
     }
 
     /// The current Usage limits of a Provider and the updates that follow.
@@ -1453,6 +1502,47 @@ impl Core {
                 files: Vec::new(),
             }),
         }
+    }
+
+    /// Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of the checkout a
+    /// Thread works in (`None`: the main one), leaving the rest untouched. A change that does
+    /// not apply cleanly is refused with nothing changed; deleting a file needs
+    /// `confirm_delete`; and nothing is reverted while a Thread is working in the checkout.
+    pub fn revert_in(
+        &self,
+        project_id: u32,
+        thread_id: Option<u32>,
+        scope: RevertScope,
+        target: &RevertTarget,
+        confirm_delete: bool,
+    ) -> Result<()> {
+        self.switch_branch(project_id, thread_id, |cwd| match scope {
+            RevertScope::Uncommitted => {
+                let base = if git::ref_exists(cwd, "HEAD") {
+                    "HEAD".to_string()
+                } else {
+                    git::run(cwd, &["hash-object", "-t", "tree", "/dev/null"])?
+                        .trim()
+                        .to_string()
+                };
+                git_diff::revert(cwd, &[&base], true, target, confirm_delete)
+            }
+            RevertScope::Turn => {
+                let thread_id = thread_id.ok_or_else(|| {
+                    Error::Git("Select a Thread to revert changes of its Turn.".into())
+                })?;
+                let turns = self.storage.get_snapshot(thread_id, 0)?.turn_count;
+                let revs = turns
+                    .checked_sub(1)
+                    .map(|latest| checkpoint::turn_revs(cwd, thread_id, latest))
+                    .transpose()?
+                    .flatten();
+                let Some((start, end)) = revs else {
+                    return Err(Error::Git("This Thread has no Turn to revert.".into()));
+                };
+                git_diff::revert(cwd, &[&start, &end], false, target, confirm_delete)
+            }
+        })
     }
 
     /// Local and remote branches of a Project's main checkout.
@@ -1802,7 +1892,32 @@ impl Core {
                 return Err(Error::Git(reason));
             }
             github::merge_pull_request(&self.gh, &cwd, number, method, delete_branch, auto)
-        })
+        })?;
+        // The merge is done; the ledger is a nicety that must not turn it into an error.
+        if !auto {
+            self.record_merge_of(project_id, &cwd, number);
+        }
+        Ok(())
+    }
+
+    /// Files a pull request Oxide just merged under the Thread whose branch it came from.
+    fn record_merge_of(&self, project_id: u32, cwd: &Path, number: u32) {
+        let Ok(Some((head, Some(merged_at)))) = github::merged_head(&self.gh, cwd, number) else {
+            return;
+        };
+        if let Ok(Some(thread_id)) = self.ledger.thread_of_branch(project_id, &head) {
+            let _ = self.ledger.record_merge(thread_id, number, &merged_at);
+        }
+    }
+
+    /// How long a Project's finished work waited for its merge, from the Review ledger.
+    pub fn review_ledger(&self, project_id: u32) -> Result<ReviewLedger> {
+        self.ledger.ledger(project_id)
+    }
+
+    /// Removes every entry of the Review ledger.
+    pub fn clear_review_ledger(&self) -> Result<()> {
+        self.ledger.clear()
     }
 
     /// Closes a pull request on GitHub without merging it.

@@ -20,7 +20,7 @@ it("shows an integrated skeleton for a new Thread, restores a visited one immedi
     return [];
   });
   const onStatusChange = vi.fn();
-  const render = (threadId: number) => act(async () => root.render(<ThreadView threadId={threadId} projectId={1} projectPath="/test" draft="follow up" onThreadCreated={vi.fn()} onStatusChange={onStatusChange} prefill={null} onPrefillUsed={vi.fn()} onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
+  const render = (threadId: number) => act(async () => root.render(<ThreadView threadId={threadId} projectId={1} draft="follow up" onThreadCreated={vi.fn()} onStatusChange={onStatusChange} prefill={null} onPrefillUsed={vi.fn()} onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
   await render(7);
   expect(host.textContent).toContain("Conversation 7");
   deferred = true;

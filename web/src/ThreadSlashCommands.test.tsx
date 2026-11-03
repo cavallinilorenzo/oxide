@@ -21,7 +21,7 @@ it("intercepts an unavailable permission mode before a Thread exists", async () 
     if (command === "get_model_catalog" || command === "list_slash_commands") return [];
     return null;
   });
-  await act(async () => root.render(<ThreadView threadId={null} projectId={1} projectPath="/test" draft="/permissions ask"
+  await act(async () => root.render(<ThreadView threadId={null} projectId={1} draft="/permissions ask"
     onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
     onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
   await act(async () => container.querySelector("form")!.requestSubmit());
@@ -44,7 +44,7 @@ it("loads capabilities before applying a permission command in a new Thread", as
     if (command === "get_model_catalog" || command === "list_slash_commands") return [];
     return null;
   });
-  await act(async () => root.render(<ThreadView threadId={null} projectId={1} projectPath="/test" draft="/permissions full"
+  await act(async () => root.render(<ThreadView threadId={null} projectId={1} draft="/permissions full"
     onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
     onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
   await act(async () => container.querySelector("form")!.requestSubmit());
@@ -69,7 +69,7 @@ it.each(["claude", "codex", "agy"])("intercepts commands in a %s Thread without 
     if (command === "get_model_catalog" || command === "list_slash_commands") return [];
     return null;
   });
-  const render = (draft: string) => <ThreadView threadId={7} projectId={1} projectPath="/test" draft={draft}
+  const render = (draft: string) => <ThreadView threadId={7} projectId={1} draft={draft}
     onOpenDefaultDiff={openDiff} onThreadCreated={vi.fn()} onStatusChange={vi.fn()} onThreadTitleChange={titleChanged}
     prefill={null} onPrefillUsed={vi.fn()} onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />;
   await act(async () => root.render(render("/rename New title")));
@@ -103,7 +103,7 @@ it("reports a failed cache reload without sending the command to the provider", 
     if (command === "list_slash_commands") throw "provider unavailable";
     return null;
   });
-  await act(async () => root.render(<ThreadView threadId={null} projectId={1} projectPath="/test" draft="/reload-cache"
+  await act(async () => root.render(<ThreadView threadId={null} projectId={1} draft="/reload-cache"
     onThreadCreated={vi.fn()} onStatusChange={vi.fn()} prefill={null} onPrefillUsed={vi.fn()}
     onOpenThread={vi.fn()} onThreadContinued={vi.fn()} />));
   await act(async () => container.querySelector("form")!.requestSubmit());

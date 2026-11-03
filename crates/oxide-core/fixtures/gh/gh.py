@@ -172,7 +172,9 @@ if args[:2] == ["pr", "comment"]:
     sys.exit(0)
 
 if args[:2] == ["pr", "merge"]:
-    by_number(number_arg())["state"] = "MERGED"
+    merged = by_number(number_arg())
+    merged["state"] = "MERGED"
+    merged["mergedAt"] = now()
     save()
     sys.exit(0)
 

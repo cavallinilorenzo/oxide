@@ -219,11 +219,11 @@ fn a_running_turn_only_blocks_branch_actions_in_its_own_checkout() {
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let status = f.core.git_status_in(f.project.id, None).unwrap();
+        let status = f.core.git_status_in(f.project.id, Some(f.chat.id)).unwrap();
         if status.picker_disabled_reason.is_some() {
             break;
         }
-        assert!(Instant::now() < deadline, "main checkout never guarded");
+        assert!(Instant::now() < deadline, "thread worktree never guarded");
         std::thread::sleep(Duration::from_millis(20));
     }
 

@@ -277,7 +277,7 @@ fn picker_is_disabled_with_a_reason_while_a_thread_turn_is_working() {
     let reason = loop {
         if let Some(r) = f
             .core
-            .git_status(f.project.id)
+            .git_status_in(f.project.id, Some(thread.id))
             .unwrap()
             .picker_disabled_reason
         {
@@ -287,7 +287,15 @@ fn picker_is_disabled_with_a_reason_while_a_thread_turn_is_working() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(reason.contains("Thread"), "{reason}");
-    assert!(f.core.create_branch(f.project.id, "blocked").is_err());
-    assert!(f.core.checkout_branch(f.project.id, "main").is_err());
-    assert!(f.core.pull(f.project.id).is_err());
+    assert!(
+        f.core
+            .create_branch_in(f.project.id, Some(thread.id), "blocked")
+            .is_err()
+    );
+    assert!(
+        f.core
+            .checkout_branch_in(f.project.id, Some(thread.id), "main")
+            .is_err()
+    );
+    assert!(f.core.pull_in(f.project.id, Some(thread.id)).is_err());
 }

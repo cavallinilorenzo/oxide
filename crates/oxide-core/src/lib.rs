@@ -1473,6 +1473,18 @@ impl Core {
         checkpoint::turn_diff(&cwd, thread_id, turn_index)
     }
 
+    /// [`Core::turn_diff`] of the Thread's latest Turn; empty before the first.
+    pub fn latest_turn_diff(&self, thread_id: u32) -> Result<Diff> {
+        let snapshot = self.storage.get_snapshot(thread_id, 0)?;
+        match snapshot.turn_count.checked_sub(1) {
+            Some(latest) => self.turn_diff(thread_id, latest),
+            None => Ok(Diff {
+                base: None,
+                files: Vec::new(),
+            }),
+        }
+    }
+
     /// Every Turn of the Thread by position and prompt, for the Diff Surface's Turn picker.
     pub fn turn_picks(&self, thread_id: u32) -> Result<Vec<TurnPick>> {
         let project_id = self.storage.get_snapshot(thread_id, 0)?.thread.project_id;

@@ -156,7 +156,7 @@ const picks = [
 const renderTurn = (threadId: number | null, scope: "turn" | "uncommitted" = "turn") =>
   act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={threadId} board={false} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={threadId} board={false} worktree={false} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
 const picker = () => host.querySelector<HTMLSelectElement>('select[aria-label="Turn"]')!;

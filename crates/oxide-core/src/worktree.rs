@@ -360,7 +360,10 @@ impl Core {
                 .unwrap_or_else(|e| e.into_inner())
                 .contains(&format!("{project_id}:{thread_id}"))
         {
-            return Err(Error::Editor("Save or close this Thread's unsaved editor files before deleting its worktree.".into()));
+            return Err(Error::Editor(
+                "Save or close this Thread's unsaved editor files before deleting its worktree."
+                    .into(),
+            ));
         }
         let worktree = worktree.filter(|w| w.exists());
         if let Some(worktree) = &worktree {

@@ -103,6 +103,8 @@ interface ThreadViewProps {
   onPrefillUsed: () => void;
   onOpenThread: (threadId: number) => void;
   onThreadContinued: (continued: ContinuedThread, from: number) => void;
+  /** Changes when the Transcript changed outside a Turn, e.g. after a restore; the Thread is read again. */
+  transcriptRevision?: number;
 }
 
 
@@ -183,6 +185,7 @@ export function ThreadView({
   onPrefillUsed,
   onOpenThread,
   onThreadContinued,
+  transcriptRevision = 0,
 }: ThreadViewProps) {
   const [settledThreadId, setSettledThreadId] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
@@ -497,7 +500,8 @@ export function ThreadView({
     };
   }, [threadId, projectId, onInitialLoad]);
 
-  // Subscribe to the thread when threadId changes
+  // Subscribe to the thread when threadId changes, and again when the Transcript
+  // changed outside a Turn, e.g. after a restore.
   useEffect(() => {
     let active = true;
     pinnedAtRef.current = null;
@@ -563,7 +567,7 @@ export function ThreadView({
       active = false;
       batcher.cancel();
     };
-  }, [threadId, onStatusChange, onThreadTitleChange, onInitialLoad]);
+  }, [threadId, onStatusChange, onThreadTitleChange, onInitialLoad, transcriptRevision]);
 
   // A continued Thread opens with its recap in the composer.
   useEffect(() => {

@@ -4,7 +4,8 @@ import { buildActivity, type Activity } from "./activity";
 export type Block =
   | { type: "activity"; activity: Activity }
   | { type: "message"; item: ItemSnapshot; final: boolean }
-  | { type: "command"; item: ItemSnapshot };
+  | { type: "command"; item: ItemSnapshot }
+  | { type: "restore"; item: ItemSnapshot };
 
 /**
  * Arranges a Turn's flat Items into what the Transcript draws: one Activity (everything the
@@ -31,6 +32,7 @@ export function groupTurnItems(items: ItemSnapshot[]): Block[] {
   for (const it of top) {
     if (it.kind === "agent_message") blocks.push({ type: "message", item: it, final: false });
     else if (it.kind === "slash_command_output") blocks.push({ type: "command", item: it });
+    else if (it.kind === "restore_marker") blocks.push({ type: "restore", item: it });
   }
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];

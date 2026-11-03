@@ -2,8 +2,8 @@ import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
-import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon } from "@primer/octicons-react";
-import { commands, type Diff, type DiffFile, type PullRequestReviewThread, type TurnPick } from "./bindings";
+import { CheckCircleIcon, GitCommitIcon, HistoryIcon, InfoIcon, RepoPushIcon, SyncIcon, UndoIcon } from "@primer/octicons-react";
+import { commands, type Diff, type DiffFile, type PendingRestore, type PullRequestReviewThread, type RestoreChange, type RestorePreview, type TurnPick } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
@@ -27,6 +27,8 @@ interface DiffPanelProps {
   threadWorking?: boolean;
   /** A Turn is running in this checkout, so its files are not ours to revert. */
   turnRunning?: boolean;
+  /** A Turn is running in the selected Thread's checkout, so its files are not ours to restore. */
+  checkoutBusy?: boolean;
   scope: PanelScope;
   /** The pull request whose files the PR scope shows, once one was opened for review. */
   reviewedPr: number | null;
@@ -37,6 +39,8 @@ interface DiffPanelProps {
   refreshKey: string;
   /** Called after a commit or push, so other Git views reload. */
   onChanged: () => void;
+  /** Called after a restore, so the Transcript shows that it happened. */
+  onRestored?: () => void;
   /** Shows the Pull request Surface, after a push that offered to open one. */
   onOpenPullRequest: () => void;
 }
@@ -55,6 +59,12 @@ const STATUS_LABEL: Record<DiffFile["status"], string> = {
   untracked: "U",
 };
 
+const CHANGE_LABEL: Record<RestoreChange, string> = {
+  rewritten: "goes back to how it was",
+  reinstated: "comes back",
+  removed: "is deleted",
+};
+
 interface RevertRequest {
   path: string;
   hunk: { index: number; header: string } | null;
@@ -67,7 +77,7 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, worktree, threadWorking = false, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, worktree, threadWorking = false, turnRunning = false, checkoutBusy = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onRestored, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -180,6 +190,50 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
     onChanged();
   }
 
+  // Restore: the Thread's files go back to how they were before the picked Turn.
+  // It is offered on a Turn with a Checkpoint, never while a Turn runs in the Thread's
+  // own checkout, and it asks first, naming the files that change.
+  const canRestore = scope === "turn" && threadId !== null && turn !== null && turn.checkpointed && !checkoutBusy;
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
+  const pendingQuery = useQuery(
+    `p${projectId}:pendingRestore:${threadId ?? ""}`,
+    async (): Promise<QueryResult<PendingRestore | null>> =>
+      threadId !== null ? await commands.pendingRestore(threadId) : { status: "ok", data: null },
+    `${refreshKey}#${focusTick}`,
+  );
+  const pendingRestore = pendingQuery.state === "ready" ? pendingQuery.data : null;
+
+  async function askRestore() {
+    if (threadId === null || turn === null) return;
+    setRestoreError(null);
+    const result = await commands.restorePreview(threadId, turn.turnIndex);
+    if (result.status === "error") return setRestoreError(result.error.message);
+    setRestorePreview(result.data);
+  }
+
+  async function doRestore() {
+    if (threadId === null || !restorePreview) return;
+    setRestoring(true);
+    const result = await commands.restoreTurn(threadId, restorePreview.turnIndex);
+    setRestoring(false);
+    if (result.status === "error") return setRestoreError(result.error.message);
+    setRestorePreview(null);
+    onChanged();
+    onRestored?.();
+  }
+
+  async function doUndoRestore() {
+    if (threadId === null) return;
+    setRestoring(true);
+    const result = await commands.undoRestore(threadId);
+    setRestoring(false);
+    if (result.status === "error") return setRestoreError(result.error.message);
+    onChanged();
+    onRestored?.();
+  }
+
   const toggleChecked = (path: string, checked: boolean) =>
     setUnchecked((prev) => {
       const next = new Set(prev);
@@ -217,6 +271,28 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
             ))}
           </select>
         )}
+        {canRestore && (
+          <button
+            type="button"
+            className="btn"
+            aria-label={`Restore the files to before Turn ${turn.turnIndex + 1}`}
+            disabled={restoring}
+            onClick={() => void askRestore()}
+          >
+            <HistoryIcon size={14} /> Restore
+          </button>
+        )}
+        {pendingRestore && threadId !== null && !checkoutBusy && (
+          <button
+            type="button"
+            className="btn"
+            aria-label="Undo the restore"
+            disabled={restoring}
+            onClick={() => void doUndoRestore()}
+          >
+            <UndoIcon size={14} /> Undo restore
+          </button>
+        )}
         {(scope === "branch" || scope === "pr") && loaded.state === "ready" && loaded.diff.base && (
           <span className="diff-base mono">vs {loaded.diff.base}</span>
         )}
@@ -233,6 +309,33 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
           <InfoIcon size={12} /> May include concurrent changes from other Threads in this checkout.
         </div>
       )}
+      {restorePreview && (
+        <div className="restore-confirm" role="alertdialog" aria-label="Confirm restore">
+          <span>
+            Put the files back to how they were before Turn {restorePreview.turnIndex + 1}?
+          </span>
+          {restorePreview.files.length === 0 ? (
+            <span>No file stands between the checkout and that Turn.</span>
+          ) : (
+            <ul>
+              {restorePreview.files.map((file) => (
+                <li key={file.path}>
+                  <span className="mono">{file.path}</span> {CHANGE_LABEL[file.change]}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="restore-actions">
+            <button type="button" className="btn primary" disabled={restoring} onClick={() => void doRestore()}>
+              Restore
+            </button>
+            <button type="button" className="btn" onClick={() => setRestorePreview(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {restoreError && <div className="error" role="alert">{restoreError}</div>}
       {push.dialog}
       {loaded.state === "loading" && <Skeleton kind="diff" label="Loading changes…" />}
       {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}

@@ -119,6 +119,8 @@ pub enum ItemKind {
     Subagent,
     /// What a Slash command printed; its own kind, never an agent message.
     SlashCommandOutput,
+    /// That the files were restored to how they were before a Turn; never an agent message.
+    RestoreMarker,
 }
 
 impl ItemKind {
@@ -130,6 +132,7 @@ impl ItemKind {
             ItemKind::FileChange => "file_change",
             ItemKind::Subagent => "subagent",
             ItemKind::SlashCommandOutput => "slash_command_output",
+            ItemKind::RestoreMarker => "restore_marker",
         }
     }
 }
@@ -145,6 +148,7 @@ impl std::str::FromStr for ItemKind {
             "file_change" => Ok(ItemKind::FileChange),
             "subagent" => Ok(ItemKind::Subagent),
             "slash_command_output" => Ok(ItemKind::SlashCommandOutput),
+            "restore_marker" => Ok(ItemKind::RestoreMarker),
             _ => Err(()),
         }
     }

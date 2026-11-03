@@ -7,3 +7,8 @@ dist
 /crates/oxide-app/gen
 .claude/worktrees/
 
+# Don't include personal Claude Code settings
+.claude/settings.local.json
+
+# Don't include Claude Code scheduled task lock
+.claude/scheduled_tasks.lock

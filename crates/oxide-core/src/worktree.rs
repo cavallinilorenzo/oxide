@@ -287,47 +287,82 @@ impl Core {
         Ok(found.flatten())
     }
 
-    /// The Project's root and, for a Board Thread, its branch and worktree.
-    fn thread_checkouts(&self, thread_id: u32) -> Result<(PathBuf, Option<(String, PathBuf)>)> {
+    /// The Project id, its root, and for a Thread with its own checkout, its branch and
+    /// worktree. A chat Thread that has not started yet has neither a branch nor a
+    /// worktree and keeps running in the Project's main checkout.
+    fn thread_checkouts(
+        &self,
+        thread_id: u32,
+    ) -> Result<(u32, PathBuf, Option<String>, Option<PathBuf>)> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(db.query_row(
-            "SELECT p.path, t.branch, t.worktree_path FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1",
+            "SELECT t.project_id, p.path, t.branch, t.worktree_path FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1",
             [thread_id],
             |r| {
-                let root = PathBuf::from(r.get::<_, String>(0)?);
-                let branch: Option<String> = r.get(1)?;
-                let worktree: Option<String> = r.get(2)?;
-                Ok((root, branch.zip(worktree.map(PathBuf::from))))
+                let project_id: u32 = r.get(0)?;
+                let root = PathBuf::from(r.get::<_, String>(1)?);
+                let branch: Option<String> = r.get(2)?;
+                let worktree: Option<PathBuf> = r.get::<_, Option<String>>(3)?.map(PathBuf::from);
+                Ok((project_id, root, branch, worktree))
             },
         )?)
     }
 
-    /// Deletes a Thread and everything Oxide keeps of it. A running Turn is stopped. A Board
-    /// Thread's worktree is removed with it and its branch kept, unless the worktree has
-    /// uncommitted changes: then nothing happens until the caller confirms with `discard_changes`.
-    /// The Provider's own session files are left to the Provider.
+    /// Creates a worktree on a fresh `oxide/<slug>` branch cut from `base`, under
+    /// `home/worktrees/<project-slug>/`, and returns the branch and worktree path.
+    fn create_worktree(
+        &self,
+        root: &Path,
+        project: &crate::ProjectSummary,
+        base: &str,
+        slug: &str,
+    ) -> Result<(String, PathBuf)> {
+        let parent = self
+            .home
+            .join("worktrees")
+            .join(slugify(&project.name, "project"));
+        std::fs::create_dir_all(&parent).map_err(|source| Error::Io {
+            path: parent.clone(),
+            source,
+        })?;
+        let (branch, worktree) = self.git.mutate(root, || {
+            let name = free_name(root, &parent, slug);
+            let branch = format!("oxide/{name}");
+            let worktree = parent.join(&name);
+            git::run(
+                root,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    &branch,
+                    &worktree.to_string_lossy(),
+                    base,
+                ],
+            )?;
+            Ok((branch, worktree))
+        })?;
+        Ok((branch, worktree))
+    }
+
+    /// Deletes a Thread and everything Oxide keeps of it. A running Turn is stopped. A Thread
+    /// with its own worktree has it removed with it and its branch kept, unless the worktree
+    /// has uncommitted changes: then nothing happens until the caller confirms with
+    /// `discard_changes`. Unsaved editor files block deletion first. The Provider's own
+    /// session files are left to the Provider.
     pub fn delete_thread(&self, thread_id: u32, discard_changes: bool) -> Result<DeleteOutcome> {
-        let (root, board) = self.thread_checkouts(thread_id)?;
-        if board.is_some() {
-            let project_id: u32 = self
-                .db
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .query_row(
-                    "SELECT project_id FROM threads WHERE id = ?1",
-                    [thread_id],
-                    |row| row.get(0),
-                )?;
-            if self
+        let (project_id, root, _branch, worktree) = self.thread_checkouts(thread_id)?;
+        if worktree.is_some()
+            && self
                 .dirty_editors
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .contains(&format!("{project_id}:{thread_id}"))
-            {
-                return Err(Error::Editor("Save or close this Thread's unsaved editor files before deleting its worktree.".into()));
-            }
+        {
+            return Err(Error::Editor("Save or close this Thread's unsaved editor files before deleting its worktree.".into()));
         }
-        let worktree = board.map(|(_, w)| w).filter(|w| w.exists());
+        let worktree = worktree.filter(|w| w.exists());
         if let Some(worktree) = &worktree {
             let dirty = self.git.mutate(&root, || {
                 Ok(!git::run(worktree, &["status", "--porcelain"])?
@@ -371,34 +406,108 @@ impl Core {
         Ok(DeleteOutcome::Deleted)
     }
 
-    /// Recreates a Board Thread's worktree from its branch when it is gone (deleted
-    /// by hand). A chat Thread, or a worktree still there, is left alone.
-    pub(crate) fn ensure_worktree(&self, thread_id: u32) -> Result<()> {
-        let (root, board) = self.thread_checkouts(thread_id)?;
-        let Some((branch, worktree)) = board.filter(|(_, w)| !w.exists()) else {
-            return Ok(());
-        };
-        self.git.mutate(&root, || {
-            // Drop the stale registration, or `add` refuses the branch as checked out elsewhere.
-            git::run(&root, &["worktree", "prune"])?;
-            if let Some(parent) = worktree.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| Error::Io {
-                    path: parent.to_path_buf(),
-                    source,
+    /// Makes sure the Thread has a checkout to run its Turns in, and reports whether a Turn
+    /// may start.
+    ///
+    /// A Board Thread's worktree is recreated when it was deleted by hand. A chat Thread gets
+    /// its own worktree on its first prompt, unless the Project keeps Threads in the main
+    /// checkout or this is not a Git checkout with a commit: then it keeps running where it is.
+    /// Returns `false` when the Project's Setup command failed, so no Turn is started.
+    pub(crate) fn ensure_worktree(&self, thread_id: u32) -> Result<bool> {
+        let (project_id, root, branch, worktree) = self.thread_checkouts(thread_id)?;
+
+        // A Board Thread's worktree deleted by hand: recreate it from its branch.
+        if let (Some(branch), Some(worktree)) = (branch.as_deref(), worktree.as_ref()) {
+            if !worktree.exists() {
+                self.git.mutate(&root, || {
+                    // Drop the stale registration, or `add` refuses the branch as checked out elsewhere.
+                    git::run(&root, &["worktree", "prune"])?;
+                    if let Some(parent) = worktree.parent() {
+                        std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                            path: parent.to_path_buf(),
+                            source,
+                        })?;
+                    }
+                    git::run(
+                        &root,
+                        &["worktree", "add", "-q", &worktree.to_string_lossy(), branch],
+                    )?;
+                    Ok(())
                 })?;
             }
-            git::run(
-                &root,
-                &[
-                    "worktree",
-                    "add",
-                    "-q",
-                    &worktree.to_string_lossy(),
-                    &branch,
-                ],
+            return Ok(true);
+        }
+
+        // A chat Thread with no worktree yet: give it one on its first prompt, unless the
+        // Project keeps Threads in the main checkout or this is not a Git checkout.
+        if branch.is_none() && worktree.is_none() {
+            if self.project_threads_in_main_checkout(project_id)? {
+                return Ok(true);
+            }
+            if !git::succeeds(&root, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+                return Ok(true); // not a Git checkout with any commit
+            }
+            let project = self.project(project_id)?;
+            let base = git::run(&root, &["rev-parse", "--abbrev-ref", "HEAD"])?
+                .trim()
+                .to_string();
+            let slug = format!("thread-{thread_id}");
+            let (_branch, worktree) = self.create_worktree(&root, &project, &base, &slug)?;
+            self.db.lock().unwrap_or_else(|e| e.into_inner()).execute(
+                "UPDATE threads SET worktree_path = ?1 WHERE id = ?2",
+                rusqlite::params![worktree.to_string_lossy(), thread_id],
             )?;
-            Ok(())
-        })
+            return self.run_setup_in(project.id, &worktree, &root, thread_id);
+        }
+
+        // A chat Thread whose worktree was deleted by hand: recreate it from the main checkout.
+        if let Some(worktree) = worktree.filter(|w| !w.exists()) {
+            self.git.mutate(&root, || {
+                git::run(&root, &["worktree", "prune"])?;
+                if let Some(parent) = worktree.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
+                }
+                git::run(
+                    &root,
+                    &["worktree", "add", "-q", &worktree.to_string_lossy(), "HEAD"],
+                )?;
+                Ok(())
+            })?;
+        }
+        Ok(true)
+    }
+
+    /// Runs the Project's Setup command in `worktree`, remembers its output, and reports whether
+    /// a Turn may start (a failed Setup leaves the Thread in needs input).
+    fn run_setup_in(
+        &self,
+        project_id: u32,
+        worktree: &Path,
+        root: &Path,
+        thread_id: u32,
+    ) -> Result<bool> {
+        if let Some(command) = self.project_setup_command(project_id)? {
+            let run = run_setup(&command, worktree, root);
+            let status = if run.success {
+                None
+            } else {
+                Some(ThreadStatus::NeedsInput)
+            };
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.execute(
+                "UPDATE threads SET setup_output = ?1, status = COALESCE(?2, status) WHERE id = ?3",
+                rusqlite::params![run.output, status.map(|s| s.to_string()), thread_id],
+            )?;
+            if !run.success {
+                self.board.publish(thread_id);
+                return Ok(false);
+            }
+        }
+        self.board.publish(thread_id);
+        Ok(true)
     }
 
     /// Housekeeping when a Project opens: forgets worktrees whose folder was deleted by hand.

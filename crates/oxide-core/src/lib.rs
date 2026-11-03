@@ -555,6 +555,35 @@ impl Core {
         Ok(())
     }
 
+    /// Whether chat Threads of this Project stay in the main checkout instead of
+    /// each getting its own worktree on its first prompt. Defaults to false.
+    pub fn project_threads_in_main_checkout(&self, project_id: u32) -> Result<bool> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(db.query_row(
+            "SELECT threads_in_main_checkout FROM projects WHERE id = ?1",
+            [project_id],
+            |r| Ok(r.get::<_, i64>(0)? != 0),
+        )?)
+    }
+
+    /// Sets whether chat Threads of this Project stay in the main checkout instead
+    /// of each getting its own worktree on its first prompt.
+    pub fn set_project_threads_in_main_checkout(
+        &self,
+        project_id: u32,
+        in_main_checkout: bool,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = db.execute(
+            "UPDATE projects SET threads_in_main_checkout = ?2 WHERE id = ?1",
+            (project_id, in_main_checkout as i64),
+        )?;
+        if changed == 0 {
+            return Err(Error::Db(rusqlite::Error::QueryReturnedNoRows));
+        }
+        Ok(())
+    }
+
     pub fn default_settings_for_provider(
         &self,
         provider: &str,
@@ -1060,7 +1089,12 @@ impl Core {
     /// them.
     pub fn send_prompt_segments(&self, thread_id: u32, input: &[PromptInput]) -> Result<()> {
         let segments = self.attachment_store().resolve(input)?;
-        self.ensure_worktree(thread_id)?;
+        // Giving a chat Thread its own worktree (and running the Setup command) happens on its
+        // first prompt; a failed Setup means no Turn is started.
+        let start_turn = self.ensure_worktree(thread_id)?;
+        if !start_turn {
+            return Ok(());
+        }
         let actor = self.get_or_create_thread_actor(thread_id)?;
         actor.send_prompt(segments)
     }

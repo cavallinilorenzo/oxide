@@ -19,6 +19,8 @@ interface DiffPanelProps {
   threadId: number | null;
   /** Board Threads work in their own worktree, so nothing else edits it. */
   board: boolean;
+  /** The selected Thread works in its own worktree, so nothing else edits its checkout. */
+  worktree: boolean;
   /** The selected Thread is running a Turn, so its draft comments can't be sent yet. */
   threadWorking?: boolean;
   /** A Turn is running in this checkout, so its files are not ours to revert. */
@@ -63,7 +65,7 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, threadWorking = false, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, board, worktree, threadWorking = false, turnRunning = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -224,7 +226,7 @@ function DiffBody({ projectId, threadId, board, threadWorking = false, turnRunni
           </span>
         )}
       </div>
-      {showsConcurrencyNote(scope, { board }) && (
+      {showsConcurrencyNote(scope, { board, worktree }) && (
         <div className="surface-note">
           <InfoIcon size={12} /> May include concurrent changes from other Threads in this checkout.
         </div>

@@ -2685,6 +2685,27 @@ fn set_project_setup_command(
     Ok(core.set_project_setup_command(project_id, command.as_deref())?)
 }
 
+/// Whether chat Threads of this Project stay in the main checkout instead of each
+/// getting its own worktree on their first prompt.
+#[tauri::command]
+#[specta::specta]
+fn get_project_threads_in_main_checkout(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<bool, AppError> {
+    Ok(core.project_threads_in_main_checkout(project_id)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn set_project_threads_in_main_checkout(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    in_main_checkout: bool,
+) -> Result<(), AppError> {
+    Ok(core.set_project_threads_in_main_checkout(project_id, in_main_checkout)?)
+}
+
 /// Starts a new Thread that continues one whose Provider session is gone.
 #[tauri::command]
 #[specta::specta]
@@ -3255,6 +3276,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         dispatch_thread,
         get_project_setup_command,
         set_project_setup_command,
+        get_project_threads_in_main_checkout,
+        set_project_threads_in_main_checkout,
         continue_thread,
         delete_thread,
         set_thread_permission_mode,

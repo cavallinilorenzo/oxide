@@ -744,6 +744,7 @@ section.terminal.terminal-hidden { display: none; }
 /* Diff */
 .diff { display: flex; flex-direction: column; min-height: 0; }
 .diff-base { color: var(--faint); }
+.turn-pick { min-width: 0; max-width: 100%; flex: 0 1 260px; font-size: 12px; text-overflow: ellipsis; }
 .diff-total { font-size: 12px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .diff-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(180px, 32%) 1fr; }
 .diff-files { list-style: none; margin: 0; padding: 4px 0; overflow: auto; border-right: 1px solid var(--line); }

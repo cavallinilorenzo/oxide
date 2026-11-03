@@ -130,8 +130,10 @@ export const commands = {
 	listBranches: (projectId: number, threadId: number | null) => typedError<GitBranch[], AppError>(__TAURI_INVOKE("list_branches", { projectId, threadId })),
 	/**  The changes of the main checkout in one scope, from Git. */
 	gitDiff: (projectId: number, threadId: number | null, scope: DiffScope) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_diff", { projectId, threadId, scope })),
-	/**  What a Thread's latest Turn changed, from its two Checkpoints. */
-	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
+	/**  What one Turn of a Thread changed, from its two Checkpoints. */
+	gitTurnDiff: (threadId: number, turnIndex: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId, turnIndex })),
+	/**  The Thread's Turns, oldest first, for the Turn picker. */
+	listTurnPicks: (threadId: number) => typedError<TurnPick[], AppError>(__TAURI_INVOKE("list_turn_picks", { threadId })),
 	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
 	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
 	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
@@ -1740,6 +1742,14 @@ export type TurnPage_Serialize = {
 	offset: number,
 	turns: TurnSnapshot_Serialize[],
 	turnCount: number,
+};
+
+/**  One Turn of a Thread as the Diff Surface's Turn picker lists it. */
+export type TurnPick = {
+	turnIndex: number,
+	prompt: string,
+	/**  Without Checkpoints a Turn has no diff. */
+	checkpointed: boolean,
 };
 
 export type TurnSnapshot = TurnSnapshot_Serialize | TurnSnapshot_Deserialize;

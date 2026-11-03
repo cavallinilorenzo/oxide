@@ -1812,11 +1812,46 @@ async fn send_line_comments(core: State<'_, Arc<Core>>, thread_id: u32) -> Resul
     git_blocking(&core, move |core| core.send_line_comments(thread_id)).await
 }
 
-/// What a Thread's latest Turn changed, from its two Checkpoints.
+/// One Turn of a Thread as the Diff Surface's Turn picker lists it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnPick {
+    pub turn_index: u32,
+    pub prompt: String,
+    /// Without Checkpoints a Turn has no diff.
+    pub checkpointed: bool,
+}
+
+/// The Thread's Turns, oldest first, for the Turn picker.
 #[tauri::command]
 #[specta::specta]
-async fn git_turn_diff(core: State<'_, Arc<Core>>, thread_id: u32) -> Result<Diff, AppError> {
-    git_blocking(&core, move |core| core.latest_turn_diff(thread_id))
+async fn list_turn_picks(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<Vec<TurnPick>, AppError> {
+    git_blocking(&core, move |core| {
+        Ok(core
+            .turn_picks(thread_id)?
+            .into_iter()
+            .map(|p| TurnPick {
+                turn_index: p.turn_index,
+                prompt: p.prompt,
+                checkpointed: p.checkpointed,
+            })
+            .collect::<Vec<_>>())
+    })
+    .await
+}
+
+/// What one Turn of a Thread changed, from its two Checkpoints.
+#[tauri::command]
+#[specta::specta]
+async fn git_turn_diff(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    turn_index: u32,
+) -> Result<Diff, AppError> {
+    git_blocking(&core, move |core| core.turn_diff(thread_id, turn_index))
         .await
         .map(|diff| convert(&diff))
 }
@@ -3234,6 +3269,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         list_branches,
         git_diff,
         git_turn_diff,
+        list_turn_picks,
         revert_diff,
         add_line_comment,
         edit_line_comment,

@@ -49,6 +49,7 @@ beforeEach(() => {
     calls.push({ command, args });
     if (command === "list_projects" || command === "rescan_projects") return [project];
     if (command === "git_turn_diff" || command === "git_diff") return { base: null, files: [file] };
+    if (command === "list_turn_picks") return [{ turnIndex: 0, prompt: "Existing", checkpointed: true }];
     if (command === "last_selection") return { projectId: 1, threadId: 2 };
     if (command === "list_threads") return [thread()];
     if (command === "add_line_comment") {

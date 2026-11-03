@@ -39,6 +39,15 @@ pub use activity::{Notification, NotificationKind, System};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
+
+/// One Turn as the Diff Surface's Turn picker lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnPick {
+    pub turn_index: u32,
+    pub prompt: String,
+    /// Whether the Turn has Checkpoints; without them it has no diff.
+    pub checkpointed: bool,
+}
 pub use git::{FETCH_INTERVAL, GitBranch, GitStatus};
 pub use git_diff::{
     Diff, DiffFile, DiffHunk, DiffKind, DiffLine, DiffScope, DiffStatus, RevertHunk, RevertScope,
@@ -1492,16 +1501,28 @@ impl Core {
     pub fn latest_turn_diff(&self, thread_id: u32) -> Result<Diff> {
         let snapshot = self.storage.get_snapshot(thread_id, 0)?;
         match snapshot.turn_count.checked_sub(1) {
-            Some(latest) => {
-                let cwd =
-                    PathBuf::from(self.checkout_path(snapshot.thread.project_id, Some(thread_id))?);
-                checkpoint::turn_diff(&cwd, thread_id, latest)
-            }
+            Some(latest) => self.turn_diff(thread_id, latest),
             None => Ok(Diff {
                 base: None,
                 files: Vec::new(),
             }),
         }
+    }
+
+    /// Every Turn of the Thread by position and prompt, for the Diff Surface's Turn picker.
+    pub fn turn_picks(&self, thread_id: u32) -> Result<Vec<TurnPick>> {
+        let project_id = self.storage.get_snapshot(thread_id, 0)?.thread.project_id;
+        let cwd = PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
+        let page = self.storage.list_turns(thread_id, 0, u32::MAX)?;
+        Ok(page
+            .turns
+            .into_iter()
+            .map(|turn| TurnPick {
+                turn_index: turn.turn_index,
+                checkpointed: checkpoint::has_start(&cwd, thread_id, turn.turn_index),
+                prompt: turn.prompt,
+            })
+            .collect())
     }
 
     /// Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of the checkout a

@@ -353,3 +353,28 @@ fn nothing_is_reverted_while_a_turn_is_running_in_the_checkout() {
     f.core.tick_thread(thread_id);
     wait_for(&rx, is_completed);
 }
+
+#[test]
+fn the_turn_picks_name_each_turn_by_position_and_prompt_and_tell_which_have_checkpoints() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(&f, thread_id, move || {
+        std::fs::write(work.join("a.txt"), "one\nfirst\n").unwrap()
+    });
+    run_turn(&f, thread_id, || {});
+
+    let picks = f.core.turn_picks(thread_id).unwrap();
+    assert_eq!(
+        picks.iter().map(|p| p.turn_index).collect::<Vec<_>>(),
+        [0, 1]
+    );
+    assert!(picks.iter().all(|p| p.checkpointed && !p.prompt.is_empty()));
+
+    // Checkpoints are refs in the checkout; without them a Turn has nothing to diff.
+    for name in checkpoint_refs(&f.work) {
+        git(&f.work, &["update-ref", "-d", &name]);
+    }
+    let picks = f.core.turn_picks(thread_id).unwrap();
+    assert!(picks.iter().all(|p| !p.checkpointed));
+}

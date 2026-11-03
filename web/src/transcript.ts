@@ -1,6 +1,7 @@
 import type {
   ApprovalDecision,
   ApprovalSnapshot,
+  CommandRecord,
   ItemSnapshot,
   PermissionMode,
   SequencedThreadEvent,
@@ -38,6 +39,9 @@ export function turnIsRunning(status: ThreadStatus): boolean {
 }
 
 const NO_CAPABILITIES: ThreadCapabilities = { reasoningText: false };
+
+/** No command was reported for an Item; its outcome is unknown, never guessed. */
+const NO_COMMAND: CommandRecord = { line: null, outcome: "unknown", exitCode: null };
 
 export function initialTranscriptState(snapshot: ThreadSnapshot | null): TranscriptState {
   if (!snapshot) {
@@ -108,6 +112,7 @@ export function applyThreadEvent(
         prompt: event.payload.prompt,
         model: event.payload.model ?? null,
         effort: event.payload.effort ?? null,
+        permissionMode: event.payload.permission_mode ?? null,
         segments: event.payload.segments,
         status: "running",
         startedAt: new Date().toISOString(),
@@ -129,6 +134,7 @@ export function applyThreadEvent(
         content: existing ? existing.content : "",
         parentItemIndex: event.payload.parent_item_index ?? null,
         category: event.payload.category ?? null,
+        command: existing ? existing.command : NO_COMMAND,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -142,6 +148,7 @@ export function applyThreadEvent(
         content: (existing ? existing.content : "") + event.payload.delta,
         parentItemIndex: existing ? existing.parentItemIndex : null,
         category: existing ? (existing.category ?? null) : null,
+        command: existing ? existing.command : NO_COMMAND,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;
@@ -155,6 +162,7 @@ export function applyThreadEvent(
         content: event.payload.content,
         parentItemIndex: event.payload.parent_item_index ?? null,
         category: event.payload.category ?? null,
+        command: event.payload.command ?? NO_COMMAND,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
       }));
       break;

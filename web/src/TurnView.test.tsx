@@ -19,7 +19,7 @@ const item = (
   kind: ItemSnapshot["kind"],
   content: string,
   category: ItemSnapshot["category"] = null,
-): ItemSnapshot => ({ id: nextId++, itemIndex, kind, content, parentItemIndex: null, category, createdAt: "2026-10-22T10:00:00Z" });
+): ItemSnapshot => ({ id: nextId++, itemIndex, kind, content, parentItemIndex: null, category, command: { line: null, outcome: "unknown", exitCode: null }, createdAt: "2026-10-22T10:00:00Z" });
 
 const turn = (over: Partial<TranscriptTurn>): TranscriptTurn => ({
   id: 1,

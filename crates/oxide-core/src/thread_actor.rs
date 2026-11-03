@@ -12,7 +12,7 @@ use crate::activity::Activity;
 use crate::checkpoint::{self, Phase};
 use crate::clock::{Clock, PROVIDER_IDLE_TIMEOUT};
 use crate::error::{Error, Result};
-use crate::storage_actor::StorageHandle;
+use crate::storage_actor::{NewItem, StorageHandle};
 use crate::thread::{
     DebugSequencedThreadEvent, SequencedThreadEvent, ThreadCapabilities, ThreadEvent,
     ThreadSnapshot, ThreadStatus, TurnError,
@@ -386,6 +386,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 .unwrap_or_else(|| vec![PromptSegment::text(prompt.clone())]);
             let prompt = crate::attachments::render(&segments);
             let (mut model, mut effort) = (None, None);
+            let mut permission_mode = None;
             let mut id = None;
             let mut new_title = None;
             if let Ok(started) = storage.write_turn_started(
@@ -397,6 +398,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 id = Some(started.id);
                 model = started.model;
                 effort = started.effort;
+                permission_mode = started.permission_mode;
                 new_title = started.thread_title;
             }
             state.current_turn = Some(CurrentTurn {
@@ -411,6 +413,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     prompt,
                     model,
                     effort,
+                    permission_mode,
                     segments,
                 },
                 raw,
@@ -456,6 +459,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             content,
             parent_item_index,
             category,
+            command,
         } => {
             if kind == ItemKind::Reasoning && !state.capabilities.supports_reasoning {
                 state.dropped_items.insert(item_index);
@@ -463,14 +467,15 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             }
             state.flush_pending_deltas();
             if let Some(turn_id) = state.current_turn_id() {
-                let _ = storage.write_item_completed(
+                let _ = storage.write_item_completed(NewItem {
                     turn_id,
                     item_index,
                     kind,
-                    content.clone(),
+                    content: content.clone(),
                     parent_item_index,
                     category,
-                );
+                    command: command.clone(),
+                });
             }
             state.broadcast_with_raw(
                 ThreadEvent::ItemCompleted {
@@ -479,6 +484,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                     content,
                     parent_item_index,
                     category,
+                    command,
                 },
                 raw,
             );

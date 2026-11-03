@@ -190,6 +190,15 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX pull_request_line_comments_by_pr
         ON pull_request_line_comments(project_id, pull_request, id);
 ",
+    // What a Provider reported about a command an Item ran, and the permission mode a Turn
+    // started in. NULL on Items and Turns stored before command evidence existed: their outcome
+    // reads as unknown, and their Turn's permission mode as not recorded.
+    "
+    ALTER TABLE items ADD COLUMN command_line TEXT;
+    ALTER TABLE items ADD COLUMN command_outcome TEXT;
+    ALTER TABLE items ADD COLUMN command_exit_code INTEGER;
+    ALTER TABLE turns ADD COLUMN permission_mode TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

@@ -1,6 +1,6 @@
 use oxide_provider::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, ItemKind, PermissionMode, PromptSegment,
-    TurnStatus,
+    ActivityCategory, ApprovalDecision, ApprovalKind, CommandRecord, ItemKind, PermissionMode,
+    PromptSegment, TurnStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +86,9 @@ pub struct ItemSnapshot {
     /// categories existed.
     #[serde(default)]
     pub category: Option<ActivityCategory>,
+    /// What the Provider reported about this Item's command. Its outcome is `Unknown` for
+    /// non-command Items and for Items stored before command evidence existed.
+    pub command: CommandRecord,
     pub created_at: String,
 }
 
@@ -119,6 +122,9 @@ pub struct TurnSnapshot {
     /// The Model and Effort the Turn ran with.
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// The Permission mode the Thread was in when the Turn started. `None` for Turns stored
+    /// before it was recorded.
+    pub permission_mode: Option<PermissionMode>,
     /// The prompt in order: text, and Attachments at the place the user put them.
     pub segments: Vec<PromptSegment>,
     pub status: TurnStatus,
@@ -175,6 +181,7 @@ pub enum ThreadEvent {
         prompt: String,
         model: Option<String>,
         effort: Option<String>,
+        permission_mode: Option<PermissionMode>,
         segments: Vec<PromptSegment>,
     },
     ItemStarted {
@@ -193,6 +200,8 @@ pub enum ThreadEvent {
         content: String,
         parent_item_index: Option<u32>,
         category: Option<ActivityCategory>,
+        #[serde(default)]
+        command: Option<CommandRecord>,
     },
     TurnCompleted {
         turn_index: u32,

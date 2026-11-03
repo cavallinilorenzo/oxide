@@ -659,3 +659,36 @@ mod discovery {
         assert_eq!(names(&f.core.rescan_projects().unwrap()), ["x"]);
     }
 }
+
+#[test]
+fn items_and_turns_stored_before_command_evidence_read_as_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let drop_at = oxide_core::MIGRATIONS
+        .iter()
+        .position(|migration| migration.contains("command_outcome"))
+        .unwrap();
+    drop(Core::open_with_migrations(tmp.path(), &oxide_core::MIGRATIONS[..drop_at]).unwrap());
+    Connection::open(tmp.path().join("oxide.db"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO projects (id, name, path) VALUES (1, 'p', '/p');
+             INSERT INTO threads (id, project_id, provider, permission_mode, status)
+             VALUES (1, 1, 'fake', 'auto-edit', 'completed');
+             INSERT INTO turns (id, thread_id, turn_index, prompt, status)
+             VALUES (1, 1, 0, 'old', 'completed');
+             INSERT INTO items (id, turn_id, item_index, kind, content, category)
+             VALUES (1, 1, 0, 'tool_call', 'Run old check', 'run');
+             INSERT INTO items (id, turn_id, item_index, kind, content)
+             VALUES (2, 1, 1, 'tool_call', 'Read old file');",
+        )
+        .unwrap();
+
+    let core = Core::open(tmp.path()).unwrap();
+    let snapshot = core.get_thread_snapshot(1).unwrap();
+    assert_eq!(snapshot.turns[0].permission_mode, None);
+    for item in &snapshot.turns[0].items {
+        assert_eq!(item.command.outcome, oxide_core::CommandOutcome::Unknown);
+        assert_eq!(item.command.line, None);
+        assert_eq!(item.command.exit_code, None);
+    }
+}

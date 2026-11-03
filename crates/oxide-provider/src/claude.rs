@@ -2,10 +2,10 @@
 
 use crate::process::{self, ProcessRegistry, SHUTDOWN_GRACE};
 use crate::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, Detection,
-    ItemKind, ModelInfo, PermissionMode, PromptSegment, Provider, ProviderCapabilities,
-    ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus, UsageWindow,
-    UsageWindowKind, attachment_marker, attachment_path_reference, render_prompt,
+    ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, CommandOutcome,
+    CommandRecord, Detection, ItemKind, ModelInfo, PermissionMode, PromptSegment, Provider,
+    ProviderCapabilities, ProviderError, ProviderEvent, StartContext, TurnStatus, UsageStatus,
+    UsageWindow, UsageWindowKind, attachment_marker, attachment_path_reference, render_prompt,
 };
 use crate::{SlashCommandInfo, SlashRoute};
 use crossbeam_channel::{Receiver, Sender};
@@ -345,8 +345,11 @@ impl ClaudeCodeProvider {
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             let mut accumulated_items: HashMap<u32, (ItemKind, String)> = HashMap::new();
-            // Tool-use blocks stream their input as JSON fragments: (tool name, input so far).
-            let mut tool_blocks: HashMap<u32, (String, String)> = HashMap::new();
+            // Tool-use blocks stream their input as JSON fragments: (tool name, input so far,
+            // tool-use id).
+            let mut tool_blocks: HashMap<u32, (String, String, Option<String>)> = HashMap::new();
+            // A command's outcome arrives in the matching `tool_result`, after its block closed.
+            let mut pending_commands: HashMap<String, PendingCommand> = HashMap::new();
             let mut slash_outputs: u32 = 0;
 
             for line_res in reader.lines() {
@@ -415,6 +418,15 @@ impl ClaudeCodeProvider {
                                                     .unwrap_or("tool")
                                                     .to_string()
                                             });
+                                            let tool_id = if btype == "tool_use" {
+                                                block
+                                                    .and_then(|b| b.get("id"))
+                                                    .and_then(|v| v.as_str())
+                                                    .filter(|id| !id.is_empty())
+                                                    .map(str::to_string)
+                                            } else {
+                                                None
+                                            };
                                             let kind = if btype == "thinking" {
                                                 ItemKind::Reasoning
                                             } else if let Some(name) = &tool_name {
@@ -427,7 +439,8 @@ impl ClaudeCodeProvider {
                                                 .filter(|_| kind == ItemKind::ToolCall)
                                                 .map(tool_category);
                                             if let Some(name) = tool_name {
-                                                tool_blocks.insert(index, (name, String::new()));
+                                                tool_blocks
+                                                    .insert(index, (name, String::new(), tool_id));
                                             }
                                             accumulated_items.insert(index, (kind, String::new()));
                                             let _ = tx.send(ProviderEvent::ItemStarted {
@@ -499,11 +512,49 @@ impl ClaudeCodeProvider {
                                                 .remove(&index)
                                                 .unwrap_or((ItemKind::AgentMessage, String::new()));
                                             let mut category = None;
-                                            if let Some((name, input)) = tool_blocks.remove(&index)
+                                            if let Some((name, input, tool_id)) =
+                                                tool_blocks.remove(&index)
                                             {
                                                 content = tool_content(&name, &input, kind);
                                                 category = (kind == ItemKind::ToolCall)
                                                     .then(|| tool_category(&name));
+                                                if category == Some(ActivityCategory::Run)
+                                                    && name == "Bash"
+                                                {
+                                                    let record = CommandRecord {
+                                                        line: command_line(&input),
+                                                        outcome: CommandOutcome::Unknown,
+                                                        exit_code: None,
+                                                    };
+                                                    let pending = PendingCommand {
+                                                        item_index: index,
+                                                        kind,
+                                                        content: content.clone(),
+                                                        category,
+                                                        record,
+                                                    };
+                                                    // Claude reports a command's outcome in the
+                                                    // `tool_result` that follows; completion waits
+                                                    // for it so no outcome is guessed. The line is
+                                                    // known now, so the live Activity can show it.
+                                                    let _ = tx.send(ProviderEvent::ItemDelta {
+                                                        item_index: index,
+                                                        delta: content.clone(),
+                                                    });
+                                                    if let Some(tool_id) = tool_id {
+                                                        pending_commands.insert(tool_id, pending);
+                                                        continue;
+                                                    }
+                                                    let _ = tx.send(ProviderEvent::ItemCompleted {
+                                                        item_index: index,
+                                                        kind,
+                                                        content,
+                                                        parent_item_index: None,
+                                                        category,
+                                                        command: Some(pending.record),
+                                                    });
+                                                    continue;
+                                                }
                                             }
                                             let _ = tx.send(ProviderEvent::ItemCompleted {
                                                 item_index: index,
@@ -511,6 +562,7 @@ impl ClaudeCodeProvider {
                                                 content,
                                                 parent_item_index: None,
                                                 category,
+                                                command: None,
                                             });
                                         }
                                         _ => {
@@ -561,7 +613,52 @@ impl ClaudeCodeProvider {
                                     content,
                                     parent_item_index: None,
                                     category: None,
+                                    command: None,
                                 });
+                            }
+                            "user" => {
+                                let mut outcomes = 0;
+                                if let Some(blocks) = val
+                                    .get("message")
+                                    .and_then(|m| m.get("content"))
+                                    .and_then(|c| c.as_array())
+                                {
+                                    for block in blocks {
+                                        if block.get("type").and_then(|v| v.as_str())
+                                            != Some("tool_result")
+                                        {
+                                            continue;
+                                        }
+                                        let Some(tool_id) =
+                                            block.get("tool_use_id").and_then(|v| v.as_str())
+                                        else {
+                                            continue;
+                                        };
+                                        let Some(mut pending) = pending_commands.remove(tool_id)
+                                        else {
+                                            continue;
+                                        };
+                                        pending.record.outcome =
+                                            match block.get("is_error").and_then(|v| v.as_bool()) {
+                                                Some(true) => CommandOutcome::Failed,
+                                                Some(false) => CommandOutcome::Succeeded,
+                                                None => CommandOutcome::Unknown,
+                                            };
+                                        let _ = tx.send(ProviderEvent::ItemCompleted {
+                                            item_index: pending.item_index,
+                                            kind: pending.kind,
+                                            content: pending.content,
+                                            parent_item_index: None,
+                                            category: pending.category,
+                                            command: Some(pending.record),
+                                        });
+                                        outcomes += 1;
+                                    }
+                                }
+                                // An ordinary user message is not part of the Provider protocol.
+                                if outcomes == 0 {
+                                    let _ = tx.send(ProviderEvent::Unknown { raw: line.clone() });
+                                }
                             }
                             "rate_limit_event" => {
                                 // Per-Model and overage windows are not shown.
@@ -613,6 +710,7 @@ impl ClaudeCodeProvider {
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
 
+                                flush_pending_commands(&tx, &mut pending_commands);
                                 let Some(turn) = active_turn_clone.lock().unwrap().take() else {
                                     continue;
                                 };
@@ -639,6 +737,8 @@ impl ClaudeCodeProvider {
                     }
                 }
             }
+            // The Provider may exit without a tool result for a command; its outcome stays unknown.
+            flush_pending_commands(&tx, &mut pending_commands);
         });
 
         Ok(rx)
@@ -668,6 +768,43 @@ impl ClaudeCodeProvider {
 
 /// Synthetic messages carry no content-block index, so they get indices above any real one.
 const SLASH_OUTPUT_INDEX_BASE: u32 = 10_000;
+
+/// A command whose block closed before the `tool_result` that reports its outcome arrived.
+struct PendingCommand {
+    item_index: u32,
+    kind: ItemKind,
+    content: String,
+    category: Option<ActivityCategory>,
+    record: CommandRecord,
+}
+
+/// Completes every command still waiting for a `tool_result`, with the outcome left unknown.
+fn flush_pending_commands(
+    tx: &crossbeam_channel::Sender<ProviderEvent>,
+    pending: &mut HashMap<String, PendingCommand>,
+) {
+    let mut remaining: Vec<_> = pending.drain().map(|(_, item)| item).collect();
+    remaining.sort_by_key(|item| item.item_index);
+    for item in remaining {
+        let _ = tx.send(ProviderEvent::ItemCompleted {
+            item_index: item.item_index,
+            kind: item.kind,
+            content: item.content,
+            parent_item_index: None,
+            category: item.category,
+            command: Some(item.record),
+        });
+    }
+}
+
+/// The command line of a `Bash` tool input.
+fn command_line(input: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(input)
+        .ok()?
+        .get("command")
+        .and_then(|command| command.as_str())
+        .map(str::to_string)
+}
 
 /// Claude Code tools that write files, reported as file changes rather than tool calls.
 const FILE_CHANGE_TOOLS: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];

@@ -408,6 +408,22 @@ export type ClaudeCustomizations = {
 	hooks: boolean,
 };
 
+export type CommandOutcome = "succeeded" | "failed" | "unknown";
+
+export type CommandRecord = CommandRecord_Serialize | CommandRecord_Deserialize;
+
+export type CommandRecord_Deserialize = {
+	line?: string | null,
+	outcome: CommandOutcome,
+	exitCode?: number | null,
+};
+
+export type CommandRecord_Serialize = {
+	line: string | null,
+	outcome: CommandOutcome,
+	exitCode: number | null,
+};
+
 export type CommentScope = "turn" | "uncommitted" | "branch";
 
 export type CommentSide = "old" | "new";
@@ -903,6 +919,7 @@ export type ItemSnapshot_Deserialize = {
 	content: string,
 	parentItemIndex?: number | null,
 	category?: ActivityCategory | null,
+	command: CommandRecord_Deserialize,
 	createdAt: string,
 };
 
@@ -913,6 +930,7 @@ export type ItemSnapshot_Serialize = {
 	content: string,
 	parentItemIndex: number | null,
 	category: ActivityCategory | null,
+	command: CommandRecord_Serialize,
 	createdAt: string,
 };
 
@@ -1647,6 +1665,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	prompt: string,
 	model?: string | null,
 	effort?: string | null,
+	permission_mode?: PermissionMode | null,
 	segments: PromptSegment[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
@@ -1662,6 +1681,7 @@ export type ThreadEvent_Deserialize = { type: "TurnStarted"; payload: {
 	content: string,
 	parent_item_index?: number | null,
 	category?: ActivityCategory | null,
+	command?: CommandRecord_Deserialize | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
@@ -1690,6 +1710,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	prompt: string,
 	model: string | null,
 	effort: string | null,
+	permission_mode: PermissionMode | null,
 	segments: PromptSegment[],
 } } | { type: "ItemStarted"; payload: {
 	item_index: number,
@@ -1705,6 +1726,7 @@ export type ThreadEvent_Serialize = { type: "TurnStarted"; payload: {
 	content: string,
 	parent_item_index: number | null,
 	category: ActivityCategory | null,
+	command: CommandRecord_Serialize | null,
 } } | { type: "TurnCompleted"; payload: {
 	turn_index: number,
 	status: TurnStatus,
@@ -1834,6 +1856,7 @@ export type TurnSnapshot_Deserialize = {
 	prompt: string,
 	model?: string | null,
 	effort?: string | null,
+	permissionMode?: PermissionMode | null,
 	segments: PromptSegment[],
 	status: TurnStatus,
 	startedAt: string,
@@ -1850,6 +1873,7 @@ export type TurnSnapshot_Serialize = {
 	prompt: string,
 	model: string | null,
 	effort: string | null,
+	permissionMode: PermissionMode | null,
 	segments: PromptSegment[],
 	status: TurnStatus,
 	startedAt: string,

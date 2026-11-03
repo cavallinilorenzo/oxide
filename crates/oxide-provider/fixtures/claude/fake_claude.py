@@ -125,6 +125,11 @@ for line in sys.stdin:
                 for resp_line in f:
                     sys.stdout.write(resp_line.strip() + "\n")
                     sys.stdout.flush()
+        elif "commands_contract" in prompt_text:
+            with open(os.path.join(fixtures_dir, "turn_commands.jsonl"), "r") as f:
+                for resp_line in f:
+                    sys.stdout.write(resp_line.strip() + "\n")
+                    sys.stdout.flush()
         elif "interrupt_test" in prompt_text:
             # Keep reading stdin so protocol interrupts can be handled on every platform.
             print(json.dumps({"type": "interrupt_ready"}), flush=True)

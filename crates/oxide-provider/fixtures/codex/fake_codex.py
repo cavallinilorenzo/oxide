@@ -244,6 +244,46 @@ for line in sys.stdin:
             })
             # Wait for turn/interrupt without sleeping
             send_msg({"method": "interrupt_ready", "params": {"threadId": t_id}})
+        elif "commands_contract" in prompt_text:
+            send_msg({
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"turn": {"id": "turn-1", "status": "inProgress"}}
+            })
+            send_msg({
+                "method": "turn/started",
+                "params": {
+                    "threadId": t_id,
+                    "turn": {"id": "turn-1", "status": "inProgress"}
+                }
+            })
+            commands = [
+                {"id": "item-cmd-0", "command": "contract-succeeds",
+                 "aggregatedOutput": "error: every check failed",
+                 "status": "completed", "exitCode": 0},
+                {"id": "item-cmd-1", "command": "contract-fails",
+                 "aggregatedOutput": "success: all checks passed",
+                 "status": "failed", "exitCode": 1},
+                {"id": "item-cmd-2", "command": "contract-unknown",
+                 "aggregatedOutput": "unknown", "status": "declined"},
+            ]
+            for command in commands:
+                item = dict(command, type="commandExecution")
+                send_msg({
+                    "method": "item/started",
+                    "params": {"threadId": t_id, "turnId": "turn-1", "item": item}
+                })
+                send_msg({
+                    "method": "item/completed",
+                    "params": {"threadId": t_id, "turnId": "turn-1", "item": item}
+                })
+            send_msg({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": t_id,
+                    "turn": {"id": "turn-1", "status": "completed"}
+                }
+            })
         else:
             # Standard prompt replay
             send_msg({

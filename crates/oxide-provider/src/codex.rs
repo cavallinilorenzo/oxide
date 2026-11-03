@@ -2,10 +2,11 @@
 
 use crate::process;
 use crate::{
-    ActivityCategory, ApprovalDecision, ApprovalKind, AttachmentKind, Detection, ItemKind,
-    ModelInfo, PermissionMode, PromptSegment, Provider, ProviderCapabilities, ProviderError,
-    ProviderEvent, SlashCommandInfo, SlashRoute, StartContext, TurnStatus, UsageStatus,
-    UsageWindow, UsageWindowKind, attachment_marker, attachment_path_reference, render_prompt,
+    ActivityCategory, ApprovalDecision, ApprovalKind, AttachmentKind, CommandOutcome,
+    CommandRecord, Detection, ItemKind, ModelInfo, PermissionMode, PromptSegment, Provider,
+    ProviderCapabilities, ProviderError, ProviderEvent, SlashCommandInfo, SlashRoute, StartContext,
+    TurnStatus, UsageStatus, UsageWindow, UsageWindowKind, attachment_marker,
+    attachment_path_reference, render_prompt,
 };
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -105,6 +106,7 @@ fn emit_compaction(threads: &ThreadsMap, items: &ThreadItemsMap, thread_id: Opti
             content: "Conversation compacted.".into(),
             parent_item_index: None,
             category: None,
+            command: None,
         },
     );
 }
@@ -540,6 +542,7 @@ impl CodexAppServer {
                                     content,
                                     parent_item_index: None,
                                     category: codex_category(kind),
+                                    command: codex_command(itype, &item),
                                 },
                             );
                         }
@@ -1512,6 +1515,30 @@ impl Provider for CodexProvider {
 /// Codex only surfaces `commandExecution` as a tool call, so every one is a command run.
 fn codex_category(kind: ItemKind) -> Option<ActivityCategory> {
     (kind == ItemKind::ToolCall).then_some(ActivityCategory::Run)
+}
+
+/// What Codex reported about a `commandExecution` item. Its `status` is the only outcome the
+/// adapter reads; `declined` and any status it does not know stay unknown.
+fn codex_command(itype: &str, item: &serde_json::Value) -> Option<CommandRecord> {
+    if itype != "commandExecution" {
+        return None;
+    }
+    let outcome = match item.get("status").and_then(|s| s.as_str()) {
+        Some("completed") => CommandOutcome::Succeeded,
+        Some("failed") => CommandOutcome::Failed,
+        _ => CommandOutcome::Unknown,
+    };
+    Some(CommandRecord {
+        line: item
+            .get("command")
+            .and_then(|command| command.as_str())
+            .map(str::to_string),
+        outcome,
+        exit_code: item
+            .get("exitCode")
+            .and_then(serde_json::Value::as_i64)
+            .map(|code| code as i32),
+    })
 }
 
 /// The prompt as text with every Attachment as a path reference.

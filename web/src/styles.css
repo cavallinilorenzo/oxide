@@ -1638,3 +1638,22 @@ section.terminal.terminal-hidden { display: none; }
 .dictation-check-progress { display: flex; gap: 10px; align-items: center; }
 .notice-text { font-size: 12px; color: var(--dim); margin: 0; }
 .warning-text { color: #d29922; font-size: 12px; margin: 0; }
+
+/* Line comments */
+.line-comments { flex: none; max-height: 40%; overflow: auto; border-top: 1px solid var(--line); background: var(--bg2); }
+.line-comments-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; position: sticky; top: 0; background: var(--bg2); }
+.line-comments .chip.warn { color: #d29922; border-color: #d29922; }
+.line-comment-list { list-style: none; margin: 0; padding: 0; }
+.line-comment { padding: 8px 10px; border-top: 1px solid var(--line); display: grid; gap: 4px; font-size: 12.5px; }
+.line-comment.outdated { opacity: 0.8; }
+.line-comment-where { display: flex; align-items: center; gap: 6px; }
+.line-comment-code { margin: 0; padding: 4px 8px; background: var(--bg3); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+.line-comment-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.line-comment-actions { display: flex; gap: 6px; }
+.line-comment-edit { display: grid; gap: 6px; }
+.line-comment-edit textarea, .comment-form textarea { width: 100%; resize: vertical; }
+.comment-form { display: grid; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 12.5px; }
+.comment-form-where { display: flex; gap: 8px; align-items: baseline; }
+.comment-form-code { margin: 0; padding: 4px 8px; background: var(--bg3); border-radius: 4px; white-space: pre-wrap; color: var(--dim); }
+.user-bubble .review-comments { font-size: 13px; }
+.user-bubble .review-comments pre { white-space: pre-wrap; }

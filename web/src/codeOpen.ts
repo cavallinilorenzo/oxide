@@ -1,5 +1,33 @@
 import type { DiffFile } from "./bindings";
-export interface CodeOpenRequest { id: number; path: string; diff?: DiffFile; remote?: boolean }
+/** Where a patch's lines can be commented on: the Thread that receives the comments and the Diff scope shown. */
+export interface ReviewTarget { threadId: number; scope: "turn" | "uncommitted" | "branch" }
+export interface CodeOpenRequest { id: number; path: string; diff?: DiffFile; remote?: boolean; review?: ReviewTarget }
+
+/** The file line a patch-document line stands for: its side, 1-based number and code. `null` on headers. */
+export function patchLine(patch: string, line: number): { side: "old" | "new"; line: number; code: string } | null {
+  const lines = patch.split("\n");
+  let oldNo = 0;
+  let newNo = 0;
+  let inHunk = false;
+  for (let i = 0; i < Math.min(line, lines.length); i++) {
+    const text = lines[i];
+    const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(text);
+    if (header) {
+      oldNo = Number(header[1]);
+      newNo = Number(header[2]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || text.startsWith("\\")) continue;
+    const removed = text[0] === "-";
+    const added = text[0] === "+";
+    const found = { side: removed ? ("old" as const) : ("new" as const), line: removed ? oldNo : newNo, code: text.slice(1) };
+    if (!added) oldNo++;
+    if (!removed) newNo++;
+    if (i === line - 1) return found;
+  }
+  return null;
+}
 
 /** The working-file line a cursor on `line` (1-based) of a patch document stands for. */
 export function hunkTarget(patch: string, line: number): number {

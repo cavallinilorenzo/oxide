@@ -19,6 +19,7 @@ mod git_diff;
 mod github;
 mod language_install;
 mod language_server;
+mod line_comments;
 mod project_setup;
 mod review_ledger;
 mod settings;
@@ -51,6 +52,7 @@ pub use github::{
     ReviewState,
 };
 pub use language_server::{LanguageServerConfig, LanguageServerSummary, LanguageTool};
+pub use line_comments::{CommentScope, CommentSide, LineComment, NewLineComment};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -696,6 +698,10 @@ impl Core {
                     [thread_id],
                 )?;
             }
+            tx.execute(
+                "DELETE FROM line_comments WHERE thread_id = ?1",
+                [thread_id],
+            )?;
             tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
             tx.execute(
                 "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",

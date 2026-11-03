@@ -1,5 +1,14 @@
 import { expect, it } from "vitest";
-import { hunkTarget, patchDocument } from "./codeOpen";
+import { hunkTarget, patchDocument, patchLine } from "./codeOpen";
+it("names the file line a patch line stands for, with its side and code", () => {
+  const patch = ["--- a/x.ts", "+++ b/x.ts", "@@ -1,3 +1,3 @@", " keep", "-old", "+new", " tail", "@@ -20,2 +30,3 @@", " ctx", "+add"].join("\n");
+  expect(patchLine(patch, 4)).toEqual({ side: "new", line: 1, code: "keep" });
+  expect(patchLine(patch, 5)).toEqual({ side: "old", line: 2, code: "old" });
+  expect(patchLine(patch, 6)).toEqual({ side: "new", line: 2, code: "new" });
+  expect(patchLine(patch, 10)).toEqual({ side: "new", line: 31, code: "add" });
+  expect(patchLine(patch, 3)).toBeNull(); // hunk header
+  expect(patchLine(patch, 1)).toBeNull(); // file header
+});
 it("maps a cursor in a patch to the line it changes in the working file", () => {
   const patch = ["--- a/x.ts", "+++ b/x.ts", "@@ -1,3 +1,3 @@", " keep", "-old", "+new", " tail", "@@ -20,2 +30,3 @@", " ctx", "+add", " end"].join("\n");
   expect(hunkTarget(patch, 6)).toBe(2); // an added line

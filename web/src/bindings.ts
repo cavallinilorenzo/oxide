@@ -129,6 +129,13 @@ export const commands = {
 	gitTurnDiff: (threadId: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId })),
 	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
 	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
+	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
+	editLineComment: (id: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_line_comment", { id, body })),
+	deleteLineComment: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("delete_line_comment", { id })),
+	/**  A Thread's draft comments, each flagged when its line has changed. */
+	listLineComments: (threadId: number) => typedError<LineComment[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
+	/**  Sends every draft to the Thread as one prompt. */
+	sendLineComments: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("send_line_comments", { threadId })),
 	/**  Checks out a branch; a remote one (`origin/x`) becomes a tracking branch. */
 	checkoutBranch: (projectId: number, threadId: number | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("checkout_branch", { projectId, threadId, name })),
 	/**  Creates a branch from HEAD and checks it out. */
@@ -372,6 +379,10 @@ export type ClaudeCustomizations = {
 	mcpServers: boolean,
 	hooks: boolean,
 };
+
+export type CommentScope = "turn" | "uncommitted" | "branch";
+
+export type CommentSide = "old" | "new";
 
 /**  A new Thread continuing one whose Provider session is gone, and the recap to prefill. */
 export type ContinuedThread = ContinuedThread_Serialize | ContinuedThread_Deserialize;
@@ -912,6 +923,18 @@ export type LanguageTool_Serialize = {
 	documentation: string,
 };
 
+export type LineComment = {
+	id: number,
+	threadId: number,
+	scope: CommentScope,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
+	outdated: boolean,
+};
+
 export type MemoryPool = MemoryPool_Serialize | MemoryPool_Deserialize;
 
 export type MemoryPool_Deserialize = {
@@ -956,6 +979,16 @@ export type ModelMemoryEstimate = {
 	backend: BackendId,
 	bytes: number | null,
 	measured: boolean,
+};
+
+/**  A draft comment on one line of a Diff. */
+export type NewLineComment = {
+	scope: CommentScope,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
 };
 
 /**  An Approval the Provider is still waiting on. */

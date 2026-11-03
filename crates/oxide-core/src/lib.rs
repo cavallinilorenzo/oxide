@@ -12,6 +12,7 @@ pub mod desktop_tools;
 mod detection_cache;
 pub mod dictation;
 mod discovery;
+mod dossier;
 mod error;
 mod files;
 mod git;
@@ -89,6 +90,7 @@ pub use attachments::{
 };
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
+pub use dossier::{VerificationCommand, VerificationDossier, VerificationKind, VerificationState};
 pub use error::{Error, Result};
 pub use oxide_provider::{
     ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, CommandOutcome,

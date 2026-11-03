@@ -1043,7 +1043,15 @@ export function App() {
                   onChanged={onGitChanged}
                   onOpenPullRequest={openPullRequest}
                   threadWorking={selectedThread?.status === "working"}
-                  onOpenFile={(file) => openCodeFile(file.path, file, diffScope === "pr", diffScope !== "pr" && currentThreadId !== null ? { threadId: currentThreadId, scope: diffScope } : undefined)}
+                  onOpenFile={(file) => {
+                    const review: ReviewTarget | undefined =
+                      diffScope === "pr" && reviewedPr?.projectId === selected.id
+                        ? { kind: "pullRequest", pullRequest: reviewedPr.number }
+                        : diffScope !== "pr" && currentThreadId !== null
+                          ? { kind: "thread", threadId: currentThreadId, scope: diffScope }
+                          : undefined;
+                    openCodeFile(file.path, file, diffScope === "pr", review);
+                  }}
                 />
               </Suspense></div>
             )}

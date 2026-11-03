@@ -59,10 +59,13 @@ pub use github::{
     MergeMethod, MergeState, PullRequest, PullRequestCandidates, PullRequestCheck,
     PullRequestComment, PullRequestDetail, PullRequestDraft, PullRequestEdit, PullRequestInput,
     PullRequestLabel, PullRequestPhase, PullRequestReviewThread, PullRequestReviewer,
-    PullRequestState, ReviewDecision, ReviewState, ReviewThreadComment,
+    PullRequestState, ReviewDecision, ReviewState, ReviewThreadComment, ReviewVerdict,
 };
 pub use language_server::{LanguageServerConfig, LanguageServerSummary, LanguageTool};
-pub use line_comments::{CommentScope, CommentSide, LineComment, NewLineComment};
+pub use line_comments::{
+    CommentScope, CommentSide, LineComment, NewLineComment, NewPullRequestLineComment,
+    PullRequestLineComment,
+};
 use oxide_provider::Provider as ProviderTrait;
 use oxide_provider::process::ProcessRegistry;
 use std::collections::HashMap;
@@ -1906,6 +1909,39 @@ impl Core {
     /// Adds a conversation comment to a pull request.
     pub fn comment_pull_request(&self, project_id: u32, number: u32, body: &str) -> Result<()> {
         github::comment_pull_request(&self.gh, &self.main_checkout(project_id)?, number, body)
+    }
+
+    /// Submits the pull request's draft Line comments as one GitHub review. A refusal leaves the
+    /// drafts in place, so the reviewer can fix them and try again. Reviewing never changes a
+    /// checkout: `gh` runs in the Project's main checkout and only talks to GitHub.
+    pub fn submit_pull_request_review(
+        &self,
+        project_id: u32,
+        number: u32,
+        verdict: ReviewVerdict,
+        summary: &str,
+    ) -> Result<()> {
+        let summary = summary.trim();
+        let comments = self.list_pull_request_line_comments(project_id, number)?;
+        if summary.is_empty() && verdict == ReviewVerdict::RequestChanges {
+            return Err(Error::Github(
+                "Write a summary when requesting changes.".into(),
+            ));
+        }
+        if summary.is_empty() && comments.is_empty() && verdict == ReviewVerdict::Comment {
+            return Err(Error::Github(
+                "Write a summary or leave a line comment first.".into(),
+            ));
+        }
+        github::submit_review(
+            &self.gh,
+            &self.main_checkout(project_id)?,
+            number,
+            verdict,
+            summary,
+            &comments,
+        )?;
+        self.clear_pull_request_line_comments(project_id, number)
     }
 
     /// Moves a pull request out of draft (`draft` false), or back into it.

@@ -88,6 +88,12 @@ impl Fixture {
         std::fs::write(self.gh_dir.join("state.json"), state.to_string()).unwrap();
     }
 
+    /// The fake `gh`'s state, after the calls this test made changed it.
+    fn gh_state(&self) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(self.gh_dir.join("state.json")).unwrap())
+            .unwrap()
+    }
+
     /// Every `gh` invocation so far, as its argument list.
     fn gh_calls(&self) -> Vec<Vec<String>> {
         let mut files: Vec<PathBuf> = std::fs::read_dir(self.gh_dir.join("calls"))
@@ -733,6 +739,217 @@ fn review_thread_errors_are_reported_as_github_errors() {
         .pull_request_review_threads(f.project.id, 5)
         .unwrap_err();
     assert!(err.to_string().contains("Resource not accessible"), "{err}");
+}
+
+fn review_draft(
+    path: &str,
+    side: oxide_core::CommentSide,
+    line: u32,
+    code: &str,
+    body: &str,
+) -> oxide_core::NewPullRequestLineComment {
+    oxide_core::NewPullRequestLineComment {
+        path: path.into(),
+        side,
+        line,
+        code: code.into(),
+        body: body.into(),
+    }
+}
+
+#[test]
+fn a_review_gathers_every_draft_into_one_github_review() {
+    use oxide_core::{CommentSide, ReviewVerdict};
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    let branch_before = git(&f.work, &["branch", "--show-current"]);
+    let head_before = git(&f.work, &["rev-parse", "HEAD"]);
+    f.core
+        .add_pull_request_line_comment(
+            f.project.id,
+            5,
+            review_draft("a.txt", CommentSide::New, 1, "uno", "Why uno?"),
+        )
+        .unwrap();
+    f.core
+        .add_pull_request_line_comment(
+            f.project.id,
+            5,
+            review_draft("gone.txt", CommentSide::Old, 1, "bye", "Keep this?"),
+        )
+        .unwrap();
+
+    f.core
+        .submit_pull_request_review(
+            f.project.id,
+            5,
+            ReviewVerdict::RequestChanges,
+            "  Please fix both.  ",
+        )
+        .unwrap();
+
+    // One request, carrying every draft: removed lines go left, the rest go right.
+    let calls = f.gh_calls();
+    let path = "repos/{owner}/{repo}/pulls/5/reviews";
+    let submitted: Vec<&Vec<String>> = calls
+        .iter()
+        .filter(|call| call[..2] == ["api", path])
+        .collect();
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(
+        submitted[0],
+        &["api", path, "--method", "POST", "--input", "-"]
+            .map(String::from)
+            .to_vec()
+    );
+    let state = f.gh_state();
+    let review = &state["review_submissions"][0];
+    assert_eq!(review["event"], "REQUEST_CHANGES");
+    assert_eq!(review["body"], "Please fix both.");
+    assert_eq!(
+        review["comments"],
+        serde_json::json!([
+            {"path": "a.txt", "line": 1, "side": "RIGHT", "body": "Why uno?"},
+            {"path": "gone.txt", "line": 1, "side": "LEFT", "body": "Keep this?"},
+        ])
+    );
+
+    assert!(
+        f.core
+            .list_pull_request_line_comments(f.project.id, 5)
+            .unwrap()
+            .is_empty()
+    );
+    // Reviewing a remote pull request never changes a checkout.
+    assert_eq!(git(&f.work, &["branch", "--show-current"]), branch_before);
+    assert_eq!(git(&f.work, &["rev-parse", "HEAD"]), head_before);
+    assert!(!calls.iter().any(|call| call[..2] == ["pr", "checkout"]));
+}
+
+#[test]
+fn a_refused_review_is_reported_and_keeps_the_drafts() {
+    use oxide_core::{CommentSide, ReviewVerdict};
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["review_error"] = "Can not approve your own pull request (HTTP 422)".into();
+    install_gh(&f, state);
+    f.core
+        .add_pull_request_line_comment(
+            f.project.id,
+            5,
+            review_draft("a.txt", CommentSide::New, 1, "uno", "Why uno?"),
+        )
+        .unwrap();
+
+    let err = f
+        .core
+        .submit_pull_request_review(f.project.id, 5, ReviewVerdict::Approve, "")
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Can not approve your own pull request"),
+        "{err}"
+    );
+    let drafts = f
+        .core
+        .list_pull_request_line_comments(f.project.id, 5)
+        .unwrap();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].body, "Why uno?");
+}
+
+#[test]
+fn review_drafts_belong_to_their_pull_request_and_survive_a_restart() {
+    use oxide_core::CommentSide;
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    let comment = f
+        .core
+        .add_pull_request_line_comment(
+            f.project.id,
+            5,
+            review_draft("a.txt", CommentSide::New, 1, "uno", "why?"),
+        )
+        .unwrap();
+    f.core
+        .edit_pull_request_line_comment(comment.id, "why uppercase?")
+        .unwrap();
+    let listed = f
+        .core
+        .list_pull_request_line_comments(f.project.id, 5)
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].body, "why uppercase?");
+    assert!(
+        f.core
+            .list_pull_request_line_comments(f.project.id, 6)
+            .unwrap()
+            .is_empty()
+    );
+
+    let home = f.core.home().to_path_buf();
+    drop(f.core);
+    let core = Core::open(home).unwrap();
+    assert_eq!(
+        core.list_pull_request_line_comments(f.project.id, 5)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn a_request_for_changes_needs_a_summary_but_a_comment_can_ride_on_its_drafts() {
+    use oxide_core::{CommentSide, ReviewVerdict};
+    let f = fixture();
+    install_gh(&f, state_with_prs(&[detailed_pr()]));
+    f.core
+        .add_pull_request_line_comment(
+            f.project.id,
+            5,
+            review_draft("a.txt", CommentSide::New, 1, "uno", "Why uno?"),
+        )
+        .unwrap();
+
+    let before = f.gh_calls().len();
+    let err = f
+        .core
+        .submit_pull_request_review(f.project.id, 5, ReviewVerdict::RequestChanges, "  ")
+        .unwrap_err();
+    assert!(err.to_string().contains("summary"), "{err}");
+    // Nothing reached GitHub, and the draft is still there.
+    assert_eq!(f.gh_calls().len(), before);
+    assert_eq!(
+        f.core
+            .list_pull_request_line_comments(f.project.id, 5)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // A plain comment review can be its inline comments alone.
+    f.core
+        .submit_pull_request_review(f.project.id, 5, ReviewVerdict::Comment, "")
+        .unwrap();
+    assert!(
+        f.core
+            .list_pull_request_line_comments(f.project.id, 5)
+            .unwrap()
+            .is_empty()
+    );
+
+    // An approval may be bare.
+    f.core
+        .submit_pull_request_review(f.project.id, 5, ReviewVerdict::Approve, "")
+        .unwrap();
+    let state = f.gh_state();
+    let events: Vec<&str> = state["review_submissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|review| review["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(events, ["COMMENT", "APPROVE"]);
 }
 
 #[test]

@@ -1,6 +1,8 @@
 import type { DiffFile } from "./bindings";
-/** Where a patch's lines can be commented on: the Thread that receives the comments and the Diff scope shown. */
-export interface ReviewTarget { threadId: number; scope: "turn" | "uncommitted" | "branch" }
+/** Where a Line comment is drafted: a Thread that receives it, or a pull request's review. */
+export type ReviewTarget =
+  | { kind: "thread"; threadId: number; scope: "turn" | "uncommitted" | "branch" }
+  | { kind: "pullRequest"; pullRequest: number };
 export interface CodeOpenRequest { id: number; path: string; diff?: DiffFile; remote?: boolean; review?: ReviewTarget }
 
 /** The file line a patch-document line stands for: its side, 1-based number and code. `null` on headers. */

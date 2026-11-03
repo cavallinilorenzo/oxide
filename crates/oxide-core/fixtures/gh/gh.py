@@ -5,6 +5,7 @@ State lives next to this script in `state.json`, which the test writes:
   {"auth": "ok" | "logged_out", "default_branch": "main", "next_number": 7, "prs": {"<branch>": {...}},
    "repo": {"mergeCommitAllowed": true, ...}}
 A PR may also carry "author", "body", "comments", "statusCheckRollup" and "diff" (a unified diff).
+A "review_error" fails every submitted review, and "review_submissions" records the ones accepted.
 Every invocation is recorded in its own file under `calls/` as {"args": [...], "cwd": "..."}:
 concurrent invocations must not share a file, appends are not atomic on Windows.
 """
@@ -85,6 +86,22 @@ if args[:2] == ["repo", "view"]:
 
 if args[:2] == ["api", "user"]:
     print(state.get("viewer", "me"))
+    sys.exit(0)
+
+REVIEWS = "repos/{owner}/{repo}/pulls/"
+if len(args) > 1 and args[0] == "api" and args[1].startswith(REVIEWS) and args[1].endswith("/reviews"):
+    # A submitted review, read as JSON from stdin through `--input -`.
+    if flag("--method") != "POST":
+        print("[]")
+        sys.exit(0)
+    if state.get("review_error"):
+        sys.stderr.write(state["review_error"] + "\n")
+        sys.exit(1)
+    review = json.load(sys.stdin)
+    review.setdefault("submittedAt", now())
+    state.setdefault("review_submissions", []).append(review)
+    save()
+    print(json.dumps(dict(review, id=len(state["review_submissions"]))))
     sys.exit(0)
 
 if args[:2] == ["api", "graphql"]:

@@ -1812,6 +1812,109 @@ async fn send_line_comments(core: State<'_, Arc<Core>>, thread_id: u32) -> Resul
     git_blocking(&core, move |core| core.send_line_comments(thread_id)).await
 }
 
+/// A draft Line comment on a pull request's Diff.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPullRequestLineComment {
+    path: String,
+    side: CommentSide,
+    line: u32,
+    code: String,
+    body: String,
+}
+
+/// A draft Line comment on a pull request's Diff, kept until a review is submitted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestLineComment {
+    id: u32,
+    project_id: u32,
+    pull_request: u32,
+    path: String,
+    side: CommentSide,
+    line: u32,
+    code: String,
+    body: String,
+}
+
+/// The decision a submitted review carries.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewVerdict {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn add_pull_request_line_comment(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    pull_request: u32,
+    comment: NewPullRequestLineComment,
+) -> Result<PullRequestLineComment, AppError> {
+    let comment: oxide_core::NewPullRequestLineComment = convert(&comment);
+    git_blocking(&core, move |core| {
+        core.add_pull_request_line_comment(project_id, pull_request, comment)
+    })
+    .await
+    .map(|c| convert(&c))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn edit_pull_request_line_comment(
+    core: State<'_, Arc<Core>>,
+    id: u32,
+    body: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.edit_pull_request_line_comment(id, &body)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn delete_pull_request_line_comment(
+    core: State<'_, Arc<Core>>,
+    id: u32,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.delete_pull_request_line_comment(id)).await
+}
+
+/// A pull request's draft Line comments, oldest first.
+#[tauri::command]
+#[specta::specta]
+async fn list_pull_request_line_comments(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    pull_request: u32,
+) -> Result<Vec<PullRequestLineComment>, AppError> {
+    git_blocking(&core, move |core| {
+        core.list_pull_request_line_comments(project_id, pull_request)
+    })
+    .await
+    .map(|comments| comments.iter().map(convert).collect())
+}
+
+/// Sends every draft as one GitHub review, leaving them in place if GitHub refuses.
+#[tauri::command]
+#[specta::specta]
+async fn submit_pull_request_review(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+    verdict: ReviewVerdict,
+    summary: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.submit_pull_request_review(project_id, number, convert(&verdict), &summary)
+    })
+    .await
+}
+
 /// One Turn of a Thread as the Diff Surface's Turn picker lists it.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -3337,6 +3440,11 @@ pub fn builder() -> Builder<tauri::Wry> {
         delete_line_comment,
         list_line_comments,
         send_line_comments,
+        add_pull_request_line_comment,
+        edit_pull_request_line_comment,
+        delete_pull_request_line_comment,
+        list_pull_request_line_comments,
+        submit_pull_request_review,
         checkout_branch,
         create_branch,
         fetch_project,

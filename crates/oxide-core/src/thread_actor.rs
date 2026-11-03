@@ -765,7 +765,14 @@ fn run_thread_actor(
                         }
                         state.idle_since = None;
                         state.pending_segments = Some(segments.clone());
-                        let sent = provider.send_prompt_with_segments(&segments);
+                        // The agent is told about a restore on the next prompt; the
+                        // Transcript keeps the user's own prompt. The notice goes away
+                        // only once the provider has the prompt.
+                        let notice = storage.restore_notice(state.thread_id);
+                        let sent = provider.send_prompt_with_segments(&with_notice(
+                            segments,
+                            notice.clone(),
+                        ));
                         let p_res = sent.map_err(|e| {
                             if has_attachments {
                                 // Say why the Attachments were refused, not where.
@@ -785,6 +792,9 @@ fn run_thread_actor(
                             if state.current_turn.is_none() {
                                 state.idle_since = Some(state.clock.now());
                             }
+                        } else if notice.is_some() {
+                            // The agent has the notice now; it does not need it again.
+                            storage.take_restore_notice(state.thread_id);
                         }
                         let _ = reply.send(p_res);
                     }
@@ -1054,4 +1064,15 @@ fn oxide_run_command(text: &str) -> Option<&'static str> {
     ["model", "effort", "clear", "permissions"]
         .into_iter()
         .find(|name| *name == word)
+}
+
+/// The prompt the agent gets, with the notice of a restore in front of it.
+fn with_notice(segments: Vec<PromptSegment>, notice: Option<String>) -> Vec<PromptSegment> {
+    let Some(notice) = notice else {
+        return segments;
+    };
+    let mut all = Vec::with_capacity(segments.len() + 1);
+    all.push(PromptSegment::text(notice));
+    all.extend(segments);
+    all
 }

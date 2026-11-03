@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { PersonIcon } from "@primer/octicons-react";
+import { HistoryIcon, PersonIcon } from "@primer/octicons-react";
 import type { ApprovalDecision, ApprovalSnapshot } from "./bindings";
 import { AttachmentChip } from "./AttachmentChip";
 import { ItemContent } from "./ItemContent";
@@ -39,6 +39,12 @@ function BlockView({ block }: { block: Block }) {
       return (
         <div className="command-output" aria-label="Command output">
           <ItemContent content={block.item.content} />
+        </div>
+      );
+    case "restore":
+      return (
+        <div className="restore-marker" aria-label="Restore">
+          <HistoryIcon size={12} /> {block.item.content}
         </div>
       );
     case "activity":

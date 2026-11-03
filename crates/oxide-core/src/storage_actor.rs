@@ -115,6 +115,17 @@ pub enum StorageMsg {
         raw: String,
         reply: mpsc::Sender<Result<u32>>,
     },
+    SetRestoreNotice {
+        thread_id: u32,
+        notice: String,
+        reply: mpsc::Sender<Result<()>>,
+    },
+    RestoreNotice {
+        thread_id: u32,
+        /// Whether the notice goes away with it.
+        take: bool,
+        reply: mpsc::Sender<Option<String>>,
+    },
     Shutdown,
 }
 
@@ -355,6 +366,40 @@ impl StorageHandle {
         reply_rx
             .recv()
             .unwrap_or(Err(rusqlite::Error::QueryReturnedNoRows.into()))
+    }
+
+    /// Keeps what the agent is told on the Thread's next prompt.
+    pub fn set_restore_notice(&self, thread_id: u32, notice: String) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::SetRestoreNotice {
+            thread_id,
+            notice,
+            reply: reply_tx,
+        });
+        reply_rx.recv().unwrap_or(Ok(()))
+    }
+
+    /// The notice the agent has not been told yet, if there is one. It stays until
+    /// the agent is told: a prompt that fails to reach the provider leaves it for
+    /// the next one.
+    pub fn restore_notice(&self, thread_id: u32) -> Option<String> {
+        self.notice(thread_id, false)
+    }
+
+    /// The notice the agent has not been told yet, if there is one, and forgets it:
+    /// the agent is told once.
+    pub fn take_restore_notice(&self, thread_id: u32) -> Option<String> {
+        self.notice(thread_id, true)
+    }
+
+    fn notice(&self, thread_id: u32, take: bool) -> Option<String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let _ = self.sender.send(StorageMsg::RestoreNotice {
+            thread_id,
+            take,
+            reply: reply_tx,
+        });
+        reply_rx.recv().ok().flatten()
     }
 
     pub fn shutdown(&self) {
@@ -626,6 +671,41 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     Ok(conn.last_insert_rowid() as u32)
                 })();
                 let _ = reply.send(res);
+            }
+            StorageMsg::SetRestoreNotice {
+                thread_id,
+                notice,
+                reply,
+            } => {
+                let res = (|| -> Result<()> {
+                    conn.execute(
+                        "UPDATE threads SET restore_notice = ?1 WHERE id = ?2",
+                        rusqlite::params![notice, thread_id],
+                    )?;
+                    Ok(())
+                })();
+                let _ = reply.send(res);
+            }
+            StorageMsg::RestoreNotice {
+                thread_id,
+                take,
+                reply,
+            } => {
+                let notice: Option<String> = conn
+                    .query_row(
+                        "SELECT restore_notice FROM threads WHERE id = ?1",
+                        [thread_id],
+                        |r| r.get(0),
+                    )
+                    .ok()
+                    .flatten();
+                if take && notice.is_some() {
+                    let _ = conn.execute(
+                        "UPDATE threads SET restore_notice = NULL WHERE id = ?1",
+                        [thread_id],
+                    );
+                }
+                let _ = reply.send(notice);
             }
             StorageMsg::Shutdown => break,
         }

@@ -40,7 +40,7 @@ A file the user puts inside a prompt, at a position in its text, stored under th
 _Avoid_: Upload, file input, image (when meaning any Attachment)
 
 **Item**:
-One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, or the output of a Slash command. Slash command output is its own kind, never an agent message, and stays out of the Continue in new Thread recap.
+One unit of a Turn's output: an agent message, reasoning, a tool call, a file change, a subagent, the output of a Slash command, or the mark of a Restore. Slash command output and the mark of a Restore are their own kinds, never an agent message, and stay out of the Continue in new Thread recap.
 _Avoid_: Step, block, event (when meaning the unit)
 
 **Activity**:
@@ -154,7 +154,11 @@ What the Diff Surface compares: Uncommitted (staged, unstaged and untracked chan
 _Avoid_: Diff mode, diff type
 
 **Revert**:
-Taking one file, or one hunk of it, out of the Uncommitted or Turn Diff by applying its patch in reverse to the selected Thread's checkout, leaving the rest of the change untouched. All-or-nothing: a patch that no longer applies cleanly changes nothing and says why. Deleting a file asks first, and it is refused while a Turn is running in that checkout. Not a Checkpoint restore, which rewinds the whole checkout to before a Turn.
+Taking one file, or one hunk of it, out of the Uncommitted or Turn Diff by applying its patch in reverse to the selected Thread's checkout, leaving the rest of the change untouched. All-or-nothing: a patch that no longer applies cleanly changes nothing and says why. Deleting a file asks first, and it is refused while a Turn is running in that checkout. Not a **Restore**, which rewinds the whole checkout to before a Turn.
+
+**Restore**:
+Putting the selected Thread's files back to how they were before a chosen Turn, file by file: HEAD, the branches, the user's index and the ignored files stay as they were, and the Provider's session is not rewound. It asks first, naming the files it changes, and takes a Checkpoint first, so it can be undone. It is refused while a Turn runs in that checkout, and the agent is told on its next prompt which files went back. See ADR-0011.
+_Avoid_: Rewind, rollback, checkout
 
 **Base branch**:
 The branch the Branch scope compares against: the remote's default branch, else `main`, `master` or `dev` (remote copy first).

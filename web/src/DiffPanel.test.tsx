@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { commands, type PullRequestReviewThread } from "./bindings";
+import { commands, type PullRequestReviewThread, type RestoreChange } from "./bindings";
 import { DiffPanel } from "./DiffPanel";
 import { clearQueryCache } from "./queryCache";
 
@@ -210,6 +210,70 @@ it("offers Revert on the latest Turn only, since Core reverts the latest", async
   expect(host.querySelector('[aria-label="Revert a.rs"]')).not.toBeNull();
   await choose("0");
   expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
+});
+
+const renderRestore = (props: { threadId?: number | null; checkoutBusy?: boolean; onChanged?: () => void; onRestored?: () => void } = {}) =>
+  act(async () =>
+    root.render(
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={props.threadId ?? 5} board={false} worktree={false} checkoutBusy={props.checkoutBusy} scope="turn" reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={props.onChanged ?? (() => {})} onRestored={props.onRestored} onOpenPullRequest={() => {}} />,
+    ),
+  );
+
+const mockRestore = (files: { path: string; change: RestoreChange }[], turnIndex = 1) => {
+  vi.spyOn(commands, "restorePreview").mockResolvedValue({ status: "ok", data: { turnIndex, files } } as never);
+  vi.spyOn(commands, "restoreTurn").mockResolvedValue({ status: "ok", data: { turnIndex, files, undone: false } } as never);
+  vi.spyOn(commands, "pendingRestore").mockResolvedValue({ status: "ok", data: null } as never);
+};
+
+it("offers a restore on a Turn with Checkpoints and names the files it changes", async () => {
+  mockTurns(picks.slice(0, 2));
+  mockRestore([{ path: "src/a.rs", change: "rewritten" }, { path: "src/new.rs", change: "removed" }]);
+  const onChanged = vi.fn();
+  const onRestored = vi.fn();
+  await renderRestore({ onChanged, onRestored });
+  await click(host.querySelector('[aria-label="Restore the files to before Turn 2"]'));
+  const dialog = host.querySelector('[role="alertdialog"]');
+  expect(dialog?.textContent).toContain("src/a.rs");
+  expect(dialog?.textContent).toContain("src/new.rs");
+  expect(commands.restoreTurn).not.toHaveBeenCalled();
+  await click(dialog!.querySelector("button.primary"));
+  expect(commands.restoreTurn).toHaveBeenCalledWith(5, 1);
+  expect(onChanged).toHaveBeenCalled();
+  expect(onRestored).toHaveBeenCalled();
+});
+
+it("offers no restore without Checkpoints or while the Thread's checkout is busy", async () => {
+  mockTurns(picks);
+  mockRestore([]);
+  await renderRestore({ checkoutBusy: true });
+  expect(host.querySelector('[aria-label^="Restore the files"]')).toBeNull();
+  await renderRestore();
+  await choose("1");
+  expect(host.querySelector('[aria-label="Restore the files to before Turn 2"]')).not.toBeNull();
+  await choose("2");
+  expect(host.querySelector('[aria-label^="Restore the files"]')).toBeNull();
+});
+
+it("reports why a restore was refused", async () => {
+  mockTurns(picks.slice(0, 2));
+  vi.spyOn(commands, "pendingRestore").mockResolvedValue({ status: "ok", data: null } as never);
+  vi.spyOn(commands, "restoreTurn").mockResolvedValue({ status: "ok", data: { turnIndex: 1, files: [], undone: false } } as never);
+  vi.spyOn(commands, "restorePreview").mockResolvedValue({ status: "error", error: { message: "A Turn is running in this Thread. Wait for it to finish or stop it." } } as never);
+  await renderRestore();
+  await click(host.querySelector('[aria-label="Restore the files to before Turn 2"]'));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("A Turn is running in this Thread.");
+  expect(commands.restoreTurn).not.toHaveBeenCalled();
+});
+
+it("offers to undo a restore that can still be undone", async () => {
+  mockTurns(picks.slice(0, 2));
+  vi.spyOn(commands, "pendingRestore").mockResolvedValue({ status: "ok", data: { turnIndex: 1, files: [{ path: "src/a.rs", change: "rewritten" }] } } as never);
+  const undo = vi.spyOn(commands, "undoRestore").mockResolvedValue({ status: "ok", data: { turnIndex: 1, files: [], undone: true } } as never);
+  const onRestored = vi.fn();
+  await renderRestore({ onRestored });
+  await click(host.querySelector('[aria-label="Undo the restore"]'));
+  expect(undo).toHaveBeenCalledWith(5);
+  expect(onRestored).toHaveBeenCalled();
 });
 
 const reviewThread = (overrides: Partial<PullRequestReviewThread> = {}): PullRequestReviewThread => ({

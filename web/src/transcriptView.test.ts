@@ -45,6 +45,14 @@ describe("groupTurnItems", () => {
     expect(blocks.map((b) => b.type)).toEqual(["command"]);
   });
 
+  it("draws a restore mark as its own block, never a message or Activity", () => {
+    const blocks = groupTurnItems([
+      item(0, "agent_message", "done"),
+      item(1, "restore_marker", "Restored the files to how they were before Turn 1."),
+    ]);
+    expect(blocks.map((b) => b.type)).toEqual(["message", "restore"]);
+  });
+
   it("renders no Activity for a Turn without tool-like Items", () => {
     expect(groupTurnItems([item(0, "agent_message", "hi")]).map((b) => b.type)).toEqual(["message"]);
   });

@@ -835,6 +835,7 @@ pub enum ItemKind {
     FileChange,
     Subagent,
     SlashCommandOutput,
+    RestoreMarker,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -2021,6 +2022,112 @@ async fn revert_diff(
         core.revert_in(project_id, thread_id, scope, &target, confirm_delete)
     })
     .await
+}
+
+/// What a restore does to one file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RestoreChange {
+    /// The file is written back to how the Checkpoint had it.
+    Rewritten,
+    /// The file is brought back: it was deleted after the Checkpoint.
+    Reinstated,
+    /// The file is removed: it was created after the Checkpoint.
+    Removed,
+}
+
+/// One file a restore changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreFile {
+    /// The file's path in the checkout.
+    pub path: String,
+    /// What the restore does to it.
+    pub change: RestoreChange,
+}
+
+/// The files a restore would change, before it is done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePreview {
+    /// The Turn whose start Checkpoint the files go back to.
+    pub turn_index: u32,
+    /// The files that stand between the working tree and that Checkpoint.
+    pub files: Vec<RestoreFile>,
+}
+
+/// What a restore did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutcome {
+    /// The Turn whose start Checkpoint the files went back to.
+    pub turn_index: u32,
+    /// The files that changed.
+    pub files: Vec<RestoreFile>,
+    /// Whether this undid a restore instead of making one.
+    pub undone: bool,
+}
+
+/// A restore that can still be undone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRestore {
+    /// The Turn whose start Checkpoint the files went back to.
+    pub turn_index: u32,
+    /// The files the restore changed.
+    pub files: Vec<RestoreFile>,
+}
+
+/// What restoring a Thread's files to before a Turn would change.
+#[tauri::command]
+#[specta::specta]
+async fn restore_preview(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    turn_index: u32,
+) -> Result<RestorePreview, AppError> {
+    git_blocking(&core, move |core| {
+        core.restore_preview(thread_id, turn_index)
+    })
+    .await
+    .map(|preview| convert(&preview))
+}
+
+/// Puts a Thread's files back to how they were before a Turn.
+#[tauri::command]
+#[specta::specta]
+async fn restore_turn(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    turn_index: u32,
+) -> Result<RestoreOutcome, AppError> {
+    git_blocking(&core, move |core| core.restore_turn(thread_id, turn_index))
+        .await
+        .map(|outcome| convert(&outcome))
+}
+
+/// Undoes a Thread's latest restore, putting the files back to its safety Checkpoint.
+#[tauri::command]
+#[specta::specta]
+async fn undo_restore(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<RestoreOutcome, AppError> {
+    git_blocking(&core, move |core| core.undo_restore(thread_id))
+        .await
+        .map(|outcome| convert(&outcome))
+}
+
+/// The restore of a Thread that can still be undone, if there is one.
+#[tauri::command]
+#[specta::specta]
+async fn pending_restore(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<Option<PendingRestore>, AppError> {
+    git_blocking(&core, move |core| core.pending_restore(thread_id))
+        .await
+        .map(|pending| pending.map(|pending| convert(&pending)))
 }
 
 /// Checks out a branch; a remote one (`origin/x`) becomes a tracking branch.
@@ -3454,6 +3561,10 @@ pub fn builder() -> Builder<tauri::Wry> {
         git_diff,
         git_turn_diff,
         list_turn_picks,
+        restore_preview,
+        restore_turn,
+        undo_restore,
+        pending_restore,
         revert_diff,
         add_line_comment,
         edit_line_comment,

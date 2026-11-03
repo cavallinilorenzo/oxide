@@ -21,6 +21,7 @@ mod language_install;
 mod language_server;
 mod line_comments;
 mod project_setup;
+mod restore;
 mod review_ledger;
 mod settings;
 mod slash_catalog;
@@ -75,7 +76,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use storage_actor::StorageHandle;
+use storage_actor::{NewItem, StorageHandle};
 pub use terminal::TerminalSummary;
 use terminal::{TerminalSession, next_id};
 use thread_actor::ThreadActorHandle;
@@ -95,6 +96,7 @@ pub use oxide_provider::{
     CommandRecord, Detection, ItemKind, ModelInfo, PromptSegment, ProviderCapabilities, TurnStatus,
     UsageStatus,
 };
+pub use restore::{PendingRestore, RestoreChange, RestoreFile, RestoreOutcome, RestorePreview};
 pub use review_ledger::{RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry};
 use settings::SettingsStore;
 pub use settings::{
@@ -755,6 +757,7 @@ impl Core {
                 "DELETE FROM line_comments WHERE thread_id = ?1",
                 [thread_id],
             )?;
+            tx.execute("DELETE FROM restores WHERE thread_id = ?1", [thread_id])?;
             tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
             tx.execute(
                 "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",
@@ -1509,7 +1512,7 @@ impl Core {
     pub fn git_status_in(&self, project_id: u32, thread_id: Option<u32>) -> Result<GitStatus> {
         let target = self.git_target(project_id, thread_id)?;
         let mut status = git::status(&target.root)?;
-        status.picker_disabled_reason = self.checkout_blocked_reason(project_id, &target)?;
+        status.picker_disabled_reason = self.checkout_blocked_reason(&target)?;
         Ok(status)
     }
 
@@ -1561,6 +1564,218 @@ impl Core {
                 prompt: turn.prompt,
             })
             .collect())
+    }
+
+    /// What restoring the Thread's files to how they were before `turn_index` would change.
+    pub fn restore_preview(&self, thread_id: u32, turn_index: u32) -> Result<RestorePreview> {
+        let target = self.thread_target(thread_id)?;
+        self.restore_refused(thread_id, &target)?;
+        let source = self.turn_checkpoint_tree(&target.root, thread_id, turn_index)?;
+        let files = restore::plan(&target.root, &source)?;
+        Ok(RestorePreview { turn_index, files })
+    }
+
+    /// Puts the Thread's files back to how they were before `turn_index`. A Checkpoint of
+    /// the files is taken first, so the restore can be undone.
+    pub fn restore_turn(&self, thread_id: u32, turn_index: u32) -> Result<RestoreOutcome> {
+        let target = self.thread_target(thread_id)?;
+        self.restore_refused(thread_id, &target)?;
+        let source = self.turn_checkpoint_tree(&target.root, thread_id, turn_index)?;
+        // The files are written under the checkout's lock, like every other change to
+        // it: the plan, the safety Checkpoint and the restore happen together.
+        let (safety, files) = self.git.mutate(&target.root, || {
+            let files = restore::plan(&target.root, &source)?;
+            // The safety Checkpoint comes first: it is what the undo returns to.
+            let safety = restore::take_safety(&target.root, thread_id)?;
+            restore::apply(&target.root, &source, &files)?;
+            Ok((safety, files))
+        })?;
+        // The restore is kept only once it happened: one that failed is not undoable.
+        self.record_restore(thread_id, turn_index, &safety, &files)?;
+        self.record_restore_in_transcript(thread_id, turn_index, &files, false)?;
+        // The agent is told on its next prompt which files went back.
+        self.storage
+            .set_restore_notice(thread_id, restore::notice(turn_index, &files, false))?;
+        Ok(RestoreOutcome {
+            turn_index,
+            files,
+            undone: false,
+        })
+    }
+
+    /// The restore that can still be undone, if any.
+    pub fn pending_restore(&self, thread_id: u32) -> Result<Option<PendingRestore>> {
+        Ok(self
+            .latest_restore(thread_id)?
+            .map(|record| PendingRestore {
+                turn_index: record.turn_index,
+                files: record.files,
+            }))
+    }
+
+    /// Undoes the Thread's latest restore, putting the files it changed back to the
+    /// Checkpoint the restore took. Work done after the restore stays.
+    pub fn undo_restore(&self, thread_id: u32) -> Result<RestoreOutcome> {
+        let target = self.thread_target(thread_id)?;
+        self.restore_refused(thread_id, &target)?;
+        let Some(record) = self.latest_restore(thread_id)? else {
+            return Err(Error::Git("There is no restore to undo.".into()));
+        };
+        let source = checkpoint::tree_of(&target.root, &record.safety_ref)?;
+        let files = self.git.mutate(&target.root, || {
+            restore::undo(&target.root, &source, &record.files)
+        })?;
+        self.mark_restore_undone(thread_id)?;
+        self.record_restore_in_transcript(thread_id, record.turn_index, &files, true)?;
+        self.storage
+            .set_restore_notice(thread_id, restore::notice(record.turn_index, &files, true))?;
+        Ok(RestoreOutcome {
+            turn_index: record.turn_index,
+            files,
+            undone: true,
+        })
+    }
+
+    /// Writes the mark of a restore into the Transcript, at the end of the Thread's last
+    /// Turn: a restore happens between Turns, not inside the one it restores to.
+    fn record_restore_in_transcript(
+        &self,
+        thread_id: u32,
+        restored_to: u32,
+        files: &[RestoreFile],
+        undone: bool,
+    ) -> Result<()> {
+        let (turn_id, item_index) = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let turn_id: u32 = db.query_row(
+                "SELECT id FROM turns WHERE thread_id = ?1 ORDER BY turn_index DESC LIMIT 1",
+                [thread_id],
+                |r| r.get(0),
+            )?;
+            let item_index: i64 = db.query_row(
+                "SELECT COALESCE(MAX(item_index), -1) + 1 FROM items WHERE turn_id = ?1",
+                [turn_id],
+                |r| r.get(0),
+            )?;
+            (turn_id, item_index.max(0) as u32)
+        };
+        self.storage.write_item_completed(NewItem {
+            turn_id,
+            item_index,
+            kind: ItemKind::RestoreMarker,
+            content: restore::marker(restored_to, files, undone),
+            parent_item_index: None,
+            category: None,
+            command: None,
+        })?;
+        Ok(())
+    }
+
+    /// Why a restore is refused, if it is. The files are not ours to put back while a
+    /// Turn is running: neither the Thread's own, nor one of another Thread in the same
+    /// checkout.
+    fn restore_refused(&self, thread_id: u32, target: &GitTarget) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let status: String = db.query_row(
+            "SELECT status FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| r.get(0),
+        )?;
+        let running: u32 = db.query_row(
+            "SELECT COUNT(*) FROM turns WHERE thread_id = ?1 AND status = 'running'",
+            [thread_id],
+            |r| r.get(0),
+        )?;
+        if running > 0 || matches!(status.as_str(), "working" | "needs-input") {
+            return Err(Error::Git(
+                "A Turn is running in this Thread. Wait for it to finish or stop it.".into(),
+            ));
+        }
+        let others = threads_in_checkout(&db, target.project_id, target.worktree.as_deref())?;
+        if others
+            .iter()
+            .any(|(id, status)| *id != thread_id && is_busy(status))
+        {
+            return Err(Error::Git(
+                "Another Thread is working in this checkout. Wait for its Turn to finish or stop it."
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Keeps a restore, so it can be undone.
+    fn record_restore(
+        &self,
+        thread_id: u32,
+        turn_index: u32,
+        safety_ref: &str,
+        files: &[RestoreFile],
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let files = serde_json::to_string(files).unwrap_or_else(|_| "[]".into());
+        db.execute(
+            "INSERT INTO restores (thread_id, turn_index, safety_ref, files) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![thread_id, turn_index, safety_ref, files],
+        )?;
+        Ok(())
+    }
+
+    /// The Thread's latest restore that has not been undone yet.
+    fn latest_restore(&self, thread_id: u32) -> Result<Option<restore::RestoreRecord>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let row = rusqlite::OptionalExtension::optional(db.query_row(
+            "SELECT turn_index, safety_ref, files FROM restores WHERE thread_id = ?1 AND undone_at IS NULL ORDER BY id DESC LIMIT 1",
+            [thread_id],
+            |r| {
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
+        ))?;
+        let Some((turn_index, safety_ref, files)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(restore::RestoreRecord {
+            turn_index,
+            safety_ref,
+            files: serde_json::from_str(&files).unwrap_or_default(),
+        }))
+    }
+
+    /// Marks the Thread's latest restore as undone.
+    fn mark_restore_undone(&self, thread_id: u32) -> Result<()> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.execute(
+            "UPDATE restores SET undone_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = (SELECT id FROM restores WHERE thread_id = ?1 AND undone_at IS NULL ORDER BY id DESC LIMIT 1)",
+            [thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// The checkout a Thread's files live in: its worktree, or the Project's main one.
+    fn thread_target(&self, thread_id: u32) -> Result<GitTarget> {
+        let project_id = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.query_row(
+                "SELECT project_id FROM threads WHERE id = ?1",
+                [thread_id],
+                |r| r.get(0),
+            )?
+        };
+        self.git_target(project_id, Some(thread_id))
+    }
+
+    /// The tree of a Turn's start Checkpoint: what the files were before the Turn.
+    fn turn_checkpoint_tree(&self, cwd: &Path, thread_id: u32, turn_index: u32) -> Result<String> {
+        if !checkpoint::has_start(cwd, thread_id, turn_index) {
+            return Err(Error::Git(
+                "This Turn has no Checkpoint to restore to.".into(),
+            ));
+        }
+        checkpoint::start_tree(cwd, thread_id, turn_index)
     }
 
     /// Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of the checkout a
@@ -1988,7 +2203,7 @@ impl Core {
             if delete_branch
                 && !auto
                 && let Some(reason) =
-                    self.checkout_blocked_reason(project_id, &self.git_target(project_id, None)?)?
+                    self.checkout_blocked_reason(&self.git_target(project_id, None)?)?
             {
                 return Err(Error::Git(reason));
             }
@@ -2056,7 +2271,7 @@ impl Core {
     ) -> Result<()> {
         let target = self.git_target(project_id, thread_id)?;
         self.git.mutate(&target.root, || {
-            if let Some(reason) = self.checkout_blocked_reason(project_id, &target)? {
+            if let Some(reason) = self.checkout_blocked_reason(&target)? {
                 return Err(Error::Git(reason));
             }
             f(&target.root)
@@ -2066,27 +2281,16 @@ impl Core {
     /// Threads started from the chat work in the main checkout, so switching branches under a
     /// running Turn would change its files. Board Threads have worktrees of their own, so only
     /// a Turn in that same worktree blocks them.
-    fn checkout_blocked_reason(
-        &self,
-        project_id: u32,
-        target: &GitTarget,
-    ) -> Result<Option<String>> {
+    fn checkout_blocked_reason(&self, target: &GitTarget) -> Result<Option<String>> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let working: u32 = match &target.worktree {
-            None => db.query_row(
-                "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path IS NULL",
-                [project_id],
-                |r| r.get(0),
-            )?,
-            Some(path) => db.query_row(
-                "SELECT COUNT(*) FROM threads WHERE project_id = ?1 AND status = 'working' AND worktree_path = ?2",
-                rusqlite::params![project_id, path],
-                |r| r.get(0),
-            )?,
-        };
-        Ok((working > 0).then(|| {
-            "A Thread is working in this checkout. Wait for its Turn to finish or stop it.".into()
-        }))
+        let threads = threads_in_checkout(&db, target.project_id, target.worktree.as_deref())?;
+        Ok(threads
+            .iter()
+            .any(|(_, status)| status == "working")
+            .then(|| {
+                "A Thread is working in this checkout. Wait for its Turn to finish or stop it."
+                    .into()
+            }))
     }
 
     /// Resolves the checkout a Git operation acts on. `None` is the Project's main checkout;
@@ -2096,6 +2300,7 @@ impl Core {
     fn git_target(&self, project_id: u32, thread_id: Option<u32>) -> Result<GitTarget> {
         let Some(thread_id) = thread_id else {
             return Ok(GitTarget {
+                project_id,
                 root: self.main_checkout(project_id)?,
                 worktree: None,
             });
@@ -2120,7 +2325,11 @@ impl Core {
                 root.display()
             )));
         }
-        Ok(GitTarget { root, worktree })
+        Ok(GitTarget {
+            project_id,
+            root,
+            worktree,
+        })
     }
 
     fn main_checkout(&self, project_id: u32) -> Result<PathBuf> {
@@ -2252,7 +2461,39 @@ fn mark_unfinished_work_interrupted(db: &Connection) -> Result<()> {
 
 /// The checkout a Git operation resolved to.
 struct GitTarget {
+    /// The Project the checkout belongs to.
+    project_id: u32,
     root: PathBuf,
     /// The Thread's worktree path, or `None` for the Project's main checkout.
     worktree: Option<String>,
+}
+
+/// The Threads of the Project that work in the given checkout, with their status: the
+/// Threads with that worktree, or the Threads without one when the checkout is the
+/// Project's main one.
+fn threads_in_checkout(
+    db: &Connection,
+    project_id: u32,
+    worktree: Option<&str>,
+) -> Result<Vec<(u32, String)>> {
+    let read = |r: &rusqlite::Row<'_>| Ok((r.get(0)?, r.get(1)?));
+    let mut stmt = match worktree {
+        None => db.prepare(
+            "SELECT id, status FROM threads WHERE project_id = ?1 AND worktree_path IS NULL",
+        )?,
+        Some(_) => db.prepare(
+            "SELECT id, status FROM threads WHERE project_id = ?1 AND worktree_path = ?2",
+        )?,
+    };
+    let rows = match worktree {
+        None => stmt.query_map([project_id], read)?,
+        Some(path) => stmt.query_map(rusqlite::params![project_id, path], read)?,
+    };
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// Whether a Thread of that status is busy: a Turn runs in its checkout, or waits there
+/// for the user.
+fn is_busy(status: &str) -> bool {
+    matches!(status, "working" | "needs-input")
 }

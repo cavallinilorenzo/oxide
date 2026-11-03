@@ -140,6 +140,14 @@ export const commands = {
 	gitTurnDiff: (threadId: number, turnIndex: number) => typedError<Diff_Serialize, AppError>(__TAURI_INVOKE("git_turn_diff", { threadId, turnIndex })),
 	/**  The Thread's Turns, oldest first, for the Turn picker. */
 	listTurnPicks: (threadId: number) => typedError<TurnPick[], AppError>(__TAURI_INVOKE("list_turn_picks", { threadId })),
+	/**  What restoring a Thread's files to before a Turn would change. */
+	restorePreview: (threadId: number, turnIndex: number) => typedError<RestorePreview, AppError>(__TAURI_INVOKE("restore_preview", { threadId, turnIndex })),
+	/**  Puts a Thread's files back to how they were before a Turn. */
+	restoreTurn: (threadId: number, turnIndex: number) => typedError<RestoreOutcome, AppError>(__TAURI_INVOKE("restore_turn", { threadId, turnIndex })),
+	/**  Undoes a Thread's latest restore, putting the files back to its safety Checkpoint. */
+	undoRestore: (threadId: number) => typedError<RestoreOutcome, AppError>(__TAURI_INVOKE("undo_restore", { threadId })),
+	/**  The restore of a Thread that can still be undone, if there is one. */
+	pendingRestore: (threadId: number) => typedError<PendingRestore | null, AppError>(__TAURI_INVOKE("pending_restore", { threadId })),
 	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
 	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
 	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
@@ -908,7 +916,7 @@ export type IssuesState_Serialize = {
 	guidance: string | null,
 };
 
-export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent" | "slash_command_output";
+export type ItemKind = "agent_message" | "reasoning" | "tool_call" | "file_change" | "subagent" | "slash_command_output" | "restore_marker";
 
 export type ItemSnapshot = ItemSnapshot_Serialize | ItemSnapshot_Deserialize;
 
@@ -1071,6 +1079,14 @@ export type PendingApproval_Serialize = {
 	kind: ApprovalKind_Serialize,
 	summary: string,
 	options: string[],
+};
+
+/**  A restore that can still be undone. */
+export type PendingRestore = {
+	/**  The Turn whose start Checkpoint the files went back to. */
+	turnIndex: number,
+	/**  The files the restore changed. */
+	files: RestoreFile[],
 };
 
 export type PerformanceIdentity = PerformanceIdentity_Serialize | PerformanceIdentity_Deserialize;
@@ -1435,6 +1451,41 @@ export type ResourceSnapshot_Serialize = {
 	availableRamBytes: number | null,
 	baselineBytes: number | null,
 	freeDiskBytes: number | null,
+};
+
+/**  What a restore does to one file. */
+export type RestoreChange = 
+/**  The file is written back to how the Checkpoint had it. */
+"rewritten" | 
+/**  The file is brought back: it was deleted after the Checkpoint. */
+"reinstated" | 
+/**  The file is removed: it was created after the Checkpoint. */
+"removed";
+
+/**  One file a restore changes. */
+export type RestoreFile = {
+	/**  The file's path in the checkout. */
+	path: string,
+	/**  What the restore does to it. */
+	change: RestoreChange,
+};
+
+/**  What a restore did. */
+export type RestoreOutcome = {
+	/**  The Turn whose start Checkpoint the files went back to. */
+	turnIndex: number,
+	/**  The files that changed. */
+	files: RestoreFile[],
+	/**  Whether this undid a restore instead of making one. */
+	undone: boolean,
+};
+
+/**  The files a restore would change, before it is done. */
+export type RestorePreview = {
+	/**  The Turn whose start Checkpoint the files go back to. */
+	turnIndex: number,
+	/**  The files that stand between the working tree and that Checkpoint. */
+	files: RestoreFile[],
 };
 
 export type RevertHunk = {

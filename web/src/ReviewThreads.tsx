@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, CommentDiscussionIcon } from "@primer/octicons-react";
 import type { Diff, PullRequestReviewThread } from "./bindings";
+import { relativeTime } from "./pullRequestReview";
 import { groupReviewThreads, type ThreadLine } from "./reviewThreadPlacement";
 
 interface Props {
@@ -8,7 +9,7 @@ interface Props {
   threads: PullRequestReviewThread[];
 }
 
-/** GitHub's inline review threads, on the lines of the pull request diff they were written on. */
+/** GitHub's inline review threads, grouped by the line of the pull request diff they were written on. */
 export function ReviewThreads({ diff, threads }: Props) {
   // A resolved thread starts collapsed; the user can open or close any of them.
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -22,7 +23,7 @@ export function ReviewThreads({ diff, threads }: Props) {
   const lines = (items: ThreadLine[]) => (
     <ul className="review-thread-lines">
       {items.map((line) => (
-        <li key={`${line.path}\u0000${line.line ?? ""}\u0000${line.side ?? ""}`} className="review-thread-line">
+        <li key={line.key} className="review-thread-line">
           <div className="review-thread-where">
             <span className="mono">
               {line.path}
@@ -34,18 +35,17 @@ export function ReviewThreads({ diff, threads }: Props) {
           <ul className="review-thread-list">
             {line.threads.map((thread) => {
               const expanded = isOpen(thread);
-              const author = thread.comments[0]?.author;
+              const author = thread.comments[0]?.author || "ghost";
               return (
                 <li key={thread.id} className={`review-thread${thread.resolved ? " resolved" : ""}${thread.outdated ? " outdated" : ""}`}>
                   <button
                     type="button"
                     className="review-thread-summary"
                     aria-expanded={expanded}
-                    aria-label={`${thread.resolved ? "Resolved" : "Open"} review thread${author ? ` by ${author}` : ""}`}
                     onClick={() => toggle(thread)}
                   >
                     {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-                    {author && <span className="review-thread-author">@{author}</span>}
+                    <span className="review-thread-author">@{author}</span>
                     <span className="review-thread-count">
                       {thread.comments.length} comment{thread.comments.length === 1 ? "" : "s"}
                     </span>
@@ -60,7 +60,10 @@ export function ReviewThreads({ diff, threads }: Props) {
                     <ul className="review-thread-comments">
                       {thread.comments.map((comment, index) => (
                         <li key={`${thread.id}:${index}`} className="review-thread-comment">
-                          <span className="review-thread-author">@{comment.author}</span>
+                          <div className="review-thread-meta">
+                            <span className="review-thread-author">@{comment.author || "ghost"}</span>
+                            <span className="review-thread-time">{relativeTime(comment.createdAt)}</span>
+                          </div>
                           <p className="review-thread-body">{comment.body}</p>
                         </li>
                       ))}

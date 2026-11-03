@@ -578,18 +578,16 @@ fn review_threads() -> serde_json::Value {
         {
             "id": "RT_1", "isResolved": false, "isOutdated": false,
             "path": "a.txt", "line": 1, "originalLine": 1, "diffSide": "RIGHT",
-            "diffHunk": "@@ -1 +1 @@\n-one\n+uno",
             "comments": {"nodes": [
-                {"author": {"login": "reviewer"}, "body": "Why uno?", "createdAt": "2026-05-01T10:00:00Z"},
-                {"author": {"login": "author"}, "body": "It means one.", "createdAt": "2026-05-01T10:05:00Z"}
+                {"author": {"login": "reviewer"}, "body": "Why uno?", "createdAt": "2026-05-01T10:00:00Z", "diffHunk": "@@ -1 +1 @@\n-one\n+uno"},
+                {"author": {"login": "author"}, "body": "It means one.", "createdAt": "2026-05-01T10:05:00Z", "diffHunk": "@@ -1 +1 @@\n-one\n+uno"}
             ]}
         },
         {
             "id": "RT_2", "isResolved": true, "isOutdated": true,
             "path": "gone.txt", "line": null, "originalLine": 3, "diffSide": "LEFT",
-            "diffHunk": "@@ -3 +0,0 @@\n-bye",
             "comments": {"nodes": [
-                {"author": {"login": "other"}, "body": "Old line.", "createdAt": "2026-05-01T11:00:00Z"}
+                {"author": {"login": "other"}, "body": "Old line.", "createdAt": "2026-05-01T11:00:00Z", "diffHunk": "@@ -3 +0,0 @@\n-bye"}
             ]}
         }
     ])
@@ -686,6 +684,19 @@ fn review_threads_carry_their_lines_authors_and_state() {
     install_gh(&f, state);
 
     let threads = f.core.pull_request_review_threads(f.project.id, 5).unwrap();
+
+    // `diffHunk` belongs to a comment, not the thread; asking for it on the thread fails every call.
+    let query = f
+        .gh_calls()
+        .into_iter()
+        .flatten()
+        .find(|argument| argument.contains("reviewThreads"))
+        .expect("review threads query");
+    assert!(
+        query.contains("comments(first:100){nodes{author{login} body createdAt diffHunk}"),
+        "{query}"
+    );
+    assert!(!query.contains("diffSide diffHunk"), "{query}");
 
     assert_eq!(threads.len(), 2);
     let open = &threads[0];

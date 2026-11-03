@@ -3,6 +3,8 @@ import { numberHunk } from "./diffView";
 
 /** Threads that share a line, so the line is named and quoted once. */
 export interface ThreadLine {
+  /** The path, line and side, unique among the groups. */
+  key: string;
   path: string;
   line: number | null;
   side: CommentSide | null;
@@ -34,14 +36,10 @@ export function threadCode(thread: PullRequestReviewThread): string {
 }
 
 /** A `null` side means GitHub reported none; the thread still reads against the new side. */
-function sideOf(thread: PullRequestReviewThread): CommentSide | null {
-  return thread.side ?? null;
-}
-
 function inDiff(files: DiffFile[], thread: PullRequestReviewThread): boolean {
   const line = threadLine(thread);
   if (line === null) return false;
-  const side = sideOf(thread);
+  const side = thread.side ?? null;
   const file = files.find((candidate) => candidate.path === thread.path || candidate.oldPath === thread.path);
   if (!file) return false;
   return file.hunks.some((hunk) =>
@@ -69,11 +67,11 @@ export function groupReviewThreads(diff: Diff, threads: PullRequestReviewThread[
   const result: ReviewThreadGroups = { inDiff: [], notInDiff: [] };
   for (const thread of threads) {
     const line = threadLine(thread);
-    const side = sideOf(thread);
+    const side = thread.side ?? null;
     const key = `${thread.path}\u0000${line ?? ""}\u0000${side ?? ""}`;
     let group = groups.get(key);
     if (!group) {
-      group = { path: thread.path, line, side, code: threadCode(thread), threads: [] };
+      group = { key, path: thread.path, line, side, code: threadCode(thread), threads: [] };
       groups.set(key, group);
       (inDiff(diff.files, thread) ? result.inDiff : result.notInDiff).push(group);
     }

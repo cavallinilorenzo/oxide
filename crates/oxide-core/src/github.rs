@@ -966,8 +966,8 @@ pub fn review_threads(gh: &Gh, cwd: &Path, number: u32) -> Result<Vec<PullReques
     gh.require_ready(cwd)?;
     let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){\
         pullRequest(number:$number){reviewThreads(first:100){nodes{\
-        id isResolved isOutdated path line originalLine diffSide diffHunk \
-        comments(first:100){nodes{author{login} body createdAt}}}}}}}";
+        id isResolved isOutdated path line originalLine diffSide \
+        comments(first:100){nodes{author{login} body createdAt diffHunk}}}}}}}";
     let number = format!("number={number}");
     let query = format!("query={query}");
     let nodes = parse(&gh.run(
@@ -996,6 +996,11 @@ pub fn review_threads(gh: &Gh, cwd: &Path, number: u32) -> Result<Vec<PullReques
 }
 
 fn review_thread_from(v: &serde_json::Value) -> PullRequestReviewThread {
+    let comments: Vec<&serde_json::Value> = v["comments"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
     PullRequestReviewThread {
         id: text(&v["id"]),
         path: text(&v["path"]),
@@ -1008,11 +1013,13 @@ fn review_thread_from(v: &serde_json::Value) -> PullRequestReviewThread {
         },
         resolved: v["isResolved"].as_bool().unwrap_or(false),
         outdated: v["isOutdated"].as_bool().unwrap_or(false),
-        diff_hunk: text(&v["diffHunk"]),
-        comments: v["comments"]["nodes"]
-            .as_array()
+        // The hunk lives on the comments; the first one wrote the thread's opening line.
+        diff_hunk: comments
+            .first()
+            .map(|c| text(&c["diffHunk"]))
+            .unwrap_or_default(),
+        comments: comments
             .into_iter()
-            .flatten()
             .map(|c| ReviewThreadComment {
                 author: text(&c["author"]["login"]),
                 body: text(&c["body"]),

@@ -208,6 +208,7 @@ it("offers Revert on the latest Turn only, since Core reverts the latest", async
   expect(host.querySelector('[aria-label="Revert a.rs"]')).not.toBeNull();
   await choose("0");
   expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
+});
 
 const reviewThread = (overrides: Partial<PullRequestReviewThread> = {}): PullRequestReviewThread => ({
   id: "t1",

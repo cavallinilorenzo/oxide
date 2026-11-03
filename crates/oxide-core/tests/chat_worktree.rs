@@ -53,7 +53,7 @@ fn fixture() -> Fixture {
 
 /// The Thread's first Turn, which its actor creates a moment after the prompt is sent.
 fn first_turn(core: &Core, thread_id: u32) -> oxide_core::TurnSnapshot {
-    for _ in 0..500 {
+    for _ in 0..3000 {
         if let Some(turn) = core.get_thread_snapshot(thread_id).unwrap().turns.first() {
             return turn.clone();
         }

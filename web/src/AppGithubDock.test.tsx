@@ -127,6 +127,7 @@ async function open(tab: "Pull request" | "Issues") {
   await settle();
   await click(host.querySelector('[aria-label="Toggle tools panel"]'));
   await click(host.querySelector(`[role="tab"][aria-label="${tab}"]`));
+  await vi.waitFor(() => expect(host.querySelector(".pr-scope-title")).not.toBeNull());
 }
 
 it("labels the pull request list by repository and branch actions by the selected Thread's checkout", async () => {

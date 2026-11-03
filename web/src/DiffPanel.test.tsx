@@ -232,7 +232,7 @@ async function renderPr(threads = [reviewThread()]) {
   vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({ status: "ok", data: threads } as never);
   await act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} worktree={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
 }
@@ -278,7 +278,7 @@ it("shows a GitHub review thread error without hiding the diff", async () => {
   } as never);
   await act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} worktree={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
   expect(host.textContent).toContain("app.rs");

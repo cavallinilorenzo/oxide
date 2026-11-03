@@ -81,6 +81,10 @@ _Avoid_: Agent view, dashboard
 A draft on one line of a Diff, with the quoted code, written by the user or by a reviewing Provider. It stays a draft until sent, and is then delivered to a Thread as part of one prompt, or to GitHub as part of a review.
 _Avoid_: Inline comment, annotation, note
 
+**Review thread**:
+A GitHub discussion on the lines of a pull request's diff: the opening comment, its replies, and the path, line and side they refer to, which GitHub marks resolved or outdated. Shown in the Diff Surface's PR scope. Its own term, not a Thread: a Thread is Oxide's conversation with a Provider.
+_Avoid_: Inline comment, comment thread, conversation
+
 **Verification command**:
 A command that counts as a check (tests, type checks, lint, build), recognized from built-in patterns plus the Project's own additions. Its state for a change is fresh, stale, failed, never run or unknown.
 _Avoid_: Test command, check script

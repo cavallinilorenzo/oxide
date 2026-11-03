@@ -3,13 +3,14 @@ import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
 import { CheckCircleIcon, GitCommitIcon, InfoIcon, RepoPushIcon, SyncIcon } from "@primer/octicons-react";
-import { commands, type Diff, type DiffFile, type TurnPick } from "./bindings";
+import { commands, type Diff, type DiffFile, type PullRequestReviewThread, type TurnPick } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 import { LineComments } from "./LineComments";
+import { ReviewThreads } from "./ReviewThreads";
 
 interface DiffPanelProps {
   projectId: number;
@@ -99,6 +100,16 @@ function DiffBody({ projectId, threadId, board, threadWorking = false, turnRunni
     `${refreshKey}#${focusTick}`,
   );
   const loaded: Loaded = query.state === "ready" ? { state: "ready", diff: query.data } : query;
+  // Review threads load beside the diff, so a GitHub failure leaves the files readable.
+  const threads = useQuery(
+    `p${projectId}:review-threads:${scope}:${reviewedPr ?? ""}`,
+    async (): Promise<QueryResult<PullRequestReviewThread[]>> =>
+      scope === "pr" && reviewedPr !== null
+        ? await commands.pullRequestReviewThreads(projectId, reviewedPr)
+        : { status: "ok", data: [] },
+    `${refreshKey}#${focusTick}`,
+  );
+  const reviewThreads = threads.state === "ready" ? threads.data : [];
   // Files the user took out of the commit; everything starts checked.
   const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
   const [message, setMessage] = useState("");
@@ -221,6 +232,14 @@ function DiffBody({ projectId, threadId, board, threadWorking = false, turnRunni
       {push.dialog}
       {loaded.state === "loading" && <Skeleton kind="diff" label="Loading changes…" />}
       {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}
+      {scope === "pr" && loaded.state !== "error" && threads.state === "error" && (
+        <div className="surface-empty error" role="alert">
+          {threads.message}
+        </div>
+      )}
+      {scope === "pr" && loaded.state === "ready" && reviewThreads.length > 0 && (
+        <ReviewThreads diff={loaded.diff} threads={reviewThreads} />
+      )}
       {loaded.state === "ready" && files.length === 0 && (
         <div className="surface-empty">
           <CheckCircleIcon size={20} />

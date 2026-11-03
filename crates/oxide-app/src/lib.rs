@@ -3348,6 +3348,7 @@ pub fn run() {
                 .expect("no home directory")
                 .join(".oxide");
             let core = Core::open(home)?;
+            core.start_usage_poller();
             let handle = app.handle().clone();
             let dictation = app
                 .state::<Arc<oxide_core::dictation::Dictation>>()

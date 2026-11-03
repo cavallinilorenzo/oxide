@@ -55,6 +55,30 @@ Auto retains its single CPU retry policy. Linux GPU expansion is outside this sl
 `dumpbin /dependents` on the locally built executables confirmed that the host
 does not import `vulkan-1.dll`, while the isolated worker does.
 
+### Downloadable GPU runtimes
+
+Target model (the installer change lands in a later PR): the installer is CPU only and
+Vulkan/CUDA workers are separate packages installed into `~/.oxide/runtimes/<backend>/<version>/`
+(`oxide_core::dictation::runtimes`).
+
+- A package is a flat zip: `manifest.json` (backend, version, `protocolVersion`, worker name,
+  SHA-256 of every file), the worker, its DLLs and licences. Unlisted files are refused.
+- A signed index (`runtimes-index.json` plus detached minisign `.minisig`, public key embedded in
+  the app) lists packages with URL, size, SHA-256, platform and driver requirements. Only entries
+  for this platform and worker protocol (`runtimes::PROTOCOL_VERSION`) are offered.
+- Install downloads to a staging folder inside `runtimes/`, checks size and SHA-256, unpacks,
+  re-verifies each file, rejects a protocol mismatch, then renames atomically. Any failure
+  deletes the staging folder and leaves the previous install and CPU untouched.
+  A new version replaces older ones only after it is in place.
+- Worker lookup order: `OXIDE_VULKAN_WORKER` / `OXIDE_CUDA_WORKER`, the executable's folder,
+  then the highest compatible installed runtime. `PATH` is never searched. Lookup runs at each
+  use (including the platform-default runtime), so a freshly installed runtime works without
+  restarting the app. Windows only for now; Linux GPU is outside this slice.
+- Runtimes live outside the app folder and survive uninstalling the app; removing one deletes
+  its folder. macOS (Metal is in the binary) is not part of this scheme.
+- Not yet in place: the app UI, the CI that builds/signs packages and the published index
+  (see issue #311); the real signing key and index URL are supplied by that work.
+
 ## Recoverable runtime architecture and extension points
 
 ### Windows native-build diagnostic path

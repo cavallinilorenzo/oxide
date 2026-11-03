@@ -17,14 +17,15 @@ describe("dictationBuildCache", () => {
   test("Windows CI can reuse its native worker builds", () => {
     assert.equal(dictationBuildCache(inputs).enabled, true);
     assert.ok(dictationBuildCache(inputs).key.includes(inputs.fingerprint));
+    assert.equal(dictationBuildCache(inputs).restoreKeys, "dictation-workers-v1-20261021.278.1-");
   });
 
   test("release builds and macOS never use this cache", () => {
     for (const platform of ["windows-x64", "macos-aarch64"]) {
-      assert.deepEqual(dictationBuildCache({ platform, release: true }), { enabled: false, key: "" });
+      assert.deepEqual(dictationBuildCache({ platform, release: true }), { enabled: false, key: "", restoreKeys: "" });
     }
-    assert.deepEqual(dictationBuildCache({ platform: "macos-aarch64", release: false }), { enabled: false, key: "" });
-    assert.deepEqual(dictationBuildCache({ platform: "windows-x64" }), { enabled: false, key: "" });
+    assert.deepEqual(dictationBuildCache({ platform: "macos-aarch64", release: false }), { enabled: false, key: "", restoreKeys: "" });
+    assert.deepEqual(dictationBuildCache({ platform: "windows-x64" }), { enabled: false, key: "", restoreKeys: "" });
   });
 
   test("a compiler image or native input change invalidates the cache", () => {

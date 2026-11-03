@@ -1,5 +1,6 @@
 import { PullRequestBrowser } from "./PullRequestBrowser";
 import { REFRESH_INTERVAL_MS, useAutoRefresh } from "./useAutoRefresh";
+import type { Thread } from "./bindings";
 
 export { REFRESH_INTERVAL_MS };
 
@@ -9,6 +10,8 @@ interface PullRequestPanelProps {
   projectName: string;
   /** The selected Thread: a new pull request is opened from its checkout. */
   threadId: number | null;
+  /** The Project's Threads, so a fix can go to the one that owns the branch. */
+  threads?: Thread[];
   createRequest?: number;
   onCreateHandled?: () => void;
   /** Changes after the user's own Git changes (commit, push, pull, checkout), which refresh the panel. */
@@ -17,8 +20,8 @@ interface PullRequestPanelProps {
   onChanged: () => void;
   /** Shows a pull request's changed files in the Diff Surface. */
   onReviewFiles: (number: number) => void;
-  /** Sends the repair request in a new Thread with Settings defaults. */
-  onFixPullRequest: (prompt: string) => Promise<void>;
+  /** Sends the repair request to the Thread that owns the branch, or a new Thread with Settings defaults. */
+  onFixPullRequest: (prompt: string, ownerThreadId?: number | null) => Promise<void>;
 }
 
 /** The repository's open pull requests on GitHub, through `gh`. It loads when opened, after the

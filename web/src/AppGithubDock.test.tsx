@@ -174,7 +174,7 @@ it("shows GitHub inline review threads on the PR Diff scope", async () => {
   await open("Pull request");
   await click(byText("Fix the thing"));
   await click(byText("Review files"));
-  expect(called("pull_request_review_threads")).toEqual([{ projectId: 1, number: 5 }]);
+  expect(called("pull_request_review_threads")).toContainEqual({ projectId: 1, number: 5 });
   const review = host.querySelector('[aria-label="Review threads"]');
   expect(review?.textContent).toContain("src/app.rs:1");
   expect(review?.textContent).toContain("@alice");

@@ -1,4 +1,4 @@
-import type { MergeMethod, MergeState, PullRequestCheck, PullRequestPhase, ReviewDecision } from "./bindings";
+import type { MergeMethod, MergeState, PullRequestCheck, PullRequestPhase, PullRequestReviewThread, ReviewDecision } from "./bindings";
 
 /** The method to preselect: the user's current pick if still allowed, else the one the web
  *  merge box would offer them, else the first allowed. */
@@ -147,6 +147,11 @@ export function readiness(inputs: MergeInputs): { tone: Tone; label: string } {
   if (!first) return { tone: "neutral", label: "No checks reported" };
   if (first.tone === "ok") return { tone: "ok", label: "Ready to merge" };
   return { tone: first.tone, label: first.title };
+}
+
+/** Review threads that still need an answer: unresolved and carrying at least one comment. */
+export function unresolvedReviewThreads(threads: PullRequestReviewThread[]): PullRequestReviewThread[] {
+  return threads.filter((thread) => !thread.resolved && thread.comments.length > 0);
 }
 
 /** Where a user's avatar is served from. Bots log in as `app/name` through `gh`. */

@@ -32,6 +32,7 @@ pub mod thread;
 pub use oxide_provider::claude::ClaudeCustomizations;
 mod thread_actor;
 mod usage;
+mod usage_poll;
 mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
@@ -145,6 +146,7 @@ pub struct Core {
     board: Arc<board::BoardHub>,
     ledger: Arc<review_ledger::LedgerStore>,
     usage: Arc<usage::UsageHub>,
+    usage_poller: Mutex<Option<usage_poll::PollerHandle>>,
     model_catalogs: Mutex<HashMap<String, Vec<oxide_provider::ModelInfo>>>,
     slash_catalogs: Mutex<HashMap<String, Vec<oxide_provider::SlashCommandInfo>>>,
     detections: detection_cache::DetectionCache,
@@ -208,6 +210,7 @@ impl Core {
             board,
             ledger,
             usage,
+            usage_poller: Mutex::new(None),
             model_catalogs: Mutex::new(HashMap::new()),
             detections: detection_cache::DetectionCache::default(),
             slash_catalogs: Mutex::new(
@@ -233,6 +236,14 @@ impl Core {
     /// Shuts every Provider and terminal down, escalating SIGTERM to SIGKILL, and returns once
     /// their processes are gone. Safe to call more than once; also runs when Core is dropped.
     pub fn shutdown(&self) {
+        if let Some(mut poller) = self
+            .usage_poller
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            poller.stop();
+        }
         self.language_servers.shutdown();
         let actors: Vec<_> = self
             .thread_actors
@@ -1247,6 +1258,19 @@ impl Core {
     /// The last Usage limits Oxide saw for a Provider, shared by all its Threads.
     pub fn usage_limits(&self, provider: &str) -> Option<UsageLimits> {
         self.usage.get(provider)
+    }
+
+    /// Starts polling provider usage limits in the background (Claude, Codex, Antigravity).
+    /// Safe to call multiple times (only one poller is spawned).
+    pub fn start_usage_poller(&self) {
+        let mut poller = self.usage_poller.lock().unwrap_or_else(|e| e.into_inner());
+        if poller.is_some() {
+            return;
+        }
+        *poller = Some(usage_poll::spawn(
+            Arc::clone(&self.usage),
+            self.user_home.clone(),
+        ));
     }
 
     /// The current Usage limits of a Provider and the updates that follow.

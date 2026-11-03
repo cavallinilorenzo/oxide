@@ -364,7 +364,28 @@ export function App() {
     return created.status === "ok" ? created.data : null;
   }, []);
 
-  const fixPullRequest = async (projectId: number, prompt: string) => {
+  const fixPullRequest = async (projectId: number, prompt: string, ownerThreadId: number | null = null) => {
+    // The branch's Thread takes the request unless it is busy; otherwise a new Thread does.
+    const owner = ownerThreadId === null
+      ? null
+      : (threads ?? []).find((thread) => thread.id === ownerThreadId && thread.status !== "working") ?? null;
+    if (owner) {
+      // Keep the request recoverable in the composer if the Thread has no draft of its own.
+      const hadDraft = Boolean(drafts[owner.id]);
+      if (!hadDraft) setDrafts((prev) => setDraft(prev, owner.id, prompt));
+      try {
+        const sent = await commands.sendPrompt(owner.id, [{ kind: "text", text: prompt }]);
+        if (sent.status === "error") throw new Error(sent.error.message);
+        if (!hadDraft) setDrafts((prev) => setDraft(prev, owner.id, ""));
+      } finally {
+        if (currentProjectRef.current === projectId) {
+          setSelectedThreadId(owner.id);
+          setMaximized(false);
+          setShowBoard(false);
+        }
+      }
+      return;
+    }
     const created = await createDefaultThread(projectId);
     if (created.status === "error") throw new Error(created.error.message);
     const thread = created.data;
@@ -1063,10 +1084,11 @@ export function App() {
                   projectId={selected.id}
                   projectName={selected.name}
                   threadId={currentThreadId}
+                  threads={threads ?? []}
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
-                  onFixPullRequest={(prompt) => fixPullRequest(selected.id, prompt)}
+                  onFixPullRequest={(prompt, ownerThreadId) => fixPullRequest(selected.id, prompt, ownerThreadId)}
                 />
               </Suspense></div>
             )}

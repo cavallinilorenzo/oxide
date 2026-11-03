@@ -947,6 +947,17 @@ section.terminal.terminal-hidden { display: none; }
 .pr-views .pr-section h4 { margin: 0; display: flex; align-items: center; gap: var(--space-2); font-size: 13px; font-weight: 650; color: var(--fg-bright); text-transform: none; letter-spacing: 0; }
 .pr-views .pr-section h4 svg { color: var(--faint); }
 
+/* Review threads the user picks to send with a fix */
+.pr-views .pr-review-select-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pr-views .pr-review-select-item { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg2); overflow: hidden; }
+.pr-views .pr-review-select-item.outdated { opacity: 0.8; }
+.pr-views .pr-review-select-row { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--space-2); padding: var(--space-2) 10px; cursor: pointer; align-items: start; }
+.pr-views .pr-review-select-row > input { margin: 2px 0 0; }
+.pr-views .pr-review-select-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; font-size: 12.5px; }
+.pr-views .pr-review-select-comments { grid-column: 2; display: grid; gap: 6px; min-width: 0; }
+.pr-views .pr-review-select-comment { display: grid; gap: 2px; font-size: 12.5px; }
+.pr-views .pr-review-select-comment .review-thread-body { color: var(--dim); }
+
 /* Description and comments */
 .pr-views .md { display: grid; gap: var(--space-2); overflow-wrap: anywhere; line-height: 1.5; }
 .pr-views .md > * { margin: 0; min-width: 0; }

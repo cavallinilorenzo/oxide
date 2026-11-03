@@ -92,6 +92,13 @@ if args[:2] == ["api", "graphql"]:
         # The names of the checks branch protection requires, one per line through --jq.
         print("\n".join(state.get("required_checks", [])))
         sys.exit(0)
+    if any("reviewThreads" in a for a in args):
+        # The inline review threads, printed through --jq as the nodes array.
+        if state.get("review_threads_error"):
+            sys.stderr.write(state["review_threads_error"] + "\n")
+            sys.exit(1)
+        print(json.dumps(state.get("review_threads", [])))
+        sys.exit(0)
     # viewerDefaultMergeMethod, printed through --jq; empty when the test sets none.
     print(state.get("default_merge", ""))
     sys.exit(0)

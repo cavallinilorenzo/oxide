@@ -573,6 +573,28 @@ fn numbers(prs: &[oxide_core::PullRequest]) -> Vec<u32> {
     prs.iter().map(|p| p.number).collect()
 }
 
+fn review_threads() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "id": "RT_1", "isResolved": false, "isOutdated": false,
+            "path": "a.txt", "line": 1, "originalLine": 1, "diffSide": "RIGHT",
+            "diffHunk": "@@ -1 +1 @@\n-one\n+uno",
+            "comments": {"nodes": [
+                {"author": {"login": "reviewer"}, "body": "Why uno?", "createdAt": "2026-05-01T10:00:00Z"},
+                {"author": {"login": "author"}, "body": "It means one.", "createdAt": "2026-05-01T10:05:00Z"}
+            ]}
+        },
+        {
+            "id": "RT_2", "isResolved": true, "isOutdated": true,
+            "path": "gone.txt", "line": null, "originalLine": 3, "diffSide": "LEFT",
+            "diffHunk": "@@ -3 +0,0 @@\n-bye",
+            "comments": {"nodes": [
+                {"author": {"login": "other"}, "body": "Old line.", "createdAt": "2026-05-01T11:00:00Z"}
+            ]}
+        }
+    ])
+}
+
 #[test]
 fn list_shows_open_pull_requests_mine_or_all_and_searches_them() {
     let f = fixture();
@@ -654,6 +676,52 @@ fn detail_has_description_checks_comments_and_changed_files() {
     );
     assert_eq!(detail.diff.files[0].hunks[0].lines[1].text, "two");
     assert_eq!(detail.diff.base.as_deref(), Some("main"));
+}
+
+#[test]
+fn review_threads_carry_their_lines_authors_and_state() {
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["review_threads"] = review_threads();
+    install_gh(&f, state);
+
+    let threads = f.core.pull_request_review_threads(f.project.id, 5).unwrap();
+
+    assert_eq!(threads.len(), 2);
+    let open = &threads[0];
+    assert_eq!(open.id, "RT_1");
+    assert_eq!(open.path, "a.txt");
+    assert_eq!(open.line, Some(1));
+    assert_eq!(open.original_line, Some(1));
+    assert_eq!(open.side, Some(oxide_core::CommentSide::New));
+    assert!(!open.resolved);
+    assert!(!open.outdated);
+    assert_eq!(open.diff_hunk, "@@ -1 +1 @@\n-one\n+uno");
+    let authors: Vec<&str> = open.comments.iter().map(|c| c.author.as_str()).collect();
+    assert_eq!(authors, ["reviewer", "author"]);
+    assert_eq!(open.comments[0].body, "Why uno?");
+    assert_eq!(open.comments[0].created_at, "2026-05-01T10:00:00Z");
+
+    let stale = &threads[1];
+    assert_eq!(stale.line, None);
+    assert_eq!(stale.original_line, Some(3));
+    assert_eq!(stale.side, Some(oxide_core::CommentSide::Old));
+    assert!(stale.resolved && stale.outdated);
+    assert_eq!(stale.path, "gone.txt");
+}
+
+#[test]
+fn review_thread_errors_are_reported_as_github_errors() {
+    let f = fixture();
+    let mut state = state_with_prs(&[detailed_pr()]);
+    state["review_threads_error"] = "GraphQL: Resource not accessible".into();
+    install_gh(&f, state);
+
+    let err = f
+        .core
+        .pull_request_review_threads(f.project.id, 5)
+        .unwrap_err();
+    assert!(err.to_string().contains("Resource not accessible"), "{err}");
 }
 
 #[test]

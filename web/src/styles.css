@@ -1653,6 +1653,28 @@ section.terminal.terminal-hidden { display: none; }
 .line-comment-actions { display: flex; gap: 6px; }
 .line-comment-edit { display: grid; gap: 6px; }
 .line-comment-edit textarea, .comment-form textarea { width: 100%; resize: vertical; }
+/* GitHub review threads on the PR diff */
+.review-threads { flex: none; max-height: 45%; overflow: auto; border-top: 1px solid var(--line); background: var(--bg2); }
+.review-threads-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; position: sticky; top: 0; z-index: 1; background: var(--bg2); }
+.review-threads .chip.warn { color: #d29922; border-color: #d29922; }
+.review-threads .chip.resolved { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+.review-thread-lines { list-style: none; margin: 0; padding: 0; }
+.review-thread-line { padding: 8px 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.review-thread-where { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.review-thread-code { margin: 0; padding: 4px 8px; background: var(--bg3); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+.review-thread-list, .review-thread-comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.review-thread { border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow: hidden; }
+.review-thread.outdated { opacity: 0.8; }
+.review-thread-summary { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.review-thread-summary:hover { background: var(--bg3); }
+.review-thread-author { font-weight: 600; color: var(--fg-bright); }
+.review-thread-count { color: var(--dim); font-size: 12px; }
+.review-thread-comments { padding: 0 8px 8px; }
+.review-thread-comment { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.review-thread-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-threads-lost { border-top: 1px solid var(--line); }
+.review-threads-lost h4 { margin: 0; padding: 8px 10px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
+.review-threads-note { margin: 0; padding: 2px 10px 6px; color: var(--dim); font-size: 12px; }
 .comment-form { display: grid; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg2); font-size: 12.5px; }
 .comment-form-where { display: flex; gap: 8px; align-items: baseline; }
 .comment-form-code { margin: 0; padding: 4px 8px; background: var(--bg3); border-radius: 4px; white-space: pre-wrap; color: var(--dim); }

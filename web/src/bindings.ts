@@ -171,6 +171,7 @@ export const commands = {
 	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
 	/**  One pull request's description, checks, conversation and changed files. */
 	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
+	pullRequestReviewThreads: (projectId: number, number: number) => typedError<PullRequestReviewThread_Serialize[], AppError>(__TAURI_INVOKE("pull_request_review_threads", { projectId, number })),
 	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
 	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean, auto: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch, auto })),
 	/**  Closes a pull request without merging it. */
@@ -1261,6 +1262,36 @@ export type PullRequestLabel = {
 
 export type PullRequestPhase = "draft" | "open" | "merged" | "closed";
 
+export type PullRequestReviewThread = PullRequestReviewThread_Serialize | PullRequestReviewThread_Deserialize;
+
+export type PullRequestReviewThread_Deserialize = {
+	id: string,
+	path: string,
+	line?: number | null,
+	originalLine?: number | null,
+	/**  `old` for a removed line, `new` for an added or unchanged one. */
+	side?: CommentSide | null,
+	resolved: boolean,
+	outdated: boolean,
+	/**  GitHub's excerpt around the commented line. */
+	diffHunk: string,
+	comments: ReviewThreadComment[],
+};
+
+export type PullRequestReviewThread_Serialize = {
+	id: string,
+	path: string,
+	line: number | null,
+	originalLine: number | null,
+	/**  `old` for a removed line, `new` for an added or unchanged one. */
+	side: CommentSide | null,
+	resolved: boolean,
+	outdated: boolean,
+	/**  GitHub's excerpt around the commented line. */
+	diffHunk: string,
+	comments: ReviewThreadComment[],
+};
+
 export type PullRequestReviewer = {
 	login: string,
 	state: ReviewState,
@@ -1415,6 +1446,12 @@ export type ReviewLedger_Serialize = {
 };
 
 export type ReviewState = "requested" | "approved" | "changesRequested" | "commented" | "dismissed";
+
+export type ReviewThreadComment = {
+	author: string,
+	body: string,
+	createdAt: string,
+};
 
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
 

@@ -2082,6 +2082,30 @@ pub struct PullRequestComment {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ReviewThreadComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewThread {
+    pub id: String,
+    pub path: String,
+    pub line: Option<u32>,
+    pub original_line: Option<u32>,
+    /// `old` for a removed line, `new` for an added or unchanged one.
+    pub side: Option<CommentSide>,
+    pub resolved: bool,
+    pub outdated: bool,
+    /// GitHub's excerpt around the commented line.
+    pub diff_hunk: String,
+    pub comments: Vec<ReviewThreadComment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PullRequestCandidates {
     pub users: Vec<String>,
     pub labels: Vec<PullRequestLabel>,
@@ -2458,6 +2482,20 @@ async fn pull_request_detail(
     })
     .await
     .map(|detail| convert(&detail))
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn pull_request_review_threads(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    number: u32,
+) -> Result<Vec<PullRequestReviewThread>, AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_request_review_threads(project_id, number)
+    })
+    .await
+    .map(|threads| convert(&threads))
 }
 
 #[tauri::command]
@@ -3289,6 +3327,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         open_pull_request,
         list_pull_requests,
         pull_request_detail,
+        pull_request_review_threads,
         comment_pull_request,
         merge_pull_request,
         close_pull_request,

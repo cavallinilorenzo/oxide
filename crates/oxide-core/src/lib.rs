@@ -58,8 +58,8 @@ pub use github::{
     IssueComment, IssueDetail, IssueEdit, IssueSummary, IssueTemplateFile, IssuesState,
     MergeMethod, MergeState, PullRequest, PullRequestCandidates, PullRequestCheck,
     PullRequestComment, PullRequestDetail, PullRequestDraft, PullRequestEdit, PullRequestInput,
-    PullRequestLabel, PullRequestPhase, PullRequestReviewer, PullRequestState, ReviewDecision,
-    ReviewState,
+    PullRequestLabel, PullRequestPhase, PullRequestReviewThread, PullRequestReviewer,
+    PullRequestState, ReviewDecision, ReviewState, ReviewThreadComment,
 };
 pub use language_server::{LanguageServerConfig, LanguageServerSummary, LanguageTool};
 pub use line_comments::{CommentScope, CommentSide, LineComment, NewLineComment};
@@ -1858,6 +1858,15 @@ impl Core {
     /// methods and changed files.
     pub fn pull_request_detail(&self, project_id: u32, number: u32) -> Result<PullRequestDetail> {
         github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)
+    }
+
+    /// A pull request's inline review threads, anchored to the lines of its diff.
+    pub fn pull_request_review_threads(
+        &self,
+        project_id: u32,
+        number: u32,
+    ) -> Result<Vec<PullRequestReviewThread>> {
+        github::review_threads(&self.gh, &self.main_checkout(project_id)?, number)
     }
 
     /// Adds a conversation comment to a pull request.

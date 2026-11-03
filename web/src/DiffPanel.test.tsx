@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { commands } from "./bindings";
+import { commands, type PullRequestReviewThread } from "./bindings";
 import { DiffPanel } from "./DiffPanel";
 import { clearQueryCache } from "./queryCache";
 
@@ -145,6 +145,7 @@ it("offers no revert in Branch scope or while a Turn is running", async () => {
   expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
 });
 
+
 const picks = [
   { turnIndex: 0, prompt: "Add the parser", checkpointed: true },
   { turnIndex: 1, prompt: "Rename it", checkpointed: true },
@@ -207,4 +208,78 @@ it("offers Revert on the latest Turn only, since Core reverts the latest", async
   expect(host.querySelector('[aria-label="Revert a.rs"]')).not.toBeNull();
   await choose("0");
   expect(host.querySelector('[aria-label^="Revert"]')).toBeNull();
+
+const reviewThread = (overrides: Partial<PullRequestReviewThread> = {}): PullRequestReviewThread => ({
+  id: "t1",
+  path: "src/app.rs",
+  line: 1,
+  originalLine: 1,
+  side: "new" as const,
+  resolved: false,
+  outdated: false,
+  diffHunk: "@@ -1 +1 @@\n+    run();\n",
+  comments: [{ author: "alice", body: "Please add a guard.", createdAt: "2026-01-01T00:00:00Z" }],
+  ...overrides,
+});
+
+async function renderPr(threads = [reviewThread()]) {
+  vi.spyOn(commands, "pullRequestDetail").mockResolvedValue({
+    status: "ok",
+    data: { diff: { base: "main", files: [fileOf("src/app.rs", "modified")] } },
+  } as never);
+  vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({ status: "ok", data: threads } as never);
+  await act(async () =>
+    root.render(
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+    ),
+  );
+}
+
+it("shows GitHub review threads on the PR diff with their line, author and comments", async () => {
+  const fetchThreads = vi.spyOn(commands, "pullRequestReviewThreads");
+  await renderPr();
+  expect(fetchThreads).toHaveBeenCalledWith(1, 5);
+  const section = host.querySelector('[aria-label="Review threads"]');
+  expect(section?.textContent).toContain("src/app.rs:1");
+  expect(section?.textContent).toContain("    run();");
+  expect(section?.textContent).toContain("@alice");
+  expect(section?.textContent).toContain("Please add a guard.");
+});
+
+it("collapses a resolved thread until asked, and keeps an outdated one in reach", async () => {
+  await renderPr([
+    reviewThread({ id: "resolved", resolved: true }),
+    reviewThread({
+      id: "lost",
+      path: "src/gone.rs",
+      line: null,
+      originalLine: 9,
+      outdated: true,
+      comments: [{ author: "bob", body: "Old note.", createdAt: "2026-01-01T00:00:00Z" }],
+    }),
+  ]);
+  expect(host.textContent).toContain("Resolved");
+  expect(host.textContent).not.toContain("Please add a guard.");
+  expect(host.querySelector('[aria-label="Review threads not in this diff"]')?.textContent).toContain("src/gone.rs:9");
+  await click(host.querySelector('.review-thread-summary[aria-expanded="false"]'));
+  expect(host.textContent).toContain("Please add a guard.");
+});
+
+it("shows a GitHub review thread error without hiding the diff", async () => {
+  vi.spyOn(commands, "pullRequestDetail").mockResolvedValue({
+    status: "ok",
+    data: { diff: { base: "main", files: [fileOf("src/app.rs", "modified")] } },
+  } as never);
+  vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({
+    status: "error",
+    error: { message: "gh: Not authenticated" },
+  } as never);
+  await act(async () =>
+    root.render(
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+    ),
+  );
+  expect(host.textContent).toContain("app.rs");
+  expect(host.querySelector(".surface-empty.error")?.textContent).toContain("Not authenticated");
+
 });

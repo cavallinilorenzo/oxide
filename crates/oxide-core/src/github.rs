@@ -4,6 +4,7 @@
 
 use crate::git;
 use crate::git_diff::{Diff, parse_patch};
+use crate::line_comments::CommentSide;
 use crate::{Error, Result};
 use oxide_provider::command::find_in;
 use serde::{Deserialize, Serialize};
@@ -187,6 +188,34 @@ pub struct PullRequestComment {
     pub created_at: String,
     /// Set when the entry is a review rather than a plain comment.
     pub review: Option<ReviewState>,
+}
+
+/// One comment in an inline review thread, as GitHub shows it next to the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewThreadComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+/// A GitHub inline review thread, anchored to a line of a pull request's diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewThread {
+    pub id: String,
+    pub path: String,
+    /// The line on the current diff; `None` when the thread is outdated and GitHub no longer maps it.
+    pub line: Option<u32>,
+    /// The line the thread was written on, kept when [`line`](Self::line) is gone.
+    pub original_line: Option<u32>,
+    /// `old` for a removed line, `new` for an added or unchanged one.
+    pub side: Option<CommentSide>,
+    pub resolved: bool,
+    pub outdated: bool,
+    /// GitHub's excerpt around the commented line.
+    pub diff_hunk: String,
+    pub comments: Vec<ReviewThreadComment>,
 }
 
 /// Who and what a pull request can be assigned, for the settings pickers.
@@ -930,6 +959,67 @@ pub fn branch_pull_request(
         },
         merged_at,
     )))
+}
+
+/// The inline review threads of a pull request, as GitHub shows them on its diff.
+pub fn review_threads(gh: &Gh, cwd: &Path, number: u32) -> Result<Vec<PullRequestReviewThread>> {
+    gh.require_ready(cwd)?;
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){\
+        pullRequest(number:$number){reviewThreads(first:100){nodes{\
+        id isResolved isOutdated path line originalLine diffSide diffHunk \
+        comments(first:100){nodes{author{login} body createdAt}}}}}}}";
+    let number = format!("number={number}");
+    let query = format!("query={query}");
+    let nodes = parse(&gh.run(
+        cwd,
+        &[
+            "api",
+            "graphql",
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &number,
+            "-f",
+            &query,
+            "--jq",
+            ".data.repository.pullRequest.reviewThreads.nodes",
+        ],
+    )?)?;
+    Ok(nodes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(review_thread_from)
+        .collect())
+}
+
+fn review_thread_from(v: &serde_json::Value) -> PullRequestReviewThread {
+    PullRequestReviewThread {
+        id: text(&v["id"]),
+        path: text(&v["path"]),
+        line: v["line"].as_u64().map(|n| n as u32),
+        original_line: v["originalLine"].as_u64().map(|n| n as u32),
+        side: match v["diffSide"].as_str() {
+            Some("LEFT") => Some(CommentSide::Old),
+            Some("RIGHT") => Some(CommentSide::New),
+            _ => None,
+        },
+        resolved: v["isResolved"].as_bool().unwrap_or(false),
+        outdated: v["isOutdated"].as_bool().unwrap_or(false),
+        diff_hunk: text(&v["diffHunk"]),
+        comments: v["comments"]["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| ReviewThreadComment {
+                author: text(&c["author"]["login"]),
+                body: text(&c["body"]),
+                created_at: text(&c["createdAt"]),
+            })
+            .collect(),
+    }
 }
 
 /// One pull request with its description, checks, conversation, the merge

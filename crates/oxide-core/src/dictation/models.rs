@@ -338,6 +338,18 @@ impl ModelManager {
                 return Err(err("Model download cancelled"));
             }
             file.persist(&path).map_err(err)?;
+            // The artifact at `path` has just been written and hash-checked.
+            // Refresh the verified cache so a subsequent `acquire`/`status` does
+            // not use a stale (invalid) entry left by an earlier `status` call.
+            if let Ok(metadata) = fs::metadata(&path) {
+                let modified = metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                VERIFIED_CACHE
+                    .lock()
+                    .unwrap()
+                    .insert(path.to_path_buf(), (metadata.len(), modified, true));
+            }
             cancellations.remove(&path);
             Ok(())
         })();

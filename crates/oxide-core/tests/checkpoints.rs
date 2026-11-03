@@ -53,6 +53,9 @@ fn fixture() -> Fixture {
     let core = Core::open(root.join("home")).unwrap();
     core.set_real_time_ticker(false);
     let project_id = core.add_project(&work.to_string_lossy()).unwrap().id;
+    // Checkpoints are tested against the main checkout, so keep Threads out of worktrees here.
+    core.set_project_threads_in_main_checkout(project_id, true)
+        .unwrap();
     Fixture {
         _tmp: tmp,
         core,

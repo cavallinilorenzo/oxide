@@ -36,6 +36,7 @@ const render = (scope: "uncommitted" | "branch" = "uncommitted") =>
         onOpenFile={() => {}}
         threadId={null}
         board={false}
+        worktree={false}
         scope={scope}
         reviewedPr={null}
         onScopeChange={() => {}}
@@ -49,7 +50,7 @@ const render = (scope: "uncommitted" | "branch" = "uncommitted") =>
 
 it("opens the selected Git patch in Code with the keyboard and removes the small viewer", async () => {
   const open = vi.fn();
-  await act(async () => root.render(<DiffPanel projectId={1} threadId={null} board={false} scope="branch" reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} onOpenFile={open} />));
+  await act(async () => root.render(<DiffPanel projectId={1} threadId={null} board={false} worktree={false} scope="branch" reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} onOpenFile={open} />));
   await act(async () => host.querySelector('[role="option"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ path: "src/first.rs" }));
   expect(host.querySelector(".diff-body")).toBeNull();
@@ -90,7 +91,7 @@ function renderRevert(
   const scope = props.scope ?? "uncommitted";
   return act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={props.threadId ?? 7} board={false} turnRunning={props.turnRunning} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={props.onChanged ?? (() => {})} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={props.threadId ?? 7} board={false} worktree={false} turnRunning={props.turnRunning} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={props.onChanged ?? (() => {})} onOpenPullRequest={() => {}} />,
     ),
   );
 }
@@ -155,7 +156,7 @@ const picks = [
 const renderTurn = (threadId: number | null, scope: "turn" | "uncommitted" = "turn") =>
   act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={threadId} board={false} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={threadId} board={false} worktree={false} scope={scope} reviewedPr={null} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
 const picker = () => host.querySelector<HTMLSelectElement>('select[aria-label="Turn"]')!;
@@ -231,7 +232,7 @@ async function renderPr(threads = [reviewThread()]) {
   vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({ status: "ok", data: threads } as never);
   await act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} worktree={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
 }
@@ -277,7 +278,7 @@ it("shows a GitHub review thread error without hiding the diff", async () => {
   } as never);
   await act(async () =>
     root.render(
-      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
+      <DiffPanel projectId={1} onOpenFile={() => {}} threadId={null} board={false} worktree={false} scope="pr" reviewedPr={5} onScopeChange={() => {}} focus={null} refreshKey="" onChanged={() => {}} onOpenPullRequest={() => {}} />,
     ),
   );
   expect(host.textContent).toContain("app.rs");

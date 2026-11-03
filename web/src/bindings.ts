@@ -53,6 +53,12 @@ export const commands = {
 	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
 	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
 	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
+	/**
+	 *  Whether chat Threads of this Project stay in the main checkout instead of each
+	 *  getting its own worktree on their first prompt.
+	 */
+	getProjectThreadsInMainCheckout: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("get_project_threads_in_main_checkout", { projectId })),
+	setProjectThreadsInMainCheckout: (projectId: number, inMainCheckout: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_project_threads_in_main_checkout", { projectId, inMainCheckout })),
 	/**  Starts a new Thread that continues one whose Provider session is gone. */
 	continueThread: (threadId: number) => typedError<ContinuedThread_Serialize, AppError>(__TAURI_INVOKE("continue_thread", { threadId })),
 	/**

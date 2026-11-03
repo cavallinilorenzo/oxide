@@ -167,6 +167,12 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX line_comments_by_thread ON line_comments(thread_id, id);
 ",
+    // A per-Project choice: keep chat Threads in the main checkout instead of
+    // giving each one its own worktree on its first prompt. Default off, so new
+    // chat Threads work in their own worktree like Board Threads do.
+    "
+    ALTER TABLE projects ADD COLUMN threads_in_main_checkout INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

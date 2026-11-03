@@ -15,6 +15,12 @@ vi.mock("./QuitDialog", () => ({ QuitDialog: () => null }));
 vi.mock("./FilesPanel", () => ({ FilesPanel: () => null }));
 vi.mock("./TerminalPanel", () => ({ TerminalPanel: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
+// jsdom does not implement HTMLCanvasElement.getContext(); some components touch it during render.
+class MockCanvasElement extends HTMLElement {
+  getContext() { return null; }
+  toDataURL() { return ""; }
+}
+Object.defineProperty(globalThis, "HTMLCanvasElement", { value: MockCanvasElement, writable: true, configurable: true });
 Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
 
 let host: HTMLDivElement;
@@ -121,6 +127,7 @@ async function open(tab: "Pull request" | "Issues") {
   await settle();
   await click(host.querySelector('[aria-label="Toggle tools panel"]'));
   await click(host.querySelector(`[role="tab"][aria-label="${tab}"]`));
+  await vi.waitFor(() => expect(host.querySelector(".pr-scope-title")).not.toBeNull());
 }
 
 it("labels the pull request list by repository and branch actions by the selected Thread's checkout", async () => {

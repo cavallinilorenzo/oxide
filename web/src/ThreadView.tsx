@@ -9,6 +9,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
+  InfoIcon,
   LockIcon,
   PaperclipIcon,
   ShieldCheckIcon,
@@ -248,6 +249,8 @@ export function ThreadView({
   }, [draft, threadId]);
 
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  /** The main checkout has uncommitted changes that stay behind while this Thread works in its own worktree. */
+  const [mainCheckoutDirty, setMainCheckoutDirty] = useState(false);
   const slashGeneration = useRef({ active: true });
   const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -277,6 +280,23 @@ export function ThreadView({
       generation.active = false;
     };
   }, [threadId, transcript.thread?.id, slashProvider, projectId]);
+
+  // A chat Thread works in its own worktree: uncommitted changes in the main checkout stay
+  // behind there, so say so when that is the case.
+  useEffect(() => {
+    const ownWorktree = transcript.thread?.worktreePath != null && transcript.thread?.branch == null;
+    if (!ownWorktree || threadId === null) {
+      setMainCheckoutDirty(false);
+      return;
+    }
+    let active = true;
+    void commands.gitStatus(projectId, null).then((result) => {
+      if (active && result.status === "ok") setMainCheckoutDirty(result.data.changedFiles > 0);
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId, threadId, transcript.thread?.worktreePath, transcript.thread?.branch]);
 
   // Codex can change its available skills while the menu is open.
   useEffect(() => {
@@ -1058,6 +1078,12 @@ export function ThreadView({
           </summary>
           <pre>{transcript.thread.setupOutput || "(no output)"}</pre>
         </details>
+      )}
+      {mainCheckoutDirty && (
+        <div className="surface-note" role="status">
+          <InfoIcon size={12} />
+          Uncommitted changes in the main checkout stay behind &mdash; this Thread works in its own worktree.
+        </div>
       )}
       <div className="transcript" aria-label="Transcript" ref={scrollRef} onScroll={onScroll}>
         {threadId !== null && transcript.thread?.id !== threadId && settledThreadId !== threadId ? (

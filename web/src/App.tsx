@@ -225,6 +225,8 @@ export function App() {
   }, [selected, threads, setActiveTool]);
   const diffThread = {
     board: threads?.some((thread) => thread.id === currentThreadId && isBoardThread(thread)) ?? false,
+    /** The selected Thread works in its own worktree, so nothing else edits its checkout. */
+    worktree: threads?.some((thread) => thread.id === currentThreadId && thread.worktreePath != null) ?? false,
   };
   const diffScope =
     chosenDiffScope && chosenDiffScope.threadId === currentThreadId
@@ -1028,6 +1030,7 @@ export function App() {
                   projectId={selected.id}
                   threadId={currentThreadId}
                   board={diffThread.board}
+                  worktree={diffThread.worktree}
                   turnRunning={threads?.some((thread) => thread.status === "working" && (diffThread.board ? thread.id === currentThreadId : !isBoardThread(thread))) ?? false}
                   scope={diffScope}
                   reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}

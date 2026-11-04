@@ -86,6 +86,8 @@ impl Fixture {
                 base_branch: Some("main".into()),
                 issue_number,
                 issue_title: issue_number.map(|n| format!("Issue {n}")),
+                issue_url: issue_number
+                    .map(|n| format!("https://github.com/example/oxide/issues/{n}")),
                 issue_labels,
             })
             .unwrap();

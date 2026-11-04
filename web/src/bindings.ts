@@ -257,6 +257,12 @@ export type AdvicePreference = "balanced" | "quality";
 
 export type AdviceStatus = "recommended" | "usableSlower" | "notRecommended" | "insufficientData";
 
+/**  The closing message of the agent, kept apart from what Oxide computed. */
+export type AgentClaim = {
+	turnIndex: number,
+	text: string,
+};
+
 export type AppError = {
 	message: string,
 };
@@ -748,6 +754,8 @@ export type DispatchRequest_Deserialize = {
 	baseBranch?: string | null,
 	issueNumber?: number | null,
 	issueTitle?: string | null,
+	/**  The issue's page on GitHub, kept for the Dossier. */
+	issueUrl?: string | null,
 	/**  The labels of that issue, by name. */
 	issueLabels?: string[],
 };
@@ -763,8 +771,42 @@ export type DispatchRequest_Serialize = {
 	baseBranch: string | null,
 	issueNumber: number | null,
 	issueTitle: string | null,
+	/**  The issue's page on GitHub, kept for the Dossier. */
+	issueUrl: string | null,
 	/**  The labels of that issue, by name. */
 	issueLabels: string[],
+};
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent = DossierIntent_Serialize | DossierIntent_Deserialize;
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent_Deserialize = {
+	issue?: DossierIssue_Deserialize | null,
+	prompts: string[],
+};
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent_Serialize = {
+	issue: DossierIssue_Serialize | null,
+	prompts: string[],
+};
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue = DossierIssue_Serialize | DossierIssue_Deserialize;
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue_Deserialize = {
+	number: number,
+	title?: string | null,
+	url?: string | null,
+};
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue_Serialize = {
+	number: number,
+	title: string | null,
+	url: string | null,
 };
 
 export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
@@ -2107,19 +2149,23 @@ export type VerificationCommand_Serialize = {
 	exitCode: number | null,
 };
 
-/**  The Verification Dossier: the commands that ran and the separate risk signals. */
+/**  The Verification section of the Diff Surface for one Thread. */
 export type VerificationDossier = VerificationDossier_Serialize | VerificationDossier_Deserialize;
 
-/**  The Verification Dossier: the commands that ran and the separate risk signals. */
+/**  The Verification section of the Diff Surface for one Thread. */
 export type VerificationDossier_Deserialize = {
 	commands: VerificationCommand_Deserialize[],
 	signals: RiskSignal_Deserialize[],
+	intent: DossierIntent_Deserialize,
+	claim?: AgentClaim | null,
 };
 
-/**  The Verification Dossier: the commands that ran and the separate risk signals. */
+/**  The Verification section of the Diff Surface for one Thread. */
 export type VerificationDossier_Serialize = {
 	commands: VerificationCommand_Serialize[],
 	signals: RiskSignal_Serialize[],
+	intent: DossierIntent_Serialize,
+	claim: AgentClaim | null,
 };
 
 export type VerificationKind = "test" | "lint" | "typeCheck" | "build" | "other";

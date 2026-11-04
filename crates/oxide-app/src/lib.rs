@@ -896,12 +896,39 @@ pub struct RiskSignal {
     pub threshold: Option<u32>,
 }
 
-/// The Verification Dossier: the commands that ran and the separate risk signals.
+/// The GitHub issue a Board Thread was started from.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIssue {
+    pub number: u32,
+    pub title: Option<String>,
+    pub url: Option<String>,
+}
+
+/// What was asked for: the stored issue reference and the Thread's own prompts.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIntent {
+    pub issue: Option<DossierIssue>,
+    pub prompts: Vec<String>,
+}
+
+/// The closing message of the agent, kept apart from what Oxide computed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentClaim {
+    pub turn_index: u32,
+    pub text: String,
+}
+
+/// The Verification section of the Diff Surface for one Thread.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     pub commands: Vec<VerificationCommand>,
     pub signals: Vec<RiskSignal>,
+    pub intent: DossierIntent,
+    pub claim: Option<AgentClaim>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -2990,6 +3017,8 @@ pub struct DispatchRequest {
     pub base_branch: Option<String>,
     pub issue_number: Option<u32>,
     pub issue_title: Option<String>,
+    /// The issue's page on GitHub, kept for the Dossier.
+    pub issue_url: Option<String>,
     /// The labels of that issue, by name.
     #[serde(default)]
     pub issue_labels: Vec<String>,

@@ -74,6 +74,15 @@ beforeEach(() => {
             threshold: 400,
           },
         ],
+        intent: {
+          issue: {
+            number: 334,
+            title: "Add intent and agent claims to the Dossier",
+            url: "https://github.com/getoxide/oxide/issues/334",
+          },
+          prompts: ["Add the parser", "Handle the empty input"],
+        },
+        claim: { turnIndex: 0, text: "All 12 tests pass." },
       };
     }
     if (command === "get_project_verification_commands") return ["pnpm run verify"];
@@ -130,6 +139,33 @@ it("shows each risk signal and links its files into the Diff", async () => {
     option.textContent?.includes("parser.rs"),
   );
   expect(row?.getAttribute("aria-selected")).toBe("true");
+});
+
+it("shows what was asked and keeps the agent's claim apart from the computed checks", async () => {
+  await openDiff();
+  const intent = await vi.waitFor(() => {
+    const section = host.querySelector<HTMLElement>('[aria-label="Intent"]');
+    expect(section).not.toBeNull();
+    return section!;
+  });
+
+  expect(intent.textContent).toContain("Issue #334");
+  const link = intent.querySelector<HTMLAnchorElement>('a[href="https://github.com/getoxide/oxide/issues/334"]');
+  expect(link?.textContent).toBe("#334 Add intent and agent claims to the Dossier");
+  const prompts = intent.querySelector<HTMLDetailsElement>("details.dossier-prompts")!;
+  expect(prompts.open).toBe(false);
+  expect(prompts.querySelector("summary")?.textContent).toBe("Prompts (2)");
+  expect(prompts.textContent).toContain("Add the parser");
+  expect(prompts.textContent).toContain("Handle the empty input");
+  expect(intent.textContent).not.toContain("All 12 tests pass.");
+
+  const claim = host.querySelector<HTMLElement>('[aria-label="Agent claim"]')!;
+  expect(claim.textContent).toContain("Agent claim");
+  expect(claim.textContent).toContain("All 12 tests pass.");
+  expect(claim.textContent).toContain("not checked by Oxide");
+  const checks = host.querySelector<HTMLElement>(".dossier-checks")!;
+  expect(checks.textContent).toContain("pytest");
+  expect(checks.textContent).not.toContain("All 12 tests pass.");
 });
 
 it("adds a Project Verification command and asks for the Dossier again", async () => {

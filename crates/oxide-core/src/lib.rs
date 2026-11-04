@@ -91,8 +91,9 @@ pub use attachments::{
 };
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
+pub use dossier::{AgentClaim, DossierIntent, DossierIssue};
 pub use dossier::{
-    AgentClaim, DossierIntent, DossierIssue, VerificationCommand, VerificationDossier,
+    LARGE_DIFF_LINES, RiskSignal, RiskSignalKind, VerificationCommand, VerificationDossier,
     VerificationKind, VerificationState,
 };
 pub use error::{Error, Result};

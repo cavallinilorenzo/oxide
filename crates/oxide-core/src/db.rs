@@ -290,6 +290,29 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX review_follow_ups_by_project ON review_follow_ups(project_id, id);
 ",
+    // Recurring feedback turned into rule suggestions (#343): the text of Line comments sent to a
+    // Thread, grouped per Project by normalized word similarity. Kept apart from the Review
+    // ledger, which still holds no comment text (ADR-0010).
+    "
+    CREATE TABLE rule_suggestions (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        decided_at TEXT
+    );
+    CREATE INDEX rule_suggestions_by_project ON rule_suggestions(project_id, id);
+
+    CREATE TABLE rule_suggestion_comments (
+        id INTEGER PRIMARY KEY,
+        suggestion_id INTEGER NOT NULL REFERENCES rule_suggestions(id),
+        thread_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX rule_suggestion_comments_by_suggestion
+        ON rule_suggestion_comments(suggestion_id, id);
+",
 ];
 
 /// Starts a transaction that will write. `IMMEDIATE` takes the write lock up front:

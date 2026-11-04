@@ -108,6 +108,13 @@ pub struct PullRequestLineComment {
     pub body: String,
 }
 
+/// `text` inside a code fence longer than any backtick run in it, so a quote stays intact.
+pub(crate) fn fenced(text: &str) -> String {
+    let longest = text.split(|ch| ch != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat((longest + 1).max(3));
+    format!("{fence}\n{text}\n{fence}")
+}
+
 /// The prompt that delivers drafts: file, line, quoted code and comment for each.
 pub(crate) fn prompt(comments: &[LineComment]) -> String {
     let mut out = format!(
@@ -120,17 +127,13 @@ pub(crate) fn prompt(comments: &[LineComment]) -> String {
             CommentSide::Old => " (removed line)",
             CommentSide::New => "",
         };
-        // A fence longer than any backtick run in the code keeps the quote intact.
-        let longest = c
-            .code
-            .split(|ch| ch != '`')
-            .map(str::len)
-            .max()
-            .unwrap_or(0);
-        let fence = "`".repeat((longest + 1).max(3));
         out.push_str(&format!(
-            "\n### {}:{}{}\n{fence}\n{}\n{fence}\n{}\n",
-            c.path, c.line, side, c.code, c.body
+            "\n### {}:{}{}\n{}\n{}\n",
+            c.path,
+            c.line,
+            side,
+            fenced(&c.code),
+            c.body
         ));
     }
     out
@@ -255,7 +258,8 @@ impl Core {
     /// Delivers every draft of the Thread as one prompt, then clears them. Refused while the
     /// Thread is working, so the drafts are not lost into a running Turn.
     pub fn send_line_comments(&self, thread_id: u32) -> Result<()> {
-        if self.storage.get_snapshot(thread_id, 0)?.thread.status == ThreadStatus::Working {
+        let snapshot = self.storage.get_snapshot(thread_id, 0)?;
+        if snapshot.thread.status == ThreadStatus::Working {
             return Err(Error::Editor(
                 "This Thread is working. Send the comments when it has finished.".into(),
             ));
@@ -269,6 +273,7 @@ impl Core {
         if let Some(kind) = kind {
             self.record_review_round(thread_id, &kind);
         }
+        self.remember_line_comments(snapshot.thread.project_id, thread_id, &comments);
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         for c in &comments {
             db.execute("DELETE FROM line_comments WHERE id = ?1", [c.id])?;

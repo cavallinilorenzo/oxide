@@ -230,7 +230,8 @@ export function ReviewLedgerSummary({ projectId }: { projectId: number }) {
       {!empty &&
         (confirming ? (
           <p role="group" aria-label="Confirm clearing the Review ledger">
-            Remove the Review ledger of every Project? This cannot be undone.{" "}
+            Remove the Review ledger, with the comments kept for rule suggestions, for every
+            Project? This cannot be undone.{" "}
             <button className="btn danger" onClick={() => void clear()}>
               Remove ledger
             </button>{" "}

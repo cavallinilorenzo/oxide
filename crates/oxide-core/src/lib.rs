@@ -24,6 +24,7 @@ mod line_comments;
 mod project_setup;
 mod restore;
 mod review_ledger;
+mod rule_suggestions;
 mod settings;
 mod slash_catalog;
 mod storage_actor;
@@ -107,6 +108,7 @@ pub use review_ledger::{
     FollowUpStatus, RECENT_ENTRIES, ReviewFollowUp, ReviewLedger, ReviewLedgerEntry, ReviewRevert,
     ReviewRoundGroup, ReviewSizeBand, ReviewWorkKind,
 };
+pub use rule_suggestions::RuleSuggestion;
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,
@@ -2246,9 +2248,10 @@ impl Core {
         self.ledger.ledger(project_id)
     }
 
-    /// Removes every entry of the Review ledger.
+    /// Removes every entry of the Review ledger, and the comments kept to suggest rules.
     pub fn clear_review_ledger(&self) -> Result<()> {
-        self.ledger.clear()
+        self.ledger.clear()?;
+        self.clear_rule_feedback()
     }
 
     /// Confirms a candidate follow-up fix in the Review ledger.

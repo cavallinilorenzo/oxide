@@ -8,6 +8,7 @@ import {
 } from "@primer/octicons-react";
 import type { Project, Thread } from "./bindings";
 import { ReviewLedgerSummary } from "./ReviewLedgerSummary";
+import { RuleSuggestions } from "./RuleSuggestions";
 import { relativeAge, threadTitle } from "./threadList";
 
 export function ProjectOverview({
@@ -15,6 +16,7 @@ export function ProjectOverview({
   threads,
   onNewThread,
   onOpenThread,
+  onSuggestionAccepted,
   onOpenBoard,
   onOpenDiff,
   onOpenPullRequest,
@@ -23,6 +25,7 @@ export function ProjectOverview({
   threads: Thread[];
   onNewThread: () => void;
   onOpenThread: (id: number) => void;
+  onSuggestionAccepted: (thread: Thread) => void;
   onOpenBoard: () => void;
   onOpenDiff: () => void;
   onOpenPullRequest: () => void;
@@ -84,6 +87,7 @@ export function ProjectOverview({
             </ul>
           </section>
         )}
+        <RuleSuggestions key={project.id} projectId={project.id} onAccepted={onSuggestionAccepted} />
         <ReviewLedgerSummary key={project.id} projectId={project.id} />
         <nav className="project-overview-links" aria-label="Project tools">
           <button onClick={onOpenDiff}>

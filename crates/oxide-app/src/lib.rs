@@ -848,6 +848,16 @@ pub struct ReviewLedger {
     pub follow_ups: Vec<ReviewFollowUp>,
 }
 
+/// Recurring feedback the app offers to turn into a rule for the Project's agent instructions.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSuggestion {
+    pub id: u32,
+    pub project_id: u32,
+    /// The comments it is based on, oldest first.
+    pub comments: Vec<String>,
+}
+
 /// The band a change's diff size falls in.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -3610,6 +3620,47 @@ fn dismiss_follow_up(
     Ok(core.dismiss_follow_up(project_id, pull_request, &commit_sha)?)
 }
 
+/// Recurring Line comments the app offers to turn into a rule for the Project's agent instructions.
+#[tauri::command]
+#[specta::specta]
+fn rule_suggestions(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<RuleSuggestion>, AppError> {
+    Ok(core
+        .rule_suggestions(project_id)?
+        .iter()
+        .map(convert)
+        .collect())
+}
+
+/// Dismisses a rule suggestion for good.
+#[tauri::command]
+#[specta::specta]
+fn dismiss_rule_suggestion(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    id: u32,
+) -> Result<(), AppError> {
+    Ok(core.dismiss_rule_suggestion(project_id, id)?)
+}
+
+/// Starts a Thread that proposes the rule in the Project's agent instructions.
+#[tauri::command]
+#[specta::specta]
+async fn accept_rule_suggestion(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    id: u32,
+    provider: String,
+) -> Result<Thread, AppError> {
+    git_blocking(&core, move |core| {
+        core.accept_rule_suggestion(project_id, id, &provider)
+    })
+    .await
+    .map(|summary| convert(&summary))
+}
+
 /// A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`.
 #[tauri::command]
 #[specta::specta]
@@ -3854,6 +3905,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         clear_review_ledger,
         confirm_follow_up,
         dismiss_follow_up,
+        rule_suggestions,
+        dismiss_rule_suggestion,
+        accept_rule_suggestion,
         start_terminal,
         start_block_terminal,
         write_file,

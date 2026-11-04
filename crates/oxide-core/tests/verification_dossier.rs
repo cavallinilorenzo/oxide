@@ -3,13 +3,18 @@ use oxide_core::{
     CommandOutcome, Core, ItemKind, PermissionMode, SequencedThreadEvent, ThreadEvent,
     ThreadStatus, VerificationCommand, VerificationKind, VerificationState,
 };
-use oxide_provider::{ActivityCategory, CommandRecord, FakeProvider, ProviderEvent, TurnStatus};
+use oxide_provider::{
+    ActivityCategory, ApprovalDecision, ApprovalKind, CommandRecord, FakeProvider, ProviderEvent,
+    TurnStatus,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::TempDir;
+
+const FAKE_GH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/gh/gh");
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -36,7 +41,23 @@ struct Fixture {
     core: Core,
     project_id: u32,
     work: PathBuf,
+    gh_dir: PathBuf,
     scripts: Mutex<HashMap<u32, Sender<Script>>>,
+}
+
+impl Fixture {
+    fn install_gh(&self, state: serde_json::Value) {
+        let names = if cfg!(windows) {
+            vec!["gh", "gh.py", "gh.cmd"]
+        } else {
+            vec!["gh", "gh.py"]
+        };
+        for name in names {
+            let from = Path::new(FAKE_GH).with_file_name(name);
+            std::fs::copy(from, self.gh_dir.join(name)).unwrap();
+        }
+        std::fs::write(self.gh_dir.join("state.json"), state.to_string()).unwrap();
+    }
 }
 
 fn fixture() -> Fixture {
@@ -50,8 +71,12 @@ fn fixture() -> Fixture {
     git(&work, &["add", "."]);
     git(&work, &["commit", "-qm", "init"]);
 
+    let gh_dir = root.join("bin");
+    std::fs::create_dir_all(&gh_dir).unwrap();
+
     let core = Core::open(root.join("home")).unwrap();
     core.set_real_time_ticker(false);
+    core.set_gh_search_path(Some(vec![gh_dir.clone()]));
     let project_id = core.add_project(&work.to_string_lossy()).unwrap().id;
     // Checkpoints are taken in the main checkout, which is also where the fake writes files.
     core.set_project_threads_in_main_checkout(project_id, true)
@@ -61,8 +86,13 @@ fn fixture() -> Fixture {
         core,
         project_id,
         work,
+        gh_dir,
         scripts: Mutex::default(),
     }
+}
+
+fn branch(f: &Fixture, name: &str) {
+    git(&f.work, &["checkout", "-q", "-b", name]);
 }
 
 /// A fake whose Turn starts, waits for a script, then completes. Spawning keeps the actor free
@@ -400,6 +430,254 @@ fn an_unreported_outcome_is_unknown() {
     assert_eq!(
         check(&f, thread_id, "cargo test").state,
         VerificationState::Unknown
+    );
+}
+
+#[test]
+fn branch_scope_flags_commits_no_turn_produced() {
+    let f = fixture();
+    branch(&f, "feature");
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |_sender| {
+            std::fs::write(work.join("a.txt"), "one\nwork\n").unwrap();
+            git(&work, &["commit", "-qam", "work by the Thread"]);
+        }),
+    );
+
+    // A commit that lands between Turns belongs to no Turn.
+    std::fs::write(f.work.join("b.txt"), "keep\nnot mine\n").unwrap();
+    git(&f.work, &["commit", "-qam", "edit b.txt outside the Turn"]);
+
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |_sender| {
+            std::fs::write(work.join("a.txt"), "one\nwork again\n").unwrap();
+            git(&work, &["commit", "-qam", "more work by the Thread"]);
+        }),
+    );
+
+    let dossier = f.core.branch_dossier(thread_id).unwrap();
+    assert_eq!(dossier.base_branch.as_deref(), Some("main"));
+    assert!(dossier.coverage_known);
+    let subjects: Vec<&str> = dossier
+        .uncovered_commits
+        .iter()
+        .map(|commit| commit.subject.as_str())
+        .collect();
+    assert_eq!(subjects, ["edit b.txt outside the Turn"]);
+}
+
+#[test]
+fn a_turn_stored_before_head_was_recorded_still_covers_its_own_commit() {
+    let f = fixture();
+    branch(&f, "feature");
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |_sender| {
+            std::fs::write(work.join("a.txt"), "one\nwork\n").unwrap();
+            git(&work, &["commit", "-qam", "work by the Thread"]);
+        }),
+    );
+    rusqlite::Connection::open(f.core.home().join("oxide.db"))
+        .unwrap()
+        .execute(
+            "UPDATE turns SET head_before = NULL, head_after = NULL WHERE thread_id = ?1",
+            [thread_id],
+        )
+        .unwrap();
+
+    let dossier = f.core.branch_dossier(thread_id).unwrap();
+    assert!(
+        dossier.uncovered_commits.is_empty(),
+        "the legacy Turn's time window covers its commit"
+    );
+}
+
+#[test]
+fn branch_scope_shows_the_pull_requests_checks() {
+    let f = fixture();
+    branch(&f, "feature");
+    let thread_id = new_thread(&f);
+    f.install_gh(serde_json::json!({
+        "auth": "ok",
+        "default_branch": "main",
+        "required_checks": ["rust"],
+        "prs": { "feature": {
+            "number": 9,
+            "title": "Feature",
+            "url": "https://github.com/fake/repo/pull/9",
+            "state": "OPEN",
+            "isDraft": false,
+            "baseRefName": "main",
+            "headRefName": "feature",
+            "author": { "login": "me" },
+            "statusCheckRollup": [
+                { "__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "SUCCESS" },
+                { "__typename": "CheckRun", "name": "web", "status": "COMPLETED", "conclusion": "FAILURE" },
+                { "__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS" }
+            ]
+        } }
+    }));
+
+    let dossier = f.core.branch_dossier(thread_id).unwrap();
+    assert!(dossier.pull_request_known);
+    let pull_request = dossier.pull_request.expect("the branch's pull request");
+    assert_eq!(pull_request.number, 9);
+    assert_eq!(pull_request.url, "https://github.com/fake/repo/pull/9");
+    let checks: Vec<(&str, oxide_core::CheckState)> = pull_request
+        .checks
+        .iter()
+        .map(|check| (check.name.as_str(), check.state))
+        .collect();
+    assert_eq!(
+        checks,
+        [
+            ("rust", oxide_core::CheckState::Success),
+            ("web", oxide_core::CheckState::Failure),
+            ("lint", oxide_core::CheckState::Pending),
+        ]
+    );
+    assert!(
+        pull_request.checks[0].required,
+        "branch protection requires rust"
+    );
+    assert!(!pull_request.checks[1].required);
+}
+
+#[test]
+fn supervision_counts_approvals_and_permission_modes_with_unrecorded_older_turns() {
+    let f = fixture();
+    let thread_id = f
+        .core
+        .create_thread(f.project_id, "fake", None, None, PermissionMode::Ask)
+        .unwrap()
+        .id;
+    let fake = FakeProvider::default();
+    let sender = fake.sender();
+    let prompts = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let approval_sender = sender.clone();
+    fake.on_prompt({
+        let sender = sender.clone();
+        let prompts = std::sync::Arc::clone(&prompts);
+        move |prompt| {
+            let sender = sender.clone();
+            let prompts = std::sync::Arc::clone(&prompts);
+            let prompt = prompt.to_string();
+            std::thread::spawn(move || {
+                let _ = sender.send(ProviderEvent::TurnStarted {
+                    turn_index: 0,
+                    prompt,
+                });
+                let index = prompts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = sender.send(ProviderEvent::ApprovalRequested {
+                    id: format!("approval-{index}"),
+                    kind: ApprovalKind::Command,
+                    summary: "Run a command".into(),
+                    options: vec![],
+                });
+            });
+        }
+    });
+    fake.on_approval(move |_id, _decision| {
+        let sender = approval_sender.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(ProviderEvent::TurnCompleted {
+                turn_index: 0,
+                status: TurnStatus::Completed,
+            });
+        });
+    });
+    f.core.register_fake_provider(thread_id, fake);
+    let (_, rx) = f.core.subscribe_thread(thread_id).unwrap();
+
+    f.core.send_prompt(thread_id, "allow").unwrap();
+    wait_for(&rx, |event| {
+        matches!(
+            event,
+            ThreadEvent::ApprovalRequested { id, .. } if id == "approval-0"
+        )
+    });
+    f.core
+        .respond_to_approval(thread_id, "approval-0", ApprovalDecision::Allow)
+        .unwrap();
+    wait_for(&rx, |event| {
+        matches!(
+            event,
+            ThreadEvent::ThreadStatusChanged {
+                status: ThreadStatus::Completed
+            }
+        )
+    });
+
+    f.core
+        .set_thread_permission_mode(thread_id, PermissionMode::AutoEdit)
+        .unwrap();
+    f.core.send_prompt(thread_id, "deny").unwrap();
+    wait_for(&rx, |event| {
+        matches!(
+            event,
+            ThreadEvent::ApprovalRequested { id, .. } if id == "approval-1"
+        )
+    });
+    f.core
+        .respond_to_approval(thread_id, "approval-1", ApprovalDecision::Deny)
+        .unwrap();
+    wait_for(&rx, |event| {
+        matches!(
+            event,
+            ThreadEvent::ThreadStatusChanged {
+                status: ThreadStatus::Completed
+            }
+        )
+    });
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+    assert_eq!(dossier.supervision.approvals_granted, 1);
+    assert_eq!(dossier.supervision.approvals_denied, 1);
+    assert_eq!(
+        dossier.supervision.permission_modes,
+        [
+            oxide_core::PermissionModeUse {
+                mode: Some(PermissionMode::Ask),
+                turns: 1,
+            },
+            oxide_core::PermissionModeUse {
+                mode: Some(PermissionMode::AutoEdit),
+                turns: 1,
+            },
+        ]
+    );
+
+    // A Turn stored before permission modes were recorded reads as unknown.
+    rusqlite::Connection::open(f.core.home().join("oxide.db"))
+        .unwrap()
+        .execute(
+            "UPDATE turns SET permission_mode = NULL WHERE thread_id = ?1 AND turn_index = 0",
+            [thread_id],
+        )
+        .unwrap();
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+    assert_eq!(
+        dossier.supervision.permission_modes,
+        [
+            oxide_core::PermissionModeUse {
+                mode: Some(PermissionMode::AutoEdit),
+                turns: 1,
+            },
+            oxide_core::PermissionModeUse {
+                mode: None,
+                turns: 1,
+            },
+        ]
     );
 }
 

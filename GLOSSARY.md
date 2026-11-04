@@ -94,8 +94,16 @@ A command that counts as a check (tests, type checks, lint, build), recognized f
 _Avoid_: Test command, check script
 
 **Verification Dossier**:
-The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. Also called the Dossier.
+The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. In Branch scope it covers the whole branch: every Turn, the commits no Turn produced, the pull request's checks, Approvals and Permission modes. Also called the Dossier.
 _Avoid_: Report, summary, risk score
+
+**Uncovered commit**:
+A commit on the branch since the base that no Turn of the Thread recorded as produced. The Dossier lists uncovered commits instead of presenting the whole branch as the Thread's work.
+_Avoid_: Foreign commit, orphan commit
+
+**Supervision**:
+The Dossier section that counts the Approvals granted and denied over a Thread's Turns and the Permission modes those Turns started in. A Turn stored before its mode was recorded counts as unknown.
+_Avoid_: Oversight, permissions summary
 
 **Blind review**:
 A review of a change by a Provider session that received only the diff and the issue, never the original Thread. Its findings become Line comments the user keeps or dismisses.

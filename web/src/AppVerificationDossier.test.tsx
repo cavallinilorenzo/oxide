@@ -19,6 +19,35 @@ let root: Root;
 const project = { id: 1, name: "Project", path: "/test", hidden: false, open: true, missing: false };
 const thread = { id: 2, projectId: 1, title: "Existing", provider: "claude", status: "completed", updatedAt: "2026-01-01T00:00:00Z" };
 const file = (path: string) => ({ path, oldPath: null, status: "modified", added: 1, removed: 0, binary: false, hunks: [] });
+const dossier = {
+  commands: [
+    { command: "cargo test", kind: "test", state: "fresh", turnIndex: 0, outcome: "succeeded", exitCode: 0 },
+    { command: "cargo clippy", kind: "lint", state: "stale", turnIndex: 0, outcome: "succeeded", exitCode: 0 },
+    { command: "pytest", kind: "test", state: "failed", turnIndex: 0, outcome: "failed", exitCode: 1 },
+    { command: "pnpm run verify", kind: "other", state: "neverRun", turnIndex: null, outcome: null, exitCode: null },
+    { command: "tsc", kind: "typeCheck", state: "unknown", turnIndex: 0, outcome: "succeeded", exitCode: null },
+  ],
+  baseBranch: "main",
+  coverageKnown: true,
+  uncoveredCommits: [{ sha: "0123456789abcdef", subject: "fix the parser by hand" }],
+  pullRequestKnown: true,
+  pullRequest: {
+    number: 42,
+    url: "https://github.com/fake/repo/pull/42",
+    checks: [
+      { name: "rust", state: "success", url: null, required: true },
+      { name: "web", state: "failure", url: null, required: true },
+    ],
+  },
+  supervision: {
+    approvalsGranted: 2,
+    approvalsDenied: 1,
+    permissionModes: [
+      { mode: "ask", turns: 2 },
+      { mode: null, turns: 1 },
+    ],
+  },
+};
 const calls: { command: string; args: unknown }[] = [];
 
 beforeEach(() => {
@@ -35,17 +64,7 @@ beforeEach(() => {
     if (command === "list_turn_picks") return [{ turnIndex: 0, prompt: "Add the parser", checkpointed: true }];
     if (command === "git_turn_diff") return { base: null, files: [file("src/parser.rs")] };
     if (command === "git_diff") return { base: "main", files: [] };
-    if (command === "verification_dossier") {
-      return {
-        commands: [
-          { command: "cargo test", kind: "test", state: "fresh", turnIndex: 0, outcome: "succeeded", exitCode: 0 },
-          { command: "cargo clippy", kind: "lint", state: "stale", turnIndex: 0, outcome: "succeeded", exitCode: 0 },
-          { command: "pytest", kind: "test", state: "failed", turnIndex: 0, outcome: "failed", exitCode: 1 },
-          { command: "pnpm run verify", kind: "other", state: "neverRun", turnIndex: null, outcome: null, exitCode: null },
-          { command: "tsc", kind: "typeCheck", state: "unknown", turnIndex: 0, outcome: "succeeded", exitCode: null },
-        ],
-      };
-    }
+    if (command === "verification_dossier" || command === "branch_dossier") return dossier;
     if (command === "get_project_verification_commands") return ["pnpm run verify"];
     if (command === "plugin:event|listen") return 1;
     return null;
@@ -81,6 +100,28 @@ it("shows every Verification state beside the diff", async () => {
   expect(host.textContent).toContain("Type check");
   expect(host.textContent).toContain("Turn 1");
   expect(host.textContent).toContain("exit 1");
+});
+
+it("shows branch coverage, pull request checks and supervision in Branch scope", async () => {
+  await openDiff();
+  const branch = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+    (tab) => tab.textContent === "Branch",
+  )!;
+  await act(async () => branch.click());
+
+  await vi.waitFor(() =>
+    expect(host.querySelector('[aria-label="Commits not covered"]')?.textContent).toContain(
+      "fix the parser by hand",
+    ),
+  );
+  const check = (name: string) => host.querySelector(`[aria-label^="${name}: "]`);
+  expect(check("rust")!.getAttribute("aria-label")).toBe("rust: Passed");
+  expect(check("web")!.getAttribute("aria-label")).toBe("web: Failed");
+  expect(host.querySelector('[aria-label="Pull request checks"]')?.textContent).toContain("Required");
+  const supervision = host.querySelector('[aria-label="Supervision"]')!.textContent!;
+  expect(supervision).toContain("2 granted, 1 denied");
+  expect(supervision).toContain("Ask 2");
+  expect(supervision).toContain("Unknown 1");
 });
 
 it("adds a Project Verification command and asks for the Dossier again", async () => {

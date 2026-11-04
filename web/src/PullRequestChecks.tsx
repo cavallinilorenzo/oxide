@@ -2,7 +2,7 @@ import { CheckCircleFillIcon, ChevronDownIcon, DotFillIcon, LinkExternalIcon, XC
 import type { PullRequestCheck } from "./bindings";
 import { countChecks, dedupeChecks } from "./pullRequestReview";
 
-const CHECK_WORD = { success: "Passed", failure: "Failed", pending: "Running" } as const;
+export const CHECK_WORD = { success: "Passed", failure: "Failed", pending: "Running" } as const;
 
 /** Checks in a box: what needs attention is listed, what passed folds into one row you can open.
  *  A check with a link opens its run on GitHub, to see what went wrong. */

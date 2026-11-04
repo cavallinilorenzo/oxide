@@ -72,6 +72,15 @@ pub struct BranchPullRequest {
     pub checks_pending: u32,
 }
 
+/// A branch's pull request with each check GitHub reports, for the Dossier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPullRequestChecks {
+    pub number: u32,
+    pub url: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
 /// How `gh pr merge` combines the commits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +108,7 @@ impl MergeMethod {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CheckState {
     Success,
@@ -117,7 +126,7 @@ impl CheckState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestCheck {
     pub name: String,
@@ -968,13 +977,12 @@ pub fn merged_head(gh: &Gh, cwd: &Path, number: u32) -> Result<Option<(String, O
         .map(|head| (head.to_string(), merged_at)))
 }
 
-/// The pull request of `branch`, whatever its state: an open one if there is one, else the
-/// latest, with its merge time (ISO 8601, UTC) when merged. `None` when the branch has none.
-pub fn branch_pull_request(
+/// The pull request of `branch` GitHub should show: an open one if there is one, else the latest.
+fn branch_pull_request_value(
     gh: &Gh,
     cwd: &Path,
     branch: &str,
-) -> Result<Option<(BranchPullRequest, Option<String>)>> {
+) -> Result<Option<serde_json::Value>> {
     gh.require_ready(cwd)?;
     let fields = format!("{PR_FIELDS},statusCheckRollup");
     let list = parse(&gh.run(
@@ -985,15 +993,25 @@ pub fn branch_pull_request(
     )?)?;
     let prs = list.as_array().cloned().unwrap_or_default();
     let open = |v: &&serde_json::Value| v["state"].as_str() == Some("OPEN");
-    let Some(v) = prs
+    Ok(prs
         .iter()
         .filter(open)
         .max_by_key(|v| v["number"].as_u64())
         .or_else(|| prs.iter().max_by_key(|v| v["number"].as_u64()))
-    else {
+        .cloned())
+}
+
+/// The pull request of `branch`, whatever its state: an open one if there is one, else the
+/// latest, with its merge time (ISO 8601, UTC) when merged. `None` when the branch has none.
+pub fn branch_pull_request(
+    gh: &Gh,
+    cwd: &Path,
+    branch: &str,
+) -> Result<Option<(BranchPullRequest, Option<String>)>> {
+    let Some(v) = branch_pull_request_value(gh, cwd, branch)? else {
         return Ok(None);
     };
-    let phase = phase_from(v);
+    let phase = phase_from(&v);
     let mut tally = [0u32; 3];
     for check in v["statusCheckRollup"].as_array().into_iter().flatten() {
         tally[match check_from(check).state {
@@ -1014,6 +1032,35 @@ pub fn branch_pull_request(
         },
         merged_at,
     )))
+}
+
+/// The pull request of `branch` with its checks, for the Dossier. Same pull request choice as
+/// [`branch_pull_request`], but with each check GitHub reports instead of a tally.
+pub fn branch_pull_request_checks(
+    gh: &Gh,
+    cwd: &Path,
+    branch: &str,
+) -> Result<Option<BranchPullRequestChecks>> {
+    let Some(v) = branch_pull_request_value(gh, cwd, branch)? else {
+        return Ok(None);
+    };
+    let number = v["number"].as_u64().unwrap_or(0) as u32;
+    let required = required_check_names(gh, cwd, number);
+    let checks = v["statusCheckRollup"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|v| {
+            let mut check = check_from(v);
+            check.required = required.contains(&check.name);
+            check
+        })
+        .collect();
+    Ok(Some(BranchPullRequestChecks {
+        number,
+        url: text(&v["url"]),
+        checks,
+    }))
 }
 
 /// The inline review threads of a pull request, as GitHub shows them on its diff.

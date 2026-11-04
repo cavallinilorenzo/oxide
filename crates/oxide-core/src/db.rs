@@ -222,6 +222,12 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN verification_commands TEXT NOT NULL DEFAULT '[]';
 ",
+    // The branch HEAD when a Turn started and when it ended, so the Dossier can tell the commits
+    // the Turn produced from those it did not. NULL for Turns stored before this.
+    "
+    ALTER TABLE turns ADD COLUMN head_before TEXT;
+    ALTER TABLE turns ADD COLUMN head_after TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

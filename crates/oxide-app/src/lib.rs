@@ -841,11 +841,53 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
-/// The Verification section of the Diff Surface for one Thread.
+/// A commit on the branch that no Turn of the Thread accounts for.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCommit {
+    pub sha: String,
+    pub subject: String,
+}
+
+/// The branch's pull request with the checks GitHub reports for it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierPullRequest {
+    pub number: u32,
+    pub url: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
+/// One Permission mode and how many Turns started in it; `null` is a Turn stored before modes
+/// were recorded.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionModeUse {
+    pub mode: Option<PermissionMode>,
+    pub turns: u32,
+}
+
+/// How much supervision the work actually had.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Supervision {
+    pub approvals_granted: u32,
+    pub approvals_denied: u32,
+    pub permission_modes: Vec<PermissionModeUse>,
+}
+
+/// The Dossier of one Thread: its Verification commands and supervision, plus branch evidence in
+/// Branch scope.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     pub commands: Vec<VerificationCommand>,
+    pub base_branch: Option<String>,
+    pub coverage_known: bool,
+    pub uncovered_commits: Vec<BranchCommit>,
+    pub pull_request: Option<DossierPullRequest>,
+    pub pull_request_known: bool,
+    pub supervision: Supervision,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -2975,7 +3017,8 @@ fn set_project_verification_commands(
     Ok(core.set_project_verification_commands(project_id, &commands)?)
 }
 
-/// Which Verification commands ran in a Thread, and whether their results still apply.
+/// The Thread-scoped Dossier: which Verification commands ran, whether they still apply, and
+/// how much supervision the Turns had.
 #[tauri::command]
 #[specta::specta]
 async fn verification_dossier(
@@ -2983,6 +3026,19 @@ async fn verification_dossier(
     thread_id: u32,
 ) -> Result<VerificationDossier, AppError> {
     git_blocking(&core, move |core| core.verification_dossier(thread_id))
+        .await
+        .map(|dossier| convert(&dossier))
+}
+
+/// The Dossier of the Thread's whole branch: its commands and supervision, the commits no Turn
+/// produced and the pull request's checks.
+#[tauri::command]
+#[specta::specta]
+async fn branch_dossier(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<VerificationDossier, AppError> {
+    git_blocking(&core, move |core| core.branch_dossier(thread_id))
         .await
         .map(|dossier| convert(&dossier))
 }
@@ -3581,6 +3637,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_project_verification_commands,
         set_project_verification_commands,
         verification_dossier,
+        branch_dossier,
         get_project_threads_in_main_checkout,
         set_project_threads_in_main_checkout,
         continue_thread,

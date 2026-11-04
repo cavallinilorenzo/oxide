@@ -379,6 +379,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
             let turn_index = state.next_turn_index;
             state.next_turn_index += 1;
             state.dropped_items.clear();
+            let head_before = crate::git::head(&state.checkout);
             checkpoint::take(&state.checkout, state.thread_id, turn_index, Phase::Start);
             let segments = state
                 .pending_segments
@@ -394,6 +395,7 @@ fn handle_provider_event(evt: ProviderEvent, state: &mut ActorState, storage: &S
                 turn_index,
                 prompt.clone(),
                 segments.clone(),
+                head_before,
             ) {
                 id = Some(started.id);
                 model = started.model;
@@ -601,7 +603,8 @@ fn finish_turn(
         }
     });
     if let Some(turn_id) = turn.id {
-        let _ = storage.update_turn_completed(turn_id, status, error.clone());
+        let head_after = crate::git::head(&state.checkout);
+        let _ = storage.update_turn_completed(turn_id, status, error.clone(), head_after);
     }
     let final_thread_status = match status {
         TurnStatus::Completed => ThreadStatus::Completed,

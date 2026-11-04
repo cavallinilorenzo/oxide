@@ -29,6 +29,7 @@ struct Fixture {
     _tmp: TempDir,
     core: Core,
     project: u32,
+    work: PathBuf,
     gh_dir: PathBuf,
 }
 
@@ -53,6 +54,7 @@ fn fixture() -> Fixture {
         _tmp: tmp,
         core,
         project,
+        work,
         gh_dir,
     }
 }
@@ -155,11 +157,19 @@ const LATER: &str = "2099-01-01T00:00:00Z";
 
 /// A Thread with a merged pull request on its branch, seen by opening the Board.
 fn merged_thread(f: &Fixture, prompt: &str) -> oxide_core::thread::ThreadSummary {
+    merged_thread_at(f, prompt, LATER)
+}
+
+fn merged_thread_at(
+    f: &Fixture,
+    prompt: &str,
+    merged_at: &str,
+) -> oxide_core::thread::ThreadSummary {
     let thread = f.finished_thread(prompt);
     let branch = thread.branch.clone().unwrap();
     f.set_gh(serde_json::json!({
         "auth": "ok",
-        "prs": { branch.clone(): pr(&branch, 4, "MERGED", Some(LATER)) },
+        "prs": { branch.clone(): pr(&branch, 4, "MERGED", Some(merged_at)) },
     }));
     let _board = f.core.subscribe_board(f.project).unwrap();
     wait_until(|| !f.ledger().entries.is_empty());
@@ -435,4 +445,111 @@ fn review_rounds_survive_deleting_the_thread_and_clearing_removes_them() {
     f.core.clear_review_ledger().unwrap();
     let after = f.ledger();
     assert!(after.rounds.is_empty());
+}
+
+#[test]
+fn fetch_detects_reverts_of_tracked_merge_within_30_days_from_default_branch() {
+    let f = fixture();
+    let thread = f.finished_thread("Implement feature");
+    let turns = f.core.list_turns(thread.id, 0, 10).unwrap();
+    let turn_completed_at = turns.turns[0].completed_at.as_ref().unwrap();
+
+    let branch = thread.branch.clone().unwrap();
+    f.set_gh(serde_json::json!({
+        "auth": "ok",
+        "prs": { branch.clone(): pr(&branch, 4, "MERGED", Some(turn_completed_at)) },
+    }));
+    let _board = f.core.subscribe_board(f.project).unwrap();
+    wait_until(|| !f.ledger().entries.is_empty());
+
+    // Commit a revert of PR #4 on main
+    git(
+        &f.work,
+        &[
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "Revert \"feat: feature (#4)\"",
+        ],
+    );
+
+    // Background fetch triggers revert detection
+    let fetched = f.core.fetch_project(f.project).unwrap();
+    assert!(fetched);
+
+    let ledger = f.ledger();
+    assert_eq!(ledger.reverts.len(), 1);
+    let rev = &ledger.reverts[0];
+    assert_eq!(rev.pull_request, 4);
+    assert!(rev.commit_subject.contains("Revert"));
+}
+
+#[test]
+fn fetch_detects_candidate_follow_up_fixes_using_the_four_heuristics() {
+    let f = fixture();
+    let thread = f.finished_thread("Fix billing calculations");
+    let turns = f.core.list_turns(thread.id, 0, 10).unwrap();
+    let turn_completed_at = turns.turns[0].completed_at.as_ref().unwrap();
+    let branch = thread.branch.clone().unwrap();
+
+    // The PR touched a source file and a boilerplate file
+    let wt = PathBuf::from(thread.worktree_path.as_ref().unwrap());
+    std::fs::create_dir_all(wt.join("src")).unwrap();
+    std::fs::write(wt.join("src/billing.rs"), "pub fn calc() -> u32 { 1 }\n").unwrap();
+    std::fs::write(wt.join("README.md"), "# Project\n").unwrap();
+    git(&wt, &["add", "."]);
+    git(&wt, &["commit", "-qm", "feat: billing (#10)"]);
+
+    // Push and merge PR #10
+    f.set_gh(serde_json::json!({
+        "auth": "ok",
+        "prs": { branch.clone(): pr(&branch, 10, "MERGED", Some(turn_completed_at)) },
+    }));
+    let _board = f.core.subscribe_board(f.project).unwrap();
+    wait_until(|| !f.ledger().entries.is_empty());
+
+    // Commit on main modifying the co-modified non-boilerplate file src/billing.rs
+    std::fs::create_dir_all(f.work.join("src")).unwrap();
+    std::fs::write(
+        f.work.join("src/billing.rs"),
+        "pub fn calc() -> u32 { 2 }\n",
+    )
+    .unwrap();
+    git(&f.work, &["add", "src/billing.rs"]);
+    git(&f.work, &["commit", "-qm", "fix: fix edge case in billing"]);
+
+    // Also a commit modifying ONLY boilerplate file README.md (should NOT match)
+    std::fs::write(f.work.join("README.md"), "# Updated README\n").unwrap();
+    git(&f.work, &["add", "README.md"]);
+    git(&f.work, &["commit", "-qm", "docs: update readme"]);
+
+    // Fetch on main
+    assert!(f.core.fetch_project(f.project).unwrap());
+
+    let ledger = f.ledger();
+    assert_eq!(ledger.follow_ups.len(), 1);
+    let fu = &ledger.follow_ups[0];
+    assert_eq!(fu.pull_request, 10);
+    assert_eq!(fu.status, oxide_core::FollowUpStatus::Candidate);
+    assert_eq!(fu.co_modified_files, vec!["src/billing.rs"]);
+
+    // Confirm candidate
+    f.core
+        .confirm_follow_up(f.project, 10, &fu.commit_sha)
+        .unwrap();
+    let ledger = f.ledger();
+    assert_eq!(
+        ledger.follow_ups[0].status,
+        oxide_core::FollowUpStatus::Confirmed
+    );
+
+    // Dismiss candidate
+    f.core
+        .dismiss_follow_up(f.project, 10, &fu.commit_sha)
+        .unwrap();
+    let ledger = f.ledger();
+    assert_eq!(
+        ledger.follow_ups[0].status,
+        oxide_core::FollowUpStatus::Dismissed
+    );
 }

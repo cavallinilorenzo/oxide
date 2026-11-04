@@ -798,6 +798,39 @@ pub struct ReviewLedgerEntry {
     pub merged_at: f64,
 }
 
+/// Status of a follow-up fix candidate in the Review ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowUpStatus {
+    Candidate,
+    Confirmed,
+    Dismissed,
+}
+
+/// A revert commit detected on the default branch for a tracked merged pull request.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRevert {
+    pub pull_request: u32,
+    pub commit_sha: String,
+    pub commit_subject: String,
+    /// Seconds since the Unix epoch (UTC).
+    pub committed_at: f64,
+}
+
+/// A follow-up candidate commit detected on the default branch for a tracked merged pull request.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFollowUp {
+    pub pull_request: u32,
+    pub commit_sha: String,
+    pub commit_subject: String,
+    /// Seconds since the Unix epoch (UTC).
+    pub committed_at: f64,
+    pub co_modified_files: Vec<String>,
+    pub status: FollowUpStatus,
+}
+
 /// A Project's wait between a finished Turn and the merge.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -809,6 +842,10 @@ pub struct ReviewLedger {
     pub entries: Vec<ReviewLedgerEntry>,
     /// Review rounds grouped by Provider, Model and kind of work.
     pub rounds: Vec<ReviewRoundGroup>,
+    /// Reverts detected on the default branch within 30 days.
+    pub reverts: Vec<ReviewRevert>,
+    /// Candidate follow-up fixes detected on the default branch within 30 days.
+    pub follow_ups: Vec<ReviewFollowUp>,
 }
 
 /// The band a change's diff size falls in.
@@ -3549,6 +3586,30 @@ fn clear_review_ledger(core: State<'_, Arc<Core>>) -> Result<(), AppError> {
     Ok(core.clear_review_ledger()?)
 }
 
+/// Confirms a candidate follow-up fix in the Review ledger.
+#[tauri::command]
+#[specta::specta]
+fn confirm_follow_up(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    pull_request: u32,
+    commit_sha: String,
+) -> Result<(), AppError> {
+    Ok(core.confirm_follow_up(project_id, pull_request, &commit_sha)?)
+}
+
+/// Dismisses a candidate follow-up fix in the Review ledger.
+#[tauri::command]
+#[specta::specta]
+fn dismiss_follow_up(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    pull_request: u32,
+    commit_sha: String,
+) -> Result<(), AppError> {
+    Ok(core.dismiss_follow_up(project_id, pull_request, &commit_sha)?)
+}
+
 /// A Provider's Usage limits now (if Oxide has seen any), then every update on `on_event`.
 #[tauri::command]
 #[specta::specta]
@@ -3791,6 +3852,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         subscribe_usage_limits,
         review_ledger,
         clear_review_ledger,
+        confirm_follow_up,
+        dismiss_follow_up,
         start_terminal,
         start_block_terminal,
         write_file,

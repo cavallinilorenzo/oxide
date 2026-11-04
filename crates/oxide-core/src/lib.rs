@@ -104,8 +104,8 @@ pub use oxide_provider::{
 };
 pub use restore::{PendingRestore, RestoreChange, RestoreFile, RestoreOutcome, RestorePreview};
 pub use review_ledger::{
-    RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry, ReviewRoundGroup, ReviewSizeBand,
-    ReviewWorkKind,
+    FollowUpStatus, RECENT_ENTRIES, ReviewFollowUp, ReviewLedger, ReviewLedgerEntry, ReviewRevert,
+    ReviewRoundGroup, ReviewSizeBand, ReviewWorkKind,
 };
 use settings::SettingsStore;
 pub use settings::{
@@ -1881,7 +1881,13 @@ impl Core {
 
     /// Like [`Core::fetch_project`], with the current time injected.
     pub fn fetch_project_at(&self, project_id: u32, now: std::time::Instant) -> Result<bool> {
-        self.git.fetch(&self.main_checkout(project_id)?, now)
+        let checkout = self.main_checkout(project_id)?;
+        let fetched = self.git.fetch(&checkout, now)?;
+        if fetched {
+            let _ =
+                review_ledger::detect_reverts_and_follow_ups(&checkout, project_id, &self.ledger);
+        }
+        Ok(fetched)
     }
 
     /// `git pull --ff-only`; a diverged branch fails with Git's message.
@@ -2243,6 +2249,36 @@ impl Core {
     /// Removes every entry of the Review ledger.
     pub fn clear_review_ledger(&self) -> Result<()> {
         self.ledger.clear()
+    }
+
+    /// Confirms a candidate follow-up fix in the Review ledger.
+    pub fn confirm_follow_up(
+        &self,
+        project_id: u32,
+        pull_request: u32,
+        commit_sha: &str,
+    ) -> Result<()> {
+        self.ledger.set_follow_up_status(
+            project_id,
+            pull_request,
+            commit_sha,
+            FollowUpStatus::Confirmed,
+        )
+    }
+
+    /// Dismisses a candidate follow-up fix in the Review ledger.
+    pub fn dismiss_follow_up(
+        &self,
+        project_id: u32,
+        pull_request: u32,
+        commit_sha: &str,
+    ) -> Result<()> {
+        self.ledger.set_follow_up_status(
+            project_id,
+            pull_request,
+            commit_sha,
+            FollowUpStatus::Dismissed,
+        )
     }
 
     /// Closes a pull request on GitHub without merging it.

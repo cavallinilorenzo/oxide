@@ -47,16 +47,17 @@ describe("dispatch form", () => {
       baseBranch: null,
       issueNumber: null,
       issueTitle: null,
+      issueLabels: [],
     });
   });
 
   it("starts from an issue: the prompt carries its number, title, body and URL, and the request links it", () => {
-    const issue = { number: 51, title: "Start a Thread", body: "Do it.", url: "https://github.com/o/r/issues/51" };
+    const issue = { number: 51, title: "Start a Thread", body: "Do it.", url: "https://github.com/o/r/issues/51", labels: ["bug", "backend"] };
     const form = issueDispatchForm(defaultDispatchForm(settings, "dev"), issue);
     expect(form.prompt).toBe("Issue #51: Start a Thread\nhttps://github.com/o/r/issues/51\n\nDo it.");
     expect(form.provider).toBe("claude");
     const edited = { ...form, prompt: `${form.prompt} Be quick.` };
-    expect(dispatchRequest(7, edited, issue)).toMatchObject({ issueNumber: 51, issueTitle: "Start a Thread" });
+    expect(dispatchRequest(7, edited, issue)).toMatchObject({ issueNumber: 51, issueTitle: "Start a Thread", issueLabels: ["bug", "backend"] });
   });
 
   it("tells Board Threads from chat Threads by their branch", () => {

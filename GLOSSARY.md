@@ -113,6 +113,14 @@ _Avoid_: Second opinion, AI review, auto-review
 Local figures about completed work that outlive Threads: identifiers, Provider, Model, timestamps and counts, never Transcript text. It is never sent anywhere and the user can clear it. See ADR-0010.
 _Avoid_: History, analytics, telemetry
 
+**Review round**:
+One send of Line comments, or of selected reviewer comments, to a Thread. The Review ledger counts review rounds by Provider, Model and kind of work (languages touched, diff size band and the issue's labels when present), with the sample size of each group, so small groups are not read as strongly. It stores no comment text.
+_Avoid_: Review pass, iteration, cycle
+
+**Reviewer comment**:
+One comment of a Review thread, written by a GitHub reviewer rather than by the user. It reaches a Thread only when the user selects its thread and asks for a fix, quoted and marked as external content. It is not a Line comment.
+_Avoid_: Review comment, review note
+
 ## Providers
 
 **Provider**:

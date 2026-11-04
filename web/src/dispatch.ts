@@ -35,6 +35,8 @@ export interface DispatchIssue {
   title: string;
   body: string;
   url: string;
+  /** The issue's labels, kept so the Review ledger can tell the kind of work apart. */
+  labels?: string[];
 }
 
 /** The form starting from an issue: its number, title, URL and body as an editable prompt. */
@@ -56,6 +58,7 @@ export function dispatchRequest(projectId: number, form: DispatchForm, issue?: D
     baseBranch: blankToNull(form.baseBranch),
     issueNumber: issue?.number ?? null,
     issueTitle: issue?.title ?? null,
+    issueLabels: issue?.labels ?? [],
   };
 }
 

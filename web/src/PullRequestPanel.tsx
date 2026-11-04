@@ -21,7 +21,7 @@ interface PullRequestPanelProps {
   /** Shows a pull request's changed files in the Diff Surface. */
   onReviewFiles: (number: number) => void;
   /** Sends the repair request to the Thread that owns the branch, or a new Thread with Settings defaults. */
-  onFixPullRequest: (prompt: string, ownerThreadId?: number | null) => Promise<void>;
+  onFixPullRequest: (prompt: string, ownerThreadId?: number | null, reviewRound?: boolean) => Promise<void>;
 }
 
 /** The repository's open pull requests on GitHub, through `gh`. It loads when opened, after the

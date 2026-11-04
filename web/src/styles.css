@@ -1446,6 +1446,8 @@ section.terminal.terminal-hidden { display: none; }
 .review-ledger ul { list-style: none; padding: 0; margin: 12px 0; }
 .review-ledger li { display: flex; gap: 12px; padding: 6px 8px; }
 .review-ledger li > span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.review-rounds li { flex-wrap: wrap; border-top: 1px solid var(--line); }
+.review-rounds li > span:last-child { font-variant-numeric: tabular-nums; }
 .project-overview-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
 .project-overview-links button { background: none; border: 0; color: var(--acc2); padding: 0 4px; }
 .provider-tab:disabled { opacity: .4; background: transparent; border-color: transparent; cursor: not-allowed; }

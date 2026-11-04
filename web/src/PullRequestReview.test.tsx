@@ -117,7 +117,7 @@ it("can fix conflicts without failed checks, including in a draft", async () => 
   await render();
   expect(button("Ready for review").nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
-  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Resolve merge conflicts"), null);
+  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Resolve merge conflicts"), null, false);
 });
 
 it.each(["clean", "blocked", "behind", "unknown"] as const)("does not offer a repair for %s with passing or running checks", async (mergeState) => {
@@ -134,7 +134,7 @@ it("places Fix PR beside Squash and merge for failing CI", async () => {
   await render();
   expect(button(/Squash and merge/).nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
-  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: web"), null);
+  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: web"), null, false);
 });
 
 it("offers Fix PR beside the merge action when only an optional check fails", async () => {
@@ -145,7 +145,7 @@ it("offers Fix PR beside the merge action when only an optional check fails", as
   await render();
   expect(button(/Squash and merge/).nextElementSibling).toBe(button("Fix PR"));
   await click(button("Fix PR"));
-  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: optional"), null);
+  expect(onFixPullRequest).toHaveBeenCalledWith(expect.stringContaining("Fix failing CI check: optional"), null, false);
 });
 
 it("still offers Fix PR in the footer when the repository allows no merge method", async () => {

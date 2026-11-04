@@ -602,11 +602,23 @@ fn finish_turn(
             stderr_tail,
         }
     });
-    if let Some(turn_id) = turn.id {
+    let recorded = if let Some(turn_id) = turn.id {
         let head_after = crate::git::head(&state.checkout);
-        let _ = storage.update_turn_completed(turn_id, status, error.clone(), head_after);
-    }
+        match storage.update_turn_completed(turn_id, status, error.clone(), head_after) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("could not record Turn {turn_id} as {status:?}: {error:?}");
+                false
+            }
+        }
+    } else {
+        // The Turn never reached the Transcript: its insert failed when it started.
+        false
+    };
     let final_thread_status = match status {
+        // A Thread whose Turn is not in the Transcript would open with an empty
+        // conversation: say it went wrong instead of calling it completed.
+        TurnStatus::Completed if !recorded => ThreadStatus::Error,
         TurnStatus::Completed => ThreadStatus::Completed,
         TurnStatus::Interrupted => ThreadStatus::Interrupted,
         TurnStatus::Error => ThreadStatus::Error,

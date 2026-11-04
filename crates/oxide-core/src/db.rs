@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::error::{Error, Result};
 
@@ -292,6 +292,15 @@ pub const MIGRATIONS: &[&str] = &[
 ",
 ];
 
+/// Starts a transaction that will write. `IMMEDIATE` takes the write lock up front:
+/// a deferred transaction that reads first and writes later reads a snapshot another
+/// connection (the app's own, the board's, the review ledger's) is free to replace,
+/// and then fails to upgrade with `SQLITE_BUSY_SNAPSHOT` — an error the busy timeout
+/// does not retry, so the write is simply lost.
+pub(crate) fn write_transaction(conn: &Connection) -> Result<Transaction<'_>> {
+    Transaction::new_unchecked(conn, TransactionBehavior::Immediate).map_err(Into::into)
+}
+
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing
 /// `<path>.bak-<version>` first, where `<version>` is the version being migrated away from.
 pub fn open(path: &Path, migrations: &[&str]) -> Result<Connection> {
@@ -331,4 +340,47 @@ fn backup(conn: &Connection, path: &Path, version: u32) -> Result<()> {
     let dest = std::path::PathBuf::from(name);
     fs::copy(path, &dest).map_err(|source| Error::Io { path: dest, source })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Oxide writes the database from several connections at once. A transaction that
+    /// reads before it writes must hold the write lock while it does, or another
+    /// connection's write lands in between and its own write is lost.
+    #[test]
+    fn a_write_transaction_survives_another_connection_writing_meanwhile() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oxide.db");
+        let mine = open(&path, &[]).unwrap();
+        mine.execute_batch("CREATE TABLE probe (value TEXT)")
+            .unwrap();
+        let other = open(&path, &[]).unwrap();
+
+        let transaction = write_transaction(&mine).unwrap();
+        let _: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM probe", [], |r| r.get(0))
+            .unwrap();
+        // Another connection writes while this transaction is open and has already read.
+        let writer = std::thread::spawn(move || {
+            other.execute("INSERT INTO probe (value) VALUES ('other')", [])
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        transaction
+            .execute("INSERT INTO probe (value) VALUES ('mine')", [])
+            .unwrap();
+        transaction.commit().unwrap();
+
+        assert_eq!(
+            writer.join().unwrap().unwrap(),
+            1,
+            "the other writer lost its write"
+        );
+        let written: i64 = mine
+            .query_row("SELECT COUNT(*) FROM probe", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(written, 2);
+    }
 }

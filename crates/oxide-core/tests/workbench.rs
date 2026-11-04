@@ -1,4 +1,6 @@
 use oxide_core::{Core, LanguageServerConfig};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn fixture() -> (tempfile::TempDir, Core, u32) {
@@ -70,6 +72,99 @@ fn until(core: &Core, id: u32, rx: &crossbeam_channel::Receiver<Vec<u8>>, needle
         "Did not receive {needle:?}: {}",
         String::from_utf8_lossy(&bytes)
     );
+}
+
+/// A terminal view that keeps reading for the whole test, as the app's own view does:
+/// `until` stops reading as soon as it has what it waited for, and a view left behind
+/// must not hold up the shell (see `a_stalled_terminal_view_never_stalls_the_shell`).
+struct Drained {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    stop: Arc<AtomicBool>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+fn drain_terminal(core: &Arc<Core>, terminal_id: u32) -> Drained {
+    let rx = core.subscribe_terminal(terminal_id).unwrap();
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader = {
+        let core = Arc::clone(core);
+        let bytes = Arc::clone(&bytes);
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let Ok(chunk) = rx.recv_timeout(Duration::from_millis(100)) else {
+                    continue;
+                };
+                for _ in 0..chunk.windows(4).filter(|w| *w == b"\x1b[6n").count() {
+                    let _ = core.write_terminal(terminal_id, b"\x1b[1;1R");
+                }
+                bytes.lock().unwrap().extend(chunk);
+            }
+        })
+    };
+    Drained {
+        bytes,
+        stop,
+        reader: Some(reader),
+    }
+}
+
+impl Drained {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.bytes.lock().unwrap()).into_owned()
+    }
+
+    fn wait_for(&self, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            let output = self.text();
+            if output.contains(needle) {
+                return output;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let output = self.text();
+        panic!(
+            "Did not receive {needle:?} in {} bytes: {}",
+            output.len(),
+            &output[output.len().saturating_sub(2000)..]
+        );
+    }
+}
+
+impl Drop for Drained {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+/// A view that stops reading must not stop the shell for the views that do read.
+#[test]
+fn a_stalled_terminal_view_never_stalls_the_shell() {
+    let (_temporary, core, id) = fixture();
+    let core = Arc::new(core);
+    let terminal = core.start_block_terminal(id, None).unwrap();
+    // Never read: the view's buffer fills and stays full.
+    let _stalled = core.subscribe_terminal(terminal.id).unwrap();
+    let live = drain_terminal(&core, terminal.id);
+    // More than the stalled view's buffer holds, so the terminal has to drop it
+    // rather than wait for it before the reading view gets anything.
+    #[cfg(windows)]
+    let command = "Write-Output ('x' * 3000000)";
+    #[cfg(not(windows))]
+    let command = "head -c 3000000 /dev/zero | tr '\\0' x";
+    core.run_terminal_block(terminal.id, command, "flood")
+        .unwrap();
+    live.wait_for("flood;end;0;");
+    assert!(
+        live.text().contains("xxxxxx"),
+        "the reading view never saw the flood"
+    );
+    core.close_terminal(terminal.id).unwrap();
 }
 
 #[test]

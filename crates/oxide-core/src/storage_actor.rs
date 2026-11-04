@@ -425,7 +425,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 reply,
             } => {
                 let res = (|| -> Result<TurnStarted> {
-                    let tx = conn.unchecked_transaction()?;
+                    let tx = crate::db::write_transaction(&conn)?;
                     let (model, effort, permission_mode, current_title): (
                         Option<String>,
                         Option<String>,

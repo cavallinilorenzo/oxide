@@ -168,7 +168,7 @@ Docs, research and UI-review screenshots match no lane, so a docs-only PR runs `
 | Live Provider smoke tests and live language installs (`#[ignore]`) | The real Provider CLIs and language-support downloads still work | A Release Manager's machine, before publishing. Never in CI: they need logins and network |
 | UI review scripts | Visual review with screenshots | By hand during UI work. Not a gate |
 
-nextest runs each test in its own process with the settings in [`.config/nextest.toml`](../.config/nextest.toml): a hard per-test timeout of 5 minutes, one retry (a pass on retry is reported as flaky, not hidden), JUnit output, and a `process-heavy` test group capped at 2 threads for the Provider adapter and terminal suites, whose child processes and PTYs time out under full parallelism.
+nextest runs each test in its own process with the settings in [`.config/nextest.toml`](../.config/nextest.toml): a hard per-test timeout of 5 minutes, one retry (a pass on retry is reported as flaky, not hidden), JUnit output, and a `process-heavy` test group capped at 2 threads for the suites that spawn child processes and PTYs (the Provider adapters, the terminal tests, `thread_checkout_git` and the whole `workbench` binary, whose shell-completion test drives a shell under a 5 s budget), which time out under full parallelism.
 
 ## Release workflows
 

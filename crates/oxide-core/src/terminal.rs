@@ -1,5 +1,5 @@
 use crate::{Error, Result};
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, unbounded};
 use oxide_provider::process::ProcessRegistry;
 #[cfg(unix)]
 use oxide_provider::process::{SHUTDOWN_GRACE, terminate_group};
@@ -201,7 +201,7 @@ impl TerminalSession {
     }
 
     pub fn subscribe(&self) -> Receiver<Vec<u8>> {
-        let (tx, rx) = bounded(128);
+        let (tx, rx) = bounded(VIEW_BUFFER);
         self.subscribers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -423,6 +423,24 @@ fn create_shell_init_file(id: u32) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// How many chunks a terminal view may fall behind before the terminal gives up
+/// on it. A terminal chunk is one PTY read, often a handful of bytes, so this is
+/// the room a renderer gets to keep up with a chatty command.
+const VIEW_BUFFER: usize = 1024;
+
+/// Hands a chunk to every view, without ever waiting for one of them. A view that
+/// stops reading (a backgrounded window, a test that stopped listening) would
+/// otherwise block this reader — and with it the shell and every other view — as
+/// soon as its buffer is full. Such a view has already missed output it can never
+/// render, so it is dropped instead: its receiver ends and its reader stops.
+fn deliver(subscribers: &Mutex<Vec<Sender<Vec<u8>>>>, chunk: Vec<u8>) {
+    let mut subscribers = subscribers.lock().unwrap_or_else(|e| e.into_inner());
+    subscribers.retain(|sender| match sender.try_send(chunk.clone()) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
+    });
+}
+
 fn read_output(
     mut reader: Box<dyn Read + Send>,
     subscribers: Arc<Mutex<Vec<Sender<Vec<u8>>>>>,
@@ -432,16 +450,11 @@ fn read_output(
     loop {
         match reader.read(&mut buffer) {
             Ok(0) | Err(_) => break,
-            Ok(count) => {
-                let chunk = buffer[..count].to_vec();
-                let mut subscribers = subscribers.lock().unwrap_or_else(|e| e.into_inner());
-                subscribers.retain(|sender| sender.send(chunk.clone()).is_ok());
-            }
+            Ok(count) => deliver(&subscribers, buffer[..count].to_vec()),
         }
     }
     if blocks {
-        let mut subscribers = subscribers.lock().unwrap_or_else(|e| e.into_inner());
-        subscribers.retain(|sender| sender.send(b"\x1b]633;Oxide;closed\x07".to_vec()).is_ok());
+        deliver(&subscribers, b"\x1b]633;Oxide;closed\x07".to_vec());
     }
 }
 

@@ -64,19 +64,50 @@ fn first_turn(core: &Core, thread_id: u32) -> oxide_core::TurnSnapshot {
 }
 
 fn completed_first_turn(core: &Core, thread_id: u32) -> oxide_core::TurnSnapshot {
-    for _ in 0..6000 {
-        if let Some(turn) = core
-            .get_thread_snapshot(thread_id)
-            .unwrap()
-            .turns
-            .first()
-            .filter(|turn| turn.status == oxide_core::TurnStatus::Completed)
-        {
-            return turn.clone();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let snapshot = core.get_thread_snapshot(thread_id).unwrap();
+        match snapshot.turns.first() {
+            Some(turn) => match turn.status {
+                oxide_core::TurnStatus::Completed => return turn.clone(),
+                oxide_core::TurnStatus::Running => {}
+                // A Turn that already ended will never complete. Say what it ended as,
+                // instead of waiting out the budget and calling it "never completed".
+                ended => panic!(
+                    "the Thread's first Turn ended as {} instead of completing: {}",
+                    ended.as_str(),
+                    turn.error.as_ref().map_or_else(
+                        || "no error recorded".to_string(),
+                        |error| error.message.clone()
+                    )
+                ),
+            },
+            // A Thread whose Turn was recorded as nothing, and which is done trying,
+            // will never produce one: say so instead of waiting out the budget.
+            None if matches!(
+                snapshot.thread.status,
+                ThreadStatus::Error | ThreadStatus::Interrupted
+            ) =>
+            {
+                panic!(
+                    "the Thread recorded no Turn at all and is {:?}",
+                    snapshot.thread.status
+                )
+            }
+            None => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            let status = snapshot.turns.first().map_or_else(
+                || "no Turn".to_string(),
+                |turn| turn.status.as_str().to_string(),
+            );
+            panic!(
+                "the Thread's first Turn never completed after 60s: the Turn is {status} and the Thread is {:?}",
+                snapshot.thread.status
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    panic!("the Thread's first Turn never completed");
 }
 
 fn request(f: &Fixture, prompt: &str) -> DispatchRequest {
@@ -435,6 +466,41 @@ fn deleting_a_board_thread_closes_only_its_own_terminals_and_declining_keeps_the
     assert!(f.core.write_terminal(in_sibling.id, b"true\n").is_err());
     assert!(f.core.write_terminal(in_main.id, b"true\n").is_ok());
     f.core.close_terminal(in_main.id).unwrap();
+}
+
+/// A Turn the Transcript cannot keep must not leave a Thread that claims it completed:
+/// re-opening that Thread would show an empty conversation.
+#[test]
+fn a_turn_the_transcript_cannot_keep_leaves_the_thread_in_error() {
+    let f = fixture();
+    // The Transcript cannot take a Turn from the start: any insert into it fails.
+    let db = rusqlite::Connection::open(f.home.join("oxide.db")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER reject_turns BEFORE INSERT ON turns
+         BEGIN SELECT RAISE(ABORT, 'the Transcript refuses this Turn'); END;",
+    )
+    .unwrap();
+
+    let thread = f.core.dispatch_thread(request(&f, "Unrecorded")).unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let status: String = db
+            .query_row(
+                "SELECT status FROM threads WHERE id = ?1",
+                [thread.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if status == "error" {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Thread is {status} after an unrecorded Turn"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 #[test]

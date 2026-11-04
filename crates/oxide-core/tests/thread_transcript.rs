@@ -225,15 +225,12 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
 
     // Start turn
     core.send_prompt(thread.id, "Prompt for batching").unwrap();
-    // Consume TurnStarted & StatusChanged
-    let mut started = false;
-    while let Ok(evt) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
-        if let ThreadEvent::TurnStarted { .. } = evt.event {
-            started = true;
-            break;
-        }
-    }
-    assert!(started);
+    // Consume TurnStarted & StatusChanged. This wait is not the one being tested: the
+    // first prompt gives the Thread its worktree, and a Turn's end takes its Checkpoint,
+    // so both wait on git. Only the batching below has to be immediate.
+    wait_for(&rx, |event| {
+        matches!(event, ThreadEvent::TurnStarted { .. })
+    });
 
     // Send item started
     sender
@@ -327,14 +324,27 @@ fn delta_batching_tested_with_injected_time_never_sleeps() {
         })
         .unwrap();
 
-    let mut turn_completed = false;
-    while let Ok(evt) = rx.recv_timeout(std::time::Duration::from_millis(500)) {
-        if let ThreadEvent::TurnCompleted { .. } = evt.event {
-            turn_completed = true;
-            break;
+    wait_for(&rx, |event| {
+        matches!(event, ThreadEvent::TurnCompleted { .. })
+    });
+}
+
+/// Waits for the next event a test cares about, without a stopwatch on the actor:
+/// these arrive after git work (a worktree, a Checkpoint), not on a schedule.
+fn wait_for(
+    rx: &crossbeam_channel::Receiver<SequencedThreadEvent>,
+    wanted: impl Fn(&ThreadEvent) -> bool,
+) -> ThreadEvent {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        let Ok(evt) = rx.recv_timeout(std::time::Duration::from_millis(500)) else {
+            continue;
+        };
+        if wanted(&evt.event) {
+            return evt.event;
         }
     }
-    assert!(turn_completed);
+    panic!("the Thread never sent the expected event");
 }
 
 fn open_core_with_project(dir: &std::path::Path) -> (Core, u32) {

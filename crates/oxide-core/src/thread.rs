@@ -137,6 +137,16 @@ pub struct TurnSnapshot {
     pub unknown_events: Vec<UnknownEventSnapshot>,
 }
 
+impl TurnSnapshot {
+    /// The agent's last top-level message of this Turn. A message nested under a Subagent is not
+    /// the agent closing the Turn.
+    pub fn final_agent_message(&self) -> Option<&ItemSnapshot> {
+        self.items
+            .iter()
+            .rfind(|item| item.kind == ItemKind::AgentMessage && item.parent_item_index.is_none())
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadCapabilities {

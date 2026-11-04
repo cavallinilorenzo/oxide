@@ -56,6 +56,7 @@ export function dispatchRequest(projectId: number, form: DispatchForm, issue?: D
     baseBranch: blankToNull(form.baseBranch),
     issueNumber: issue?.number ?? null,
     issueTitle: issue?.title ?? null,
+    issueUrl: issue?.url ?? null,
   };
 }
 

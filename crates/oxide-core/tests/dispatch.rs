@@ -90,6 +90,7 @@ fn request(f: &Fixture, prompt: &str) -> DispatchRequest {
         base_branch: Some("main".into()),
         issue_number: None,
         issue_title: None,
+        issue_url: None,
     }
 }
 

@@ -222,6 +222,12 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN verification_commands TEXT NOT NULL DEFAULT '[]';
 ",
+    // The title and link of the GitHub issue a Board Thread was started from, so its Dossier can
+    // show what was asked without asking GitHub again.
+    "
+    ALTER TABLE threads ADD COLUMN issue_title TEXT;
+    ALTER TABLE threads ADD COLUMN issue_url TEXT;
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

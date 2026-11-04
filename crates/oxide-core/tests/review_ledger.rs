@@ -73,6 +73,7 @@ impl Fixture {
                 base_branch: Some("main".into()),
                 issue_number: None,
                 issue_title: None,
+                issue_url: None,
             })
             .unwrap();
         // The Turn itself must be stored as completed, not just the Thread's status shown so.

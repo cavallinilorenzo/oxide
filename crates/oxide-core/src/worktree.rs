@@ -24,6 +24,8 @@ pub struct DispatchRequest {
     /// `oxide/<issue-n>-<slug of the issue title>`.
     pub issue_number: Option<u32>,
     pub issue_title: Option<String>,
+    /// The issue's page on GitHub, kept so its Dossier can link to it without asking again.
+    pub issue_url: Option<String>,
 }
 
 /// `body` closing issue `n` when merged: unchanged if it already has a `Closes #n`.
@@ -236,11 +238,13 @@ impl Core {
             None,
         )?;
         self.db.lock().unwrap_or_else(|e| e.into_inner()).execute(
-            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3 WHERE id = ?4",
+            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3, issue_title = ?4, issue_url = ?5 WHERE id = ?6",
             rusqlite::params![
                 branch,
                 worktree.to_string_lossy(),
                 request.issue_number,
+                request.issue_title,
+                request.issue_url,
                 thread.id
             ],
         )?;

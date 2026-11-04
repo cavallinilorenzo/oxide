@@ -222,6 +222,28 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN verification_commands TEXT NOT NULL DEFAULT '[]';
 ",
+    // The labels of the GitHub issue a Board Thread was started from, so a Review round can
+    // describe its kind of work without asking GitHub again. Names only, never issue text.
+    "
+    ALTER TABLE threads ADD COLUMN issue_labels TEXT NOT NULL DEFAULT '[]';
+",
+    // The Review ledger's review rounds (ADR-0010): one row per send of Line comments or
+    // reviewer comments, with Provider, Model, kind of work and counts, never Transcript text
+    // and no foreign key, so a row outlives its Thread.
+    "
+    CREATE TABLE review_rounds (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT,
+        languages TEXT NOT NULL DEFAULT '[]',
+        size_band TEXT NOT NULL,
+        issue_labels TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX review_rounds_by_project ON review_rounds(project_id, id);
+",
     // The branch HEAD when a Turn started and when it ended, so the Dossier can tell the commits
     // the Turn produced from those it did not. NULL for Turns stored before this.
     "

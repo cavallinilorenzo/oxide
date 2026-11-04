@@ -102,7 +102,10 @@ pub use oxide_provider::{
     UsageStatus,
 };
 pub use restore::{PendingRestore, RestoreChange, RestoreFile, RestoreOutcome, RestorePreview};
-pub use review_ledger::{RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry};
+pub use review_ledger::{
+    RECENT_ENTRIES, ReviewLedger, ReviewLedgerEntry, ReviewRoundGroup, ReviewSizeBand,
+    ReviewWorkKind,
+};
 use settings::SettingsStore;
 pub use settings::{
     FieldError, PermissionMode, Provider, ProviderSettings, Providers, Settings, SettingsState,

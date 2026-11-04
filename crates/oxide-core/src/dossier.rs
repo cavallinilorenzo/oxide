@@ -7,14 +7,95 @@
 //! at the end of the command's Turn must match the working tree. A Turn whose Checkpoint diff
 //! includes files that no FileChange Item names (a shell edit, say) makes freshness unknown rather
 //! than fresh, because Oxide cannot tell when those files changed.
+//!
+//! Beside the commands the Dossier lists separate risk signals computed from the files the
+//! Thread's Turns changed: a changed language no Verification command covers, source without a
+//! test change, a sensitive path, and a diff over the line threshold. Each signal explains itself
+//! in one sentence and points at the files in the Diff; none of them is combined into a score.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::git_diff::{Diff, DiffFile};
 use crate::thread::{ItemSnapshot, TurnSnapshot};
 use crate::{CommandOutcome, Core, ItemKind, Result, checkpoint};
+
+/// Changed lines past which the Dossier flags a change as large.
+pub const LARGE_DIFF_LINES: u32 = 400;
+
+/// Gitignore-style patterns for CI configuration, flagged by default as sensitive.
+const CI_SENSITIVE: &[&str] = &[
+    ".github/workflows/",
+    ".github/actions/",
+    ".gitlab-ci.yml",
+    ".circleci/",
+    ".buildkite/",
+    ".drone.yml",
+    "azure-pipelines.yml",
+    "azure-pipelines.yaml",
+    "bitbucket-pipelines.yml",
+    "appveyor.yml",
+    "Jenkinsfile",
+];
+
+/// Gitignore-style patterns for dependency manifests and lockfiles, flagged by default.
+const DEPENDENCY_SENSITIVE: &[&str] = &[
+    "Cargo.toml",
+    "Cargo.lock",
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "deno.json",
+    "deno.lock",
+    "pyproject.toml",
+    "poetry.lock",
+    "Pipfile",
+    "Pipfile.lock",
+    "requirements.txt",
+    "requirements-*.txt",
+    "go.mod",
+    "go.sum",
+    "Gemfile",
+    "Gemfile.lock",
+    "composer.json",
+    "composer.lock",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "gradle.properties",
+    "mix.exs",
+    "mix.lock",
+    "pubspec.yaml",
+    "pubspec.lock",
+    "Package.swift",
+    "Package.resolved",
+    "*.csproj",
+    "*.fsproj",
+    "*.vbproj",
+    "*.sln",
+    "Directory.Build.props",
+    "Directory.Packages.props",
+    "vcpkg.json",
+    "conanfile.txt",
+    "conanfile.py",
+];
+
+/// Paths under which migrations usually live, flagged by default.
+const MIGRATION_SENSITIVE: &[&str] = &[
+    "migrations/",
+    "migration/",
+    "db/migrate/",
+    "**/db/migrate/",
+    "**/migrations/",
+];
 
 /// How much the evidence behind a Verification command can be trusted now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,24 +142,51 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
+/// What kind of risk a signal points at. Each kind explains itself; there is no aggregate score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RiskSignalKind {
+    /// A language the change touches that no Verification command ran for.
+    UncheckedLanguage,
+    /// Source files changed, but no test file did.
+    SourceWithoutTests,
+    /// A changed file matches a sensitive path (CI, dependency manifests, migrations or a
+    /// Project's own additions).
+    SensitivePath,
+    /// The change is larger than the line threshold.
+    LargeDiff,
+}
+
+/// One risk signal, with the files in the Diff it points at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiskSignal {
+    pub kind: RiskSignalKind,
+    /// One sentence a reviewer can read on its own.
+    pub explanation: String,
+    /// The changed files the signal points at, relative to the checkout, in path order.
+    pub files: Vec<String>,
+    /// The language an [`RiskSignalKind::UncheckedLanguage`] signal is about.
+    pub language: Option<String>,
+    /// The line threshold an [`RiskSignalKind::LargeDiff`] signal crossed.
+    pub threshold: Option<u32>,
+}
+
 /// The Verification section of the Diff Surface for one Thread.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     /// Risk first: failed, stale, unknown, never run, then fresh. Ties by command.
     pub commands: Vec<VerificationCommand>,
+    /// Separate, self-explaining signals about what stayed uncovered and where to look first.
+    /// Deliberately no single risk score.
+    pub signals: Vec<RiskSignal>,
 }
 
 impl Core {
     /// The Project's own Verification commands, in the order they were saved.
     pub fn project_verification_commands(&self, project_id: u32) -> Result<Vec<String>> {
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let json: String = db.query_row(
-            "SELECT verification_commands FROM projects WHERE id = ?1",
-            [project_id],
-            |r| r.get(0),
-        )?;
-        Ok(serde_json::from_str(&json).unwrap_or_default())
+        self.project_string_list(project_id, "verification_commands")
     }
 
     /// Replaces the Project's own Verification commands. Blank lines are dropped and duplicates
@@ -94,10 +202,49 @@ impl Core {
             .map(|command| command.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|command| !command.is_empty() && seen.insert(command.clone()))
             .collect();
-        let json = serde_json::to_string(&commands).expect("Verification commands serialize");
+        self.set_project_string_list(project_id, "verification_commands", commands)
+    }
+
+    /// The Project's own sensitive paths, in the order they were saved. The built-in CI,
+    /// dependency manifest and migration patterns are matched beside these.
+    pub fn project_sensitive_paths(&self, project_id: u32) -> Result<Vec<String>> {
+        self.project_string_list(project_id, "sensitive_paths")
+    }
+
+    /// Replaces the Project's own sensitive paths. Blank lines are dropped and duplicates collapse,
+    /// so the Dossier matches each pattern once.
+    pub fn set_project_sensitive_paths(&self, project_id: u32, paths: &[String]) -> Result<()> {
+        let mut seen = HashSet::new();
+        let paths: Vec<String> = paths
+            .iter()
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty() && seen.insert(path.clone()))
+            .collect();
+        self.set_project_string_list(project_id, "sensitive_paths", paths)
+    }
+
+    /// A Project column holding a JSON array of strings, in the order it was saved.
+    fn project_string_list(&self, project_id: u32, column: &'static str) -> Result<Vec<String>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let json: String = db.query_row(
+            &format!("SELECT {column} FROM projects WHERE id = ?1"),
+            [project_id],
+            |r| r.get(0),
+        )?;
+        Ok(serde_json::from_str(&json).unwrap_or_default())
+    }
+
+    /// Replaces a Project column holding a JSON array of strings.
+    fn set_project_string_list(
+        &self,
+        project_id: u32,
+        column: &'static str,
+        values: Vec<String>,
+    ) -> Result<()> {
+        let json = serde_json::to_string(&values).expect("project list serializes");
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let changed = db.execute(
-            "UPDATE projects SET verification_commands = ?2 WHERE id = ?1",
+            &format!("UPDATE projects SET {column} = ?2 WHERE id = ?1"),
             rusqlite::params![project_id, json],
         )?;
         if changed == 0 {
@@ -107,13 +254,20 @@ impl Core {
     }
 
     /// Computes the Dossier from the Thread's Transcript and Checkpoints and the Project's
-    /// Verification commands. It runs nothing and stores nothing.
+    /// Verification commands and sensitive paths. It runs nothing and stores nothing.
     pub fn verification_dossier(&self, thread_id: u32) -> Result<VerificationDossier> {
         let snapshot = self.storage.get_snapshot(thread_id, u32::MAX)?;
         let project_id = snapshot.thread.project_id;
         let root = std::path::PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
         let commands = self.project_verification_commands(project_id)?;
-        Ok(compute(&root, thread_id, &snapshot.turns, &commands))
+        let sensitive_paths = self.project_sensitive_paths(project_id)?;
+        Ok(compute(
+            &root,
+            thread_id,
+            &snapshot.turns,
+            &commands,
+            &sensitive_paths,
+        ))
     }
 }
 
@@ -122,6 +276,7 @@ fn compute(
     thread_id: u32,
     turns: &[TurnSnapshot],
     project_commands: &[String],
+    project_sensitive_paths: &[String],
 ) -> VerificationDossier {
     // A Provider reports absolute paths as it sees them; compare them with the checkout as Git
     // spells it, too.
@@ -182,6 +337,16 @@ fn compute(
         );
     }
 
+    // One Git diff per Turn, shared by freshness and the risk signals.
+    let turn_diffs: HashMap<u32, Vec<DiffFile>> = turns
+        .iter()
+        .filter_map(|turn| {
+            checkpoint::turn_diff(&root, thread_id, turn.turn_index)
+                .ok()
+                .map(|diff| (turn.turn_index, diff.files))
+        })
+        .collect();
+
     let successful_turns: HashSet<u32> = latest
         .values()
         .filter(|run| run.outcome == CommandOutcome::Succeeded)
@@ -197,13 +362,15 @@ fn compute(
         let Some(turn_facts) = facts.get(&turn_index) else {
             continue;
         };
-        let changed = checkpoint::turn_diff(&root, thread_id, turn_index)
-            .map(|diff| diff.files)
-            .unwrap_or_default();
-        let any = changed.iter().any(|file| {
-            let named = |path: &str| turn_facts.named.contains(path);
-            !named(&file.path) && !file.old_path.as_deref().is_some_and(named)
-        });
+        let any = turn_diffs
+            .get(&turn_index)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .any(|file| {
+                let named = |path: &str| turn_facts.named.contains(path);
+                !named(&file.path) && !file.old_path.as_deref().is_some_and(named)
+            });
         if any {
             unattributed.insert(turn_index);
         }
@@ -243,7 +410,294 @@ fn compute(
             .then_with(|| a.command.cmp(&b.command))
             .then_with(|| kind_rank(a.kind).cmp(&kind_rank(b.kind)))
     });
-    VerificationDossier { commands }
+    let turn_indexes: Vec<u32> = turns.iter().map(|turn| turn.turn_index).collect();
+    let thread_diff = checkpoint::thread_diff(&root, thread_id, &turn_indexes)
+        .ok()
+        .flatten();
+    let changed = changed_files(thread_diff.as_ref());
+    let signals = risk_signals(&changed, &commands, project_sensitive_paths);
+    VerificationDossier { commands, signals }
+}
+
+/// The files the Thread changed as a whole, with the lines each file's net change touches.
+fn changed_files(diff: Option<&Diff>) -> BTreeMap<String, u32> {
+    diff.map(|diff| {
+        diff.files
+            .iter()
+            .map(|file| (file.path.clone(), file.added + file.removed))
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn risk_signals(
+    changed: &BTreeMap<String, u32>,
+    commands: &[VerificationCommand],
+    project_sensitive_paths: &[String],
+) -> Vec<RiskSignal> {
+    let mut signals = Vec::new();
+    let mut covered = HashSet::new();
+    let mut covers_all = false;
+    for command in commands
+        .iter()
+        .filter(|command| command.turn_index.is_some())
+    {
+        match command_coverage(&command.command) {
+            CommandCoverage::Languages(languages) => covered.extend(languages),
+            CommandCoverage::EveryLanguage => covers_all = true,
+        }
+    }
+    let mut languages: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    for path in changed.keys() {
+        if let Some(language) = language_of(path) {
+            languages.entry(language).or_default().push(path.clone());
+        }
+    }
+    for (language, files) in languages {
+        if covers_all || covered.contains(language) {
+            continue;
+        }
+        signals.push(RiskSignal {
+            kind: RiskSignalKind::UncheckedLanguage,
+            explanation: format!("{language} changed with no Verification command."),
+            files,
+            language: Some(language.to_string()),
+            threshold: None,
+        });
+    }
+    let source: Vec<String> = changed
+        .keys()
+        .filter(|path| is_source(path) && !is_test_path(path))
+        .cloned()
+        .collect();
+    let has_test_change = changed.keys().any(|path| is_test_path(path));
+    if !source.is_empty() && !has_test_change {
+        signals.push(RiskSignal {
+            kind: RiskSignalKind::SourceWithoutTests,
+            explanation: "Source changed with no test change.".to_string(),
+            files: source,
+            language: None,
+            threshold: None,
+        });
+    }
+    for (explanation, files) in sensitive_changes(changed, project_sensitive_paths) {
+        signals.push(RiskSignal {
+            kind: RiskSignalKind::SensitivePath,
+            explanation: explanation.to_string(),
+            files,
+            language: None,
+            threshold: None,
+        });
+    }
+    let lines: u32 = changed.values().sum();
+    if lines > LARGE_DIFF_LINES {
+        signals.push(RiskSignal {
+            kind: RiskSignalKind::LargeDiff,
+            explanation: format!(
+                "The diff changes {lines} lines, over the {LARGE_DIFF_LINES}-line threshold."
+            ),
+            files: changed.keys().cloned().collect(),
+            language: None,
+            threshold: Some(LARGE_DIFF_LINES),
+        });
+    }
+    signals.sort_by(|a, b| {
+        signal_rank(a.kind)
+            .cmp(&signal_rank(b.kind))
+            .then_with(|| a.explanation.cmp(&b.explanation))
+            .then_with(|| a.files.cmp(&b.files))
+    });
+    signals
+}
+
+fn signal_rank(kind: RiskSignalKind) -> u8 {
+    match kind {
+        RiskSignalKind::UncheckedLanguage => 0,
+        RiskSignalKind::SourceWithoutTests => 1,
+        RiskSignalKind::SensitivePath => 2,
+        RiskSignalKind::LargeDiff => 3,
+    }
+}
+
+/// The sensitive groups the change touches, each with its files. A file belongs to the first
+/// group that matches it, so the groups never repeat a path.
+fn sensitive_changes(
+    changed: &BTreeMap<String, u32>,
+    project_sensitive_paths: &[String],
+) -> Vec<(&'static str, Vec<String>)> {
+    let mut unmatched: std::collections::BTreeSet<&str> =
+        changed.keys().map(String::as_str).collect();
+    let mut groups = Vec::new();
+    for (patterns, explanation) in [
+        (CI_SENSITIVE, "Touches CI configuration."),
+        (DEPENDENCY_SENSITIVE, "Touches a dependency manifest."),
+        (MIGRATION_SENSITIVE, "Touches database migrations."),
+    ] {
+        let Some(matcher) = gitignore(patterns.iter().copied()) else {
+            continue;
+        };
+        let files: Vec<String> = unmatched
+            .iter()
+            .filter(|path| matcher.matches(path))
+            .map(|path| path.to_string())
+            .collect();
+        for file in &files {
+            unmatched.remove(file.as_str());
+        }
+        if !files.is_empty() {
+            groups.push((explanation, files));
+        }
+    }
+    if !project_sensitive_paths.is_empty() {
+        let Some(matcher) = gitignore(project_sensitive_paths.iter().map(String::as_str)) else {
+            return groups;
+        };
+        let files: Vec<String> = unmatched
+            .into_iter()
+            .filter(|path| matcher.matches(path))
+            .map(str::to_string)
+            .collect();
+        if !files.is_empty() {
+            groups.push(("Touches a configured sensitive path.", files));
+        }
+    }
+    groups
+}
+
+struct SensitiveMatcher(ignore::gitignore::Gitignore);
+
+impl SensitiveMatcher {
+    /// Gitignore semantics: a bare name matches at any depth, a pattern with a slash is relative
+    /// to the checkout, and a directory pattern matches the files under it.
+    fn matches(&self, path: &str) -> bool {
+        self.0
+            .matched_path_or_any_parents(Path::new(path), false)
+            .is_ignore()
+    }
+}
+
+fn gitignore<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Option<SensitiveMatcher> {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new("");
+    for pattern in patterns {
+        let pattern = pattern.trim();
+        if !pattern.is_empty() {
+            // An invalid pattern is skipped rather than making the whole Dossier fail.
+            let _ = builder.add_line(None, pattern);
+        }
+    }
+    builder.build().ok().map(SensitiveMatcher)
+}
+
+enum CommandCoverage {
+    Languages(Vec<&'static str>),
+    /// The command crosses ecosystems (a Makefile, a Bazel target or a Project's own script), so
+    /// Oxide cannot claim that any language stayed uncovered.
+    EveryLanguage,
+}
+
+/// The languages of the files a language-aware command checks.
+fn command_coverage(command: &str) -> CommandCoverage {
+    let tokens = command_tokens(command);
+    let Some(program) = tokens.first().map(|token| program_name(token)) else {
+        return CommandCoverage::EveryLanguage;
+    };
+    let languages: &'static [&'static str] = match program {
+        "cargo" | "rustc" | "rustfmt" | "clippy-driver" => &["Rust"],
+        "npm" | "pnpm" | "yarn" | "bun" | "tsc" | "vue-tsc" | "svelte-check" | "jest"
+        | "vitest" | "mocha" | "ava" | "tap" | "eslint" | "oxlint" | "biome" | "prettier"
+        | "deno" | "node" => &["JavaScript", "TypeScript", "Vue", "Svelte"],
+        "pytest" | "mypy" | "pyright" | "pyre" | "ruff" | "flake8" | "pylint" | "black"
+        | "python" | "python3" => &["Python"],
+        "go" | "golangci-lint" => &["Go"],
+        "mvn" | "mvnw" | "gradle" | "gradlew" => &["Java", "Kotlin"],
+        "java" | "javac" | "junit" => &["Java"],
+        "kotlinc" | "ktlint" => &["Kotlin"],
+        "ctest" | "cmake" | "ninja" | "clang" | "clang++" | "gcc" | "g++" | "clang-tidy"
+        | "cppcheck" => &["C", "C++"],
+        "swift" | "xcodebuild" => &["Swift"],
+        "rake" | "rspec" | "rubocop" => &["Ruby"],
+        "php" | "phpunit" | "phpstan" | "psalm" => &["PHP"],
+        "dotnet" | "msbuild" => &["C#"],
+        "flutter" | "dart" => &["Dart"],
+        "mix" => &["Elixir"],
+        "shellcheck" => &["Shell"],
+        "lua" | "luac" => &["Lua"],
+        "scala" | "sbt" => &["Scala"],
+        "terraform" => &["Terraform"],
+        _ => return CommandCoverage::EveryLanguage,
+    };
+    CommandCoverage::Languages(languages.to_vec())
+}
+
+/// Whether a path is source a reviewer reads, not documentation, data or a generated file.
+fn is_source(path: &str) -> bool {
+    language_of(path).is_some()
+}
+
+/// Whether a path names test code or test data. A test change is what proves a source change.
+fn is_test_path(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    let segments: Vec<&str> = path.split('/').collect();
+    let in_test_directory = segments.iter().rev().skip(1).any(|segment| {
+        matches!(
+            *segment,
+            "test" | "tests" | "__tests__" | "spec" | "specs" | "testdata" | "fixtures"
+        )
+    });
+    let name = segments.last().copied().unwrap_or_default();
+    let test_file = name.contains(".test.")
+        || name.contains(".spec.")
+        || name.ends_with(".snap")
+        || name.starts_with("test_")
+        || name.ends_with("_test.py")
+        || name.ends_with("_test.go")
+        || name.ends_with("_tests.rs")
+        || name.ends_with("_test.rs")
+        || name.ends_with("_spec.rb")
+        || name.ends_with("test.java")
+        || name.ends_with("tests.java")
+        || name.ends_with("test.kt")
+        || name.ends_with("test.cs");
+    test_file || (in_test_directory && is_test_artifact(&path))
+}
+
+/// Whether a path in a test directory is test code or a snapshot, rather than documentation or a
+/// fixture that happens to sit under a folder called `spec` (say, `docs/spec/api.md`).
+fn is_test_artifact(path: &str) -> bool {
+    language_of(path).is_some() || path.ends_with(".snap")
+}
+
+/// The language a source file is written in, as a display name. Test, documentation and data
+/// files have none.
+fn language_of(path: &str) -> Option<&'static str> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let extension = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    let language = match extension.as_str() {
+        "rs" => "Rust",
+        "ts" | "tsx" | "mts" | "cts" => "TypeScript",
+        "js" | "jsx" | "mjs" | "cjs" => "JavaScript",
+        "py" | "pyi" => "Python",
+        "go" => "Go",
+        "java" => "Java",
+        "kt" | "kts" => "Kotlin",
+        "swift" => "Swift",
+        "rb" => "Ruby",
+        "php" => "PHP",
+        "cs" => "C#",
+        "c" | "h" => "C",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" => "C++",
+        "dart" => "Dart",
+        "ex" | "exs" => "Elixir",
+        "sh" | "bash" | "zsh" => "Shell",
+        "lua" => "Lua",
+        "scala" => "Scala",
+        "sql" => "SQL",
+        "vue" => "Vue",
+        "svelte" => "Svelte",
+        "tf" => "Terraform",
+        _ => return None,
+    };
+    Some(language)
 }
 
 fn state_of(

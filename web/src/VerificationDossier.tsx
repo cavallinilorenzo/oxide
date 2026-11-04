@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { commands, type VerificationDossier as Dossier, type VerificationKind, type VerificationState } from "./bindings";
 import { useQuery, type QueryResult } from "./queryCache";
 
@@ -31,10 +31,12 @@ interface VerificationDossierProps {
   threadId: number;
   /** Changes whenever a Turn does, so the evidence is recomputed. */
   refreshKey: string;
+  /** Selects the file a signal points at in the Diff. */
+  onOpenFile: (path: string) => void;
 }
 
-/** Which Verification commands ran in this Thread, and whether each result still applies. */
-export function VerificationDossier({ projectId, threadId, refreshKey }: VerificationDossierProps) {
+/** Which Verification commands ran, whether each result still applies, and the separate risk signals. */
+export function VerificationDossier({ projectId, threadId, refreshKey, onOpenFile }: VerificationDossierProps) {
   const [reload, setReload] = useState(0);
   const query = useQuery(
     `p${projectId}:dossier:${threadId}`,
@@ -42,6 +44,7 @@ export function VerificationDossier({ projectId, threadId, refreshKey }: Verific
     `${refreshKey}#${reload}`,
   );
   const entries = query.state === "ready" ? (query.data?.commands ?? []) : [];
+  const signals = query.state === "ready" ? (query.data?.signals ?? []) : [];
   return (
     <section className="dossier" aria-label="Verification dossier">
       <div className="dossier-head">
@@ -78,13 +81,61 @@ export function VerificationDossier({ projectId, threadId, refreshKey }: Verific
           ))}
         </ul>
       )}
+      {query.state === "ready" && (
+        <div className="dossier-signals-block">
+          <span className="dossier-title">Risk signals</span>
+          {signals.length === 0 ? (
+            <p className="dossier-note">No risk signal.</p>
+          ) : (
+            <ul className="dossier-signals" aria-label="Risk signals">
+              {signals.map((signal) => (
+                <li
+                  key={`${signal.kind}:${signal.explanation}`}
+                  className={`dossier-signal dossier-signal-${signal.kind}`}
+                  aria-label={`Risk signal: ${signal.explanation}`}
+                >
+                  <span className="dossier-signal-explanation">{signal.explanation}</span>
+                  {signal.files.length > 0 && (
+                    <span className="dossier-signal-files">
+                      {signal.files.map((path) => (
+                        <button
+                          key={path}
+                          type="button"
+                          className="link dossier-signal-file mono"
+                          aria-label={`Open ${path} in the Diff`}
+                          onClick={() => onOpenFile(path)}
+                        >
+                          {path}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <VerificationCommandsEditor projectId={projectId} onSaved={() => setReload((n) => n + 1)} />
+      <SensitivePathsEditor projectId={projectId} onSaved={() => setReload((n) => n + 1)} />
     </section>
   );
 }
 
-/** The Project's own Verification commands, one per line. Stored by Oxide, not in the repository. */
-function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number; onSaved: () => void }) {
+type ListResult = { status: "ok"; data: string[] } | { status: "error"; error: { message: string } };
+type SaveResult = { status: "ok"; data: null } | { status: "error"; error: { message: string } };
+
+interface ProjectListEditorProps {
+  title: string;
+  hint: string;
+  placeholder: string;
+  load: () => Promise<ListResult>;
+  save: (values: string[]) => Promise<SaveResult>;
+  onSaved: () => void;
+}
+
+/** A Project setting that is one value per line, stored by Oxide and never in the repository. */
+function ProjectListEditor({ title, hint, placeholder, load, save, onSaved }: ProjectListEditorProps) {
   const [saved, setSaved] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -92,8 +143,7 @@ function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number;
 
   useEffect(() => {
     let active = true;
-    void commands
-      .getProjectVerificationCommands(projectId)
+    void load()
       .then((result) => {
         if (!active) return;
         if (result.status === "ok") {
@@ -108,9 +158,9 @@ function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number;
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [load]);
 
-  const commandsInText = [
+  const values = [
     ...new Set(
       text
         .split("\n")
@@ -119,12 +169,12 @@ function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number;
     ),
   ];
 
-  const save = async () => {
+  const persist = async () => {
     setSaving(true);
     try {
-      const result = await commands.setProjectVerificationCommands(projectId, commandsInText);
+      const result = await save(values);
       if (result.status === "error") return setError(result.error.message);
-      setSaved(commandsInText);
+      setSaved(values);
       setError(null);
       onSaved();
     } catch (error: unknown) {
@@ -136,28 +186,65 @@ function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number;
 
   return (
     <details className="dossier-commands">
-      <summary>Project Verification commands ({saved.length})</summary>
-      <p className="hint">
-        Commands that count as checks beside the built-in patterns, one per line. Stored by Oxide,
-        not in the repository.
-      </p>
+      <summary>
+        {title} ({saved.length})
+      </summary>
+      <p className="hint">{hint}</p>
       <textarea
-        aria-label="Project Verification commands"
+        aria-label={title}
         rows={3}
         spellCheck={false}
-        placeholder={"pnpm run verify\nmake check"}
+        placeholder={placeholder}
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
       <button
         type="button"
         className="btn"
-        disabled={saving || commandsInText.join("\n") === saved.join("\n")}
-        onClick={() => void save()}
+        disabled={saving || values.join("\n") === saved.join("\n")}
+        onClick={() => void persist()}
       >
         Save
       </button>
       {error && <p className="dossier-note error">{error}</p>}
     </details>
+  );
+}
+
+/** The Project's own Verification commands, one per line. */
+function VerificationCommandsEditor({ projectId, onSaved }: { projectId: number; onSaved: () => void }) {
+  const load = useCallback(() => commands.getProjectVerificationCommands(projectId), [projectId]);
+  const save = useCallback(
+    (values: string[]) => commands.setProjectVerificationCommands(projectId, values),
+    [projectId],
+  );
+  return (
+    <ProjectListEditor
+      title="Project Verification commands"
+      hint="Commands that count as checks beside the built-in patterns, one per line. Stored by Oxide, not in the repository."
+      placeholder={"pnpm run verify\nmake check"}
+      load={load}
+      save={save}
+      onSaved={onSaved}
+    />
+  );
+}
+
+/** The Project's own sensitive paths. The built-in CI, dependency and migration patterns stay. */
+function SensitivePathsEditor({ projectId, onSaved }: { projectId: number; onSaved: () => void }) {
+  const load = useCallback(() => commands.getProjectSensitivePaths(projectId), [projectId]);
+  const save = useCallback(
+    (values: string[]) => commands.setProjectSensitivePaths(projectId, values),
+    [projectId],
+  );
+  return (
+    <ProjectListEditor
+      title="Project sensitive paths"
+      hint="Extra paths to flag, one glob per line. CI, dependency manifests and migrations are flagged already. Stored by Oxide, not in the repository."
+      placeholder={"src/billing/**\ninfra/**"}
+      load={load}
+      save={save}
+      onSaved={onSaved}
+    />
   );
 }

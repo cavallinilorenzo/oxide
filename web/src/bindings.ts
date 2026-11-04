@@ -57,7 +57,14 @@ export const commands = {
 	getProjectVerificationCommands: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("get_project_verification_commands", { projectId })),
 	/**  Replaces the Project's own Verification commands. */
 	setProjectVerificationCommands: (projectId: number, commands: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_verification_commands", { projectId, commands })),
-	/**  Which Verification commands ran in a Thread, and whether their results still apply. */
+	/**  The Project's own sensitive paths, besides the built-in CI, dependency and migration patterns. */
+	getProjectSensitivePaths: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("get_project_sensitive_paths", { projectId })),
+	/**  Replaces the Project's own sensitive paths. */
+	setProjectSensitivePaths: (projectId: number, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_sensitive_paths", { projectId, paths })),
+	/**
+	 *  The Dossier of a Thread: which Verification commands ran, whether they still apply, and the
+	 *  separate risk signals about what stayed uncovered.
+	 */
 	verificationDossier: (threadId: number) => typedError<VerificationDossier_Serialize, AppError>(__TAURI_INVOKE("verification_dossier", { threadId })),
 	/**
 	 *  Whether chat Threads of this Project stay in the main checkout instead of each
@@ -1565,6 +1572,37 @@ export type ReviewThreadComment = {
 /**  The decision a submitted review carries. */
 export type ReviewVerdict = "comment" | "approve" | "requestChanges";
 
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal = RiskSignal_Serialize | RiskSignal_Deserialize;
+
+export type RiskSignalKind = "uncheckedLanguage" | "sourceWithoutTests" | "sensitivePath" | "largeDiff";
+
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal_Deserialize = {
+	kind: RiskSignalKind,
+	/**  One sentence a reviewer can read on its own. */
+	explanation: string,
+	/**  The changed files the signal points at, relative to the checkout, in path order. */
+	files: string[],
+	/**  The language an unchecked-language signal is about. */
+	language?: string | null,
+	/**  The line threshold a large-diff signal crossed. */
+	threshold?: number | null,
+};
+
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal_Serialize = {
+	kind: RiskSignalKind,
+	/**  One sentence a reviewer can read on its own. */
+	explanation: string,
+	/**  The changed files the signal points at, relative to the checkout, in path order. */
+	files: string[],
+	/**  The language an unchecked-language signal is about. */
+	language: string | null,
+	/**  The line threshold a large-diff signal crossed. */
+	threshold: number | null,
+};
+
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
 
 export type RuntimeCatalogue_Deserialize = {
@@ -2028,17 +2066,19 @@ export type VerificationCommand_Serialize = {
 	exitCode: number | null,
 };
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**  The Verification Dossier: the commands that ran and the separate risk signals. */
 export type VerificationDossier = VerificationDossier_Serialize | VerificationDossier_Deserialize;
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**  The Verification Dossier: the commands that ran and the separate risk signals. */
 export type VerificationDossier_Deserialize = {
 	commands: VerificationCommand_Deserialize[],
+	signals: RiskSignal_Deserialize[],
 };
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**  The Verification Dossier: the commands that ran and the separate risk signals. */
 export type VerificationDossier_Serialize = {
 	commands: VerificationCommand_Serialize[],
+	signals: RiskSignal_Serialize[],
 };
 
 export type VerificationKind = "test" | "lint" | "typeCheck" | "build" | "other";

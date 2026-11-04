@@ -222,6 +222,11 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN verification_commands TEXT NOT NULL DEFAULT '[]';
 ",
+    // A Project's own sensitive paths for the Dossier's risk signals, as glob patterns. The
+    // built-in CI, dependency manifest and migration patterns are matched beside these.
+    "
+    ALTER TABLE projects ADD COLUMN sensitive_paths TEXT NOT NULL DEFAULT '[]';
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

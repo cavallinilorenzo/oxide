@@ -97,6 +97,14 @@ _Avoid_: Test command, check script
 The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. Also called the Dossier.
 _Avoid_: Report, summary, risk score
 
+**Risk signal**:
+One separate fact in the Dossier that says what stayed uncovered and where to look first: a changed language no Verification command covers, source without a test change, a sensitive path, or a diff over the shown line threshold. Each signal explains itself in one sentence and points at the files in the Diff; signals are never combined into a score.
+_Avoid_: Risk score, warning, severity
+
+**Sensitive path**:
+A changed path the Dossier flags for a reviewer: CI configuration, dependency manifests, migrations, or a glob the Project added. Matched with gitignore-style patterns.
+_Avoid_: Dangerous path, protected path
+
 **Blind review**:
 A review of a change by a Provider session that received only the diff and the issue, never the original Thread. Its findings become Line comments the user keeps or dismisses.
 _Avoid_: Second opinion, AI review, auto-review

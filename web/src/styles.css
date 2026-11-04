@@ -722,6 +722,18 @@ section.terminal.terminal-hidden { display: none; }
 .dossier-badge-failed { border-color: #f06a6a55; background: #3d1d1d; color: var(--red); }
 .dossier-badge-unknown { border-color: #a98bff55; background: #2e2550; color: var(--purple); }
 .dossier-badge-never-run { border-color: var(--line-strong); background: var(--bg3); color: var(--dim); }
+/* Risk signals: separate, self-explaining facts, never one aggregate score. */
+.dossier-signals-block { display: grid; gap: 4px; }
+.dossier-signals { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 24vh; overflow: auto; }
+.dossier-signal { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px; border-left: 2px solid var(--line-strong); font-size: 12px; }
+.dossier-signal-uncheckedLanguage { border-left-color: var(--purple); }
+.dossier-signal-sourceWithoutTests { border-left-color: var(--yellow); }
+.dossier-signal-sensitivePath { border-left-color: var(--red); }
+.dossier-signal-largeDiff { border-left-color: var(--dim); }
+.dossier-signal-explanation { color: var(--fg-bright); }
+.dossier-signal-files { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.dossier-signal-file { padding: 0; border: 0; background: none; font-size: 11px; color: var(--dim); text-align: left; cursor: pointer; }
+.dossier-signal-file:hover, .dossier-signal-file:focus-visible { color: var(--fg-bright); text-decoration: underline; }
 .dossier-commands { font-size: 12px; display: grid; gap: 6px; }
 .dossier-commands summary { cursor: pointer; color: var(--dim); }
 .dossier-commands textarea { font-family: var(--mono); font-size: 11.5px; color: var(--fg); resize: vertical; }

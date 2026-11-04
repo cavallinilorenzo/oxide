@@ -841,11 +841,36 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
-/// The Verification section of the Diff Surface for one Thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RiskSignalKind {
+    UncheckedLanguage,
+    SourceWithoutTests,
+    SensitivePath,
+    LargeDiff,
+}
+
+/// One risk signal, with the files in the Diff it points at.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RiskSignal {
+    pub kind: RiskSignalKind,
+    /// One sentence a reviewer can read on its own.
+    pub explanation: String,
+    /// The changed files the signal points at, relative to the checkout, in path order.
+    pub files: Vec<String>,
+    /// The language an unchecked-language signal is about.
+    pub language: Option<String>,
+    /// The line threshold a large-diff signal crossed.
+    pub threshold: Option<u32>,
+}
+
+/// The Verification Dossier: the commands that ran and the separate risk signals.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     pub commands: Vec<VerificationCommand>,
+    pub signals: Vec<RiskSignal>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -2975,7 +3000,29 @@ fn set_project_verification_commands(
     Ok(core.set_project_verification_commands(project_id, &commands)?)
 }
 
-/// Which Verification commands ran in a Thread, and whether their results still apply.
+/// The Project's own sensitive paths, besides the built-in CI, dependency and migration patterns.
+#[tauri::command]
+#[specta::specta]
+fn get_project_sensitive_paths(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<String>, AppError> {
+    Ok(core.project_sensitive_paths(project_id)?)
+}
+
+/// Replaces the Project's own sensitive paths.
+#[tauri::command]
+#[specta::specta]
+fn set_project_sensitive_paths(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    paths: Vec<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_project_sensitive_paths(project_id, &paths)?)
+}
+
+/// The Dossier of a Thread: which Verification commands ran, whether they still apply, and the
+/// separate risk signals about what stayed uncovered.
 #[tauri::command]
 #[specta::specta]
 async fn verification_dossier(
@@ -3580,6 +3627,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         set_project_setup_command,
         get_project_verification_commands,
         set_project_verification_commands,
+        get_project_sensitive_paths,
+        set_project_sensitive_paths,
         verification_dossier,
         get_project_threads_in_main_checkout,
         set_project_threads_in_main_checkout,

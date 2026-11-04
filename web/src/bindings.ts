@@ -126,6 +126,12 @@ export const commands = {
 	confirmFollowUp: (projectId: number, pullRequest: number, commitSha: string) => typedError<null, AppError>(__TAURI_INVOKE("confirm_follow_up", { projectId, pullRequest, commitSha })),
 	/**  Dismisses a candidate follow-up fix in the Review ledger. */
 	dismissFollowUp: (projectId: number, pullRequest: number, commitSha: string) => typedError<null, AppError>(__TAURI_INVOKE("dismiss_follow_up", { projectId, pullRequest, commitSha })),
+	/**  Recurring Line comments the app offers to turn into a rule for the Project's agent instructions. */
+	ruleSuggestions: (projectId: number) => typedError<RuleSuggestion[], AppError>(__TAURI_INVOKE("rule_suggestions", { projectId })),
+	/**  Dismisses a rule suggestion for good. */
+	dismissRuleSuggestion: (projectId: number, id: number) => typedError<null, AppError>(__TAURI_INVOKE("dismiss_rule_suggestion", { projectId, id })),
+	/**  Starts a Thread that proposes the rule in the Project's agent instructions. */
+	acceptRuleSuggestion: (projectId: number, id: number, provider: string) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("accept_rule_suggestion", { projectId, id, provider })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	startBlockTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_block_terminal", { projectId, threadId, onOutput })),
 	writeFile: (projectId: number, threadId: number | null, path: string, expected: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("write_file", { projectId, threadId, path, expected, content })),
@@ -1771,6 +1777,14 @@ export type RiskSignal_Serialize = {
 	language: string | null,
 	/**  The line threshold a large-diff signal crossed. */
 	threshold: number | null,
+};
+
+/**  Recurring feedback the app offers to turn into a rule for the Project's agent instructions. */
+export type RuleSuggestion = {
+	id: number,
+	projectId: number,
+	/**  The comments it is based on, oldest first. */
+	comments: string[],
 };
 
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;

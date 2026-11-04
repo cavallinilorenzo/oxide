@@ -143,7 +143,7 @@ it("appears in the Project overview", async () => {
   const project = { id: 1, name: "Alpha", path: "/alpha", hidden: false, open: true, missing: false };
   await act(async () => root.render(
     <ProjectOverview project={project} threads={[]} onNewThread={() => {}} onOpenThread={() => {}}
-      onOpenBoard={() => {}} onOpenDiff={() => {}} onOpenPullRequest={() => {}} />,
+      onSuggestionAccepted={() => {}} onOpenBoard={() => {}} onOpenDiff={() => {}} onOpenPullRequest={() => {}} />,
   ));
   expect(host.querySelector('[aria-label="Review ledger"]')).not.toBeNull();
   expect(host.textContent).toContain("#8");

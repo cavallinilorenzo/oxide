@@ -956,6 +956,11 @@ export function App() {
             <ProjectOverview project={selected} threads={threads ?? []}
               onNewThread={() => void startNewThread()}
               onOpenThread={(id) => { selectThread(id); }}
+              onSuggestionAccepted={(thread) => {
+                if (currentProjectRef.current !== thread.projectId) return;
+                setThreads((previous) => [thread, ...(previous ?? []).filter((t) => t.id !== thread.id)]);
+                selectThread(thread.id);
+              }}
               onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
               onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (

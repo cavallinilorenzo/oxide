@@ -125,6 +125,10 @@ _Avoid_: History, analytics, telemetry
 One send of Line comments, or of selected reviewer comments, to a Thread. The Review ledger counts review rounds by Provider, Model and kind of work (languages touched, diff size band and the issue's labels when present), with the sample size of each group, so small groups are not read as strongly. It stores no comment text.
 _Avoid_: Review pass, iteration, cycle
 
+**Rule suggestion**:
+A proposal to turn feedback the user keeps giving into a rule for the Project's agent instructions. Oxide groups the Line comments sent in the Project by normalized word similarity and suggests one once a group holds at least three similar comments from at least two Threads, showing the comments it is based on; a dismissed suggestion never comes back. The comments kept for this live apart from the Review ledger, and clearing the ledger clears them too. Accepting starts a normal Thread that proposes the edit in `AGENTS.md`, which the user reviews like any other change.
+_Avoid_: Rule, recommendation, tip
+
 **Reviewer comment**:
 One comment of a Review thread, written by a GitHub reviewer rather than by the user. It reaches a Thread only when the user selects its thread and asks for a fix, quoted and marked as external content. It is not a Line comment.
 _Avoid_: Review comment, review note

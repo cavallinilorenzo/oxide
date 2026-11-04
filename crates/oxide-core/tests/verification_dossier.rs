@@ -1,7 +1,7 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use oxide_core::{
-    CommandOutcome, Core, ItemKind, PermissionMode, SequencedThreadEvent, ThreadEvent,
-    ThreadStatus, VerificationCommand, VerificationKind, VerificationState,
+    CommandOutcome, Core, DispatchRequest, ItemKind, PermissionMode, SequencedThreadEvent,
+    ThreadEvent, ThreadStatus, VerificationCommand, VerificationKind, VerificationState,
 };
 use oxide_provider::{ActivityCategory, CommandRecord, FakeProvider, ProviderEvent, TurnStatus};
 use std::collections::HashMap;
@@ -111,9 +111,25 @@ fn wait_for(rx: &Receiver<SequencedThreadEvent>, accept: impl Fn(&ThreadEvent) -
     }
 }
 
+/// A Thread whose Turn the default fake runs on its own, such as a dispatched one.
+fn wait_until_completed(f: &Fixture, thread_id: u32) {
+    for _ in 0..6000 {
+        let snapshot = f.core.get_thread_snapshot(thread_id).unwrap();
+        if snapshot.turn_count > 0 && snapshot.thread.status == ThreadStatus::Completed {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the Thread never completed its Turn");
+}
+
 fn run_turn(f: &Fixture, thread_id: u32, script: Script) {
+    run_turn_with_prompt(f, thread_id, "go", script);
+}
+
+fn run_turn_with_prompt(f: &Fixture, thread_id: u32, prompt: &str, script: Script) {
     let (_, rx) = f.core.subscribe_thread(thread_id).unwrap();
-    f.core.send_prompt(thread_id, "go").unwrap();
+    f.core.send_prompt(thread_id, prompt).unwrap();
     f.core.tick_thread(thread_id);
     wait_for(&rx, |event| {
         matches!(event, ThreadEvent::TurnStarted { .. })
@@ -170,6 +186,23 @@ fn command(
     });
 }
 
+fn agent_message(sender: &Sender<ProviderEvent>, item_index: u32, text: &str) {
+    let _ = sender.send(ProviderEvent::ItemStarted {
+        item_index,
+        kind: ItemKind::AgentMessage,
+        parent_item_index: None,
+        category: None,
+    });
+    let _ = sender.send(ProviderEvent::ItemCompleted {
+        item_index,
+        kind: ItemKind::AgentMessage,
+        content: text.to_string(),
+        parent_item_index: None,
+        category: None,
+        command: None,
+    });
+}
+
 fn check(f: &Fixture, thread_id: u32, command: &str) -> VerificationCommand {
     f.core
         .verification_dossier(thread_id)
@@ -178,6 +211,102 @@ fn check(f: &Fixture, thread_id: u32, command: &str) -> VerificationCommand {
         .into_iter()
         .find(|check| check.command == command)
         .unwrap_or_else(|| panic!("no {command} in the Dossier"))
+}
+
+#[test]
+fn the_dossier_shows_the_stored_issue_with_its_title_and_link() {
+    let f = fixture();
+    let thread = f
+        .core
+        .dispatch_thread(DispatchRequest {
+            project_id: f.project_id,
+            prompt: "Fix the parser".into(),
+            provider: "fake".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            base_branch: Some("main".into()),
+            issue_number: Some(51),
+            issue_title: Some("Parser crashes on empty input".into()),
+            issue_url: Some("https://github.com/example/oxide/issues/51".into()),
+            issue_labels: Vec::new(),
+        })
+        .unwrap();
+    wait_until_completed(&f, thread.id);
+
+    let dossier = f.core.verification_dossier(thread.id).unwrap();
+
+    let issue = dossier.intent.issue.expect("the issue is stored");
+    assert_eq!(issue.number, 51);
+    assert_eq!(
+        issue.title.as_deref(),
+        Some("Parser crashes on empty input")
+    );
+    assert_eq!(
+        issue.url.as_deref(),
+        Some("https://github.com/example/oxide/issues/51")
+    );
+    assert_eq!(dossier.intent.prompts, vec!["Fix the parser"]);
+}
+
+#[test]
+fn the_dossier_shows_the_threads_prompts_as_intent() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn_with_prompt(&f, thread_id, "Add the parser", Box::new(|_| {}));
+    run_turn_with_prompt(&f, thread_id, "Add tests for it", Box::new(|_| {}));
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert_eq!(
+        dossier.intent.prompts,
+        vec!["Add the parser", "Add tests for it"]
+    );
+    assert!(dossier.intent.issue.is_none());
+}
+
+#[test]
+fn the_closing_agent_message_is_a_claim_beside_the_computed_facts() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| {
+            command(sender, 0, "cargo test", CommandOutcome::Failed, Some(1));
+            agent_message(sender, 1, "All 12 tests pass.");
+        }),
+    );
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert_eq!(
+        check(&f, thread_id, "cargo test").state,
+        VerificationState::Failed
+    );
+    let claim = dossier.claim.expect("the closing message is a claim");
+    assert_eq!(claim.text, "All 12 tests pass.");
+    assert_eq!(claim.turn_index, 0);
+}
+
+#[test]
+fn an_earlier_turns_message_is_not_the_closing_claim() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| agent_message(sender, 0, "The first answer.")),
+    );
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| command(sender, 0, "cargo test", CommandOutcome::Succeeded, Some(0))),
+    );
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert!(dossier.claim.is_none());
 }
 
 #[test]

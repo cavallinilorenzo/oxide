@@ -47,6 +47,7 @@ describe("dispatch form", () => {
       baseBranch: null,
       issueNumber: null,
       issueTitle: null,
+      issueUrl: null,
       issueLabels: [],
     });
   });
@@ -57,7 +58,12 @@ describe("dispatch form", () => {
     expect(form.prompt).toBe("Issue #51: Start a Thread\nhttps://github.com/o/r/issues/51\n\nDo it.");
     expect(form.provider).toBe("claude");
     const edited = { ...form, prompt: `${form.prompt} Be quick.` };
-    expect(dispatchRequest(7, edited, issue)).toMatchObject({ issueNumber: 51, issueTitle: "Start a Thread", issueLabels: ["bug", "backend"] });
+    expect(dispatchRequest(7, edited, issue)).toMatchObject({
+      issueNumber: 51,
+      issueTitle: "Start a Thread",
+      issueUrl: "https://github.com/o/r/issues/51",
+      issueLabels: ["bug", "backend"],
+    });
   });
 
   it("tells Board Threads from chat Threads by their branch", () => {

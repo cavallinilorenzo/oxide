@@ -1,4 +1,3 @@
-use oxide_provider::ItemKind;
 use serde::{Deserialize, Serialize};
 
 use crate::thread::{ThreadSummary, TurnSnapshot};
@@ -23,10 +22,7 @@ pub fn build_recap(turns: &[TurnSnapshot]) -> String {
     let body = turns
         .iter()
         .map(|turn| {
-            let answer = turn
-                .items
-                .iter()
-                .rfind(|i| i.kind == ItemKind::AgentMessage && i.parent_item_index.is_none());
+            let answer = turn.final_agent_message();
             match answer {
                 Some(answer) => format!("User: {}\nAgent: {}", turn.prompt, answer.content),
                 None => format!("User: {}", turn.prompt),

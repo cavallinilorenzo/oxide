@@ -61,12 +61,44 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
+/// What was asked for: the stored issue reference and the Thread's own prompts, never a summary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIntent {
+    pub issue: Option<DossierIssue>,
+    /// The Thread's prompts in order, as the user wrote them.
+    pub prompts: Vec<String>,
+}
+
+/// The GitHub issue a Board Thread was started from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIssue {
+    pub number: u32,
+    /// The title stored when the Thread was dispatched; `None` for an older Thread.
+    pub title: Option<String>,
+    /// The issue's page on GitHub, stored when the Thread was dispatched.
+    pub url: Option<String>,
+}
+
+/// The closing message of the agent, kept apart from what Oxide computed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentClaim {
+    pub turn_index: u32,
+    pub text: String,
+}
+
 /// The Verification section of the Diff Surface for one Thread.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     /// Risk first: failed, stale, unknown, never run, then fresh. Ties by command.
     pub commands: Vec<VerificationCommand>,
+    /// What was asked: the issue and prompts, not an LLM summary.
+    pub intent: DossierIntent,
+    /// The agent's closing message. It is never evidence and never changes `commands`.
+    pub claim: Option<AgentClaim>,
 }
 
 impl Core {
@@ -113,7 +145,27 @@ impl Core {
         let project_id = snapshot.thread.project_id;
         let root = std::path::PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
         let commands = self.project_verification_commands(project_id)?;
-        Ok(compute(&root, thread_id, &snapshot.turns, &commands))
+        let issue = self.stored_issue(thread_id)?;
+        Ok(compute(&root, thread_id, &snapshot.turns, &commands, issue))
+    }
+
+    /// The issue a Thread was started from, as it was stored when the Thread was dispatched.
+    fn stored_issue(&self, thread_id: u32) -> Result<Option<DossierIssue>> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.query_row(
+            "SELECT issue_number, issue_title, issue_url FROM threads WHERE id = ?1",
+            [thread_id],
+            |r| {
+                let number: Option<u32> = r.get(0)?;
+                let title: Option<String> = r.get(1)?;
+                // Only a web page is a link the Dossier may offer.
+                let url: Option<String> = r
+                    .get::<_, Option<String>>(2)?
+                    .filter(|url| url.starts_with("https://"));
+                Ok(number.map(|number| DossierIssue { number, title, url }))
+            },
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -122,6 +174,7 @@ fn compute(
     thread_id: u32,
     turns: &[TurnSnapshot],
     project_commands: &[String],
+    issue: Option<DossierIssue>,
 ) -> VerificationDossier {
     // A Provider reports absolute paths as it sees them; compare them with the checkout as Git
     // spells it, too.
@@ -243,7 +296,28 @@ fn compute(
             .then_with(|| a.command.cmp(&b.command))
             .then_with(|| kind_rank(a.kind).cmp(&kind_rank(b.kind)))
     });
-    VerificationDossier { commands }
+    let prompts = turns
+        .iter()
+        .map(|turn| turn.prompt.clone())
+        .filter(|prompt| !prompt.trim().is_empty())
+        .collect();
+    VerificationDossier {
+        commands,
+        intent: DossierIntent { issue, prompts },
+        claim: closing_claim(turns),
+    }
+}
+
+/// The agent's closing message: the last top-level message of the last Turn. An earlier Turn's
+/// message is not the claim, and neither is a message nested under a Subagent.
+fn closing_claim(turns: &[TurnSnapshot]) -> Option<AgentClaim> {
+    let turn = turns.last()?;
+    turn.final_agent_message()
+        .filter(|item| !item.content.trim().is_empty())
+        .map(|item| AgentClaim {
+            turn_index: turn.turn_index,
+            text: item.content.trim().to_string(),
+        })
 }
 
 fn state_of(

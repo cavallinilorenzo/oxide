@@ -91,7 +91,10 @@ pub use attachments::{
 };
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
-pub use dossier::{VerificationCommand, VerificationDossier, VerificationKind, VerificationState};
+pub use dossier::{
+    AgentClaim, DossierIntent, DossierIssue, VerificationCommand, VerificationDossier,
+    VerificationKind, VerificationState,
+};
 pub use error::{Error, Result};
 pub use oxide_provider::{
     ActivityCategory, ApprovalDecision, ApprovalKind, Attachment, AttachmentKind, CommandOutcome,

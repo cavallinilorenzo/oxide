@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { commands, type VerificationDossier as Dossier, type VerificationKind, type VerificationState } from "./bindings";
+import {
+  commands,
+  type DossierIssue,
+  type VerificationDossier as Dossier,
+  type VerificationKind,
+  type VerificationState,
+} from "./bindings";
 import { useQuery, type QueryResult } from "./queryCache";
 
 const STATE_LABEL: Record<VerificationState, string> = {
@@ -36,14 +42,65 @@ interface VerificationDossierProps {
 /** Which Verification commands ran in this Thread, and whether each result still applies. */
 export function VerificationDossier({ projectId, threadId, refreshKey }: VerificationDossierProps) {
   const [reload, setReload] = useState(0);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const query = useQuery(
     `p${projectId}:dossier:${threadId}`,
     async (): Promise<QueryResult<Dossier>> => await commands.verificationDossier(threadId),
     `${refreshKey}#${reload}`,
   );
   const entries = query.state === "ready" ? (query.data?.commands ?? []) : [];
+  const intent = query.state === "ready" ? query.data?.intent : undefined;
+  const issue = intent?.issue ?? null;
+  const issueUrl = issue?.url ?? null;
+  const prompts = intent?.prompts ?? [];
+  const claim = query.state === "ready" ? query.data?.claim : null;
   return (
     <section className="dossier" aria-label="Verification dossier">
+      {query.state === "ready" && (issue || prompts.length > 0) && (
+        <section className="dossier-intent" aria-label="Intent">
+          <div className="dossier-head">
+            <span className="dossier-title">Intent</span>
+            {issue && <span className="dossier-count">Issue #{issue.number}</span>}
+          </div>
+          {issue && (
+            <p className="dossier-issue">
+              {issueUrl ? (
+                <a
+                  href={issueUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void commands
+                      .openLink(issueUrl)
+                      .then((result) => {
+                        if (result.status === "error") setLinkError(result.error.message);
+                      })
+                      .catch((cause: unknown) => setLinkError(String(cause)));
+                  }}
+                >
+                  {issueLabel(issue)}
+                </a>
+              ) : (
+                issueLabel(issue)
+              )}
+            </p>
+          )}
+          {linkError && <p className="dossier-note error">{linkError}</p>}
+          {prompts.length > 0 && (
+            <details className="dossier-prompts">
+              <summary>Prompts ({prompts.length})</summary>
+              <ol>
+                {prompts.map((prompt, index) => (
+                  <li key={index} className="dossier-prompt">
+                    {prompt}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
+        </section>
+      )}
       <div className="dossier-head">
         <span className="dossier-title">Verification</span>
         {entries.length > 0 && (
@@ -78,9 +135,24 @@ export function VerificationDossier({ projectId, threadId, refreshKey }: Verific
           ))}
         </ul>
       )}
+      {claim && (
+        <section className="dossier-claim" aria-label="Agent claim">
+          <div className="dossier-head">
+            <span className="dossier-title">Agent claim</span>
+            <span className="dossier-count">
+              Turn {claim.turnIndex + 1} · the agent's own words, not checked by Oxide
+            </span>
+          </div>
+          <p className="dossier-claim-text">{claim.text}</p>
+        </section>
+      )}
       <VerificationCommandsEditor projectId={projectId} onSaved={() => setReload((n) => n + 1)} />
     </section>
   );
+}
+
+function issueLabel(issue: DossierIssue): string {
+  return issue.title ? `#${issue.number} ${issue.title}` : `#${issue.number}`;
 }
 
 /** The Project's own Verification commands, one per line. Stored by Oxide, not in the repository. */

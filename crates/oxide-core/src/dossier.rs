@@ -1,6 +1,8 @@
 //! The Verification Dossier: which commands count as checks for a Thread, and whether the result
-//! of each still applies to the files as they are now. Computed every time from the Transcript,
-//! the Checkpoints and the Project's Verification commands; never persisted, never run, no LLM.
+//! of each still applies to the files as they are now, plus the branch-wide evidence: commits no
+//! Turn produced, the pull request's checks and how much supervision the work had. Computed every
+//! time from the Transcript, the Checkpoints, Git, GitHub and the Project's Verification
+//! commands; never persisted, never run, no LLM.
 //!
 //! A command is fresh only if it succeeded after the last known change. Within a Turn the order of
 //! Items says whether a FileChange came after the command. Across Turns and human edits, the tree
@@ -14,13 +16,14 @@
 //! in one sentence and points at the files in the Diff; none of them is combined into a score.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::git_diff::{Diff, DiffFile};
+use crate::github::PullRequestCheck;
 use crate::thread::{ItemSnapshot, TurnSnapshot};
-use crate::{CommandOutcome, Core, ItemKind, Result, checkpoint};
+use crate::{CommandOutcome, Core, ItemKind, PermissionMode, Result, checkpoint, git, git_diff};
 
 /// Changed lines past which the Dossier flags a change as large.
 pub const LARGE_DIFF_LINES: u32 = 400;
@@ -142,6 +145,42 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
+/// A commit on the branch that no Turn of the Thread accounts for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCommit {
+    pub sha: String,
+    pub subject: String,
+}
+
+/// The pull request of the Thread's branch, with the checks GitHub reports for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierPullRequest {
+    pub number: u32,
+    pub url: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
+/// One Permission mode and how many Turns started in it; `None` is a Turn stored before it was
+/// recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionModeUse {
+    pub mode: Option<PermissionMode>,
+    pub turns: u32,
+}
+
+/// How much supervision the work actually had.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Supervision {
+    pub approvals_granted: u32,
+    pub approvals_denied: u32,
+    /// Known modes first, then Turns whose mode was never recorded.
+    pub permission_modes: Vec<PermissionModeUse>,
+}
+
 /// What kind of risk a signal points at. Each kind explains itself; there is no aggregate score.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,7 +239,8 @@ pub struct AgentClaim {
     pub text: String,
 }
 
-/// The Verification section of the Diff Surface for one Thread.
+/// The Dossier of one Thread: its Verification commands and risk signals, the branch evidence no
+/// Turn covers, the pull request's checks and the supervision the work had.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
@@ -213,6 +253,18 @@ pub struct VerificationDossier {
     pub intent: DossierIntent,
     /// The agent's closing message. It is never evidence and never changes `commands`.
     pub claim: Option<AgentClaim>,
+    /// What the Branch scope compares against; `None` when there is no base branch.
+    pub base_branch: Option<String>,
+    /// Whether the branch could be compared with its base, so coverage is meaningful.
+    pub coverage_known: bool,
+    /// Commits since the merge-base that fall outside every recorded Turn.
+    pub uncovered_commits: Vec<BranchCommit>,
+    /// The branch's pull request, when GitHub reports one.
+    pub pull_request: Option<DossierPullRequest>,
+    /// Whether GitHub answered: `pull_request` being `None` then means the branch has none.
+    pub pull_request_known: bool,
+    /// Approvals and the Permission modes the Turns used.
+    pub supervision: Supervision,
 }
 
 impl Core {
@@ -285,23 +337,53 @@ impl Core {
         Ok(())
     }
 
-    /// Computes the Dossier from the Thread's Transcript and Checkpoints and the Project's
-    /// Verification commands and sensitive paths. It runs nothing and stores nothing.
+    /// Computes the Thread-scoped Dossier from the Transcript, Checkpoints and the Project's
+    /// Verification commands and sensitive paths. It runs nothing in the checkout and stores
+    /// nothing.
     pub fn verification_dossier(&self, thread_id: u32) -> Result<VerificationDossier> {
+        Ok(self.computed_dossier(thread_id)?.1)
+    }
+
+    /// The Dossier of the Thread's whole branch: the Thread-scoped evidence plus the commits no
+    /// Turn produced and, when GitHub reports one, the pull request's checks.
+    pub fn branch_dossier(&self, thread_id: u32) -> Result<VerificationDossier> {
+        let (root, mut dossier) = self.computed_dossier(thread_id)?;
+        if let Some(history) = self.branch_commits(thread_id, &root)? {
+            dossier.base_branch = Some(history.base);
+            dossier.coverage_known = history.comparable;
+            dossier.uncovered_commits = history.uncovered;
+        }
+        if let Ok(status) = git::status(&root)
+            && let Some(branch) = status.branch
+            && let Ok(found) = crate::github::branch_pull_request_checks(&self.gh, &root, &branch)
+        {
+            dossier.pull_request_known = true;
+            dossier.pull_request = found.map(|pull_request| DossierPullRequest {
+                number: pull_request.number,
+                url: pull_request.url,
+                checks: pull_request.checks,
+            });
+        }
+        Ok(dossier)
+    }
+
+    fn computed_dossier(&self, thread_id: u32) -> Result<(PathBuf, VerificationDossier)> {
         let snapshot = self.storage.get_snapshot(thread_id, u32::MAX)?;
         let project_id = snapshot.thread.project_id;
         let root = std::path::PathBuf::from(self.checkout_path(project_id, Some(thread_id))?);
         let commands = self.project_verification_commands(project_id)?;
         let sensitive_paths = self.project_sensitive_paths(project_id)?;
         let issue = self.stored_issue(thread_id)?;
-        Ok(compute(
+        let mut dossier = compute(
             &root,
             thread_id,
             &snapshot.turns,
             &commands,
             &sensitive_paths,
             issue,
-        ))
+        );
+        dossier.supervision = supervision(&snapshot.turns);
+        Ok((root, dossier))
     }
 
     /// The issue a Thread was started from, as it was stored when the Thread was dispatched.
@@ -322,6 +404,113 @@ impl Core {
         )
         .map_err(Into::into)
     }
+
+    /// Commits since the merge-base with the base branch that no Turn recorded as its own. A
+    /// Turn owns the commits that became reachable from HEAD while it ran; a commit outside
+    /// every Turn is never presented as covered. Turns stored before HEAD was recorded fall back
+    /// to their start and end times.
+    fn branch_commits(&self, thread_id: u32, root: &Path) -> Result<Option<BranchCommits>> {
+        let Some(history) = git_diff::branch_commits(root)? else {
+            return Ok(None);
+        };
+        let turns: Vec<TurnHeads> = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let mut stmt = db.prepare(
+                "SELECT head_before, head_after, CAST(strftime('%s', started_at) AS INTEGER), \
+                 CAST(COALESCE(strftime('%s', completed_at), strftime('%s', 'now')) AS INTEGER) \
+                 FROM turns WHERE thread_id = ?1 ORDER BY id ASC",
+            )?;
+            let rows = stmt.query_map([thread_id], |r| {
+                Ok(TurnHeads {
+                    before: r.get(0)?,
+                    after: r.get(1)?,
+                    started_at: r.get(2)?,
+                    ended_at: r.get(3)?,
+                })
+            })?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let mut covered = HashSet::new();
+        for turn in turns {
+            if let Some(before) = turn.before {
+                // A Turn still running has no end HEAD yet: HEAD now is as far as it has got.
+                let after = turn.after.as_deref().unwrap_or("HEAD");
+                if let Ok(log) = git::run(root, &["rev-list", &format!("{before}..{after}")]) {
+                    covered.extend(
+                        log.lines()
+                            .filter(|line| !line.is_empty())
+                            .map(str::to_string),
+                    );
+                }
+                continue;
+            }
+            covered.extend(
+                history
+                    .commits
+                    .iter()
+                    .filter(|commit| {
+                        commit.committed_at >= turn.started_at
+                            && commit.committed_at <= turn.ended_at
+                    })
+                    .map(|commit| commit.sha.clone()),
+            );
+        }
+        let uncovered = history
+            .commits
+            .into_iter()
+            .filter(|commit| !covered.contains(&commit.sha))
+            .map(|commit| BranchCommit {
+                sha: commit.sha,
+                subject: commit.subject,
+            })
+            .collect();
+        Ok(Some(BranchCommits {
+            base: history.base,
+            comparable: history.comparable,
+            uncovered,
+        }))
+    }
+}
+
+struct TurnHeads {
+    before: Option<String>,
+    after: Option<String>,
+    started_at: i64,
+    ended_at: i64,
+}
+
+struct BranchCommits {
+    base: String,
+    comparable: bool,
+    uncovered: Vec<BranchCommit>,
+}
+
+fn supervision(turns: &[TurnSnapshot]) -> Supervision {
+    let mut supervision = Supervision::default();
+    let mut modes: HashMap<Option<PermissionMode>, u32> = HashMap::new();
+    for turn in turns {
+        for approval in &turn.approvals {
+            match approval.decision {
+                Some(crate::ApprovalDecision::Allow) => supervision.approvals_granted += 1,
+                Some(crate::ApprovalDecision::Deny) => supervision.approvals_denied += 1,
+                None => {}
+            }
+        }
+        *modes.entry(turn.permission_mode).or_default() += 1;
+    }
+    let order = |mode: Option<PermissionMode>| match mode {
+        Some(PermissionMode::Ask) => 0,
+        Some(PermissionMode::AutoEdit) => 1,
+        Some(PermissionMode::FullAccess) => 2,
+        None => 3,
+    };
+    let mut modes: Vec<PermissionModeUse> = modes
+        .into_iter()
+        .map(|(mode, turns)| PermissionModeUse { mode, turns })
+        .collect();
+    modes.sort_by_key(|entry| order(entry.mode));
+    supervision.permission_modes = modes;
+    supervision
 }
 
 fn compute(
@@ -480,6 +669,7 @@ fn compute(
         signals,
         intent: DossierIntent { issue, prompts },
         claim: closing_claim(turns),
+        ..VerificationDossier::default()
     }
 }
 

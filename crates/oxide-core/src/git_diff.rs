@@ -82,7 +82,7 @@ const BASE_CANDIDATES: [&str; 6] = [
     "dev",
 ];
 
-fn base_branch(cwd: &Path) -> Option<String> {
+pub(crate) fn base_branch(cwd: &Path) -> Option<String> {
     run(
         cwd,
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
@@ -96,6 +96,70 @@ fn base_branch(cwd: &Path) -> Option<String> {
             .find(|name| ref_exists(cwd, name))
             .map(|name| name.to_string())
     })
+}
+
+pub(crate) struct BranchCommitLine {
+    pub sha: String,
+    pub subject: String,
+    /// The committer time, in seconds since the Unix epoch.
+    pub committed_at: i64,
+}
+
+pub(crate) struct BranchHistory {
+    pub base: String,
+    /// False when the histories are unrelated, so nothing could be compared.
+    pub comparable: bool,
+    pub commits: Vec<BranchCommitLine>,
+}
+
+/// The commits in the Branch scope since the merge-base, newest first. `None` when there is no
+/// HEAD or no base branch to compare with.
+pub(crate) fn branch_commits(cwd: &Path) -> Result<Option<BranchHistory>> {
+    if !ref_exists(cwd, "HEAD") {
+        return Ok(None);
+    }
+    let Some(base) = base_branch(cwd) else {
+        return Ok(None);
+    };
+    let Ok(fork) = run(cwd, &["merge-base", &base, "HEAD"]) else {
+        // Unrelated histories: nothing shared to compare from.
+        return Ok(Some(BranchHistory {
+            base,
+            comparable: false,
+            commits: Vec::new(),
+        }));
+    };
+    let fork = fork.trim();
+    if fork.is_empty() {
+        return Ok(None);
+    }
+    let log = run(
+        cwd,
+        &[
+            "--no-optional-locks",
+            "log",
+            "--format=%H%x1f%ct%x1f%s",
+            &format!("{fork}..HEAD"),
+        ],
+    )?;
+    Ok(Some(BranchHistory {
+        base,
+        comparable: true,
+        commits: log
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.splitn(3, '\x1f');
+                let sha = fields.next()?;
+                let committed_at = fields.next()?.parse().ok()?;
+                let subject = fields.next()?;
+                Some(BranchCommitLine {
+                    sha: sha.to_string(),
+                    subject: subject.to_string(),
+                    committed_at,
+                })
+            })
+            .collect(),
+    }))
 }
 
 pub fn diff(cwd: &Path, scope: DiffScope) -> Result<Diff> {

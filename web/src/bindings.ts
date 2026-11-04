@@ -62,10 +62,15 @@ export const commands = {
 	/**  Replaces the Project's own sensitive paths. */
 	setProjectSensitivePaths: (projectId: number, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_sensitive_paths", { projectId, paths })),
 	/**
-	 *  The Dossier of a Thread: which Verification commands ran, whether they still apply, and the
-	 *  separate risk signals about what stayed uncovered.
+	 *  The Dossier of a Thread: which Verification commands ran, whether they still apply, the
+	 *  separate risk signals about what stayed uncovered, and how much supervision the Turns had.
 	 */
 	verificationDossier: (threadId: number) => typedError<VerificationDossier_Serialize, AppError>(__TAURI_INVOKE("verification_dossier", { threadId })),
+	/**
+	 *  The Dossier of the Thread's whole branch: its commands and supervision, the commits no Turn
+	 *  produced and the pull request's checks.
+	 */
+	branchDossier: (threadId: number) => typedError<VerificationDossier_Serialize, AppError>(__TAURI_INVOKE("branch_dossier", { threadId })),
 	/**
 	 *  Whether chat Threads of this Project stay in the main checkout instead of each
 	 *  getting its own worktree on their first prompt.
@@ -398,6 +403,12 @@ export type BoardEvent = BoardEvent_Serialize | BoardEvent_Deserialize;
 export type BoardEvent_Deserialize = { type: "ThreadChanged"; payload: BoardCard_Deserialize } | { type: "ThreadDeleted"; payload: number };
 
 export type BoardEvent_Serialize = { type: "ThreadChanged"; payload: BoardCard_Serialize } | { type: "ThreadDeleted"; payload: number };
+
+/**  A commit on the branch that no Turn of the Thread accounts for. */
+export type BranchCommit = {
+	sha: string,
+	subject: string,
+};
 
 /**  A Board Thread's pull request: its state and a tally of its checks. */
 export type BranchPullRequest = {
@@ -809,6 +820,23 @@ export type DossierIssue_Serialize = {
 	url: string | null,
 };
 
+/**  The branch's pull request with the checks GitHub reports for it. */
+export type DossierPullRequest = DossierPullRequest_Serialize | DossierPullRequest_Deserialize;
+
+/**  The branch's pull request with the checks GitHub reports for it. */
+export type DossierPullRequest_Deserialize = {
+	number: number,
+	url: string,
+	checks: PullRequestCheck_Deserialize[],
+};
+
+/**  The branch's pull request with the checks GitHub reports for it. */
+export type DossierPullRequest_Serialize = {
+	number: number,
+	url: string,
+	checks: PullRequestCheck_Serialize[],
+};
+
 export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
 
 export type ExecutionDetails_Deserialize = {
@@ -1193,6 +1221,30 @@ export type PerformanceMeasurement_Serialize = {
 };
 
 export type PermissionMode = "ask" | "auto-edit" | "full-access";
+
+/**
+ *  One Permission mode and how many Turns started in it; `null` is a Turn stored before modes
+ *  were recorded.
+ */
+export type PermissionModeUse = PermissionModeUse_Serialize | PermissionModeUse_Deserialize;
+
+/**
+ *  One Permission mode and how many Turns started in it; `null` is a Turn stored before modes
+ *  were recorded.
+ */
+export type PermissionModeUse_Deserialize = {
+	mode?: PermissionMode | null,
+	turns: number,
+};
+
+/**
+ *  One Permission mode and how many Turns started in it; `null` is a Turn stored before modes
+ *  were recorded.
+ */
+export type PermissionModeUse_Serialize = {
+	mode: PermissionMode | null,
+	turns: number,
+};
 
 export type Project = {
 	id: number,
@@ -1812,6 +1864,23 @@ export type SlashCommand_Serialize = {
 
 export type SlashRoute = "oxide" | "passthrough" | "native";
 
+/**  How much supervision the work actually had. */
+export type Supervision = Supervision_Serialize | Supervision_Deserialize;
+
+/**  How much supervision the work actually had. */
+export type Supervision_Deserialize = {
+	approvalsGranted: number,
+	approvalsDenied: number,
+	permissionModes: PermissionModeUse_Deserialize[],
+};
+
+/**  How much supervision the work actually had. */
+export type Supervision_Serialize = {
+	approvalsGranted: number,
+	approvalsDenied: number,
+	permissionModes: PermissionModeUse_Serialize[],
+};
+
 export type Terminal = {
 	id: number,
 	pid: number,
@@ -2149,23 +2218,44 @@ export type VerificationCommand_Serialize = {
 	exitCode: number | null,
 };
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
+ */
 export type VerificationDossier = VerificationDossier_Serialize | VerificationDossier_Deserialize;
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
+ */
 export type VerificationDossier_Deserialize = {
 	commands: VerificationCommand_Deserialize[],
 	signals: RiskSignal_Deserialize[],
 	intent: DossierIntent_Deserialize,
 	claim?: AgentClaim | null,
+	baseBranch?: string | null,
+	coverageKnown: boolean,
+	uncoveredCommits: BranchCommit[],
+	pullRequest?: DossierPullRequest_Deserialize | null,
+	pullRequestKnown: boolean,
+	supervision: Supervision_Deserialize,
 };
 
-/**  The Verification section of the Diff Surface for one Thread. */
+/**
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
+ */
 export type VerificationDossier_Serialize = {
 	commands: VerificationCommand_Serialize[],
 	signals: RiskSignal_Serialize[],
 	intent: DossierIntent_Serialize,
 	claim: AgentClaim | null,
+	baseBranch: string | null,
+	coverageKnown: boolean,
+	uncoveredCommits: BranchCommit[],
+	pullRequest: DossierPullRequest_Serialize | null,
+	pullRequestKnown: boolean,
+	supervision: Supervision_Serialize,
 };
 
 export type VerificationKind = "test" | "lint" | "typeCheck" | "build" | "other";

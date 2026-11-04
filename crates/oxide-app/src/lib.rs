@@ -872,6 +872,41 @@ pub struct VerificationCommand {
     pub exit_code: Option<i32>,
 }
 
+/// A commit on the branch that no Turn of the Thread accounts for.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCommit {
+    pub sha: String,
+    pub subject: String,
+}
+
+/// The branch's pull request with the checks GitHub reports for it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierPullRequest {
+    pub number: u32,
+    pub url: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
+/// One Permission mode and how many Turns started in it; `null` is a Turn stored before modes
+/// were recorded.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionModeUse {
+    pub mode: Option<PermissionMode>,
+    pub turns: u32,
+}
+
+/// How much supervision the work actually had.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Supervision {
+    pub approvals_granted: u32,
+    pub approvals_denied: u32,
+    pub permission_modes: Vec<PermissionModeUse>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum RiskSignalKind {
@@ -921,7 +956,8 @@ pub struct AgentClaim {
     pub text: String,
 }
 
-/// The Verification section of the Diff Surface for one Thread.
+/// The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+/// branch evidence in Branch scope.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
@@ -929,6 +965,12 @@ pub struct VerificationDossier {
     pub signals: Vec<RiskSignal>,
     pub intent: DossierIntent,
     pub claim: Option<AgentClaim>,
+    pub base_branch: Option<String>,
+    pub coverage_known: bool,
+    pub uncovered_commits: Vec<BranchCommit>,
+    pub pull_request: Option<DossierPullRequest>,
+    pub pull_request_known: bool,
+    pub supervision: Supervision,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -3098,8 +3140,8 @@ fn set_project_sensitive_paths(
     Ok(core.set_project_sensitive_paths(project_id, &paths)?)
 }
 
-/// The Dossier of a Thread: which Verification commands ran, whether they still apply, and the
-/// separate risk signals about what stayed uncovered.
+/// The Dossier of a Thread: which Verification commands ran, whether they still apply, the
+/// separate risk signals about what stayed uncovered, and how much supervision the Turns had.
 #[tauri::command]
 #[specta::specta]
 async fn verification_dossier(
@@ -3107,6 +3149,19 @@ async fn verification_dossier(
     thread_id: u32,
 ) -> Result<VerificationDossier, AppError> {
     git_blocking(&core, move |core| core.verification_dossier(thread_id))
+        .await
+        .map(|dossier| convert(&dossier))
+}
+
+/// The Dossier of the Thread's whole branch: its commands and supervision, the commits no Turn
+/// produced and the pull request's checks.
+#[tauri::command]
+#[specta::specta]
+async fn branch_dossier(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<VerificationDossier, AppError> {
+    git_blocking(&core, move |core| core.branch_dossier(thread_id))
         .await
         .map(|dossier| convert(&dossier))
 }
@@ -3707,6 +3762,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         get_project_sensitive_paths,
         set_project_sensitive_paths,
         verification_dossier,
+        branch_dossier,
         get_project_threads_in_main_checkout,
         set_project_threads_in_main_checkout,
         continue_thread,

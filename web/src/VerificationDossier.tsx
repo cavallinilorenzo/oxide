@@ -2,10 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import {
   commands,
   type DossierIssue,
-  type VerificationDossier as Dossier,
+  type PermissionMode,
+  type VerificationDossier_Serialize as Dossier,
   type VerificationKind,
   type VerificationState,
 } from "./bindings";
+import type { PanelScope } from "./diffScope";
+import { CHECK_WORD } from "./PullRequestChecks";
+import { dedupeChecks } from "./pullRequestReview";
 import { useQuery, type QueryResult } from "./queryCache";
 
 const STATE_LABEL: Record<VerificationState, string> = {
@@ -32,31 +36,48 @@ const KIND_LABEL: Record<VerificationKind, string> = {
   other: "Command",
 };
 
+const MODE_LABEL: Record<PermissionMode, string> = {
+  ask: "Ask",
+  "auto-edit": "Auto-edit",
+  "full-access": "Full access",
+};
+
 interface VerificationDossierProps {
   projectId: number;
   threadId: number;
+  /** The Diff scope; the branch-wide sections are evidence about the whole branch. */
+  scope: PanelScope;
   /** Changes whenever a Turn does, so the evidence is recomputed. */
   refreshKey: string;
   /** Selects the file a signal points at in the Diff. */
   onOpenFile: (path: string) => void;
 }
 
-/** Which Verification commands ran, whether each result still applies, and the separate risk signals. */
-export function VerificationDossier({ projectId, threadId, refreshKey, onOpenFile }: VerificationDossierProps) {
+/** Which Verification commands ran in this Thread, whether each result still applies, the
+ *  separate risk signals, and in Branch scope what the branch holds beyond the Thread's Turns. */
+export function VerificationDossier({
+  projectId,
+  threadId,
+  scope,
+  refreshKey,
+  onOpenFile,
+}: VerificationDossierProps) {
   const [reload, setReload] = useState(0);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const branchScope = scope === "branch";
   const query = useQuery(
-    `p${projectId}:dossier:${threadId}`,
-    async (): Promise<QueryResult<Dossier>> => await commands.verificationDossier(threadId),
+    `p${projectId}:dossier:${threadId}:${branchScope ? "branch" : "thread"}`,
+    async (): Promise<QueryResult<Dossier>> =>
+      branchScope ? await commands.branchDossier(threadId) : await commands.verificationDossier(threadId),
     `${refreshKey}#${reload}`,
   );
-  const entries = query.state === "ready" ? (query.data?.commands ?? []) : [];
-  const signals = query.state === "ready" ? (query.data?.signals ?? []) : [];
-  const intent = query.state === "ready" ? query.data?.intent : undefined;
-  const issue = intent?.issue ?? null;
+  const dossier = query.state === "ready" ? query.data : null;
+  const entries = dossier?.commands ?? [];
+  const signals = dossier?.signals ?? [];
+  const issue = dossier?.intent.issue ?? null;
   const issueUrl = issue?.url ?? null;
-  const prompts = intent?.prompts ?? [];
-  const claim = query.state === "ready" ? query.data?.claim : null;
+  const prompts = dossier?.intent.prompts ?? [];
+  const claim = dossier?.claim ?? null;
   return (
     <section className="dossier" aria-label="Verification dossier">
       {query.state === "ready" && (issue || prompts.length > 0) && (
@@ -184,9 +205,80 @@ export function VerificationDossier({ projectId, threadId, refreshKey, onOpenFil
           <p className="dossier-claim-text">{claim.text}</p>
         </section>
       )}
+      {scope === "branch" && dossier !== null && <BranchEvidence dossier={dossier} />}
       <VerificationCommandsEditor projectId={projectId} onSaved={() => setReload((n) => n + 1)} />
       <SensitivePathsEditor projectId={projectId} onSaved={() => setReload((n) => n + 1)} />
     </section>
+  );
+}
+
+/** What the branch holds beyond this Thread's Turns: uncovered commits, PR checks and supervision. */
+function BranchEvidence({ dossier }: { dossier: Dossier }) {
+  const uncovered = dossier.uncoveredCommits;
+  const pullRequest = dossier.pullRequest;
+  const checks = pullRequest === null ? [] : dedupeChecks(pullRequest.checks);
+  const supervision = dossier.supervision;
+  const modes = supervision.permissionModes
+    .map((entry) => `${entry.mode === null ? "Unknown" : MODE_LABEL[entry.mode]} ${entry.turns}`)
+    .join(" · ");
+  return (
+    <div className="dossier-branch" aria-label="Branch evidence">
+      {dossier.baseBranch === null ? (
+        <p className="dossier-note">No base branch found, so branch coverage is unknown.</p>
+      ) : !dossier.coverageKnown ? (
+        <p className="dossier-note">
+          Branch coverage is unknown: its history shares no base with {dossier.baseBranch}.
+        </p>
+      ) : uncovered.length > 0 ? (
+        <section className="dossier-branch-section" aria-label="Commits not covered">
+          <span className="dossier-subtitle">
+            Not covered by this Thread ({uncovered.length})
+          </span>
+          <ul className="dossier-commits">
+            {uncovered.map((commit) => (
+              <li key={commit.sha}>
+                <code>{commit.sha.slice(0, 7)}</code> <span>{commit.subject}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="dossier-note">Every commit on this branch is covered by a Turn.</p>
+      )}
+      {!dossier.pullRequestKnown ? (
+        <p className="dossier-note">Pull request checks are unavailable.</p>
+      ) : pullRequest !== null ? (
+        <section className="dossier-branch-section" aria-label="Pull request checks">
+          <span className="dossier-subtitle">Pull request #{pullRequest.number}</span>
+          {checks.length === 0 ? (
+            <p className="dossier-note">No checks reported.</p>
+          ) : (
+            <ul className="dossier-checks">
+              {checks.map((check, index) => (
+                <li
+                  key={`${check.name}:${index}`}
+                  className="dossier-check"
+                  aria-label={`${check.name}: ${CHECK_WORD[check.state]}`}
+                >
+                  <span className={`dossier-badge dossier-badge-${check.state}`}>
+                    {CHECK_WORD[check.state]}
+                  </span>
+                  <code className="dossier-command">{check.name}</code>
+                  {check.required && <span className="dossier-meta">Required</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+      <section className="dossier-branch-section" aria-label="Supervision">
+        <span className="dossier-subtitle">Supervision</span>
+        <span className="dossier-meta">
+          Approvals: {supervision.approvalsGranted} granted, {supervision.approvalsDenied} denied
+        </span>
+        {modes !== "" && <span className="dossier-meta">Permission modes: {modes}</span>}
+      </section>
+    </div>
   );
 }
 

@@ -341,6 +341,7 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
         <VerificationDossier
           projectId={projectId}
           threadId={threadId}
+          scope={scope}
           refreshKey={`${refreshKey}#${focusTick}`}
           onOpenFile={(path) => {
             const file = files.find((candidate) => candidate.path === path || candidate.oldPath === path);

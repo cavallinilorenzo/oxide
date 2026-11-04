@@ -39,12 +39,14 @@ pub enum StorageMsg {
         turn_index: u32,
         prompt: String,
         segments: Vec<PromptSegment>,
+        head_before: Option<String>,
         reply: mpsc::Sender<Result<TurnStarted>>,
     },
     UpdateTurnCompleted {
         turn_id: u32,
         status: TurnStatus,
         error: Option<TurnError>,
+        head_after: Option<String>,
         reply: mpsc::Sender<Result<()>>,
     },
     WriteItemCompleted {
@@ -167,6 +169,7 @@ impl StorageHandle {
         turn_index: u32,
         prompt: String,
         segments: Vec<PromptSegment>,
+        head_before: Option<String>,
     ) -> Result<TurnStarted> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::WriteTurnStarted {
@@ -174,6 +177,7 @@ impl StorageHandle {
             turn_index,
             prompt,
             segments,
+            head_before,
             reply: reply_tx,
         });
         reply_rx
@@ -186,12 +190,14 @@ impl StorageHandle {
         turn_id: u32,
         status: TurnStatus,
         error: Option<TurnError>,
+        head_after: Option<String>,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         let _ = self.sender.send(StorageMsg::UpdateTurnCompleted {
             turn_id,
             status,
             error,
+            head_after,
             reply: reply_tx,
         });
         reply_rx.recv().unwrap_or(Ok(()))
@@ -415,6 +421,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 turn_index,
                 prompt,
                 segments,
+                head_before,
                 reply,
             } => {
                 let res = (|| -> Result<TurnStarted> {
@@ -431,8 +438,8 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                     )?;
                     let segments_json = serde_json::to_string(&segments).ok();
                     tx.execute(
-                        "INSERT INTO turns (thread_id, turn_index, prompt, model, effort, permission_mode, segments, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running')",
-                        rusqlite::params![thread_id, turn_index, prompt, model, effort, permission_mode, segments_json],
+                        "INSERT INTO turns (thread_id, turn_index, prompt, model, effort, permission_mode, segments, head_before, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running')",
+                        rusqlite::params![thread_id, turn_index, prompt, model, effort, permission_mode, segments_json, head_before],
                     )?;
                     let turn_id = tx.last_insert_rowid() as u32;
                     let mut thread_title = None;
@@ -464,6 +471,7 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                 turn_id,
                 status,
                 error,
+                head_after,
                 reply,
             } => {
                 let res = (|| -> Result<()> {
@@ -478,8 +486,8 @@ fn run_storage_actor(conn: Connection, rx: Receiver<StorageMsg>) {
                         None => (None, None),
                     };
                     conn.execute(
-                        "UPDATE turns SET status = ?1, error_message = ?2, stderr_tail = ?3, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?4",
-                        rusqlite::params![status_str, error_message, stderr_tail, turn_id],
+                        "UPDATE turns SET status = ?1, error_message = ?2, stderr_tail = ?3, head_after = ?4, completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?5",
+                        rusqlite::params![status_str, error_message, stderr_tail, head_after, turn_id],
                     )?;
                     Ok(())
                 })();

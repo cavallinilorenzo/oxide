@@ -261,6 +261,35 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE turns ADD COLUMN head_before TEXT;
     ALTER TABLE turns ADD COLUMN head_after TEXT;
 ",
+    // Reverts and candidate follow-up fixes for tracked merged pull requests (ADR-0010, #342).
+    // Stored without Transcript text, outliving Threads.
+    "
+    CREATE TABLE review_reverts (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        pull_request INTEGER NOT NULL,
+        commit_sha TEXT NOT NULL,
+        commit_subject TEXT NOT NULL,
+        committed_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        UNIQUE (project_id, pull_request, commit_sha)
+    );
+    CREATE INDEX review_reverts_by_project ON review_reverts(project_id, id);
+
+    CREATE TABLE review_follow_ups (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        pull_request INTEGER NOT NULL,
+        commit_sha TEXT NOT NULL,
+        commit_subject TEXT NOT NULL,
+        committed_at INTEGER NOT NULL,
+        co_modified_files TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'candidate',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        UNIQUE (project_id, pull_request, commit_sha)
+    );
+    CREATE INDEX review_follow_ups_by_project ON review_follow_ups(project_id, id);
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

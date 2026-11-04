@@ -122,6 +122,10 @@ export const commands = {
 	reviewLedger: (projectId: number) => typedError<ReviewLedger_Serialize, AppError>(__TAURI_INVOKE("review_ledger", { projectId })),
 	/**  Removes every entry of the Review ledger. */
 	clearReviewLedger: () => typedError<null, AppError>(__TAURI_INVOKE("clear_review_ledger")),
+	/**  Confirms a candidate follow-up fix in the Review ledger. */
+	confirmFollowUp: (projectId: number, pullRequest: number, commitSha: string) => typedError<null, AppError>(__TAURI_INVOKE("confirm_follow_up", { projectId, pullRequest, commitSha })),
+	/**  Dismisses a candidate follow-up fix in the Review ledger. */
+	dismissFollowUp: (projectId: number, pullRequest: number, commitSha: string) => typedError<null, AppError>(__TAURI_INVOKE("dismiss_follow_up", { projectId, pullRequest, commitSha })),
 	startTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_terminal", { projectId, threadId, onOutput })),
 	startBlockTerminal: (projectId: number, threadId: number | null, onOutput: Channel<number[]>) => typedError<Terminal, AppError>(__TAURI_INVOKE("start_block_terminal", { projectId, threadId, onOutput })),
 	writeFile: (projectId: number, threadId: number | null, path: string, expected: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("write_file", { projectId, threadId, path, expected, content })),
@@ -874,6 +878,9 @@ export type FileEntry = {
 	isDir: boolean,
 };
 
+/**  Status of a follow-up fix candidate in the Review ledger. */
+export type FollowUpStatus = "candidate" | "confirmed" | "dismissed";
+
 export type GitBranch = {
 	name: string,
 	remote: boolean,
@@ -1611,6 +1618,17 @@ export type RevertScope = "uncommitted" | "turn";
 
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
 
+/**  A follow-up candidate commit detected on the default branch for a tracked merged pull request. */
+export type ReviewFollowUp = {
+	pullRequest: number,
+	commitSha: string,
+	commitSubject: string,
+	/**  Seconds since the Unix epoch (UTC). */
+	committedAt: number | null,
+	coModifiedFiles: string[],
+	status: FollowUpStatus,
+};
+
 /**  A Project's wait between a finished Turn and the merge. */
 export type ReviewLedger = ReviewLedger_Serialize | ReviewLedger_Deserialize;
 
@@ -1652,6 +1670,10 @@ export type ReviewLedger_Deserialize = {
 	entries: ReviewLedgerEntry_Deserialize[],
 	/**  Review rounds grouped by Provider, Model and kind of work. */
 	rounds: ReviewRoundGroup_Deserialize[],
+	/**  Reverts detected on the default branch within 30 days. */
+	reverts: ReviewRevert[],
+	/**  Candidate follow-up fixes detected on the default branch within 30 days. */
+	followUps: ReviewFollowUp[],
 };
 
 /**  A Project's wait between a finished Turn and the merge. */
@@ -1663,6 +1685,19 @@ export type ReviewLedger_Serialize = {
 	entries: ReviewLedgerEntry_Serialize[],
 	/**  Review rounds grouped by Provider, Model and kind of work. */
 	rounds: ReviewRoundGroup_Serialize[],
+	/**  Reverts detected on the default branch within 30 days. */
+	reverts: ReviewRevert[],
+	/**  Candidate follow-up fixes detected on the default branch within 30 days. */
+	followUps: ReviewFollowUp[],
+};
+
+/**  A revert commit detected on the default branch for a tracked merged pull request. */
+export type ReviewRevert = {
+	pullRequest: number,
+	commitSha: string,
+	commitSubject: string,
+	/**  Seconds since the Unix epoch (UTC). */
+	committedAt: number | null,
 };
 
 /**  Review rounds of one Provider, Model and kind of work. */

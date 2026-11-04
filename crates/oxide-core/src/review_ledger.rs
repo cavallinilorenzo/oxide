@@ -3,14 +3,16 @@
 //! identifiers, Provider, Model, counts and the kind of work, never Transcript text (ADR-0010),
 //! and no foreign key to the Thread: it outlives the Thread. Nothing here is sent anywhere.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::git::run;
+use crate::git_diff::base_branch;
 use crate::{Core, DiffFile, DiffScope};
 
 /// Most recent entries a [`ReviewLedger`] lists.
@@ -172,6 +174,55 @@ impl ReviewLedgerEntry {
     }
 }
 
+/// Status of a follow-up fix candidate in the Review ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowUpStatus {
+    Candidate,
+    Confirmed,
+    Dismissed,
+}
+
+impl FollowUpStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Confirmed => "confirmed",
+            Self::Dismissed => "dismissed",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "confirmed" => Self::Confirmed,
+            "dismissed" => Self::Dismissed,
+            _ => Self::Candidate,
+        }
+    }
+}
+
+/// A revert commit detected on the default branch for a tracked merged pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRevert {
+    pub pull_request: u32,
+    pub commit_sha: String,
+    pub commit_subject: String,
+    pub committed_at: i64,
+}
+
+/// A follow-up candidate commit detected on the default branch for a tracked merged pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFollowUp {
+    pub pull_request: u32,
+    pub commit_sha: String,
+    pub commit_subject: String,
+    pub committed_at: i64,
+    pub co_modified_files: Vec<String>,
+    pub status: FollowUpStatus,
+}
+
 /// A Project's figures: the median wait, the most recent entries, newest merge first, and the
 /// review rounds grouped by Provider, Model and kind of work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +234,8 @@ pub struct ReviewLedger {
     pub count: u32,
     pub entries: Vec<ReviewLedgerEntry>,
     pub rounds: Vec<ReviewRoundGroup>,
+    pub reverts: Vec<ReviewRevert>,
+    pub follow_ups: Vec<ReviewFollowUp>,
 }
 
 pub(crate) struct LedgerStore {
@@ -328,11 +381,45 @@ impl LedgerStore {
                 })
                 .collect();
 
+            let mut stmt = conn.prepare(
+                "SELECT pull_request, commit_sha, commit_subject, committed_at
+                 FROM review_reverts WHERE project_id = ?1 ORDER BY committed_at DESC, id DESC",
+            )?;
+            let reverts = stmt
+                .query_map([project_id], |r| {
+                    Ok(ReviewRevert {
+                        pull_request: r.get(0)?,
+                        commit_sha: r.get(1)?,
+                        commit_subject: r.get(2)?,
+                        committed_at: r.get(3)?,
+                    })
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            let mut stmt = conn.prepare(
+                "SELECT pull_request, commit_sha, commit_subject, committed_at, co_modified_files, status
+                 FROM review_follow_ups WHERE project_id = ?1 ORDER BY committed_at DESC, id DESC",
+            )?;
+            let follow_ups = stmt
+                .query_map([project_id], |r| {
+                    Ok(ReviewFollowUp {
+                        pull_request: r.get(0)?,
+                        commit_sha: r.get(1)?,
+                        commit_subject: r.get(2)?,
+                        committed_at: r.get(3)?,
+                        co_modified_files: string_list(&r.get::<_, String>(4)?),
+                        status: FollowUpStatus::parse(&r.get::<_, String>(5)?),
+                    })
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
             Ok(ReviewLedger {
                 median_secs,
                 count,
                 entries: all.into_iter().take(RECENT_ENTRIES).collect(),
                 rounds,
+                reverts,
+                follow_ups,
             })
         })
     }
@@ -341,9 +428,314 @@ impl LedgerStore {
         self.with_conn(|conn| {
             conn.execute("DELETE FROM review_ledger", [])?;
             conn.execute("DELETE FROM review_rounds", [])?;
+            conn.execute("DELETE FROM review_reverts", [])?;
+            conn.execute("DELETE FROM review_follow_ups", [])?;
             Ok(())
         })
     }
+
+    pub(crate) fn set_follow_up_status(
+        &self,
+        project_id: u32,
+        pull_request: u32,
+        commit_sha: &str,
+        status: FollowUpStatus,
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE review_follow_ups SET status = ?4
+                 WHERE project_id = ?1 AND pull_request = ?2 AND commit_sha = ?3",
+                rusqlite::params![project_id, pull_request, commit_sha, status.as_str()],
+            )?;
+            Ok(())
+        })
+    }
+}
+
+/// 30 days in seconds: the time window within which reverts and follow-up fixes are tracked.
+const THIRTY_DAYS_SECS: i64 = 30 * 86_400;
+
+/// Whether a file path is considered boilerplate (documentation, configs, lockfiles, etc.)
+/// rather than functional code.
+pub(crate) fn is_boilerplate(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let lower = path.to_ascii_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+
+    // Markdown / text docs
+    if lower.ends_with(".md")
+        || lower.ends_with(".txt")
+        || lower.ends_with(".rst")
+        || lower.ends_with(".adoc")
+    {
+        return true;
+    }
+
+    // Docs directory
+    if lower.starts_with("docs/") || lower.contains("/docs/") {
+        return true;
+    }
+
+    // Licenses, notices, contributing, changelog
+    if name.starts_with("license")
+        || name.starts_with("licence")
+        || name.starts_with("copying")
+        || name.starts_with("notice")
+        || name.starts_with("contributing")
+        || name.starts_with("changelog")
+        || name.starts_with("changes")
+        || name.starts_with("authors")
+        || name.starts_with("code_of_conduct")
+        || name.starts_with("codeowners")
+    {
+        return true;
+    }
+
+    // Lockfiles
+    if matches!(
+        name,
+        "cargo.lock"
+            | "package-lock.json"
+            | "pnpm-lock.yaml"
+            | "yarn.lock"
+            | "poetry.lock"
+            | "gemfile.lock"
+            | "composer.lock"
+            | "flake.lock"
+    ) {
+        return true;
+    }
+
+    // Dotfiles / Tool / CI configurations
+    if lower.starts_with(".github/")
+        || lower.contains("/.github/")
+        || lower.starts_with(".vscode/")
+        || lower.contains("/.vscode/")
+        || matches!(
+            name,
+            ".gitignore"
+                | ".gitattributes"
+                | ".editorconfig"
+                | ".prettierrc"
+                | ".prettierignore"
+                | ".eslintrc"
+                | ".eslintignore"
+        )
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Information about a commit on the default branch.
+struct CommitInfo {
+    sha: String,
+    committed_at: i64,
+    subject: String,
+    files: Vec<String>,
+}
+
+/// Inspects git log on the default branch to detect reverts and candidate follow-up fixes
+/// for tracked merged pull requests within 30 days of their merge.
+pub(crate) fn detect_reverts_and_follow_ups(
+    cwd: &Path,
+    project_id: u32,
+    store: &LedgerStore,
+) -> Result<()> {
+    // 1. Gather all merged PRs for this project
+    let entries = store.with_conn(|conn| {
+        let mut stmt = conn
+            .prepare("SELECT pull_request, merged_at FROM review_ledger WHERE project_id = ?1")?;
+        let rows = stmt
+            .query_map([project_id], |r| {
+                Ok((r.get::<_, u32>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })?;
+
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    // Determine target ref for the default branch: symbolic-ref or base_branch or HEAD
+    let default_ref = base_branch(cwd).unwrap_or_else(|| "HEAD".to_string());
+
+    // 2. Read recent commits from default branch (up to 1000 commits)
+    // Use %x1e (record separator) before each commit and %x1f (unit separator) between fields
+    let log_args = [
+        "log",
+        "-n",
+        "1000",
+        "--format=%x1e%H%x1f%ct%x1f%s",
+        "--name-only",
+        &default_ref,
+        "--",
+    ];
+    let log_out = match run(cwd, &log_args) {
+        Ok(out) => out,
+        Err(_) => return Ok(()),
+    };
+
+    let mut commits: Vec<CommitInfo> = Vec::new();
+    for block in log_out.split('\x1e') {
+        let block = block.trim();
+        if block.is_empty() {
+            continue;
+        }
+        let (header, files_part) = match block.split_once('\n') {
+            Some((h, f)) => (h.trim(), f),
+            None => (block.trim(), ""),
+        };
+        let fields: Vec<&str> = header.split('\x1f').collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        let sha = fields[0].trim().to_string();
+        let committed_at = fields[1].trim().parse::<i64>().unwrap_or(0);
+        let subject = fields[2].trim().to_string();
+        let files = files_part
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        commits.push(CommitInfo {
+            sha,
+            committed_at,
+            subject,
+            files,
+        });
+    }
+
+    // For candidate follow-up fixes, we need the files modified by each tracked PR.
+    for (pr_number, merged_at) in &entries {
+        let pr_number = *pr_number;
+        let merged_at = *merged_at;
+        let pr_marker = format!("#{pr_number}");
+
+        // Find the PR files by looking up commits mentioning `(#<pr_number>)` or `#<pr_number>`
+        let mut pr_files: HashSet<String> = HashSet::new();
+        for commit in &commits {
+            let lower_subj = commit.subject.to_ascii_lowercase();
+            if lower_subj.contains(&pr_marker.to_ascii_lowercase())
+                && !lower_subj.contains("revert")
+            {
+                for f in &commit.files {
+                    pr_files.insert(f.clone());
+                }
+            }
+        }
+
+        // If no commit files were found from commits list, try querying git log for that PR specifically across all branches
+        if pr_files.is_empty() {
+            let pr_grep = format!("#{pr_number}");
+            let pr_log = run(
+                cwd,
+                &[
+                    "log",
+                    "--all",
+                    "-n",
+                    "10",
+                    &format!("--grep={pr_grep}"),
+                    "--name-only",
+                    "--format=",
+                    "--",
+                ],
+            )
+            .unwrap_or_default();
+            for line in pr_log.lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    pr_files.insert(line.to_string());
+                }
+            }
+        }
+
+        for commit in &commits {
+            // Heuristic 2: within 30 days after merge
+            if commit.committed_at < merged_at || commit.committed_at > merged_at + THIRTY_DAYS_SECS
+            {
+                continue;
+            }
+
+            let lower_subj = commit.subject.to_ascii_lowercase();
+
+            // Revert check: subject indicates revert of this PR
+            // e.g. "Revert ... (#4)" or "Revert #4"
+            if lower_subj.contains("revert")
+                && (lower_subj.contains(&pr_marker.to_ascii_lowercase())
+                    || lower_subj.contains(&format!(" #{pr_number}"))
+                    || lower_subj.contains(&format!("\"#{pr_number}\"")))
+            {
+                let _ = store.with_conn(|conn| {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO review_reverts
+                             (project_id, pull_request, commit_sha, commit_subject, committed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![
+                            project_id,
+                            pr_number,
+                            commit.sha,
+                            commit.subject,
+                            commit.committed_at,
+                        ],
+                    )?;
+                    Ok(())
+                });
+            }
+
+            // Candidate follow-up check:
+            // Must not be the merge commit of the PR itself or a revert
+            if lower_subj.contains("revert")
+                || (lower_subj.contains(&pr_marker.to_ascii_lowercase())
+                    && commit.committed_at == merged_at)
+            {
+                continue;
+            }
+
+            // Heuristic 3: Co-modified files
+            let mut co_modified: Vec<String> = commit
+                .files
+                .iter()
+                .filter(|f| pr_files.contains(*f))
+                .cloned()
+                .collect();
+            co_modified.sort();
+            co_modified.dedup();
+
+            if co_modified.is_empty() {
+                continue;
+            }
+
+            // Heuristic 4: At least one co-modified file is non-boilerplate
+            let has_non_boilerplate = co_modified.iter().any(|f| !is_boilerplate(f));
+            if !has_non_boilerplate {
+                continue;
+            }
+
+            let co_modified_json =
+                serde_json::to_string(&co_modified).unwrap_or_else(|_| "[]".into());
+            let _ = store.with_conn(|conn| {
+                conn.execute(
+                    "INSERT OR IGNORE INTO review_follow_ups
+                         (project_id, pull_request, commit_sha, commit_subject, committed_at, co_modified_files, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'candidate')",
+                    rusqlite::params![
+                        project_id,
+                        pr_number,
+                        commit.sha,
+                        commit.subject,
+                        commit.committed_at,
+                        co_modified_json,
+                    ],
+                )?;
+                Ok(())
+            });
+        }
+    }
+
+    Ok(())
 }
 
 impl Core {

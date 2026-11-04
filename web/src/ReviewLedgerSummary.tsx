@@ -57,9 +57,31 @@ export function ReviewLedgerSummary({ projectId }: { projectId: number }) {
     } else setError(result.error.message);
   }
 
+  async function handleConfirmFollowUp(pullRequest: number, commitSha: string) {
+    const result = await commands.confirmFollowUp(projectId, pullRequest, commitSha);
+    if (result.status === "ok") {
+      await load();
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  async function handleDismissFollowUp(pullRequest: number, commitSha: string) {
+    const result = await commands.dismissFollowUp(projectId, pullRequest, commitSha);
+    if (result.status === "ok") {
+      await load();
+    } else {
+      setError(result.error.message);
+    }
+  }
+
   const merges = ledger?.count ?? 0;
   const rounds = ledger?.rounds ?? [];
-  const empty = ledger === null || (merges === 0 && rounds.length === 0);
+  const reverts = ledger?.reverts ?? [];
+  const followUps = ledger?.followUps ?? [];
+  const empty =
+    ledger === null ||
+    (merges === 0 && rounds.length === 0 && reverts.length === 0 && followUps.length === 0);
   return (
     <section className="review-ledger" aria-label="Review ledger">
       <h2>Time to merge</h2>
@@ -100,6 +122,78 @@ export function ReviewLedgerSummary({ projectId }: { projectId: number }) {
               </li>
             ))}
           </ul>
+        </>
+      )}
+      <h2>Reverts and follow-up fixes</h2>
+      {reverts.length === 0 && followUps.length === 0 ? (
+        <p className="dim">
+          No reverts or follow-up fixes detected within 30 days of merged pull requests.
+        </p>
+      ) : (
+        <>
+          {reverts.length > 0 && (
+            <div className="review-reverts">
+              <h3>Reverts</h3>
+              <ul>
+                {reverts.map((rev) => (
+                  <li key={`revert-${rev.pullRequest}-${rev.commitSha}`}>
+                    <span>
+                      <strong>#{rev.pullRequest}</strong> revert
+                    </span>
+                    <span className="commit-subject">{rev.commitSubject}</span>
+                    {rev.committedAt && (
+                      <time className="dim" dateTime={new Date(rev.committedAt * 1000).toISOString()}>
+                        {new Date(rev.committedAt * 1000).toLocaleDateString([], {
+                          day: "numeric",
+                          month: "short",
+                        })}
+                      </time>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {followUps.length > 0 && (
+            <div className="review-follow-ups">
+              <h3>Follow-up fixes</h3>
+              <p className="dim">
+                Candidates are unverified follow-up fixes detected from co-modified files.
+              </p>
+              <ul>
+                {followUps.map((fu) => (
+                  <li key={`followup-${fu.pullRequest}-${fu.commitSha}`}>
+                    <span>
+                      <strong>#{fu.pullRequest}</strong>
+                    </span>
+                    <span className="commit-subject">{fu.commitSubject}</span>
+                    <span className="dim">
+                      {fu.coModifiedFiles.length > 0
+                        ? `modified ${fu.coModifiedFiles.join(", ")}`
+                        : ""}
+                    </span>
+                    <span className="badge">{fu.status}</span>
+                    {fu.status === "candidate" ? (
+                      <span className="actions">
+                        <button
+                          className="btn"
+                          onClick={() => void handleConfirmFollowUp(fu.pullRequest, fu.commitSha)}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => void handleDismissFollowUp(fu.pullRequest, fu.commitSha)}
+                        >
+                          Dismiss
+                        </button>
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
       <h2>Review rounds</h2>

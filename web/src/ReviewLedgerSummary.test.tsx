@@ -26,19 +26,55 @@ type Ledger = {
   count: number;
   entries: ReturnType<typeof entry>[];
   rounds: ReturnType<typeof round>[];
+  reverts: { pullRequest: number; commitSha: string; commitSubject: string; committedAt: number | null }[];
+  followUps: {
+    pullRequest: number;
+    commitSha: string;
+    commitSubject: string;
+    committedAt: number | null;
+    coModifiedFiles: string[];
+    status: "candidate" | "confirmed" | "dismissed";
+  }[];
 };
 let ledger: Ledger;
 let cleared: number;
+let confirmed: string[];
+let dismissed: string[];
 
 beforeEach(() => {
   cleared = 0;
-  ledger = { medianSecs: 3600, count: 2, entries: [entry(8, 7200), entry(7, 0)],
-    rounds: [round("claude", "sonnet", 2), round("codex", "gpt-5", 1, { languages: ["typescript"], sizeBand: "large", issueLabels: [] })] };
-  mockIPC((command) => {
+  confirmed = [];
+  dismissed = [];
+  ledger = {
+    medianSecs: 3600,
+    count: 2,
+    entries: [entry(8, 7200), entry(7, 0)],
+    rounds: [
+      round("claude", "sonnet", 2),
+      round("codex", "gpt-5", 1, { languages: ["typescript"], sizeBand: "large", issueLabels: [] }),
+    ],
+    reverts: [],
+    followUps: [],
+  };
+  mockIPC((command, args) => {
     if (command === "review_ledger") return ledger;
     if (command === "clear_review_ledger") {
       cleared += 1;
-      ledger = { medianSecs: null, count: 0, entries: [], rounds: [] };
+      ledger = { medianSecs: null, count: 0, entries: [], rounds: [], reverts: [], followUps: [] };
+      return null;
+    }
+    if (command === "confirm_follow_up") {
+      const { commitSha } = args as { commitSha: string };
+      confirmed.push(commitSha);
+      const target = ledger.followUps.find((fu) => fu.commitSha === commitSha);
+      if (target) target.status = "confirmed";
+      return null;
+    }
+    if (command === "dismiss_follow_up") {
+      const { commitSha } = args as { commitSha: string };
+      dismissed.push(commitSha);
+      const target = ledger.followUps.find((fu) => fu.commitSha === commitSha);
+      if (target) target.status = "dismissed";
       return null;
     }
     return null;
@@ -75,7 +111,7 @@ it("shows the median, the recent entries, and review rounds by Provider with the
 });
 
 it("explains itself when there is no data", async () => {
-  ledger = { medianSecs: null, count: 0, entries: [], rounds: [] };
+  ledger = { medianSecs: null, count: 0, entries: [], rounds: [], reverts: [], followUps: [] };
   await act(async () => root.render(<ReviewLedgerSummary projectId={1} />));
   expect(host.textContent).toContain("No merged pull requests yet");
   expect(host.textContent).toContain("No review rounds yet");
@@ -83,7 +119,7 @@ it("explains itself when there is no data", async () => {
 });
 
 it("shows review rounds even before any pull request is merged", async () => {
-  ledger = { medianSecs: null, count: 0, entries: [], rounds: [round("claude", "sonnet", 1)] };
+  ledger = { medianSecs: null, count: 0, entries: [], rounds: [round("claude", "sonnet", 1)], reverts: [], followUps: [] };
   await act(async () => root.render(<ReviewLedgerSummary projectId={1} />));
   expect(host.textContent).toContain("No merged pull requests yet");
   expect(host.textContent).toContain("sample size: 1 round");
@@ -112,4 +148,53 @@ it("appears in the Project overview", async () => {
   expect(host.querySelector('[aria-label="Review ledger"]')).not.toBeNull();
   expect(host.textContent).toContain("#8");
   expect(host.textContent).toContain("sample size: 2 rounds");
+});
+
+it("shows reverts and candidate follow-ups and allows confirming or dismissing candidates", async () => {
+  ledger = {
+    medianSecs: 3600,
+    count: 1,
+    entries: [entry(42, 1000)],
+    rounds: [],
+    reverts: [
+      {
+        pullRequest: 42,
+        commitSha: "rev12345",
+        commitSubject: 'Revert "feat: something (#42)"',
+        committedAt: 1_700_000_100,
+      },
+    ],
+    followUps: [
+      {
+        pullRequest: 42,
+        commitSha: "fu12345",
+        commitSubject: "fix: crash in billing",
+        committedAt: 1_700_000_200,
+        coModifiedFiles: ["src/billing.rs"],
+        status: "candidate",
+      },
+    ],
+  };
+
+  await act(async () => root.render(<ReviewLedgerSummary projectId={1} />));
+  expect(host.textContent).toContain("Reverts and follow-up fixes");
+  expect(host.textContent).toContain('#42 revert');
+  expect(host.textContent).toContain('Revert "feat: something (#42)"');
+  expect(host.textContent).toContain("Candidates are unverified follow-up fixes detected from co-modified files.");
+  expect(host.textContent).toContain("fix: crash in billing");
+  expect(host.textContent).toContain("modified src/billing.rs");
+  expect(host.textContent).toContain("candidate");
+
+  const confirmBtn = button("Confirm");
+  expect(confirmBtn).toBeDefined();
+  await act(async () => confirmBtn!.click());
+  expect(confirmed).toEqual(["fu12345"]);
+
+  // after confirming, it's status confirmed so button won't be candidate buttons unless we reset or have another
+  ledger.followUps[0].status = "candidate";
+  await act(async () => root.render(<ReviewLedgerSummary projectId={1} />));
+  const dismissBtn = button("Dismiss");
+  expect(dismissBtn).toBeDefined();
+  await act(async () => dismissBtn!.click());
+  expect(dismissed).toEqual(["fu12345"]);
 });

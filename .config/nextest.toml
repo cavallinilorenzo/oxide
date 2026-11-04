@@ -17,10 +17,12 @@ path = "junit.xml"
 
 # The Provider adapter and terminal suites spawn child processes and pseudo
 # terminals. Running them with every other test at full parallelism produced
-# the timeouts; a small thread budget removes the contention.
+# the timeouts; a small thread budget removes the contention. The whole
+# `workbench` binary is in the group: its shell-completion and interactive
+# tests drive a PowerShell PTY under a 5 s budget, whatever their name says.
 [test-groups.process-heavy]
 max-threads = 2
 
 [[profile.ci.overrides]]
-filter = "(package(oxide-provider) & binary(/_adapter$|^provider_contract$/)) | test(/terminal/) | binary(thread_checkout_git)"
+filter = "(package(oxide-provider) & binary(/_adapter$|^provider_contract$/)) | test(/terminal/) | binary(thread_checkout_git) | binary(workbench)"
 test-group = "process-heavy"

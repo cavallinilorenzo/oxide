@@ -446,7 +446,7 @@ impl Core {
         let found = discovery::find_repositories(&roots);
         {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            let tx = db.unchecked_transaction()?;
+            let tx = crate::db::write_transaction(&db)?;
             for path in &found {
                 let name = path
                     .file_name()
@@ -753,7 +753,7 @@ impl Core {
                 })
                 .collect();
             drop(stmt);
-            let tx = db.unchecked_transaction()?;
+            let tx = crate::db::write_transaction(&db)?;
             for table in ["approvals", "unknown_events", "items"] {
                 tx.execute(
                     &format!(

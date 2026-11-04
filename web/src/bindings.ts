@@ -57,9 +57,13 @@ export const commands = {
 	getProjectVerificationCommands: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("get_project_verification_commands", { projectId })),
 	/**  Replaces the Project's own Verification commands. */
 	setProjectVerificationCommands: (projectId: number, commands: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_verification_commands", { projectId, commands })),
+	/**  The Project's own sensitive paths, besides the built-in CI, dependency and migration patterns. */
+	getProjectSensitivePaths: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("get_project_sensitive_paths", { projectId })),
+	/**  Replaces the Project's own sensitive paths. */
+	setProjectSensitivePaths: (projectId: number, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_sensitive_paths", { projectId, paths })),
 	/**
-	 *  The Thread-scoped Dossier: which Verification commands ran, whether they still apply, and
-	 *  how much supervision the Turns had.
+	 *  The Dossier of a Thread: which Verification commands ran, whether they still apply, the
+	 *  separate risk signals about what stayed uncovered, and how much supervision the Turns had.
 	 */
 	verificationDossier: (threadId: number) => typedError<VerificationDossier_Serialize, AppError>(__TAURI_INVOKE("verification_dossier", { threadId })),
 	/**
@@ -257,6 +261,12 @@ export type AdviceConfidence = "low" | "medium" | "high";
 export type AdvicePreference = "balanced" | "quality";
 
 export type AdviceStatus = "recommended" | "usableSlower" | "notRecommended" | "insufficientData";
+
+/**  The closing message of the agent, kept apart from what Oxide computed. */
+export type AgentClaim = {
+	turnIndex: number,
+	text: string,
+};
 
 export type AppError = {
 	message: string,
@@ -755,6 +765,8 @@ export type DispatchRequest_Deserialize = {
 	baseBranch?: string | null,
 	issueNumber?: number | null,
 	issueTitle?: string | null,
+	/**  The issue's page on GitHub, kept for the Dossier. */
+	issueUrl?: string | null,
 	/**  The labels of that issue, by name. */
 	issueLabels?: string[],
 };
@@ -770,8 +782,42 @@ export type DispatchRequest_Serialize = {
 	baseBranch: string | null,
 	issueNumber: number | null,
 	issueTitle: string | null,
+	/**  The issue's page on GitHub, kept for the Dossier. */
+	issueUrl: string | null,
 	/**  The labels of that issue, by name. */
 	issueLabels: string[],
+};
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent = DossierIntent_Serialize | DossierIntent_Deserialize;
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent_Deserialize = {
+	issue?: DossierIssue_Deserialize | null,
+	prompts: string[],
+};
+
+/**  What was asked for: the stored issue reference and the Thread's own prompts. */
+export type DossierIntent_Serialize = {
+	issue: DossierIssue_Serialize | null,
+	prompts: string[],
+};
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue = DossierIssue_Serialize | DossierIssue_Deserialize;
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue_Deserialize = {
+	number: number,
+	title?: string | null,
+	url?: string | null,
+};
+
+/**  The GitHub issue a Board Thread was started from. */
+export type DossierIssue_Serialize = {
+	number: number,
+	title: string | null,
+	url: string | null,
 };
 
 /**  The branch's pull request with the checks GitHub reports for it. */
@@ -1661,6 +1707,37 @@ export type ReviewWorkKind = {
 	issueLabels: string[],
 };
 
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal = RiskSignal_Serialize | RiskSignal_Deserialize;
+
+export type RiskSignalKind = "uncheckedLanguage" | "sourceWithoutTests" | "sensitivePath" | "largeDiff";
+
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal_Deserialize = {
+	kind: RiskSignalKind,
+	/**  One sentence a reviewer can read on its own. */
+	explanation: string,
+	/**  The changed files the signal points at, relative to the checkout, in path order. */
+	files: string[],
+	/**  The language an unchecked-language signal is about. */
+	language?: string | null,
+	/**  The line threshold a large-diff signal crossed. */
+	threshold?: number | null,
+};
+
+/**  One risk signal, with the files in the Diff it points at. */
+export type RiskSignal_Serialize = {
+	kind: RiskSignalKind,
+	/**  One sentence a reviewer can read on its own. */
+	explanation: string,
+	/**  The changed files the signal points at, relative to the checkout, in path order. */
+	files: string[],
+	/**  The language an unchecked-language signal is about. */
+	language: string | null,
+	/**  The line threshold a large-diff signal crossed. */
+	threshold: number | null,
+};
+
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
 
 export type RuntimeCatalogue_Deserialize = {
@@ -2142,17 +2219,20 @@ export type VerificationCommand_Serialize = {
 };
 
 /**
- *  The Dossier of one Thread: its Verification commands and supervision, plus branch evidence in
- *  Branch scope.
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
  */
 export type VerificationDossier = VerificationDossier_Serialize | VerificationDossier_Deserialize;
 
 /**
- *  The Dossier of one Thread: its Verification commands and supervision, plus branch evidence in
- *  Branch scope.
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
  */
 export type VerificationDossier_Deserialize = {
 	commands: VerificationCommand_Deserialize[],
+	signals: RiskSignal_Deserialize[],
+	intent: DossierIntent_Deserialize,
+	claim?: AgentClaim | null,
 	baseBranch?: string | null,
 	coverageKnown: boolean,
 	uncoveredCommits: BranchCommit[],
@@ -2162,11 +2242,14 @@ export type VerificationDossier_Deserialize = {
 };
 
 /**
- *  The Dossier of one Thread: its Verification commands and supervision, plus branch evidence in
- *  Branch scope.
+ *  The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+ *  branch evidence in Branch scope.
  */
 export type VerificationDossier_Serialize = {
 	commands: VerificationCommand_Serialize[],
+	signals: RiskSignal_Serialize[],
+	intent: DossierIntent_Serialize,
+	claim: AgentClaim | null,
 	baseBranch: string | null,
 	coverageKnown: boolean,
 	uncoveredCommits: BranchCommit[],

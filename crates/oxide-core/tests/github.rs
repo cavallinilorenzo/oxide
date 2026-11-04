@@ -1604,6 +1604,7 @@ fn a_pull_request_from_an_issue_threads_branch_closes_the_issue() {
             base_branch: Some("main".into()),
             issue_number: Some(51),
             issue_title: Some("Do it".into()),
+            issue_url: Some("https://github.com/example/oxide/issues/51".into()),
             issue_labels: Vec::new(),
         })
         .unwrap();
@@ -1648,6 +1649,7 @@ fn closes_is_not_repeated_when_the_body_already_has_it() {
             base_branch: Some("main".into()),
             issue_number: Some(51),
             issue_title: None,
+            issue_url: None,
             issue_labels: Vec::new(),
         })
         .unwrap();
@@ -1716,6 +1718,7 @@ fn checkout_in_a_thread_switches_only_that_threads_worktree() {
             base_branch: Some("main".into()),
             issue_number: None,
             issue_title: None,
+            issue_url: None,
             issue_labels: Vec::new(),
         })
         .unwrap();

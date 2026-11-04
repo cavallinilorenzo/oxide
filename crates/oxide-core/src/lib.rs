@@ -92,7 +92,8 @@ pub use attachments::{
 pub use clock::{Clock, ManualClock, PROVIDER_IDLE_TIMEOUT, SystemClock};
 pub use db::MIGRATIONS;
 pub use dossier::{
-    BranchCommit, DossierPullRequest, PermissionModeUse, Supervision, VerificationCommand,
+    AgentClaim, BranchCommit, DossierIntent, DossierIssue, DossierPullRequest, LARGE_DIFF_LINES,
+    PermissionModeUse, RiskSignal, RiskSignalKind, Supervision, VerificationCommand,
     VerificationDossier, VerificationKind, VerificationState,
 };
 pub use error::{Error, Result};

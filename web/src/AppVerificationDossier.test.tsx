@@ -27,6 +27,45 @@ const dossier = {
     { command: "pnpm run verify", kind: "other", state: "neverRun", turnIndex: null, outcome: null, exitCode: null },
     { command: "tsc", kind: "typeCheck", state: "unknown", turnIndex: 0, outcome: "succeeded", exitCode: null },
   ],
+  signals: [
+    {
+      kind: "uncheckedLanguage",
+      explanation: "Python changed with no Verification command.",
+      files: ["src/parser.py"],
+      language: "Python",
+      threshold: null,
+    },
+    {
+      kind: "sourceWithoutTests",
+      explanation: "Source changed with no test change.",
+      files: ["src/parser.rs"],
+      language: null,
+      threshold: null,
+    },
+    {
+      kind: "sensitivePath",
+      explanation: "Touches CI configuration.",
+      files: [".github/workflows/ci.yml"],
+      language: null,
+      threshold: null,
+    },
+    {
+      kind: "largeDiff",
+      explanation: "The diff changes 512 lines, over the 400-line threshold.",
+      files: ["src/parser.rs"],
+      language: null,
+      threshold: 400,
+    },
+  ],
+  intent: {
+    issue: {
+      number: 334,
+      title: "Add intent and agent claims to the Dossier",
+      url: "https://github.com/getoxide/oxide/issues/334",
+    },
+    prompts: ["Add the parser", "Handle the empty input"],
+  },
+  claim: { turnIndex: 0, text: "All 12 tests pass." },
   baseBranch: "main",
   coverageKnown: true,
   uncoveredCommits: [{ sha: "0123456789abcdef", subject: "fix the parser by hand" }],
@@ -66,6 +105,7 @@ beforeEach(() => {
     if (command === "git_diff") return { base: "main", files: [] };
     if (command === "verification_dossier" || command === "branch_dossier") return dossier;
     if (command === "get_project_verification_commands") return ["pnpm run verify"];
+    if (command === "get_project_sensitive_paths") return ["src/billing/**"];
     if (command === "plugin:event|listen") return 1;
     return null;
   });
@@ -124,6 +164,51 @@ it("shows branch coverage, pull request checks and supervision in Branch scope",
   expect(supervision).toContain("Unknown 1");
 });
 
+it("shows each risk signal and links its files into the Diff", async () => {
+  await openDiff();
+  await vi.waitFor(() => expect(host.querySelectorAll('[aria-label^="Risk signal: "]')).toHaveLength(4));
+
+  expect(host.textContent).toContain("Python changed with no Verification command.");
+  expect(host.textContent).toContain("Source changed with no test change.");
+  expect(host.textContent).toContain("Touches CI configuration.");
+  expect(host.textContent).toContain("The diff changes 512 lines, over the 400-line threshold.");
+  expect(host.textContent?.toLowerCase()).not.toContain("score");
+
+  const link = host.querySelector<HTMLButtonElement>('[aria-label="Open src/parser.rs in the Diff"]')!;
+  await act(async () => link.click());
+  const row = Array.from(host.querySelectorAll<HTMLElement>('[role="option"]')).find((option) =>
+    option.textContent?.includes("parser.rs"),
+  );
+  expect(row?.getAttribute("aria-selected")).toBe("true");
+});
+
+it("shows what was asked and keeps the agent's claim apart from the computed checks", async () => {
+  await openDiff();
+  const intent = await vi.waitFor(() => {
+    const section = host.querySelector<HTMLElement>('[aria-label="Intent"]');
+    expect(section).not.toBeNull();
+    return section!;
+  });
+
+  expect(intent.textContent).toContain("Issue #334");
+  const link = intent.querySelector<HTMLAnchorElement>('a[href="https://github.com/getoxide/oxide/issues/334"]');
+  expect(link?.textContent).toBe("#334 Add intent and agent claims to the Dossier");
+  const prompts = intent.querySelector<HTMLDetailsElement>("details.dossier-prompts")!;
+  expect(prompts.open).toBe(false);
+  expect(prompts.querySelector("summary")?.textContent).toBe("Prompts (2)");
+  expect(prompts.textContent).toContain("Add the parser");
+  expect(prompts.textContent).toContain("Handle the empty input");
+  expect(intent.textContent).not.toContain("All 12 tests pass.");
+
+  const claim = host.querySelector<HTMLElement>('[aria-label="Agent claim"]')!;
+  expect(claim.textContent).toContain("Agent claim");
+  expect(claim.textContent).toContain("All 12 tests pass.");
+  expect(claim.textContent).toContain("not checked by Oxide");
+  const checks = host.querySelector<HTMLElement>(".dossier-checks")!;
+  expect(checks.textContent).toContain("pytest");
+  expect(checks.textContent).not.toContain("All 12 tests pass.");
+});
+
 it("adds a Project Verification command and asks for the Dossier again", async () => {
   await openDiff();
   await vi.waitFor(() =>
@@ -141,6 +226,30 @@ it("adds a Project Verification command and asks for the Dossier again", async (
 
   const saved = calls.filter(({ command }) => command === "set_project_verification_commands").at(-1);
   expect(saved?.args).toEqual({ projectId: 1, commands: ["pnpm run verify", "make check"] });
+  await vi.waitFor(() =>
+    expect(calls.filter(({ command }) => command === "verification_dossier")).toHaveLength(2),
+  );
+});
+
+it("adds a Project sensitive path and asks for the Dossier again", async () => {
+  await openDiff();
+  await vi.waitFor(() =>
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Project sensitive paths"]')?.value).toBe(
+      "src/billing/**",
+    ),
+  );
+  const textarea = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Project sensitive paths"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "src/billing/**\ninfra/**");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const save = Array.from(textarea.closest("details")!.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent === "Save",
+  )!;
+  await act(async () => save.click());
+
+  const saved = calls.filter(({ command }) => command === "set_project_sensitive_paths").at(-1);
+  expect(saved?.args).toEqual({ projectId: 1, paths: ["src/billing/**", "infra/**"] });
   await vi.waitFor(() =>
     expect(calls.filter(({ command }) => command === "verification_dossier")).toHaveLength(2),
   );

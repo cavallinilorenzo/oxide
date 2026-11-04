@@ -108,6 +108,37 @@ pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<D
     Ok(Diff { base: None, files })
 }
 
+/// What the Thread changed: the first Turn's start Checkpoint against the last Turn's end
+/// Checkpoint, or the working tree while the last Turn has no end. `None` without a start
+/// Checkpoint. Unlike summing each Turn, a file rewritten across Turns is measured once, as the
+/// reviewer sees it.
+pub(crate) fn thread_diff(
+    cwd: &Path,
+    thread_id: u32,
+    turn_indexes: &[u32],
+) -> Result<Option<Diff>> {
+    let Some(first) = turn_indexes
+        .iter()
+        .copied()
+        .filter(|&turn_index| has_start(cwd, thread_id, turn_index))
+        .min()
+    else {
+        return Ok(None);
+    };
+    let Some(last) = turn_indexes.iter().copied().max() else {
+        return Ok(None);
+    };
+    let start = start_tree(cwd, thread_id, first)?;
+    let end = match resolve(cwd, thread_id, last, Phase::End) {
+        Some(end) => end,
+        None => working_tree(cwd)?,
+    };
+    Ok(Some(Diff {
+        base: None,
+        files: diff_against(cwd, &[&start, &end])?,
+    }))
+}
+
 /// Whether the working tree right now matches a Turn's end Checkpoint. Read-only: it never writes
 /// an object. `None` when the Turn has no end Checkpoint.
 pub(crate) fn working_tree_matches_end(

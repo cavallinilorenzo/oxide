@@ -343,6 +343,10 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
           threadId={threadId}
           scope={scope}
           refreshKey={`${refreshKey}#${focusTick}`}
+          onOpenFile={(path) => {
+            const file = files.find((candidate) => candidate.path === path || candidate.oldPath === path);
+            if (file) setPicked(file.path);
+          }}
         />
       )}
       {push.dialog}

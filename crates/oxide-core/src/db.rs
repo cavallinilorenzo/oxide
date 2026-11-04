@@ -244,6 +244,17 @@ pub const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX review_rounds_by_project ON review_rounds(project_id, id);
 ",
+    // The title and link of the GitHub issue a Board Thread was started from, so its Dossier can
+    // show what was asked without asking GitHub again.
+    "
+    ALTER TABLE threads ADD COLUMN issue_title TEXT;
+    ALTER TABLE threads ADD COLUMN issue_url TEXT;
+",
+    // A Project's own sensitive paths for the Dossier's risk signals, as glob patterns. The
+    // built-in CI, dependency manifest and migration patterns are matched beside these.
+    "
+    ALTER TABLE projects ADD COLUMN sensitive_paths TEXT NOT NULL DEFAULT '[]';
+",
     // The branch HEAD when a Turn started and when it ended, so the Dossier can tell the commits
     // the Turn produced from those it did not. NULL for Turns stored before this.
     "

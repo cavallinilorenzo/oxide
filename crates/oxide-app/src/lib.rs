@@ -907,12 +907,64 @@ pub struct Supervision {
     pub permission_modes: Vec<PermissionModeUse>,
 }
 
-/// The Dossier of one Thread: its Verification commands and supervision, plus branch evidence in
-/// Branch scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RiskSignalKind {
+    UncheckedLanguage,
+    SourceWithoutTests,
+    SensitivePath,
+    LargeDiff,
+}
+
+/// One risk signal, with the files in the Diff it points at.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RiskSignal {
+    pub kind: RiskSignalKind,
+    /// One sentence a reviewer can read on its own.
+    pub explanation: String,
+    /// The changed files the signal points at, relative to the checkout, in path order.
+    pub files: Vec<String>,
+    /// The language an unchecked-language signal is about.
+    pub language: Option<String>,
+    /// The line threshold a large-diff signal crossed.
+    pub threshold: Option<u32>,
+}
+
+/// The GitHub issue a Board Thread was started from.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIssue {
+    pub number: u32,
+    pub title: Option<String>,
+    pub url: Option<String>,
+}
+
+/// What was asked for: the stored issue reference and the Thread's own prompts.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierIntent {
+    pub issue: Option<DossierIssue>,
+    pub prompts: Vec<String>,
+}
+
+/// The closing message of the agent, kept apart from what Oxide computed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentClaim {
+    pub turn_index: u32,
+    pub text: String,
+}
+
+/// The Dossier of one Thread: its Verification commands, risk signals and supervision, plus
+/// branch evidence in Branch scope.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationDossier {
     pub commands: Vec<VerificationCommand>,
+    pub signals: Vec<RiskSignal>,
+    pub intent: DossierIntent,
+    pub claim: Option<AgentClaim>,
     pub base_branch: Option<String>,
     pub coverage_known: bool,
     pub uncovered_commits: Vec<BranchCommit>,
@@ -3007,6 +3059,8 @@ pub struct DispatchRequest {
     pub base_branch: Option<String>,
     pub issue_number: Option<u32>,
     pub issue_title: Option<String>,
+    /// The issue's page on GitHub, kept for the Dossier.
+    pub issue_url: Option<String>,
     /// The labels of that issue, by name.
     #[serde(default)]
     pub issue_labels: Vec<String>,
@@ -3065,8 +3119,29 @@ fn set_project_verification_commands(
     Ok(core.set_project_verification_commands(project_id, &commands)?)
 }
 
-/// The Thread-scoped Dossier: which Verification commands ran, whether they still apply, and
-/// how much supervision the Turns had.
+/// The Project's own sensitive paths, besides the built-in CI, dependency and migration patterns.
+#[tauri::command]
+#[specta::specta]
+fn get_project_sensitive_paths(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<String>, AppError> {
+    Ok(core.project_sensitive_paths(project_id)?)
+}
+
+/// Replaces the Project's own sensitive paths.
+#[tauri::command]
+#[specta::specta]
+fn set_project_sensitive_paths(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    paths: Vec<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_project_sensitive_paths(project_id, &paths)?)
+}
+
+/// The Dossier of a Thread: which Verification commands ran, whether they still apply, the
+/// separate risk signals about what stayed uncovered, and how much supervision the Turns had.
 #[tauri::command]
 #[specta::specta]
 async fn verification_dossier(
@@ -3684,6 +3759,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         set_project_setup_command,
         get_project_verification_commands,
         set_project_verification_commands,
+        get_project_sensitive_paths,
+        set_project_sensitive_paths,
         verification_dossier,
         branch_dossier,
         get_project_threads_in_main_checkout,

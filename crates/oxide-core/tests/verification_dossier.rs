@@ -1,7 +1,8 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use oxide_core::{
-    CommandOutcome, Core, ItemKind, PermissionMode, SequencedThreadEvent, ThreadEvent,
-    ThreadStatus, VerificationCommand, VerificationKind, VerificationState,
+    CommandOutcome, Core, DispatchRequest, ItemKind, PermissionMode, RiskSignalKind,
+    SequencedThreadEvent, ThreadEvent, ThreadStatus, VerificationCommand, VerificationKind,
+    VerificationState,
 };
 use oxide_provider::{
     ActivityCategory, ApprovalDecision, ApprovalKind, CommandRecord, FakeProvider, ProviderEvent,
@@ -141,9 +142,25 @@ fn wait_for(rx: &Receiver<SequencedThreadEvent>, accept: impl Fn(&ThreadEvent) -
     }
 }
 
+/// A Thread whose Turn the default fake runs on its own, such as a dispatched one.
+fn wait_until_completed(f: &Fixture, thread_id: u32) {
+    for _ in 0..6000 {
+        let snapshot = f.core.get_thread_snapshot(thread_id).unwrap();
+        if snapshot.turn_count > 0 && snapshot.thread.status == ThreadStatus::Completed {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the Thread never completed its Turn");
+}
+
 fn run_turn(f: &Fixture, thread_id: u32, script: Script) {
+    run_turn_with_prompt(f, thread_id, "go", script);
+}
+
+fn run_turn_with_prompt(f: &Fixture, thread_id: u32, prompt: &str, script: Script) {
     let (_, rx) = f.core.subscribe_thread(thread_id).unwrap();
-    f.core.send_prompt(thread_id, "go").unwrap();
+    f.core.send_prompt(thread_id, prompt).unwrap();
     f.core.tick_thread(thread_id);
     wait_for(&rx, |event| {
         matches!(event, ThreadEvent::TurnStarted { .. })
@@ -200,6 +217,23 @@ fn command(
     });
 }
 
+fn agent_message(sender: &Sender<ProviderEvent>, item_index: u32, text: &str) {
+    let _ = sender.send(ProviderEvent::ItemStarted {
+        item_index,
+        kind: ItemKind::AgentMessage,
+        parent_item_index: None,
+        category: None,
+    });
+    let _ = sender.send(ProviderEvent::ItemCompleted {
+        item_index,
+        kind: ItemKind::AgentMessage,
+        content: text.to_string(),
+        parent_item_index: None,
+        category: None,
+        command: None,
+    });
+}
+
 fn check(f: &Fixture, thread_id: u32, command: &str) -> VerificationCommand {
     f.core
         .verification_dossier(thread_id)
@@ -208,6 +242,113 @@ fn check(f: &Fixture, thread_id: u32, command: &str) -> VerificationCommand {
         .into_iter()
         .find(|check| check.command == command)
         .unwrap_or_else(|| panic!("no {command} in the Dossier"))
+}
+
+fn signals(f: &Fixture, thread_id: u32) -> Vec<oxide_core::RiskSignal> {
+    f.core.verification_dossier(thread_id).unwrap().signals
+}
+
+/// Writes a file inside the checkout, creating its directories.
+fn write(root: &Path, path: &str, content: &str) {
+    let file = root.join(path);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(file, content).unwrap();
+}
+
+#[test]
+fn the_dossier_shows_the_stored_issue_with_its_title_and_link() {
+    let f = fixture();
+    let thread = f
+        .core
+        .dispatch_thread(DispatchRequest {
+            project_id: f.project_id,
+            prompt: "Fix the parser".into(),
+            provider: "fake".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
+            base_branch: Some("main".into()),
+            issue_number: Some(51),
+            issue_title: Some("Parser crashes on empty input".into()),
+            issue_url: Some("https://github.com/example/oxide/issues/51".into()),
+            issue_labels: Vec::new(),
+        })
+        .unwrap();
+    wait_until_completed(&f, thread.id);
+
+    let dossier = f.core.verification_dossier(thread.id).unwrap();
+
+    let issue = dossier.intent.issue.expect("the issue is stored");
+    assert_eq!(issue.number, 51);
+    assert_eq!(
+        issue.title.as_deref(),
+        Some("Parser crashes on empty input")
+    );
+    assert_eq!(
+        issue.url.as_deref(),
+        Some("https://github.com/example/oxide/issues/51")
+    );
+    assert_eq!(dossier.intent.prompts, vec!["Fix the parser"]);
+}
+
+#[test]
+fn the_dossier_shows_the_threads_prompts_as_intent() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn_with_prompt(&f, thread_id, "Add the parser", Box::new(|_| {}));
+    run_turn_with_prompt(&f, thread_id, "Add tests for it", Box::new(|_| {}));
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert_eq!(
+        dossier.intent.prompts,
+        vec!["Add the parser", "Add tests for it"]
+    );
+    assert!(dossier.intent.issue.is_none());
+}
+
+#[test]
+fn the_closing_agent_message_is_a_claim_beside_the_computed_facts() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| {
+            command(sender, 0, "cargo test", CommandOutcome::Failed, Some(1));
+            agent_message(sender, 1, "All 12 tests pass.");
+        }),
+    );
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert_eq!(
+        check(&f, thread_id, "cargo test").state,
+        VerificationState::Failed
+    );
+    let claim = dossier.claim.expect("the closing message is a claim");
+    assert_eq!(claim.text, "All 12 tests pass.");
+    assert_eq!(claim.turn_index, 0);
+}
+
+#[test]
+fn an_earlier_turns_message_is_not_the_closing_claim() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| agent_message(sender, 0, "The first answer.")),
+    );
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(|sender| command(sender, 0, "cargo test", CommandOutcome::Succeeded, Some(0))),
+    );
+
+    let dossier = f.core.verification_dossier(thread_id).unwrap();
+
+    assert!(dossier.claim.is_none());
 }
 
 #[test]
@@ -742,5 +883,486 @@ fn built_in_patterns_recognize_common_commands_across_ecosystems() {
             .commands
             .iter()
             .any(|entry| entry.command.contains("echo"))
+    );
+}
+
+#[test]
+fn a_changed_language_with_no_verification_command_is_flagged() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            std::fs::write(work.join("script.py"), "print('hi')\n").unwrap();
+            file_change(sender, 0, "script.py");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::UncheckedLanguage)
+        .unwrap_or_else(|| panic!("no uncovered language in {signals:?}"));
+    assert_eq!(signal.language.as_deref(), Some("Python"));
+    assert_eq!(signal.files, vec!["script.py"]);
+    assert!(signal.explanation.contains("Python"));
+    assert!(signal.explanation.contains("no Verification command"));
+}
+
+#[test]
+fn a_checked_language_is_not_flagged_as_uncovered() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            std::fs::write(work.join("main.rs"), "fn main() {}\n").unwrap();
+            file_change(sender, 0, "main.rs");
+            command(sender, 1, "cargo test", CommandOutcome::Succeeded, Some(0));
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::UncheckedLanguage)
+    );
+}
+
+#[test]
+fn an_ecosystem_wide_command_leaves_no_language_gap() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "script.py", "print('hi')\n");
+            file_change(sender, 0, "script.py");
+            // Make is not tied to one language: Oxide cannot claim a gap it did not see.
+            command(sender, 1, "make check", CommandOutcome::Succeeded, Some(0));
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::UncheckedLanguage)
+    );
+}
+
+#[test]
+fn a_vue_change_verified_by_the_javascript_commands_is_not_flagged() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/App.vue", "<template />\n");
+            file_change(sender, 0, "src/App.vue");
+            command(sender, 1, "pnpm test", CommandOutcome::Succeeded, Some(0));
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::UncheckedLanguage)
+    );
+}
+
+#[test]
+fn source_without_a_test_change_is_flagged() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/parser.rs", "pub fn parse() {}\n");
+            file_change(sender, 0, "src/parser.rs");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::SourceWithoutTests)
+        .unwrap_or_else(|| panic!("no source-without-tests signal in {signals:?}"));
+    assert_eq!(signal.files, vec!["src/parser.rs"]);
+    assert!(signal.explanation.contains("no test change"));
+}
+
+#[test]
+fn source_with_a_test_change_is_not_flagged() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/parser.rs", "pub fn parse() {}\n");
+            file_change(sender, 0, "src/parser.rs");
+            write(&work, "tests/parser.rs", "#[test]\nfn parses() {}\n");
+            file_change(sender, 1, "tests/parser.rs");
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::SourceWithoutTests)
+    );
+}
+
+#[test]
+fn a_docs_spec_is_not_a_test_change() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/parser.rs", "pub fn parse() {}\n");
+            file_change(sender, 0, "src/parser.rs");
+            write(&work, "docs/spec/api.md", "# API\n");
+            file_change(sender, 1, "docs/spec/api.md");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::SourceWithoutTests)
+        .unwrap_or_else(|| panic!("no source-without-tests signal in {signals:?}"));
+    assert_eq!(signal.files, vec!["src/parser.rs"]);
+}
+
+#[test]
+fn a_test_fixture_is_not_a_test_change() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/parser.rs", "pub fn parse() {}\n");
+            file_change(sender, 0, "src/parser.rs");
+            write(&work, "tests/fixtures/input.json", "{}\n");
+            file_change(sender, 1, "tests/fixtures/input.json");
+        }),
+    );
+
+    assert!(
+        signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::SourceWithoutTests)
+    );
+}
+
+#[test]
+fn a_file_removed_by_a_later_turn_is_not_signalled() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "scratch.py", "print('hi')\n");
+            file_change(sender, 0, "scratch.py");
+        }),
+    );
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            std::fs::remove_file(work.join("scratch.py")).unwrap();
+            file_change(sender, 0, "scratch.py");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    assert!(
+        signals
+            .iter()
+            .all(|signal| !signal.files.iter().any(|path| path == "scratch.py")),
+        "{signals:?}"
+    );
+}
+
+#[test]
+fn a_file_rewritten_across_turns_is_measured_by_its_net_change() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    let first = (0..250).map(|n| format!("first {n}\n")).collect::<String>();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/big.rs", &first);
+            file_change(sender, 0, "src/big.rs");
+        }),
+    );
+    let work = f.work.clone();
+    let second = (0..250)
+        .map(|n| format!("second {n}\n"))
+        .collect::<String>();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/big.rs", &second);
+            file_change(sender, 0, "src/big.rs");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    assert!(
+        !signals
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::LargeDiff),
+        "a 250-line file rewritten twice is not a 750-line diff: {signals:?}"
+    );
+}
+
+#[test]
+fn a_large_diff_is_flagged_with_the_threshold_it_crossed() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/big.rs", &"line\n".repeat(500));
+            file_change(sender, 0, "src/big.rs");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::LargeDiff)
+        .unwrap_or_else(|| panic!("no large-diff signal in {signals:?}"));
+    assert_eq!(signal.threshold, Some(oxide_core::LARGE_DIFF_LINES));
+    assert_eq!(signal.threshold, Some(400));
+    assert_eq!(signal.files, vec!["src/big.rs"]);
+    assert!(signal.explanation.contains("400"), "{}", signal.explanation);
+    assert!(signal.explanation.contains("500"), "{}", signal.explanation);
+}
+
+#[test]
+fn a_small_diff_is_not_flagged_as_large() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/small.rs", "fn small() {}\n");
+            file_change(sender, 0, "src/small.rs");
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::LargeDiff)
+    );
+}
+
+#[test]
+fn sensitive_paths_are_flagged_by_default() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, ".github/workflows/ci.yml", "on: push\n");
+            file_change(sender, 0, ".github/workflows/ci.yml");
+            write(&work, "Cargo.lock", "# lock\n");
+            file_change(sender, 1, "Cargo.lock");
+            write(&work, "migrations/0001_init.sql", "create table t;\n");
+            file_change(sender, 2, "migrations/0001_init.sql");
+        }),
+    );
+
+    let sensitive: Vec<_> = signals(&f, thread_id)
+        .into_iter()
+        .filter(|signal| signal.kind == RiskSignalKind::SensitivePath)
+        .collect();
+    let summaries: Vec<&str> = sensitive
+        .iter()
+        .map(|signal| signal.explanation.as_str())
+        .collect();
+    assert!(
+        summaries.iter().any(|summary| summary.contains("CI")),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries
+            .iter()
+            .any(|summary| summary.contains("dependency")),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries
+            .iter()
+            .any(|summary| summary.contains("migration")),
+        "{summaries:?}"
+    );
+    let files: Vec<&str> = sensitive
+        .iter()
+        .flat_map(|signal| signal.files.iter().map(String::as_str))
+        .collect();
+    assert!(files.contains(&".github/workflows/ci.yml"));
+    assert!(files.contains(&"Cargo.lock"));
+    assert!(files.contains(&"migrations/0001_init.sql"));
+}
+
+#[test]
+fn ordinary_files_are_not_flagged_as_sensitive() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "README.md", "# Project\n");
+            file_change(sender, 0, "README.md");
+            write(&work, "src/parser.rs", "pub fn parse() {}\n");
+            file_change(sender, 1, "src/parser.rs");
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::SensitivePath)
+    );
+}
+
+#[test]
+fn signals_cover_every_turn_of_the_thread() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "script.py", "print('hi')\n");
+            file_change(sender, 0, "script.py");
+        }),
+    );
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "README.md", "# Project\n");
+            file_change(sender, 0, "README.md");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::UncheckedLanguage)
+        .unwrap_or_else(|| panic!("no uncovered language in {signals:?}"));
+    assert_eq!(signal.files, vec!["script.py"]);
+}
+
+#[test]
+fn the_dossier_has_no_aggregate_score() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "script.py", "print('hi')\n");
+            file_change(sender, 0, "script.py");
+        }),
+    );
+
+    let dossier = serde_json::to_value(f.core.verification_dossier(thread_id).unwrap()).unwrap();
+    assert!(dossier.get("score").is_none());
+    for signal in dossier["signals"].as_array().unwrap() {
+        assert!(signal.get("score").is_none(), "{signal}");
+    }
+}
+
+#[test]
+fn a_project_can_add_its_own_sensitive_paths() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    f.core
+        .set_project_sensitive_paths(f.project_id, &["src/billing/**".to_string()])
+        .unwrap();
+    assert_eq!(
+        f.core.project_sensitive_paths(f.project_id).unwrap(),
+        vec!["src/billing/**".to_string()]
+    );
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/billing/charge.rs", "pub fn charge() {}\n");
+            file_change(sender, 0, "src/billing/charge.rs");
+        }),
+    );
+
+    let signals = signals(&f, thread_id);
+    let signal = signals
+        .iter()
+        .find(|signal| signal.kind == RiskSignalKind::SensitivePath)
+        .unwrap_or_else(|| panic!("no sensitive-path signal in {signals:?}"));
+    assert_eq!(signal.files, vec!["src/billing/charge.rs"]);
+    assert!(
+        signal.explanation.contains("configured"),
+        "{}",
+        signal.explanation
+    );
+}
+
+#[test]
+fn a_project_does_not_flag_its_own_paths_before_they_are_added() {
+    let f = fixture();
+    let thread_id = new_thread(&f);
+    let work = f.work.clone();
+    run_turn(
+        &f,
+        thread_id,
+        Box::new(move |sender| {
+            write(&work, "src/billing/charge.rs", "pub fn charge() {}\n");
+            file_change(sender, 0, "src/billing/charge.rs");
+        }),
+    );
+
+    assert!(
+        !signals(&f, thread_id)
+            .iter()
+            .any(|signal| signal.kind == RiskSignalKind::SensitivePath)
     );
 }

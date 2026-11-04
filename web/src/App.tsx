@@ -375,7 +375,11 @@ export function App() {
     return created.status === "ok" ? created.data : null;
   }, []);
 
-  const fixPullRequest = async (projectId: number, prompt: string, ownerThreadId: number | null = null) => {
+  const fixPullRequest = async (projectId: number, prompt: string, ownerThreadId: number | null = null, reviewRound = false) => {
+    const send = (threadId: number) =>
+      reviewRound
+        ? commands.sendReviewerComments(threadId, prompt)
+        : commands.sendPrompt(threadId, [{ kind: "text", text: prompt }]);
     // The branch's Thread takes the request unless it is busy; otherwise a new Thread does.
     const owner = ownerThreadId === null
       ? null
@@ -385,7 +389,7 @@ export function App() {
       const hadDraft = Boolean(drafts[owner.id]);
       if (!hadDraft) setDrafts((prev) => setDraft(prev, owner.id, prompt));
       try {
-        const sent = await commands.sendPrompt(owner.id, [{ kind: "text", text: prompt }]);
+        const sent = await send(owner.id);
         if (sent.status === "error") throw new Error(sent.error.message);
         if (!hadDraft) setDrafts((prev) => setDraft(prev, owner.id, ""));
       } finally {
@@ -404,7 +408,7 @@ export function App() {
     // Transcript's initial snapshot includes the Turn even if its events arrived early.
     setDrafts((prev) => setDraft(prev, thread.id, prompt));
     try {
-      const sent = await commands.sendPrompt(thread.id, [{ kind: "text", text: prompt }]);
+      const sent = await send(thread.id);
       if (sent.status === "error") throw new Error(sent.error.message);
       setDrafts((prev) => setDraft(prev, thread.id, ""));
     } finally {
@@ -1102,7 +1106,7 @@ export function App() {
                   refreshKey={gitRevision + turnRevision.count}
                   onChanged={onGitChanged}
                   onReviewFiles={(number) => reviewPullRequestFiles(selected.id, number)}
-                  onFixPullRequest={(prompt, ownerThreadId) => fixPullRequest(selected.id, prompt, ownerThreadId)}
+                  onFixPullRequest={(prompt, ownerThreadId, reviewRound) => fixPullRequest(selected.id, prompt, ownerThreadId, reviewRound)}
                 />
               </Suspense></div>
             )}

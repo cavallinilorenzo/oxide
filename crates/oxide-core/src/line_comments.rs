@@ -264,10 +264,26 @@ impl Core {
         if comments.is_empty() {
             return Err(Error::Editor("There are no comments to send.".into()));
         }
+        let kind = self.review_work_kind(thread_id);
         self.send_prompt(thread_id, &prompt(&comments))?;
+        if let Some(kind) = kind {
+            self.record_review_round(thread_id, &kind);
+        }
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         for c in &comments {
             db.execute("DELETE FROM line_comments WHERE id = ?1", [c.id])?;
+        }
+        Ok(())
+    }
+
+    /// Delivers a request that addresses selected reviewer comments as one prompt, and counts it
+    /// as a review round. The caller builds the prompt, including how reviewer text is delimited
+    /// as external content.
+    pub fn send_reviewer_comments(&self, thread_id: u32, prompt: &str) -> Result<()> {
+        let kind = self.review_work_kind(thread_id);
+        self.send_prompt(thread_id, prompt)?;
+        if let Some(kind) = kind {
+            self.record_review_round(thread_id, &kind);
         }
         Ok(())
     }

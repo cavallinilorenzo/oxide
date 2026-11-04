@@ -56,7 +56,7 @@ interface PullRequestBrowserProps {
   onChanged: () => void;
   /** Shows the pull request's changed files in the Diff Surface. */
   onReviewFiles: (number: number) => void;
-  onFixPullRequest: (prompt: string, ownerThreadId?: number | null) => Promise<void>;
+  onFixPullRequest: (prompt: string, ownerThreadId?: number | null, reviewRound?: boolean) => Promise<void>;
   createRequest?: number;
   onCreateHandled?: () => void;
 }
@@ -245,7 +245,7 @@ interface PullRequestReviewProps {
   onBack: (done?: "merged" | "closed") => void;
   onChanged: () => void;
   onReviewFiles: (number: number) => void;
-  onFixPullRequest: (prompt: string, ownerThreadId?: number | null) => Promise<void>;
+  onFixPullRequest: (prompt: string, ownerThreadId?: number | null, reviewRound?: boolean) => Promise<void>;
 }
 
 /** How often an open pull request reloads while some of its checks are still running. */
@@ -434,7 +434,7 @@ export function PullRequestReview({
     setFixing(true);
     setError(null);
     try {
-      await onFixPullRequest(fixPrompt, ownerThread?.id ?? null);
+      await onFixPullRequest(fixPrompt, ownerThread?.id ?? null, selectedReviewThreads.length > 0);
       setPickedReviewThreads(new Set());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

@@ -110,16 +110,19 @@ it("sends only the review threads the user selected, and only when they ask for 
   // An open thread alone offers no fix: the user must pick it first.
   expect(byText("Fix PR")).toBeUndefined();
   expect(called("send_prompt")).toEqual([]);
+  expect(called("send_reviewer_comments")).toEqual([]);
 
   await click(checkboxes()[0]);
   expect(called("send_prompt")).toEqual([]);
+  expect(called("send_reviewer_comments")).toEqual([]);
   await click(byText("Fix PR"));
 
-  await vi.waitFor(() => expect(called("send_prompt")).toHaveLength(1));
+  await vi.waitFor(() => expect(called("send_reviewer_comments")).toHaveLength(1));
+  expect(called("send_prompt")).toEqual([]);
   expect(called("create_thread")).toEqual([]);
-  const [sent] = called("send_prompt");
+  const [sent] = called("send_reviewer_comments");
   expect(sent.threadId).toBe(2);
-  const text = (sent.segments as { kind: string; text: string }[])[0].text;
+  const text = sent.prompt as string;
   expect(text).toContain("src/app.rs:12");
   expect(text).toContain("@alice");
   expect(text).toContain("Please add a guard.");
@@ -135,9 +138,9 @@ it("starts a new fix Thread when the branch's Thread is working", async () => {
   await click(checkboxes()[0]);
   await click(byText("Fix PR"));
 
-  await vi.waitFor(() => expect(called("send_prompt")).toHaveLength(1));
+  await vi.waitFor(() => expect(called("send_reviewer_comments")).toHaveLength(1));
   expect(called("create_thread")).toHaveLength(1);
-  expect(called("send_prompt")[0].threadId).toBe(10);
+  expect(called("send_reviewer_comments")[0].threadId).toBe(10);
   expect(host.querySelector('[data-thread="10"]')).not.toBeNull();
 });
 
@@ -148,8 +151,8 @@ it("uses a Thread that records the branch even when another Thread is selected",
   await click(checkboxes()[0]);
   await click(byText("Fix PR"));
 
-  await vi.waitFor(() => expect(called("send_prompt")).toHaveLength(1));
+  await vi.waitFor(() => expect(called("send_reviewer_comments")).toHaveLength(1));
   expect(called("create_thread")).toEqual([]);
-  expect(called("send_prompt")[0].threadId).toBe(3);
+  expect(called("send_reviewer_comments")[0].threadId).toBe(3);
   expect(host.querySelector('[data-thread="3"]')).not.toBeNull();
 });

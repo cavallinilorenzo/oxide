@@ -24,6 +24,9 @@ pub struct DispatchRequest {
     /// `oxide/<issue-n>-<slug of the issue title>`.
     pub issue_number: Option<u32>,
     pub issue_title: Option<String>,
+    /// The labels of that issue, kept by name so a Review round can describe the kind of work.
+    #[serde(default)]
+    pub issue_labels: Vec<String>,
 }
 
 /// `body` closing issue `n` when merged: unchanged if it already has a `Closes #n`.
@@ -236,11 +239,12 @@ impl Core {
             None,
         )?;
         self.db.lock().unwrap_or_else(|e| e.into_inner()).execute(
-            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3 WHERE id = ?4",
+            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3, issue_labels = ?4 WHERE id = ?5",
             rusqlite::params![
                 branch,
                 worktree.to_string_lossy(),
                 request.issue_number,
+                serde_json::to_string(&request.issue_labels).unwrap_or_else(|_| "[]".into()),
                 thread.id
             ],
         )?;

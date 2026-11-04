@@ -248,7 +248,7 @@ export function IssueDetailView({ projectId, number, refreshKey, onBack, onChang
             <button
               className="primary"
               onClick={() =>
-                setStarting({ number: detail.number, title: detail.title, body: detail.body, url: detail.url })
+                setStarting({ number: detail.number, title: detail.title, body: detail.body, url: detail.url, labels: detail.labels.map((label) => label.name) })
               }
             >
               <PlayIcon size={14} /> Start thread from issue

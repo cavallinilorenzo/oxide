@@ -229,6 +229,7 @@ fn the_dossier_shows_the_stored_issue_with_its_title_and_link() {
             issue_number: Some(51),
             issue_title: Some("Parser crashes on empty input".into()),
             issue_url: Some("https://github.com/example/oxide/issues/51".into()),
+            issue_labels: Vec::new(),
         })
         .unwrap();
     wait_until_completed(&f, thread.id);

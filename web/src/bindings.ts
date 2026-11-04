@@ -163,6 +163,8 @@ export const commands = {
 	listLineComments: (threadId: number) => typedError<LineComment[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
 	/**  Sends every draft to the Thread as one prompt. */
 	sendLineComments: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("send_line_comments", { threadId })),
+	/**  Sends a request that addresses selected reviewer comments, counting it as a review round. */
+	sendReviewerComments: (threadId: number, prompt: string) => typedError<null, AppError>(__TAURI_INVOKE("send_reviewer_comments", { threadId, prompt })),
 	addPullRequestLineComment: (projectId: number, pullRequest: number, comment: NewPullRequestLineComment) => typedError<PullRequestLineComment, AppError>(__TAURI_INVOKE("add_pull_request_line_comment", { projectId, pullRequest, comment })),
 	editPullRequestLineComment: (id: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_pull_request_line_comment", { id, body })),
 	deletePullRequestLineComment: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("delete_pull_request_line_comment", { id })),
@@ -747,6 +749,8 @@ export type DispatchRequest_Deserialize = {
 	issueTitle?: string | null,
 	/**  The issue's page on GitHub, kept for the Dossier. */
 	issueUrl?: string | null,
+	/**  The labels of that issue, by name. */
+	issueLabels?: string[],
 };
 
 /**  A Board Thread handed off from the Thread Board. */
@@ -762,6 +766,8 @@ export type DispatchRequest_Serialize = {
 	issueTitle: string | null,
 	/**  The issue's page on GitHub, kept for the Dossier. */
 	issueUrl: string | null,
+	/**  The labels of that issue, by name. */
+	issueLabels: string[],
 };
 
 /**  What was asked for: the stored issue reference and the Thread's own prompts. */
@@ -1585,6 +1591,8 @@ export type ReviewLedger_Deserialize = {
 	count: number,
 	/**  The most recent entries, newest merge first. */
 	entries: ReviewLedgerEntry_Deserialize[],
+	/**  Review rounds grouped by Provider, Model and kind of work. */
+	rounds: ReviewRoundGroup_Deserialize[],
 };
 
 /**  A Project's wait between a finished Turn and the merge. */
@@ -1594,7 +1602,33 @@ export type ReviewLedger_Serialize = {
 	count: number,
 	/**  The most recent entries, newest merge first. */
 	entries: ReviewLedgerEntry_Serialize[],
+	/**  Review rounds grouped by Provider, Model and kind of work. */
+	rounds: ReviewRoundGroup_Serialize[],
 };
+
+/**  Review rounds of one Provider, Model and kind of work. */
+export type ReviewRoundGroup = ReviewRoundGroup_Serialize | ReviewRoundGroup_Deserialize;
+
+/**  Review rounds of one Provider, Model and kind of work. */
+export type ReviewRoundGroup_Deserialize = {
+	provider: string,
+	model?: string | null,
+	kind: ReviewWorkKind,
+	/**  How many rounds the group holds. */
+	sampleSize: number,
+};
+
+/**  Review rounds of one Provider, Model and kind of work. */
+export type ReviewRoundGroup_Serialize = {
+	provider: string,
+	model: string | null,
+	kind: ReviewWorkKind,
+	/**  How many rounds the group holds. */
+	sampleSize: number,
+};
+
+/**  The band a change's diff size falls in. */
+export type ReviewSizeBand = "small" | "medium" | "large";
 
 export type ReviewState = "requested" | "approved" | "changesRequested" | "commented" | "dismissed";
 
@@ -1606,6 +1640,13 @@ export type ReviewThreadComment = {
 
 /**  The decision a submitted review carries. */
 export type ReviewVerdict = "comment" | "approve" | "requestChanges";
+
+/**  What a review round was about: languages touched, diff size band and issue labels. */
+export type ReviewWorkKind = {
+	languages: string[],
+	sizeBand: ReviewSizeBand,
+	issueLabels: string[],
+};
 
 export type RuntimeCatalogue = RuntimeCatalogue_Serialize | RuntimeCatalogue_Deserialize;
 

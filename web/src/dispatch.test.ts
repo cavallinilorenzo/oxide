@@ -48,11 +48,12 @@ describe("dispatch form", () => {
       issueNumber: null,
       issueTitle: null,
       issueUrl: null,
+      issueLabels: [],
     });
   });
 
   it("starts from an issue: the prompt carries its number, title, body and URL, and the request links it", () => {
-    const issue = { number: 51, title: "Start a Thread", body: "Do it.", url: "https://github.com/o/r/issues/51" };
+    const issue = { number: 51, title: "Start a Thread", body: "Do it.", url: "https://github.com/o/r/issues/51", labels: ["bug", "backend"] };
     const form = issueDispatchForm(defaultDispatchForm(settings, "dev"), issue);
     expect(form.prompt).toBe("Issue #51: Start a Thread\nhttps://github.com/o/r/issues/51\n\nDo it.");
     expect(form.provider).toBe("claude");
@@ -61,6 +62,7 @@ describe("dispatch form", () => {
       issueNumber: 51,
       issueTitle: "Start a Thread",
       issueUrl: "https://github.com/o/r/issues/51",
+      issueLabels: ["bug", "backend"],
     });
   });
 

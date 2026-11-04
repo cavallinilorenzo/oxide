@@ -807,6 +807,37 @@ pub struct ReviewLedger {
     pub count: u32,
     /// The most recent entries, newest merge first.
     pub entries: Vec<ReviewLedgerEntry>,
+    /// Review rounds grouped by Provider, Model and kind of work.
+    pub rounds: Vec<ReviewRoundGroup>,
+}
+
+/// The band a change's diff size falls in.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewSizeBand {
+    Small,
+    Medium,
+    Large,
+}
+
+/// What a review round was about: languages touched, diff size band and issue labels.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewWorkKind {
+    pub languages: Vec<String>,
+    pub size_band: ReviewSizeBand,
+    pub issue_labels: Vec<String>,
+}
+
+/// Review rounds of one Provider, Model and kind of work.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRoundGroup {
+    pub provider: String,
+    pub model: Option<String>,
+    pub kind: ReviewWorkKind,
+    /// How many rounds the group holds.
+    pub sample_size: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -1899,6 +1930,20 @@ async fn send_line_comments(core: State<'_, Arc<Core>>, thread_id: u32) -> Resul
     git_blocking(&core, move |core| core.send_line_comments(thread_id)).await
 }
 
+/// Sends a request that addresses selected reviewer comments, counting it as a review round.
+#[tauri::command]
+#[specta::specta]
+async fn send_reviewer_comments(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+    prompt: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.send_reviewer_comments(thread_id, &prompt)
+    })
+    .await
+}
+
 /// A draft Line comment on a pull request's Diff.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -2949,6 +2994,9 @@ pub struct DispatchRequest {
     pub issue_title: Option<String>,
     /// The issue's page on GitHub, kept for the Dossier.
     pub issue_url: Option<String>,
+    /// The labels of that issue, by name.
+    #[serde(default)]
+    pub issue_labels: Vec<String>,
 }
 
 /// Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn.
@@ -3675,6 +3723,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         delete_line_comment,
         list_line_comments,
         send_line_comments,
+        send_reviewer_comments,
         add_pull_request_line_comment,
         edit_pull_request_line_comment,
         delete_pull_request_line_comment,

@@ -56,6 +56,7 @@ fn request(project_id: u32) -> DispatchRequest {
         issue_number: None,
         issue_title: None,
         issue_url: None,
+        issue_labels: Vec::new(),
     }
 }
 

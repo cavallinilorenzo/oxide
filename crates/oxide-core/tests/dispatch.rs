@@ -91,6 +91,7 @@ fn request(f: &Fixture, prompt: &str) -> DispatchRequest {
         issue_number: None,
         issue_title: None,
         issue_url: None,
+        issue_labels: Vec::new(),
     }
 }
 

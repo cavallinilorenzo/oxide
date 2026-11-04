@@ -26,6 +26,9 @@ pub struct DispatchRequest {
     pub issue_title: Option<String>,
     /// The issue's page on GitHub, kept so its Dossier can link to it without asking again.
     pub issue_url: Option<String>,
+    /// The labels of that issue, kept by name so a Review round can describe the kind of work.
+    #[serde(default)]
+    pub issue_labels: Vec<String>,
 }
 
 /// `body` closing issue `n` when merged: unchanged if it already has a `Closes #n`.
@@ -238,13 +241,14 @@ impl Core {
             None,
         )?;
         self.db.lock().unwrap_or_else(|e| e.into_inner()).execute(
-            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3, issue_title = ?4, issue_url = ?5 WHERE id = ?6",
+            "UPDATE threads SET branch = ?1, worktree_path = ?2, issue_number = ?3, issue_title = ?4, issue_url = ?5, issue_labels = ?6 WHERE id = ?7",
             rusqlite::params![
                 branch,
                 worktree.to_string_lossy(),
                 request.issue_number,
                 request.issue_title,
                 request.issue_url,
+                serde_json::to_string(&request.issue_labels).unwrap_or_else(|_| "[]".into()),
                 thread.id
             ],
         )?;

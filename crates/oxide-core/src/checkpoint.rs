@@ -50,13 +50,24 @@ pub(crate) fn forget(cwd: &Path, thread_id: u32) {
     }
 }
 
+/// The commit one of a Turn's Checkpoints points at, if that Checkpoint exists.
+fn resolve(cwd: &Path, thread_id: u32, turn_index: u32, phase: Phase) -> Option<String> {
+    run(
+        cwd,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{}^{{commit}}", ref_name(thread_id, turn_index, phase)),
+        ],
+    )
+    .ok()
+    .map(|commit| commit.trim().to_string())
+}
+
 /// Whether the Turn has a start Checkpoint, so there is something to diff.
 pub(crate) fn has_start(cwd: &Path, thread_id: u32, turn_index: u32) -> bool {
-    let name = format!(
-        "{}^{{commit}}",
-        ref_name(thread_id, turn_index, Phase::Start)
-    );
-    run(cwd, &["rev-parse", "--verify", "--quiet", &name]).is_ok()
+    resolve(cwd, thread_id, turn_index, Phase::Start).is_some()
 }
 
 /// The tree of a Turn's start Checkpoint: what the files were before the Turn.
@@ -78,23 +89,10 @@ pub(crate) fn turn_revs(
     thread_id: u32,
     turn_index: u32,
 ) -> Result<Option<(String, String)>> {
-    let resolve = |phase| {
-        run(
-            cwd,
-            &[
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                &format!("{}^{{commit}}", ref_name(thread_id, turn_index, phase)),
-            ],
-        )
-        .ok()
-        .map(|s| s.trim().to_string())
-    };
-    let Some(start) = resolve(Phase::Start) else {
+    let Some(start) = resolve(cwd, thread_id, turn_index, Phase::Start) else {
         return Ok(None);
     };
-    let end = match resolve(Phase::End) {
+    let end = match resolve(cwd, thread_id, turn_index, Phase::End) {
         Some(end) => end,
         None => snapshot(cwd)?,
     };
@@ -108,6 +106,30 @@ pub(crate) fn turn_diff(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<D
         None => Vec::new(),
     };
     Ok(Diff { base: None, files })
+}
+
+/// Whether the working tree right now matches a Turn's end Checkpoint. Read-only: it never writes
+/// an object. `None` when the Turn has no end Checkpoint.
+pub(crate) fn working_tree_matches_end(
+    cwd: &Path,
+    thread_id: u32,
+    turn_index: u32,
+) -> Option<bool> {
+    let end = resolve(cwd, thread_id, turn_index, Phase::End)?;
+    if run(cwd, &["--no-optional-locks", "diff", "--quiet", &end, "--"]).is_err() {
+        return Some(false);
+    }
+    let untracked = run(
+        cwd,
+        &[
+            "--no-optional-locks",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ],
+    )
+    .ok()?;
+    Some(untracked.is_empty())
 }
 
 /// A parentless commit of the working tree, written without touching the real index.

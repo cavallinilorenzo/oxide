@@ -217,6 +217,11 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE threads ADD COLUMN restore_notice TEXT;
 ",
+    // A Project's own Verification commands: a JSON array of command lines that count as checks
+    // beside the built-in patterns. Kept with the Project, never in its repository.
+    "
+    ALTER TABLE projects ADD COLUMN verification_commands TEXT NOT NULL DEFAULT '[]';
+",
 ];
 
 /// Opens the database at `path` (WAL) and applies pending `migrations`, writing

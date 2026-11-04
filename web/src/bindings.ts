@@ -53,6 +53,12 @@ export const commands = {
 	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
 	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
 	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
+	/**  The Project's own Verification commands, besides the built-in patterns. */
+	getProjectVerificationCommands: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("get_project_verification_commands", { projectId })),
+	/**  Replaces the Project's own Verification commands. */
+	setProjectVerificationCommands: (projectId: number, commands: string[]) => typedError<null, AppError>(__TAURI_INVOKE("set_project_verification_commands", { projectId, commands })),
+	/**  Which Verification commands ran in a Thread, and whether their results still apply. */
+	verificationDossier: (threadId: number) => typedError<VerificationDossier_Serialize, AppError>(__TAURI_INVOKE("verification_dossier", { threadId })),
 	/**
 	 *  Whether chat Threads of this Project stay in the main checkout instead of each
 	 *  getting its own worktree on their first prompt.
@@ -1998,6 +2004,46 @@ export type UsageLimits_Serialize = {
 };
 
 export type UsageStatus = "ok" | "warning" | "limited";
+
+/**  One Verification command of a Thread, with the state of its most recent evidence. */
+export type VerificationCommand = VerificationCommand_Serialize | VerificationCommand_Deserialize;
+
+/**  One Verification command of a Thread, with the state of its most recent evidence. */
+export type VerificationCommand_Deserialize = {
+	command: string,
+	kind: VerificationKind,
+	state: VerificationState,
+	turnIndex?: number | null,
+	outcome?: CommandOutcome | null,
+	exitCode?: number | null,
+};
+
+/**  One Verification command of a Thread, with the state of its most recent evidence. */
+export type VerificationCommand_Serialize = {
+	command: string,
+	kind: VerificationKind,
+	state: VerificationState,
+	turnIndex: number | null,
+	outcome: CommandOutcome | null,
+	exitCode: number | null,
+};
+
+/**  The Verification section of the Diff Surface for one Thread. */
+export type VerificationDossier = VerificationDossier_Serialize | VerificationDossier_Deserialize;
+
+/**  The Verification section of the Diff Surface for one Thread. */
+export type VerificationDossier_Deserialize = {
+	commands: VerificationCommand_Deserialize[],
+};
+
+/**  The Verification section of the Diff Surface for one Thread. */
+export type VerificationDossier_Serialize = {
+	commands: VerificationCommand_Serialize[],
+};
+
+export type VerificationKind = "test" | "lint" | "typeCheck" | "build" | "other";
+
+export type VerificationState = "fresh" | "stale" | "failed" | "neverRun" | "unknown";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

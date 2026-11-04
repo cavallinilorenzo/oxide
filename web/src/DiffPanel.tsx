@@ -13,6 +13,7 @@ import { LineComments } from "./LineComments";
 import { PullRequestReviewDrafts } from "./PullRequestReviewDrafts";
 import { reviewThreadsPrefix } from "./reviewKeys";
 import { ReviewThreads } from "./ReviewThreads";
+import { VerificationDossier } from "./VerificationDossier";
 
 interface DiffPanelProps {
   projectId: number;
@@ -336,6 +337,13 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
         </div>
       )}
       {restoreError && <div className="error" role="alert">{restoreError}</div>}
+      {threadId !== null && (
+        <VerificationDossier
+          projectId={projectId}
+          threadId={threadId}
+          refreshKey={`${refreshKey}#${focusTick}`}
+        />
+      )}
       {push.dialog}
       {loaded.state === "loading" && <Skeleton kind="diff" label="Loading changes…" />}
       {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}

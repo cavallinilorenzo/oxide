@@ -809,6 +809,45 @@ pub struct ReviewLedger {
     pub entries: Vec<ReviewLedgerEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationState {
+    Fresh,
+    Stale,
+    Failed,
+    NeverRun,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationKind {
+    Test,
+    Lint,
+    TypeCheck,
+    Build,
+    Other,
+}
+
+/// One Verification command of a Thread, with the state of its most recent evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationCommand {
+    pub command: String,
+    pub kind: VerificationKind,
+    pub state: VerificationState,
+    pub turn_index: Option<u32>,
+    pub outcome: Option<CommandOutcome>,
+    pub exit_code: Option<i32>,
+}
+
+/// The Verification section of the Diff Surface for one Thread.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationDossier {
+    pub commands: Vec<VerificationCommand>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThreadStatus {
@@ -2915,6 +2954,39 @@ fn set_project_setup_command(
     Ok(core.set_project_setup_command(project_id, command.as_deref())?)
 }
 
+/// The Project's own Verification commands, besides the built-in patterns.
+#[tauri::command]
+#[specta::specta]
+fn get_project_verification_commands(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+) -> Result<Vec<String>, AppError> {
+    Ok(core.project_verification_commands(project_id)?)
+}
+
+/// Replaces the Project's own Verification commands.
+#[tauri::command]
+#[specta::specta]
+fn set_project_verification_commands(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    commands: Vec<String>,
+) -> Result<(), AppError> {
+    Ok(core.set_project_verification_commands(project_id, &commands)?)
+}
+
+/// Which Verification commands ran in a Thread, and whether their results still apply.
+#[tauri::command]
+#[specta::specta]
+async fn verification_dossier(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<VerificationDossier, AppError> {
+    git_blocking(&core, move |core| core.verification_dossier(thread_id))
+        .await
+        .map(|dossier| convert(&dossier))
+}
+
 /// Whether chat Threads of this Project stay in the main checkout instead of each
 /// getting its own worktree on their first prompt.
 #[tauri::command]
@@ -3506,6 +3578,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         dispatch_thread,
         get_project_setup_command,
         set_project_setup_command,
+        get_project_verification_commands,
+        set_project_verification_commands,
+        verification_dossier,
         get_project_threads_in_main_checkout,
         set_project_threads_in_main_checkout,
         continue_thread,

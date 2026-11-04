@@ -199,6 +199,24 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE items ADD COLUMN command_exit_code INTEGER;
     ALTER TABLE turns ADD COLUMN permission_mode TEXT;
 ",
+    // A restore: a Thread's files put back to before a Turn, and the Checkpoint
+    // that undoes it (ADR-0011).
+    "
+    CREATE TABLE restores (
+        id INTEGER PRIMARY KEY,
+        thread_id INTEGER NOT NULL REFERENCES threads(id),
+        turn_index INTEGER NOT NULL,
+        safety_ref TEXT NOT NULL,
+        files TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        undone_at TEXT
+    );
+    CREATE INDEX restores_by_thread ON restores(thread_id, id);
+",
+    // What the agent is told on the next prompt of a Thread whose files were restored.
+    "
+    ALTER TABLE threads ADD COLUMN restore_notice TEXT;
+",
     // A Project's own Verification commands: a JSON array of command lines that count as checks
     // beside the built-in patterns. Kept with the Project, never in its repository.
     "

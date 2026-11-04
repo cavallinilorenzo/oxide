@@ -728,6 +728,12 @@ section.terminal.terminal-hidden { display: none; }
 .dossier-commands button { justify-self: start; }
 .dossier-commands .hint { margin: 0; font-size: 11px; color: var(--faint); }
 
+/* Restore: the confirmation that names the files that change, and its mark in the Transcript. */
+.restore-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); background: var(--bg2); }
+.restore-confirm ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.restore-confirm .restore-actions { display: flex; gap: 6px; }
+.restore-marker { display: flex; align-items: center; gap: 6px; margin: 6px 0; padding: 6px 8px; font-size: 12px; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; background: var(--bg2); }
+
 /* Files */
 .files { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; font-size: 12.5px; }
 .files.files-navigation { display: flex; flex-direction: column; overflow: auto; }

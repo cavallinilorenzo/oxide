@@ -1,8 +1,8 @@
 //! Checkpoints: a commit of the working tree (untracked files included, ignored
 //! ones not) made through a temporary index, so the user's index, stash,
 //! HEAD and branches are never touched. Kept under
-//! `refs/oxide/checkpoints/<thread>/<turn>/{start,end}`; only ever diffed,
-//! never restored from.
+//! `refs/oxide/checkpoints/<thread>/<turn>/{start,end}`; diffed, and restored
+//! from (ADR-0011).
 
 use crate::Result;
 use crate::git::{run, run_with_env};
@@ -70,6 +70,18 @@ pub(crate) fn has_start(cwd: &Path, thread_id: u32, turn_index: u32) -> bool {
     resolve(cwd, thread_id, turn_index, Phase::Start).is_some()
 }
 
+/// The tree of a Turn's start Checkpoint: what the files were before the Turn.
+pub(crate) fn start_tree(cwd: &Path, thread_id: u32, turn_index: u32) -> Result<String> {
+    tree_of(cwd, &ref_name(thread_id, turn_index, Phase::Start))
+}
+
+/// The tree of a Checkpoint kept under `reference`.
+pub(crate) fn tree_of(cwd: &Path, reference: &str) -> Result<String> {
+    let name = format!("{reference}^{{tree}}");
+    let tree = run(cwd, &["rev-parse", "--verify", "--quiet", &name])?;
+    Ok(tree.trim().to_string())
+}
+
 /// The two revisions a Turn is diffed between. While the Turn runs, its end is
 /// the working tree right now; a Turn with no start Checkpoint has none.
 pub(crate) fn turn_revs(
@@ -121,15 +133,35 @@ pub(crate) fn working_tree_matches_end(
 }
 
 /// A parentless commit of the working tree, written without touching the real index.
-fn snapshot(cwd: &Path) -> Result<String> {
+pub(crate) fn snapshot(cwd: &Path) -> Result<String> {
+    let index = temp_index(cwd, "oxide-checkpoint")?;
+    let result = commit_through(cwd, &index.to_string_lossy());
+    let _ = std::fs::remove_file(&index);
+    result
+}
+
+/// A tree of the working tree, written without touching the real index.
+pub(crate) fn working_tree(cwd: &Path) -> Result<String> {
+    let index = temp_index(cwd, "oxide-tree")?;
+    let result = tree_through(cwd, &index.to_string_lossy());
+    let _ = std::fs::remove_file(&index);
+    result
+}
+
+/// A path for a temporary index, inside the repository's own Git directory.
+pub(crate) fn temp_index(cwd: &Path, kind: &str) -> Result<PathBuf> {
     let git_dir = PathBuf::from(run(cwd, &["rev-parse", "--absolute-git-dir"])?.trim());
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    let index = git_dir.join(format!("oxide-checkpoint-{}-{nanos}", std::process::id()));
-    let result = commit_through(cwd, &index.to_string_lossy());
-    let _ = std::fs::remove_file(&index);
-    result
+    Ok(git_dir.join(format!("{kind}-{}-{nanos}.index", std::process::id())))
+}
+
+fn tree_through(cwd: &Path, index: &str) -> Result<String> {
+    let env = [("GIT_INDEX_FILE", index)];
+    run_with_env(cwd, &["add", "--all", "--", "."], &env)?;
+    let tree = run_with_env(cwd, &["write-tree"], &env)?;
+    Ok(tree.trim().to_string())
 }
 
 fn commit_through(cwd: &Path, index: &str) -> Result<String> {

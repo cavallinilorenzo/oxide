@@ -228,6 +228,14 @@ export function App() {
     /** The selected Thread works in its own worktree, so nothing else edits its checkout. */
     worktree: threads?.some((thread) => thread.id === currentThreadId && thread.worktreePath != null) ?? false,
   };
+  // A Turn runs in the selected Thread's checkout: its own, or another Thread's that
+  // shares it. A Thread with a worktree of its own leaves this checkout alone.
+  const checkoutBusy = selected
+    ? (threads?.some((thread) =>
+        (thread.status === "working" || thread.status === "needs-input") &&
+        (thread.worktreePath ?? selected.path) === (selectedThread?.worktreePath ?? selected.path),
+      ) ?? false)
+    : false;
   const diffScope =
     chosenDiffScope && chosenDiffScope.threadId === currentThreadId
       ? chosenDiffScope.scope
@@ -271,6 +279,9 @@ export function App() {
   }, [selectedId]);
   const threadStatuses = threads?.map((t) => `${t.id}:${t.status}`).join(",") ?? "";
   const threadsKey = `${threadStatuses}#${gitRevision}`;
+  // A restore records a mark in the Transcript, so the Thread is read again.
+  const [transcriptRevision, setTranscriptRevision] = useState(0);
+  const onRestored = useCallback(() => setTranscriptRevision((n) => n + 1), []);
   // An agent can open a pull request during a Turn, which no change the user makes reports,
   // so the Pull request tab reloads whenever a Thread changes status.
   const [turnRevision, setTurnRevision] = useState({ statuses: threadStatuses, count: 0 });
@@ -996,6 +1007,7 @@ export function App() {
                     setSelectedThreadId(continued.thread.id);
 
                   }}
+                  transcriptRevision={transcriptRevision}
                 />
               </DiffOpenContext.Provider>
             </main>
@@ -1053,6 +1065,7 @@ export function App() {
                   board={diffThread.board}
                   worktree={diffThread.worktree}
                   turnRunning={threads?.some((thread) => thread.status === "working" && (diffThread.board ? thread.id === currentThreadId : !isBoardThread(thread))) ?? false}
+                  checkoutBusy={checkoutBusy}
                   scope={diffScope}
                   reviewedPr={reviewedPr?.projectId === selected.id ? reviewedPr.number : null}
                   onScopeChange={(scope) => {
@@ -1062,6 +1075,7 @@ export function App() {
                   focus={diffFocus}
                   refreshKey={threadsKey}
                   onChanged={onGitChanged}
+                  onRestored={onRestored}
                   onOpenPullRequest={openPullRequest}
                   threadWorking={selectedThread?.status === "working"}
                   onOpenFile={(file) => {

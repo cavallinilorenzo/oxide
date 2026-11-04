@@ -7,6 +7,7 @@ Two glossary rules are reversed on purpose, to serve the path to a confident mer
 The glossary said a Checkpoint is read-only. Now a Thread's files can be restored to how they were before a chosen Turn. Reason: a wrong Turn cannot be undone today, so the user must reprompt or clean up by hand, and competing tools already offer restore.
 
 - Restore writes the chosen Turn's start Checkpoint back to the working tree, after taking a safety Checkpoint so that a restore can itself be undone. It does not move HEAD or branches and leaves ignored files alone.
+- Undoing a restore puts back the files the restore changed, as the safety Checkpoint had them; work done after the restore stays where it is.
 - It is refused while a Turn is running or while another working Thread shares the checkout.
 - The Provider session is not rewound (ADR-0002, ADR-0001). The Transcript records a restore marker and the next prompt tells the agent which files were restored.
 - Reverting a single hunk or file is a separate, all-or-nothing reverse patch, not a restore.

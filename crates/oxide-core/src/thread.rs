@@ -68,10 +68,12 @@ pub struct ThreadSummary {
     pub setup_output: Option<String>,
     /// The GitHub issue a Board Thread was started from.
     pub issue_number: Option<u32>,
+    /// Whether this Thread was created as a Blind review.
+    pub blind_review: bool,
 }
 
 /// The `threads` columns [`parse_thread_summary`] reads, in order.
-pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number";
+pub const THREAD_COLUMNS: &str = "id, project_id, provider, model, effort, permission_mode, status, created_at, updated_at, session_lost, continued_from, (SELECT MIN(c.id) FROM threads c WHERE c.continued_from = threads.id), title, branch, worktree_path, setup_output, issue_number, blind_review";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,5 +300,6 @@ pub fn parse_thread_summary(r: &rusqlite::Row) -> rusqlite::Result<ThreadSummary
         worktree_path: r.get(14)?,
         setup_output: r.get(15)?,
         issue_number: r.get(16)?,
+        blind_review: r.get::<_, i64>(17)? != 0,
     })
 }

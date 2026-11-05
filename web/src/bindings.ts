@@ -51,6 +51,8 @@ export const commands = {
 	createThread: (projectId: number, provider: string, model: string | null, effort: string | null, permissionMode: PermissionMode | null) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("create_thread", { projectId, provider, model, effort, permissionMode })),
 	/**  Creates the Thread's worktree and branch, runs the Project's Setup command, starts its first Turn. */
 	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
+	blindReviewProviders: (currentProvider: string | null) => typedError<BlindReviewProviderOption[], AppError>(__TAURI_INVOKE("blind_review_providers", { currentProvider })),
+	startBlindReview: (request: BlindReviewRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("start_blind_review", { request })),
 	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
 	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
 	/**  The Project's own Verification commands, besides the built-in patterns. */
@@ -388,6 +390,37 @@ export type BackendProbe_Serialize = {
 };
 
 export type BenchmarkPhase = { phase: "loading" } | { phase: "warmup" } | { phase: "measuring"; run: number };
+
+export type BlindReviewProviderOption = {
+	provider: string,
+	name: string,
+	sameProvider: boolean,
+	label: string,
+};
+
+export type BlindReviewRequest = BlindReviewRequest_Serialize | BlindReviewRequest_Deserialize;
+
+export type BlindReviewRequest_Deserialize = {
+	projectId: number,
+	threadId?: number | null,
+	provider: string,
+	model?: string | null,
+	effort?: string | null,
+	scope: string,
+	turnIndex?: number | null,
+	issue?: string | null,
+};
+
+export type BlindReviewRequest_Serialize = {
+	projectId: number,
+	threadId: number | null,
+	provider: string,
+	model: string | null,
+	effort: string | null,
+	scope: string,
+	turnIndex: number | null,
+	issue: string | null,
+};
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
 export type BoardCard = BoardCard_Serialize | BoardCard_Deserialize;
@@ -2088,6 +2121,7 @@ export type Thread_Deserialize = {
 	worktreePath?: string | null,
 	setupOutput?: string | null,
 	issueNumber?: number | null,
+	blindReview: boolean,
 };
 
 export type Thread_Serialize = {
@@ -2108,6 +2142,7 @@ export type Thread_Serialize = {
 	worktreePath: string | null,
 	setupOutput: string | null,
 	issueNumber: number | null,
+	blindReview: boolean,
 };
 
 export type TurnError = TurnError_Serialize | TurnError_Deserialize;

@@ -1088,6 +1088,7 @@ pub struct Thread {
     pub worktree_path: Option<String>,
     pub setup_output: Option<String>,
     pub issue_number: Option<u32>,
+    pub blind_review: bool,
 }
 
 /// An Approval the Provider is still waiting on.
@@ -3126,6 +3127,58 @@ async fn dispatch_thread(
         .map(|thread| convert(&thread))
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BlindReviewProviderOption {
+    pub provider: String,
+    pub name: String,
+    pub same_provider: bool,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BlindReviewRequest {
+    pub project_id: u32,
+    pub thread_id: Option<u32>,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub scope: String,
+    pub turn_index: Option<u32>,
+    pub issue: Option<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+fn blind_review_providers(
+    core: State<'_, Arc<Core>>,
+    current_provider: Option<String>,
+) -> Result<Vec<BlindReviewProviderOption>, AppError> {
+    Ok(core
+        .blind_review_providers(current_provider.as_deref())
+        .into_iter()
+        .map(|opt| BlindReviewProviderOption {
+            provider: opt.provider,
+            name: opt.name,
+            same_provider: opt.same_provider,
+            label: opt.label,
+        })
+        .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn start_blind_review(
+    core: State<'_, Arc<Core>>,
+    request: BlindReviewRequest,
+) -> Result<Thread, AppError> {
+    let req: oxide_core::BlindReviewRequest = convert(&request);
+    git_blocking(&core, move |core| core.start_blind_review(req))
+        .await
+        .map(|thread| convert(&thread))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn get_project_setup_command(
@@ -3867,6 +3920,8 @@ pub fn builder() -> Builder<tauri::Wry> {
         save_settings,
         create_thread,
         dispatch_thread,
+        blind_review_providers,
+        start_blind_review,
         get_project_setup_command,
         set_project_setup_command,
         get_project_verification_commands,
@@ -4155,6 +4210,7 @@ mod tests {
                 worktree_path: None,
                 setup_output: None,
                 issue_number: None,
+                blind_review: false,
             },
             turns: vec![oxide_core::TurnSnapshot {
                 id: 3,

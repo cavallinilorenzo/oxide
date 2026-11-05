@@ -348,5 +348,109 @@ it("shows a GitHub review thread error without hiding the diff", async () => {
   );
   expect(host.textContent).toContain("app.rs");
   expect(host.querySelector(".surface-empty.error")?.textContent).toContain("Not authenticated");
+});
 
+it("offers Blind review and starts it with the selected provider", async () => {
+  const providersMock = vi.spyOn(commands, "blindReviewProviders").mockResolvedValue({
+    status: "ok",
+    data: [
+      { provider: "claude", name: "Claude", sameProvider: true, label: "Claude (same provider)" },
+      { provider: "codex", name: "Codex", sameProvider: false, label: "Codex" },
+    ],
+  } as never);
+  const startReviewMock = vi.spyOn(commands, "startBlindReview").mockResolvedValue({
+    status: "ok",
+    data: {
+      id: 99,
+      projectId: 1,
+      provider: "claude",
+      model: null,
+      effort: null,
+      permissionMode: "ask",
+      status: "running",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      title: "Blind review (Claude · same provider)",
+      blindReview: true,
+      branch: null,
+      worktreePath: "/tmp/detached",
+      issueNumber: null,
+      sessionLost: false,
+      continuedFrom: null,
+      continuedIn: null,
+    },
+  } as never);
+
+  const onThreadCreated = vi.fn();
+  const onChanged = vi.fn();
+
+  await act(async () =>
+    root.render(
+      <DiffPanel
+        projectId={1}
+        threadId={7}
+        threadProvider="claude"
+        threadIssue="#42"
+        board={false}
+        worktree={false}
+        scope="uncommitted"
+        reviewedPr={null}
+        onScopeChange={() => {}}
+        focus={null}
+        refreshKey=""
+        onChanged={onChanged}
+        onOpenPullRequest={() => {}}
+        onOpenFile={() => {}}
+        onThreadCreated={onThreadCreated}
+      />,
+    ),
+  );
+
+  const blindBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Blind review"]');
+  expect(blindBtn).not.toBeNull();
+  await click(blindBtn);
+
+  expect(providersMock).toHaveBeenCalledWith("claude");
+  const dialog = host.querySelector('[role="dialog"][aria-label="Blind review"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog?.textContent).toContain("Claude (same provider)");
+
+  const issueInput = dialog?.querySelector<HTMLInputElement>('input[aria-label="Issue"]');
+  expect(issueInput?.value).toBe("#42");
+
+  const startBtn = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? []).find(
+    (b) => b.textContent?.includes("Start Blind review"),
+  );
+  expect(startBtn).toBeDefined();
+  await click(startBtn!);
+
+  expect(startReviewMock).toHaveBeenCalledWith({
+    projectId: 1,
+    threadId: 7,
+    provider: "claude",
+    scope: "uncommitted",
+    turnIndex: null,
+    issue: "#42",
+  });
+  expect(onThreadCreated).toHaveBeenCalled();
+  expect(onChanged).toHaveBeenCalled();
+});
+
+it("shows a notice when no provider can honour non-writing configuration", async () => {
+  vi.spyOn(commands, "blindReviewProviders").mockResolvedValue({
+    status: "ok",
+    data: [],
+  } as never);
+
+  await renderRevert();
+  await click(host.querySelector('button[aria-label="Blind review"]'));
+
+  const dialog = host.querySelector('[role="dialog"][aria-label="Blind review"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog?.textContent).toContain("No provider is available that can honour a non-writing configuration");
+
+  const startBtn = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? []).find(
+    (b) => b.textContent?.includes("Start Blind review"),
+  );
+  expect(startBtn?.disabled).toBe(true);
 });

@@ -2,8 +2,8 @@ import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
-import { CheckCircleIcon, GitCommitIcon, HistoryIcon, InfoIcon, RepoPushIcon, SyncIcon, UndoIcon } from "@primer/octicons-react";
-import { commands, type Diff, type DiffFile, type PendingRestore, type PullRequestReviewThread, type RestoreChange, type RestorePreview, type TurnPick } from "./bindings";
+import { CheckCircleIcon, EyeIcon, GitCommitIcon, HistoryIcon, InfoIcon, RepoPushIcon, SyncIcon, UndoIcon } from "@primer/octicons-react";
+import { commands, type BlindReviewProviderOption, type Diff, type DiffFile, type PendingRestore, type PullRequestReviewThread, type RestoreChange, type RestorePreview, type Thread, type TurnPick } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
@@ -20,6 +20,12 @@ interface DiffPanelProps {
   onOpenFile: (file: DiffFile) => void;
   /** The selected Thread: the Turn scope diffs its latest Turn. */
   threadId: number | null;
+  /** The provider of the selected Thread, used to mark 'same provider' for Blind review. */
+  threadProvider?: string;
+  /** Optional issue description or reference for Blind review. */
+  threadIssue?: string | null;
+  /** Called when a Blind review thread is created and started. */
+  onThreadCreated?: (thread: Thread) => void;
   /** Board Threads work in their own worktree, so nothing else edits it. */
   board: boolean;
   /** The selected Thread works in its own worktree, so nothing else edits its checkout. */
@@ -78,7 +84,7 @@ export function DiffPanel(props: DiffPanelProps) {
   return <DiffBody key={`${props.projectId}:${props.scope}:${props.reviewedPr}`} {...props} />;
 }
 
-function DiffBody({ projectId, threadId, board, worktree, threadWorking = false, turnRunning = false, checkoutBusy = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onRestored, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
+function DiffBody({ projectId, threadId, threadProvider, threadIssue, onThreadCreated, board, worktree, threadWorking = false, turnRunning = false, checkoutBusy = false, scope, reviewedPr, onScopeChange, focus, refreshKey, onChanged, onRestored, onOpenPullRequest, onOpenFile }: DiffPanelProps) {
   // The window regaining focus reloads the diff, like the Pull request tab.
   const [focusTick, setFocusTick] = useState(0);
   useEffect(() => {
@@ -235,6 +241,54 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
     onRestored?.();
   }
 
+  // Blind review: runs the diff and issue against a provider in a separate Thread and detached worktree.
+  const [blindReviewOpen, setBlindReviewOpen] = useState(false);
+  const [blindProviders, setBlindProviders] = useState<BlindReviewProviderOption[]>([]);
+  const [blindLoading, setBlindLoading] = useState(false);
+  const [selectedBlindProvider, setSelectedBlindProvider] = useState<string>("");
+  const [blindIssue, setBlindIssue] = useState<string>("");
+  const [startingBlindReview, setStartingBlindReview] = useState(false);
+  const [blindError, setBlindError] = useState<string | null>(null);
+
+  async function openBlindReview() {
+    setBlindReviewOpen(true);
+    setBlindError(null);
+    setBlindLoading(true);
+    setBlindIssue(threadIssue ?? "");
+    const res = await commands.blindReviewProviders(threadProvider ?? null);
+    setBlindLoading(false);
+    if (res.status === "ok") {
+      setBlindProviders(res.data);
+      if (res.data.length > 0) {
+        setSelectedBlindProvider(res.data[0].provider);
+      }
+    } else {
+      setBlindError(res.error.message);
+    }
+  }
+
+  async function runBlindReview() {
+    if (!selectedBlindProvider) return;
+    setStartingBlindReview(true);
+    setBlindError(null);
+    const res = await commands.startBlindReview({
+      projectId,
+      threadId,
+      provider: selectedBlindProvider,
+      scope,
+      turnIndex: scope === "turn" ? (turn?.turnIndex ?? null) : null,
+      issue: blindIssue.trim() || null,
+    });
+    setStartingBlindReview(false);
+    if (res.status === "error") {
+      setBlindError(res.error.message);
+      return;
+    }
+    setBlindReviewOpen(false);
+    onThreadCreated?.(res.data);
+    onChanged();
+  }
+
   const toggleChecked = (path: string, checked: boolean) =>
     setUnchecked((prev) => {
       const next = new Set(prev);
@@ -299,6 +353,16 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
         )}
         <span className="grow" />
         {files.length > 0 && (
+          <button
+            type="button"
+            className="btn"
+            aria-label="Blind review"
+            onClick={() => void openBlindReview()}
+          >
+            <EyeIcon size={14} /> Blind review
+          </button>
+        )}
+        {files.length > 0 && (
           <span className="diff-total">
             {files.length} file{files.length === 1 ? "" : "s"} <span className="add">+{added}</span>{" "}
             <span className="del">−{removed}</span>
@@ -350,6 +414,84 @@ function DiffBody({ projectId, threadId, board, worktree, threadWorking = false,
         />
       )}
       {push.dialog}
+      {blindReviewOpen && (
+        <div className="modal-backdrop">
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Blind review"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !startingBlindReview) setBlindReviewOpen(false);
+            }}
+          >
+            <h2>Blind review</h2>
+            <p className="hint">
+              Review changes with a fresh provider in a separate thread and detached worktree. The review prompt only includes the diff, issue, and structured format—no transcript history is shared.
+            </p>
+            {blindLoading ? (
+              <p>Loading available providers…</p>
+            ) : blindProviders.length === 0 ? (
+              <p className="error" role="alert">
+                No provider is available that can honour a non-writing configuration.
+              </p>
+            ) : (
+              <div className="blind-review-fields">
+                <label>
+                  <span>Provider</span>
+                  <select
+                    aria-label="Provider"
+                    value={selectedBlindProvider}
+                    onChange={(e) => setSelectedBlindProvider(e.target.value)}
+                    disabled={startingBlindReview}
+                  >
+                    {blindProviders.map((p) => (
+                      <option key={p.provider} value={p.provider}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Issue reference or description (optional)</span>
+                  <input
+                    type="text"
+                    aria-label="Issue"
+                    placeholder="e.g. #123 or issue description"
+                    value={blindIssue}
+                    onChange={(e) => setBlindIssue(e.target.value)}
+                    disabled={startingBlindReview}
+                  />
+                </label>
+              </div>
+            )}
+            {blindError && (
+              <div className="error" role="alert">
+                {blindError}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={() => setBlindReviewOpen(false)}
+                disabled={startingBlindReview}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={
+                  startingBlindReview || blindLoading || blindProviders.length === 0 || !selectedBlindProvider
+                }
+                onClick={() => void runBlindReview()}
+              >
+                {startingBlindReview ? "Starting…" : "Start Blind review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {loaded.state === "loading" && <Skeleton kind="diff" label="Loading changes…" />}
       {loaded.state === "error" && <div className="surface-empty error">{loaded.message}</div>}
       {scope === "pr" && loaded.state !== "error" && threads.state === "error" && (

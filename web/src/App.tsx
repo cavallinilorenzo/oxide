@@ -12,6 +12,7 @@ import {
   FileDiffIcon,
   FileDirectoryIcon,
   FileIcon,
+  EyeIcon,
   GearIcon,
   GitBranchIcon,
   GitPullRequestIcon,
@@ -1071,6 +1072,8 @@ export function App() {
                 <DiffPanel
                   projectId={selected.id}
                   threadId={currentThreadId}
+                  threadProvider={selectedThread?.provider}
+                  threadIssue={selectedThread?.issueNumber != null ? `#${selectedThread.issueNumber}` : null}
                   board={diffThread.board}
                   worktree={diffThread.worktree}
                   turnRunning={threads?.some((thread) => thread.status === "working" && (diffThread.board ? thread.id === currentThreadId : !isBoardThread(thread))) ?? false}
@@ -1087,6 +1090,10 @@ export function App() {
                   onRestored={onRestored}
                   onOpenPullRequest={openPullRequest}
                   threadWorking={selectedThread?.status === "working"}
+                  onThreadCreated={(thread) => {
+                    setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)]);
+                    setSelectedThreadId(thread.id);
+                  }}
                   onOpenFile={(file) => {
                     const review: ReviewTarget | undefined =
                       diffScope === "pr" && reviewedPr?.projectId === selected.id
@@ -1259,6 +1266,11 @@ function Sidebar({
         >
           <span className={`status-dot ${t.status}`} aria-label={`Status: ${t.status}`} />
           <span className="thread-item-title">{threadTitle(t)}</span>
+          {t.blindReview && (
+            <span className="thread-item-branch" title="Blind review" aria-label="Blind review">
+              <EyeIcon size={12} />
+            </span>
+          )}
           {isBoardThread(t) && (
             <span className="thread-item-branch" title={`Board Thread: own worktree on ${t.branch}`} aria-label="Board Thread">
               <GitBranchIcon size={12} />

@@ -3,6 +3,7 @@
 
 mod activity;
 pub mod attachments;
+pub mod blind_review;
 mod board;
 mod checkpoint;
 mod clock;
@@ -39,6 +40,7 @@ mod usage_poll;
 mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
+pub use blind_review::{BlindReviewProviderOption, BlindReviewRequest};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
@@ -2384,7 +2386,7 @@ impl Core {
         Ok(PathBuf::from(self.checkout_path(project_id, None)?))
     }
 
-    fn checkout_path(&self, project_id: u32, thread_id: Option<u32>) -> Result<String> {
+    pub fn checkout_path(&self, project_id: u32, thread_id: Option<u32>) -> Result<String> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         Ok(match thread_id {
             Some(thread_id) => db.query_row(

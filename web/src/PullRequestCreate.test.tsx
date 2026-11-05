@@ -34,6 +34,14 @@ beforeEach(() => {
       head: "fix/topic",
     },
   });
+  vi.spyOn(commands, "dossierPullRequestSection").mockResolvedValue({
+    status: "ok",
+    data: {
+      markdown:
+        "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
+      visibility: "public",
+    },
+  });
   vi.spyOn(commands, "pullRequestBaseBranches").mockResolvedValue({
     status: "ok",
     data: ["main", "dev", "fix/topic"],
@@ -46,12 +54,10 @@ afterEach(async () => {
 
 it("submits a prefilled draft and keeps the form and diagnostics when the push fails", async () => {
   const created = vi.fn();
-  const create = vi
-    .spyOn(commands, "createPullRequest")
-    .mockResolvedValue({
-      status: "error",
-      error: { message: "non-fast-forward [rejected]" },
-    });
+  const create = vi.spyOn(commands, "createPullRequest").mockResolvedValue({
+    status: "error",
+    error: { message: "non-fast-forward [rejected]" },
+  });
   await act(async () =>
     root.render(
       <PullRequestCreate
@@ -66,7 +72,7 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
     host.querySelector<HTMLInputElement>(".pr-create-title input")?.value,
   ).toBe("Fix topic");
   await act(async () =>
-    host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(),
+    host.querySelector<HTMLInputElement>(".pr-create-draft input")!.click(),
   );
   await act(async () =>
     host
@@ -80,6 +86,7 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
     "Tested locally",
     "main",
     true,
+    "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
   );
   expect(created).not.toHaveBeenCalled();
   expect(host.querySelector('[role="alert"]')?.textContent).toContain(
@@ -128,4 +135,94 @@ it("blocks PR creation from main before loading defaults or pushing", async () =
   expect(host.textContent).toContain("create a branch");
   expect(commands.pullRequestDraft).not.toHaveBeenCalled();
   expect(host.querySelector('[type="submit"]')).toBeNull();
+});
+
+const pullRequest = {
+  number: 12,
+  title: "Fix topic",
+  body: "",
+  author: "me",
+  url: "",
+  head: "fix/topic",
+  base: "main",
+  draft: false,
+  createdAt: "",
+};
+
+async function open(threadId: number | null) {
+  await act(async () =>
+    root.render(
+      <PullRequestCreate
+        projectId={1}
+        threadId={threadId}
+        onCancel={() => {}}
+        onCreated={() => {}}
+      />,
+    ),
+  );
+}
+
+async function submit() {
+  await act(async () =>
+    host
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+}
+
+it("previews the Dossier with the repository's visibility, publishes what was edited and offers prompts only as an opt-in", async () => {
+  const create = vi
+    .spyOn(commands, "createPullRequest")
+    .mockResolvedValue({ status: "ok", data: pullRequest });
+  await open(7);
+  expect(commands.dossierPullRequestSection).toHaveBeenLastCalledWith(
+    1,
+    7,
+    false,
+    false,
+  );
+  expect(host.querySelector(".pr-create-visibility")?.textContent).toContain(
+    "public",
+  );
+  const preview = [...host.querySelectorAll("textarea")].find((area) =>
+    area.value.includes("facts"),
+  )!;
+  expect(preview).toBeTruthy();
+
+  const prompts = [...host.querySelectorAll<HTMLInputElement>("input")].find(
+    (input) => input.parentElement?.textContent?.includes("my prompts"),
+  )!;
+  await act(async () => prompts.click());
+  expect(commands.dossierPullRequestSection).toHaveBeenLastCalledWith(
+    1,
+    7,
+    true,
+    false,
+  );
+  await submit();
+  expect(create.mock.calls[0][6]).toContain("facts");
+});
+
+it("declining the Dossier publishes the description as written", async () => {
+  const create = vi
+    .spyOn(commands, "createPullRequest")
+    .mockResolvedValue({ status: "ok", data: pullRequest });
+  await open(7);
+  const toggle = [...host.querySelectorAll<HTMLInputElement>("input")].find(
+    (input) => input.parentElement?.textContent?.includes("Add the Dossier"),
+  )!;
+  await act(async () => toggle.click());
+  await submit();
+  expect(create.mock.calls[0][6]).toBeNull();
+});
+
+it("offers no Dossier outside a Thread", async () => {
+  const create = vi
+    .spyOn(commands, "createPullRequest")
+    .mockResolvedValue({ status: "ok", data: pullRequest });
+  await open(null);
+  expect(commands.dossierPullRequestSection).not.toHaveBeenCalled();
+  expect(host.querySelector(".pr-create-dossier")).toBeNull();
+  await submit();
+  expect(create.mock.calls[0][6]).toBeNull();
 });

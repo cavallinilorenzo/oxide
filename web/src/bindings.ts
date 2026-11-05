@@ -215,8 +215,16 @@ export const commands = {
 	pullRequestBaseBranches: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("pull_request_base_branches", { projectId })),
 	/**  Title, body and base prefilled from the branch's commits. */
 	pullRequestDraft: (projectId: number, threadId: number | null) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId, threadId })),
-	/**  Pushes the branch if needed, then opens a pull request for it. */
-	createPullRequest: (projectId: number, threadId: number | null, title: string, body: string, base: string, draft: boolean) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, threadId, title, body, base, draft })),
+	/**
+	 *  Pushes the branch if needed, then opens a pull request for it. `dossier_section` is the
+	 *  previewed section to publish in the body, or `None` to leave the body as written.
+	 */
+	createPullRequest: (projectId: number, threadId: number | null, title: string, body: string, base: string, draft: boolean, dossierSection: string | null) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, threadId, title, body, base, draft, dossierSection })),
+	/**
+	 *  The Dossier section for the pull request about to be opened from a Thread's branch. Prompts
+	 *  and the agent's closing message are included only when asked for.
+	 */
+	dossierPullRequestSection: (projectId: number, threadId: number, includePrompts: boolean, includeAgentMessage: boolean) => typedError<DossierSection, AppError>(__TAURI_INVOKE("dossier_pull_request_section", { projectId, threadId, includePrompts, includeAgentMessage })),
 	openPullRequest: (projectId: number) => typedError<null, AppError>(__TAURI_INVOKE("open_pull_request", { projectId })),
 	/**  Open pull requests; `mine` keeps the user's own, `search` is a GitHub query. */
 	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
@@ -845,6 +853,12 @@ export type DossierPullRequest_Serialize = {
 	number: number,
 	url: string,
 	checks: PullRequestCheck_Serialize[],
+};
+
+/**  The Dossier section offered for a pull request body, to preview before publishing. */
+export type DossierSection = {
+	markdown: string,
+	visibility: RepositoryVisibility,
 };
 
 export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
@@ -1510,6 +1524,9 @@ export type PullRequestState_Serialize = {
 	defaultBranch: string | null,
 	pullRequest: PullRequest | null,
 };
+
+/**  Who can read the repository a pull request is opened in. */
+export type RepositoryVisibility = "public" | "private" | "internal" | "unknown";
 
 export type ResourceDecision = ResourceDecision_Serialize | ResourceDecision_Deserialize;
 

@@ -94,7 +94,7 @@ A command that counts as a check (tests, type checks, lint, build), recognized f
 _Avoid_: Test command, check script
 
 **Verification Dossier**:
-The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. In Branch scope it covers the whole branch: every Turn, the commits no Turn produced, the pull request's checks, Approvals and Permission modes. Also called the Dossier.
+The account of a change's intent, evidence and risk signals that Oxide computes, without an LLM, from the Transcript, Checkpoints, Settings and GitHub. It is a section of the Diff Surface, shows separate signals instead of a single score, and keeps the agent's closing message apart as a claim. In Branch scope it covers the whole branch: every Turn, the commits no Turn produced, the pull request's checks, Approvals and Permission modes. Also called the Dossier. Published, it is a section of a pull request's body between HTML comment markers: computed facts only, commands redacted, and prompts or the agent's message only when the author opts in for that pull request.
 _Avoid_: Report, summary, risk score
 
 **Risk signal**:

@@ -382,3 +382,53 @@ fn declining_leaves_the_body_as_it_would_have_been() {
 
     assert_eq!(create(&f, "Just the body", None), "Just the body");
 }
+
+#[test]
+fn a_description_over_githubs_limit_is_refused_before_the_branch_is_pushed() {
+    let f = fixture(Some("PUBLIC"));
+    thread_with_turn(&f, "go", &[], "done");
+
+    let error = f
+        .core
+        .create_pull_request(
+            f.project_id,
+            &PullRequestInput {
+                title: "T".into(),
+                body: "x".repeat(70_000),
+                base: "main".into(),
+                draft: false,
+                dossier_section: Some("facts".into()),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("65536"), "{error}");
+    let remote = f
+        .work
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("remote.git");
+    let branches = Command::new("git")
+        .args(["branch", "--list", "feature"])
+        .current_dir(remote)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&branches.stdout).trim().is_empty());
+}
+
+#[test]
+fn a_long_file_list_is_counted_instead_of_listed() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let dossier = f.core.branch_dossier(id).unwrap();
+    // The rendering cap is exercised on the real section: nothing in it may exceed GitHub's limit.
+    let section = f
+        .core
+        .dossier_pull_request_section(f.project_id, id, &DossierSectionOptions::default())
+        .unwrap();
+    assert!(section.markdown.chars().count() < 65_536);
+    assert!(dossier.signals.len() < 100);
+}

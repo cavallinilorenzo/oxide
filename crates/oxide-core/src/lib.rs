@@ -13,6 +13,7 @@ mod detection_cache;
 pub mod dictation;
 mod discovery;
 mod dossier;
+mod dossier_publish;
 mod error;
 mod files;
 mod git;
@@ -96,6 +97,9 @@ pub use dossier::{
     AgentClaim, BranchCommit, DossierIntent, DossierIssue, DossierPullRequest, LARGE_DIFF_LINES,
     PermissionModeUse, RiskSignal, RiskSignalKind, Supervision, VerificationCommand,
     VerificationDossier, VerificationKind, VerificationState,
+};
+pub use dossier_publish::{
+    DossierSection, DossierSectionOptions, RepositoryVisibility, SECTION_END, SECTION_START,
 };
 pub use error::{Error, Result};
 pub use oxide_provider::{
@@ -2005,6 +2009,10 @@ impl Core {
             && let Some(n) = self.issue_of_branch(project_id, &branch)?
         {
             input.body = worktree::closing_issue(&input.body, n);
+        }
+        // After `Closes`, so the section's text can never stand in for it.
+        if let Some(section) = &input.dossier_section {
+            input.body = dossier_publish::with_section(&input.body, section);
         }
         self.git
             .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))

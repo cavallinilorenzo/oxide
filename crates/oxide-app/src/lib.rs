@@ -2696,6 +2696,24 @@ pub struct PullRequestDraft {
     pub head: String,
 }
 
+/// Who can read the repository a pull request is opened in.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryVisibility {
+    Public,
+    Private,
+    Internal,
+    Unknown,
+}
+
+/// The Dossier section offered for a pull request body, to preview before publishing.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierSection {
+    pub markdown: String,
+    pub visibility: RepositoryVisibility,
+}
+
 /// Whether `gh` works and the branch's open pull request. Runs `gh` only when
 /// asked; the Surface decides when to refresh.
 #[tauri::command]
@@ -2740,7 +2758,33 @@ async fn pull_request_draft(
     .map(|draft| convert(&draft))
 }
 
-/// Pushes the branch if needed, then opens a pull request for it.
+/// The Dossier section for the pull request about to be opened from a Thread's branch. Prompts
+/// and the agent's closing message are included only when asked for.
+#[tauri::command]
+#[specta::specta]
+async fn dossier_pull_request_section(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: u32,
+    include_prompts: bool,
+    include_agent_message: bool,
+) -> Result<DossierSection, AppError> {
+    git_blocking(&core, move |core| {
+        core.dossier_pull_request_section(
+            project_id,
+            thread_id,
+            &oxide_core::DossierSectionOptions {
+                include_prompts,
+                include_agent_message,
+            },
+        )
+    })
+    .await
+    .map(|section| convert(&section))
+}
+
+/// Pushes the branch if needed, then opens a pull request for it. `dossier_section` is the
+/// previewed section to publish in the body, or `None` to leave the body as written.
 #[tauri::command]
 #[specta::specta]
 async fn create_pull_request(
@@ -2751,6 +2795,7 @@ async fn create_pull_request(
     body: String,
     base: String,
     draft: bool,
+    dossier_section: Option<String>,
 ) -> Result<PullRequest, AppError> {
     git_blocking(&core, move |core| {
         core.create_pull_request_in(
@@ -2761,6 +2806,7 @@ async fn create_pull_request(
                 body,
                 base,
                 draft,
+                dossier_section,
             },
         )
     })
@@ -3961,6 +4007,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         pull_request_base_branches,
         pull_request_draft,
         create_pull_request,
+        dossier_pull_request_section,
         open_pull_request,
         list_pull_requests,
         pull_request_detail,

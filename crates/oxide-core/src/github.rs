@@ -324,6 +324,8 @@ pub struct PullRequestInput {
     pub body: String,
     pub base: String,
     pub draft: bool,
+    /// The Dossier section the author chose to publish; `None` leaves the body as written.
+    pub dossier_section: Option<String>,
 }
 
 /// One of the user's GitHub repositories, as offered for cloning.
@@ -914,6 +916,25 @@ pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Res
     gh.run(cwd, &args)?;
     gh.current_pull_request(cwd)?
         .ok_or_else(|| Error::Github("The pull request was created but could not be read.".into()))
+}
+
+/// Who can read the repository, as GitHub reports it.
+pub fn repository_visibility(gh: &Gh, cwd: &Path) -> Result<crate::RepositoryVisibility> {
+    use crate::RepositoryVisibility as V;
+    gh.require_ready(cwd)?;
+    let repo = parse(&gh.run(cwd, &["repo", "view", "--json", "visibility"])?)?;
+    Ok(
+        match repo["visibility"]
+            .as_str()
+            .map(str::to_ascii_uppercase)
+            .as_deref()
+        {
+            Some("PUBLIC") => V::Public,
+            Some("PRIVATE") => V::Private,
+            Some("INTERNAL") => V::Internal,
+            _ => V::Unknown,
+        },
+    )
 }
 
 /// The URL of the branch's open pull request.

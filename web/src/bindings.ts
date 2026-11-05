@@ -215,11 +215,8 @@ export const commands = {
 	pullRequestBaseBranches: (projectId: number) => typedError<string[], AppError>(__TAURI_INVOKE("pull_request_base_branches", { projectId })),
 	/**  Title, body and base prefilled from the branch's commits. */
 	pullRequestDraft: (projectId: number, threadId: number | null) => typedError<PullRequestDraft, AppError>(__TAURI_INVOKE("pull_request_draft", { projectId, threadId })),
-	/**
-	 *  Pushes the branch if needed, then opens a pull request for it. `dossier_section` is the
-	 *  previewed section to publish in the body, or `None` to leave the body as written.
-	 */
-	createPullRequest: (projectId: number, threadId: number | null, title: string, body: string, base: string, draft: boolean, dossierSection: string | null) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, threadId, title, body, base, draft, dossierSection })),
+	/**  Pushes the branch if needed, then opens a pull request for it. */
+	createPullRequest: (projectId: number, threadId: number | null, pullRequest: NewPullRequest_Deserialize) => typedError<PullRequest, AppError>(__TAURI_INVOKE("create_pull_request", { projectId, threadId, pullRequest })),
 	/**
 	 *  The Dossier section for the pull request about to be opened from a Thread's branch. Prompts
 	 *  and the agent's closing message are included only when asked for.
@@ -1169,6 +1166,9 @@ export type NewLineComment = {
 	body: string,
 };
 
+/**  What the author chose for a new pull request. */
+export type NewPullRequest = NewPullRequest_Serialize | NewPullRequest_Deserialize;
+
 /**  A draft Line comment on a pull request's Diff. */
 export type NewPullRequestLineComment = {
 	path: string,
@@ -1176,6 +1176,26 @@ export type NewPullRequestLineComment = {
 	line: number,
 	code: string,
 	body: string,
+};
+
+/**  What the author chose for a new pull request. */
+export type NewPullRequest_Deserialize = {
+	title: string,
+	body: string,
+	base: string,
+	draft: boolean,
+	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
+	dossierSection?: string | null,
+};
+
+/**  What the author chose for a new pull request. */
+export type NewPullRequest_Serialize = {
+	title: string,
+	body: string,
+	base: string,
+	draft: boolean,
+	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
+	dossierSection: string | null,
 };
 
 /**  An Approval the Provider is still waiting on. */

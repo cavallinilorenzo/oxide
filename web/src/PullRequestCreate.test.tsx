@@ -79,15 +79,14 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
   );
-  expect(create).toHaveBeenCalledWith(
-    1,
-    7,
-    "Fix topic",
-    "Tested locally",
-    "main",
-    true,
-    "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
-  );
+  expect(create).toHaveBeenCalledWith(1, 7, {
+    title: "Fix topic",
+    body: "Tested locally",
+    base: "main",
+    draft: true,
+    dossierSection:
+      "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
+  });
   expect(created).not.toHaveBeenCalled();
   expect(host.querySelector('[role="alert"]')?.textContent).toContain(
     "couldn’t be pushed",
@@ -200,7 +199,7 @@ it("previews the Dossier with the repository's visibility, publishes what was ed
     false,
   );
   await submit();
-  expect(create.mock.calls[0][6]).toContain("facts");
+  expect(create.mock.calls[0][2].dossierSection).toContain("facts");
 });
 
 it("declining the Dossier publishes the description as written", async () => {
@@ -213,7 +212,7 @@ it("declining the Dossier publishes the description as written", async () => {
   )!;
   await act(async () => toggle.click());
   await submit();
-  expect(create.mock.calls[0][6]).toBeNull();
+  expect(create.mock.calls[0][2].dossierSection).toBeNull();
 });
 
 it("offers no Dossier outside a Thread", async () => {
@@ -224,5 +223,5 @@ it("offers no Dossier outside a Thread", async () => {
   expect(commands.dossierPullRequestSection).not.toHaveBeenCalled();
   expect(host.querySelector(".pr-create-dossier")).toBeNull();
   await submit();
-  expect(create.mock.calls[0][6]).toBeNull();
+  expect(create.mock.calls[0][2].dossierSection).toBeNull();
 });

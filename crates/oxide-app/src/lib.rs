@@ -2696,6 +2696,18 @@ pub struct PullRequestDraft {
     pub head: String,
 }
 
+/// What the author chose for a new pull request.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPullRequest {
+    pub title: String,
+    pub body: String,
+    pub base: String,
+    pub draft: bool,
+    /// The previewed Dossier section to publish in the body; `None` leaves the body as written.
+    pub dossier_section: Option<String>,
+}
+
 /// Who can read the repository a pull request is opened in.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -2783,30 +2795,25 @@ async fn dossier_pull_request_section(
     .map(|section| convert(&section))
 }
 
-/// Pushes the branch if needed, then opens a pull request for it. `dossier_section` is the
-/// previewed section to publish in the body, or `None` to leave the body as written.
+/// Pushes the branch if needed, then opens a pull request for it.
 #[tauri::command]
 #[specta::specta]
 async fn create_pull_request(
     core: State<'_, Arc<Core>>,
     project_id: u32,
     thread_id: Option<u32>,
-    title: String,
-    body: String,
-    base: String,
-    draft: bool,
-    dossier_section: Option<String>,
+    pull_request: NewPullRequest,
 ) -> Result<PullRequest, AppError> {
     git_blocking(&core, move |core| {
         core.create_pull_request_in(
             project_id,
             thread_id,
             &oxide_core::PullRequestInput {
-                title,
-                body,
-                base,
-                draft,
-                dossier_section,
+                title: pull_request.title,
+                body: pull_request.body,
+                base: pull_request.base,
+                draft: pull_request.draft,
+                dossier_section: pull_request.dossier_section,
             },
         )
     })

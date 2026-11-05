@@ -146,15 +146,14 @@ export function PullRequestCreate({
     setBusy(true);
     setError(null);
     try {
-      const result = await commands.createPullRequest(
-        projectId,
-        threadId,
-        title.trim(),
+      const result = await commands.createPullRequest(projectId, threadId, {
+        title: title.trim(),
         body,
         base,
         draft,
-        publishing && section && dossierText.trim() ? dossierText : null,
-      );
+        dossierSection:
+          publishing && section && dossierText.trim() ? dossierText : null,
+      });
       if (result.status === "error") setError(result.error.message);
       else onCreated(result.data);
     } catch (cause) {

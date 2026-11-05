@@ -48,7 +48,7 @@ pub(crate) fn closing_issue(body: &str, n: u32) -> String {
 }
 
 /// `Fix the login bug!` →`fix-the-login-bug`; never empty.
-fn slugify(text: &str, fallback: &str) -> String {
+pub(crate) fn slugify(text: &str, fallback: &str) -> String {
     let mut slug = String::new();
     for c in text.chars() {
         if c.is_ascii_alphanumeric() {
@@ -68,7 +68,7 @@ fn slugify(text: &str, fallback: &str) -> String {
 
 /// The first `slug`, `slug-2`, `slug-3`… that is neither a branch `oxide/<name>` nor a folder in
 /// `parent`.
-fn free_name(checkout: &Path, parent: &Path, slug: &str) -> String {
+pub(crate) fn free_name(checkout: &Path, parent: &Path, slug: &str) -> String {
     (1..)
         .map(|n| {
             if n == 1 {

@@ -313,6 +313,10 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX rule_suggestion_comments_by_suggestion
         ON rule_suggestion_comments(suggestion_id, id);
 ",
+    // Blind review (#337): marks Threads created as Blind reviews.
+    "
+    ALTER TABLE threads ADD COLUMN blind_review INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 /// Starts a transaction that will write. `IMMEDIATE` takes the write lock up front:

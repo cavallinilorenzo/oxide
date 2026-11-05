@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { GitBranchIcon, PencilIcon } from "@primer/octicons-react";
+import { EyeIcon, GitBranchIcon, PencilIcon } from "@primer/octicons-react";
 import type { Thread } from "./bindings";
 import { ProviderAvatar } from "./ProviderAvatar";
 import { UsageRing } from "./UsageRing";
@@ -63,6 +63,11 @@ export function ThreadHeader({
             <h2 className="thread-title" onClick={onStartRename} title={`${title} · Click to rename`}>
               {title}
             </h2>
+            {thread?.blindReview && (
+              <span className="chip" title="Blind review" aria-label="Blind review">
+                <EyeIcon size={12} /> Blind review
+              </span>
+            )}
             {thread?.issueNumber != null && (
               <span className="chip" title={`Started from issue #${thread.issueNumber}`}>
                 #{thread.issueNumber}

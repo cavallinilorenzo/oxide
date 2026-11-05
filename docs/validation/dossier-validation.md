@@ -36,8 +36,8 @@ requests can be used at all.
 ### Where the Dossier lives
 
 - It is a section at the top of the Diff Surface, above the changed files. It is not a separate
-  Surface and has no collapse of its own (ADR-0009). In Branch scope it also shows the branch
-  evidence.
+  Surface (ADR-0009); ADR-0010 places the Dossier inside the Diff Surface. It has no collapse of
+  its own. In Branch scope it also shows the branch evidence.
 - It requires an **Oxide Thread** that produced the change. A pull request from someone else, or
   one opened outside Oxide without a Thread on its branch, has no Dossier. Only use pull requests
   whose branch has an Oxide Thread with at least one completed Turn.
@@ -79,9 +79,11 @@ requests can be used at all.
 - A merge is recorded when it is made from Oxide, and when Oxide refreshes a Board Thread's pull
   request: at app start for every open Project, or when the Project's Board is opened. **A merge
   made in the browser while Oxide stays open is not recorded until the Board is opened again or
-  Oxide restarts.** Open the Board after any external merge, or the two-week figures will silently
-  undercount.
-- Only pull requests whose branch has an Oxide Thread are tracked.
+  Oxide restarts.** An auto-merge started from Oxide is also skipped until that refresh. Open the
+  Board after any external or auto merge, or the two-week figures will silently undercount.
+- Only pull requests whose branch has an Oxide Thread are tracked, and a merge is dropped when the
+  Thread has no completed Turn at or before the merge. Record those misses in the tally rather than
+  assuming the ledger is complete.
 - A **review round** is one send of Line comments or selected reviewer comments to a Thread. It is
   not every comment read, and it is not recorded for reviews done in the browser.
 - The app does **not** record when someone leaves Oxide. That has to be observed and tallied by
@@ -108,31 +110,38 @@ Run this first, so the sessions happen on a build and a workflow the maintainers
 
 1. **Choose the window.** Two consecutive weeks of normal work. Record the start and end dates and
    the Oxide commit used.
-2. **Decide eligibility before starting.** An eligible pull request is one opened from an Oxide
+2. **Snapshot the ledger at the start.** For each Project, open the overview and record its current
+   `count`, median and recent entries. The ledger has no date filter: its median and count cover
+   the Project's whole history, and the list shows only the 20 most recent entries. The start
+   snapshot is how the in-window figures are separated from older data.
+3. **Decide eligibility before starting.** An eligible pull request is one opened from an Oxide
    Thread's branch and merged during the window. Work merged without an Oxide Thread is out of
    scope; note how much of the week's work that was, so the sample is not mistaken for all merges.
-3. **Merge from Oxide where possible.** Otherwise open the Project's Board before reading the
-   ledger, so the external merge is recorded.
-4. **Tally leaving Oxide per eligible pull request.** Before the merge decision, did the maintainer
+4. **Merge from Oxide where possible.** Otherwise open the Project's Board before reading the
+   ledger, so the external or auto merge is recorded.
+5. **Tally leaving Oxide per eligible pull request.** Before the merge decision, did the maintainer
    leave the Oxide window to get information the Dossier should have covered? Count GitHub in a
    browser, CI logs, an external terminal running checks, or another editor. Do not count unrelated
    absences (chat, mail). Record the number of visits and the reason. Use the
    [tally template](review-ledger-tally.md).
-5. **Read the ledger at the end.** Record the median wait, the number of merges, the review-round
-   groups with their sample sizes, and any reverts or follow-up candidates. Also record how many
-   eligible merges are missing from the ledger and why.
-6. **Keep the raw numbers with the notes.** The ledger is local; once cleared it is gone. Clearing
+6. **Read the ledger at the end.** Record the end `count`; the in-window recorded merges are the
+   difference from the start snapshot. Compute the window's median from the tally rows (or from
+   ledger entries whose merge date falls in the window), not from the overview's all-history
+   median. Record the review-round groups with their sample sizes, and any reverts or follow-up
+   candidates. Record how many eligible merges are missing from the ledger and why.
+7. **Keep the raw numbers with the notes.** The ledger is local; once cleared it is gone. Clearing
    is the user's choice, not a step in this protocol.
 
-Guidance, not an acceptance threshold: a median over fewer than about ten merges is weak evidence.
-If the window yields fewer, extend it or say so in the decision.
+Guidance, not an acceptance threshold: a median over fewer than about ten in-window merges is weak
+evidence. If the window yields fewer, extend it or say so in the decision.
 
 ## Part B - 5-8 senior engineer sessions
 
 ### Participants
 
-- 5-8 senior engineers who own merges and already use coding agents. A mix of Oxide users and
-  people who have never used Oxide is more informative than Oxide enthusiasts only.
+- 5-8 senior engineers who own merges. Experience with coding agents is common but not required;
+  requiring it would narrow the sample beyond what [#336] asks. A mix of Oxide users and people who
+  have never used Oxide is more informative than Oxide enthusiasts only.
 - Each session uses a real pull request the participant would actually review. Prefer one from
   their own work; where they do not use Oxide yet, use a real maintainer pull request in their
   area. Either way its branch must have an Oxide Thread. Do not use a fixture, a toy repository or
@@ -193,19 +202,29 @@ are:
 
 Everything else is context for the decision, not a score.
 
+Count a session toward the 5-8 only when the participant reached a merge decision themselves,
+without the observer pointing at the Dossier. A session cut short by a bug, or one where the
+observer had to point at the section before the participant noticed it, is still recorded and
+reported, but it is not counted; replace it with another session instead of stretching the sample.
+A participant who notices the section and asks what it is still counts, and you record that the
+explanation was prompted.
+
 ## Part C - analysis and decision
 
 ### Agree the thresholds before the first session
 
 Write the thresholds into the decision comment draft before collecting data. A threshold moved
 after seeing the results is a finding about the process, not a pass. Starting proposal, derived
-from the acceptance criteria in [#336]:
+from the acceptance criteria in [#336]; the maintainers should confirm or replace it in writing
+before the first session. The merge floor is deliberately left to them: state the smallest number
+of in-window merges that will count as a usable median before starting, so it cannot be lowered
+afterwards. The leaving-Oxide tally is a baseline finding, not a pass/fail bar.
 
 | Decision | When |
 | --- | --- |
-| **Continue** | At least two weeks of ledger data with about ten eligible merges; at least 5 of 8 sessions show unprompted engagement; at least 3 of those show a check, skip or decision that changed; no recurring confusion that makes the evidence misleading. |
+| **Continue** | The two-week window is complete, with at least the pre-agreed number of in-window merges for a median; at least 5 of 8 counted sessions show unprompted engagement; at least 3 of those show a check, skip or decision that changed; no recurring confusion that makes the evidence misleading. |
 | **Change** | Some unprompted engagement, but the Continue bar is not met: fewer than 5 of 8 engage unprompted, or fewer than 3 change a check. Also when one recurring blocking confusion explains the result, or only one section is used and the rest is noise. Narrow the feature, fix the confusion, and re-run a smaller session set. |
-| **Stop** | Fewer than half the sessions engage with it unprompted, or at most one session changes a check because of it, or participants still leave Oxide for the same checks the Dossier claims to replace. |
+| **Stop** | Fewer than half the sessions engage with it unprompted, or at most one session changes a check because of it. |
 
 Apply the rows in order: any Stop condition wins, then any Change condition, then Continue. This
 keeps a weak result from being rounded up.
@@ -221,14 +240,16 @@ Post the same comment on [#336] and the parent spec [#320]. Use this shape:
 ```markdown
 ## Dossier validation - decision: continue | change | stop
 
-**Window and build.** Two weeks from YYYY-MM-DD to YYYY-MM-DD on commit `<sha>`. Ledger: <n> eligible
-merges, median wait <duration>, <n> review-round groups. Missing merges: <n>, reason: <...>.
+**Window and build.** Two weeks from YYYY-MM-DD to YYYY-MM-DD on commit `<sha>`. In-window ledger:
+<n> merges (end count <n> minus start count <n>), median wait <duration>. The overview's
+all-history median was <duration>. Review-round groups: <n>. Missing merges: <n>, reason: <...>.
 
 **Leaving Oxide.** <n> of <n> eligible merges involved leaving Oxide before the decision. Reasons:
 <...>.
 
-**Sessions.** <n> senior engineers on <n> real pull requests. Unprompted engagement: <n>. Changed
-what they checked: <n>. Still checked by hand: <list>. Recurring confusion: <list>.
+**Sessions.** <n> counted senior engineers (plus <n> recorded but not counted) on <n> real pull
+requests. Unprompted engagement: <n>. Changed what they checked: <n>. Still checked by hand:
+<list>. Recurring confusion: <list>.
 
 **What the Dossier replaced.** <checks or steps engineers skipped because the Dossier already
 answered them>

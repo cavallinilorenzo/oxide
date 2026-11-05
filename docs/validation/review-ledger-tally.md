@@ -12,6 +12,15 @@ command output.
 - Projects included:
 - Work merged without an Oxide Thread (out of scope, for context only):
 
+## Window start snapshot
+
+The ledger has no date filter: its median and count cover the Project's whole history, and the list
+shows only the 20 most recent entries. Record these before the window starts.
+
+| Project | Ledger count | Median | Newest entry (PR / merged) | Oldest visible entry (PR / merged) |
+| --- | --- | --- | --- | --- |
+|  |  |  |  |  |
+
 ## Eligible merges
 
 `Left Oxide` means the maintainer left the Oxide window before the merge decision for information
@@ -28,9 +37,13 @@ another editor). Do not count unrelated absences.
 Copy the numbers from the Project overview. There is no export.
 
 - Projects read:
-- Merges recorded (`count`):
-- Median wait from a finished Turn to the merge:
-- Eligible merges missing from the ledger, and why:
+- End `count`:
+- Start `count` (from the window start snapshot):
+- In-window recorded merges (end minus start):
+- Median wait computed from the in-window rows in the eligible merges table:
+- The overview's all-history median (do not use it as the window median):
+- Eligible merges missing from the ledger, and why (no Oxide Thread, no completed Turn at or
+  before the merge, not refreshed after an external or auto merge, other):
 - Review-round groups:
 
 | Provider | Model | Languages | Size band | Issue labels | Sample size |

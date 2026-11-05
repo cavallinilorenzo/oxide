@@ -1,4 +1,4 @@
-# Dossier session notes - engineer <n>
+# Dossier session notes - Engineer A
 
 Copy this file per session. Keep one file per participant and pull request. Do not add Transcript
 text, prompts, issue bodies or command output.
@@ -12,17 +12,20 @@ text, prompts, issue bodies or command output.
 - Thread and branch:
 - Provider / Model:
 - Permission mode:
-- Dossier scope used: `Branch` / `Turn` / `PR` (record every change)
+- Dossier scope used: `Branch` / `Turn` (PR scope shows Turn evidence, not branch evidence; record
+  every change)
 - Observer:
 - Started / ended (local time):
+- Session counted toward 5-8: `yes` / `no` (no when cut short, or the observer had to point at the
+  Dossier before the participant noticed it)
 - Decision reached: `merge` / `request changes` / `keep reviewing` / `stop`
 - Time to decision:
 
 ## Build readiness (check before starting)
 
 - [ ] The pull request's branch has an Oxide Thread with completed Turns.
-- [ ] A Verification command is recorded in the Dossier (not only "No Verification command has
-      run").
+- [ ] At least one Verification command has a state other than `Never run`, so the Provider reported
+      a real run. A Project command that was declared but never ran also appears, as `Never run`.
 - [ ] The Project's Verification commands and sensitive paths are set.
 - [ ] The pull request appears in the Branch scope.
 - [ ] The Review ledger is readable for this Project.

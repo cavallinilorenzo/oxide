@@ -273,6 +273,11 @@ pub struct PullRequestDetail {
     pub pull_request: PullRequest,
     pub phase: PullRequestPhase,
     pub body: String,
+    /// The commit the pull request's head points at.
+    pub head_sha: String,
+    /// Whether the Dossier section in `body` describes an earlier commit than `head_sha`. Set by
+    /// Core, which owns the section format.
+    pub dossier_out_of_date: bool,
     pub checks: Vec<PullRequestCheck>,
     pub comments: Vec<PullRequestComment>,
     pub merge_state: MergeState,
@@ -952,6 +957,62 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
     Ok(pr.url)
 }
 
+/// The body of the branch's open pull request, when it has one. A missing or logged-out `gh`,
+/// and a repository with no GitHub remote, mean nobody published a Dossier from here: `None`
+/// rather than a failure the push would have to report on every push.
+pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, String)>> {
+    if gh.require_ready(cwd).is_err() {
+        return Ok(None);
+    }
+    let json = match gh.run(cwd, &["pr", "view", "--json", "number,body,state"]) {
+        Ok(json) => json,
+        Err(GhError::Failed(message))
+            if message.contains("no pull requests found")
+                || message.contains("no git remotes")
+                || message.contains("none of the git remotes") =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let value = parse(&json)?;
+    if value["state"].as_str() != Some("OPEN") {
+        return Ok(None);
+    }
+    Ok(Some((
+        value["number"].as_u64().unwrap_or_default() as u32,
+        text(&value["body"]),
+    )))
+}
+
+/// One pull request's body and the commit its head points at.
+pub fn pull_request_body_and_head(gh: &Gh, cwd: &Path, number: u32) -> Result<(String, String)> {
+    gh.require_ready(cwd)?;
+    let json = gh.run(
+        cwd,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "body,headRefOid",
+        ],
+    )?;
+    let value = parse(&json)?;
+    Ok((text(&value["body"]), text(&value["headRefOid"])))
+}
+
+/// Replaces a pull request's body, leaving its other fields alone.
+pub fn edit_pull_request_body(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run_with_stdin(
+        cwd,
+        &["pr", "edit", &number.to_string(), "--body-file", "-"],
+        body,
+    )?;
+    Ok(())
+}
+
 /// Open pull requests of the repository, optionally only the user's own and
 /// narrowed by a GitHub search query.
 pub fn list_pull_requests(
@@ -1158,7 +1219,7 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     gh.require_ready(cwd)?;
     let n = number.to_string();
     let fields = format!(
-        "{PR_FIELDS},body,comments,reviews,latestReviews,reviewRequests,assignees,labels,\
+        "{PR_FIELDS},body,headRefOid,comments,reviews,latestReviews,reviewRequests,assignees,labels,\
          additions,deletions,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup"
     );
     // Independent round trips to GitHub: run them side by side.
@@ -1192,6 +1253,8 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     Ok(PullRequestDetail {
         phase: phase_from(&v),
         body: text(&v["body"]),
+        head_sha: text(&v["headRefOid"]),
+        dossier_out_of_date: false,
         checks: list("statusCheckRollup")
             .iter()
             .map(|v| {

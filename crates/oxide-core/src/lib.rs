@@ -91,7 +91,7 @@ use thread_actor::ThreadActorHandle;
 pub use worktree::{DeleteOutcome, DispatchRequest};
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use attachments::{
     AttachmentError, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_PROMPT, PromptInput,
@@ -104,7 +104,8 @@ pub use dossier::{
     VerificationDossier, VerificationKind, VerificationState,
 };
 pub use dossier_publish::{
-    DossierSection, DossierSectionOptions, RepositoryVisibility, SECTION_END, SECTION_START,
+    DossierSection, DossierSectionOptions, DossierUpdate, DossierUpdateState, RepositoryVisibility,
+    SECTION_END, SECTION_START,
 };
 pub use error::{Error, Result};
 pub use oxide_provider::{
@@ -154,6 +155,14 @@ pub struct ProjectSummary {
 pub struct Selection {
     pub project_id: u32,
     pub thread_id: Option<u32>,
+}
+
+/// What a push from Oxide did besides moving the branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutcome {
+    /// The published Dossier update; `None` for a push with no Thread to compute one from.
+    pub dossier: Option<DossierUpdate>,
 }
 
 /// How long quitting waits for interrupted Turns to wind down before killing their processes.
@@ -1947,19 +1956,25 @@ impl Core {
 
     /// Pushes the current branch (upstream set on the first push, never
     /// forced). Pushing `main`/`master` needs `allow_protected`.
-    pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<()> {
+    pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<PushOutcome> {
         self.push_in(project_id, None, allow_protected)
     }
 
-    /// [`Core::push`] from a Thread's checkout (`None`: the main one).
+    /// [`Core::push`] from a Thread's checkout (`None`: the main one). After a successful push
+    /// from a Thread, the published Dossier of the branch's pull request is updated; a failure
+    /// there is reported in the outcome and never fails the push.
     pub fn push_in(
         &self,
         project_id: u32,
         thread_id: Option<u32>,
         allow_protected: bool,
-    ) -> Result<()> {
+    ) -> Result<PushOutcome> {
         let cwd = self.git_target(project_id, thread_id)?.root;
-        self.git.mutate(&cwd, || git::push(&cwd, allow_protected))
+        self.git.mutate(&cwd, || git::push(&cwd, allow_protected))?;
+        Ok(PushOutcome {
+            dossier: thread_id
+                .map(|thread_id| self.update_published_dossier(project_id, thread_id)),
+        })
     }
 
     /// Replaces the directories `gh` is looked up in (default: the process PATH
@@ -2167,7 +2182,11 @@ impl Core {
     /// A pull request's description, checks, conversation, allowed merge
     /// methods and changed files.
     pub fn pull_request_detail(&self, project_id: u32, number: u32) -> Result<PullRequestDetail> {
-        github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)
+        let mut detail =
+            github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)?;
+        detail.dossier_out_of_date = dossier_publish::section_state(&detail.body, &detail.head_sha)
+            == dossier_publish::DossierSectionState::OutOfDate;
+        Ok(detail)
     }
 
     /// A pull request's inline review threads, anchored to the lines of its diff.

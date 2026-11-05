@@ -221,6 +221,14 @@ function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPull
         )}
       </div>
       {push.dialog}
+      {push.warning && (
+        <span className="git-note" role="status" title={push.warning}>
+          <span className="git-error-text">{push.warning}</span>
+          <button className="icon-btn sm" aria-label="Dismiss notice" onClick={push.clearWarning}>
+            <XIcon size={12} />
+          </button>
+        </span>
+      )}
       {(error ?? push.error) && (
         <span className="git-error" role="alert" title={error ?? push.error ?? undefined}>
           <span className="git-error-text">{error ?? push.error}</span>

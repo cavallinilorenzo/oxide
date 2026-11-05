@@ -70,6 +70,23 @@ def branch():
     return out.stdout.strip()
 
 
+def head_oid(pr):
+    """The commit GitHub would report for the pull request's head, as the remote has it."""
+    head = pr.get("headRefName")
+    if head:
+        out = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/%s" % head],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    out = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
 if args[:2] == ["auth", "status"]:
     if state.get("auth") == "ok":
         print("Logged in to github.com account fake (keyring)")
@@ -136,7 +153,12 @@ if args[:2] == ["pr", "update-branch"]:
     sys.exit(0)
 
 if args[:2] == ["pr", "edit"]:
+    if state.get("pr_edit_error"):
+        sys.stderr.write(state["pr_edit_error"] + "\n")
+        sys.exit(1)
     pr = by_number(number_arg())
+    if "--body-file" in args or "--body" in args:
+        pr["body"] = read_body()
     csv = lambda name: [v for v in (flag(name) or "").split(",") if v]
     pr["assignees"] = [
         a for a in pr.get("assignees", []) if a["login"] not in csv("--remove-assignee")
@@ -244,6 +266,9 @@ if args[:2] == ["pr", "view"]:
     if pr is None:
         sys.stderr.write('no pull requests found for branch "%s"\n' % branch())
         sys.exit(1)
+    pr = dict(pr)
+    if not pr.get("headRefOid"):
+        pr["headRefOid"] = head_oid(pr)
     print(json.dumps(pr))
     sys.exit(0)
 

@@ -32,8 +32,8 @@ const thread = (id: number, title: string, branch: string | null) => ({
 });
 const threads = [thread(2, "Alpha work", "feat-alpha"), thread(3, "Beta work", "feat-beta"), thread(4, "Chat", null)];
 const pullRequest = { number: 5, title: "Fix the thing", url: "https://github.com/me/repo/pull/5", draft: false, base: "main", head: "remote-topic", author: "alice", createdAt: "2026-01-01T00:00:00Z" };
-const prDetail = {
-  pullRequest, phase: "open", body: "", comments: [], mergeState: "conflicting", reviewDecision: null, reviewers: [], assignees: [],
+const baseDetail = {
+  pullRequest, phase: "open", body: "", headSha: "abc123", dossierOutOfDate: false, comments: [], mergeState: "conflicting", reviewDecision: null, reviewers: [], assignees: [],
   labels: [], additions: 1, deletions: 0, viewer: "me", mergeMethods: ["merge"], defaultMergeMethod: "merge", deleteBranchOnMerge: false,
   checks: [{ name: "web", state: "failure", url: null, required: true }],
   diff: {
@@ -65,12 +65,14 @@ const called = (command: string) => calls.filter((call) => call.command === comm
 let selection: { projectId: number; threadId: number | null };
 let fail: string | null;
 let statusFail: string | null;
+let prDetail: typeof baseDetail;
 
 beforeEach(() => {
   clearQueryCache();
   calls.length = 0;
   fail = null;
   statusFail = null;
+  prDetail = baseDetail;
   selection = { projectId: 1, threadId: 2 };
   host = document.createElement("div");
   document.body.append(host);
@@ -91,6 +93,9 @@ beforeEach(() => {
       case "list_pull_requests": return [pullRequest];
       case "pull_request_detail": return prDetail;
       case "pull_request_review_threads": return reviewThreads;
+      case "refresh_pull_request_dossier":
+        prDetail = { ...prDetail, dossierOutOfDate: false };
+        return { state: "updated", pullRequest: 5, message: null };
       case "checkout_pull_request": if (fail) throw { message: fail }; return null;
       case "issues_state": return { availability: "ready", guidance: null };
       case "list_issues": return [issue];
@@ -229,6 +234,20 @@ it("starts a fix Thread from a failing pull request and selects it", async () =>
   expect(called("create_thread")).toHaveLength(1);
   expect(called("send_prompt")[0]?.threadId).toBe(10);
   expect(host.querySelector('[data-thread="10"]')).not.toBeNull();
+});
+
+it("shows a Dossier published for an earlier commit as out of date and refreshes it in place", async () => {
+  prDetail = {
+    ...baseDetail,
+    dossierOutOfDate: true,
+    pullRequest: { ...pullRequest, head: "feat-alpha" },
+  };
+  await open("Pull request");
+  await click(byText("Fix the thing"));
+  expect(text()).toContain("may not describe this branch's latest commit");
+  await click(byText("Refresh Dossier"));
+  expect(called("refresh_pull_request_dossier")).toEqual([{ projectId: 1, threadId: 2, number: 5 }]);
+  await vi.waitFor(() => expect(text()).not.toContain("may not describe this branch's latest commit"));
 });
 
 it("keeps the remote review readable when the Thread's checkout cannot be read", async () => {

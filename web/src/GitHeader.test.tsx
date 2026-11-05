@@ -73,7 +73,7 @@ it("ignores a late status of a deselected Thread and drops its open menu", async
 
 it("discards an unsubmitted push dialog when another Thread is selected", async () => {
   vi.spyOn(commands, "gitStatus").mockResolvedValue({ status: "ok", data: { ...baseStatus, ahead: 1, protected: true } });
-  const push = vi.spyOn(commands, "push").mockResolvedValue({ status: "ok", data: null });
+  const push = vi.spyOn(commands, "push").mockResolvedValue({ status: "ok", data: { dossier: null } });
   const { host, root, view, cleanup } = setup();
   await act(async () => root.render(view(7)));
   await act(async () => host.querySelector<HTMLButtonElement>(".git-primary")!.click());
@@ -81,6 +81,23 @@ it("discards an unsubmitted push dialog when another Thread is selected", async 
   await act(async () => root.render(view(8)));
   expect(document.querySelector("[aria-label='Push to main']")).toBeNull();
   expect(push).not.toHaveBeenCalled();
+  await cleanup();
+});
+
+it("reports a failed Dossier update after a successful push, and lets the user dismiss it", async () => {
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({ status: "ok", data: { ...baseStatus, ahead: 1 } });
+  vi.spyOn(commands, "push").mockResolvedValue({
+    status: "ok",
+    data: { dossier: { state: "failed", pullRequest: 5, message: "HTTP 502" } },
+  });
+  const { host, root, view, cleanup } = setup();
+  await act(async () => root.render(view(7)));
+  await act(async () => host.querySelector<HTMLButtonElement>(".git-primary")!.click());
+  const note = host.querySelector(".git-note");
+  expect(note?.textContent).toContain("Pushed, but the Dossier was not updated: HTTP 502");
+  expect(host.querySelector("[role='alert']")).toBeNull();
+  await act(async () => note!.querySelector<HTMLButtonElement>("button")!.click());
+  expect(host.querySelector(".git-note")).toBeNull();
   await cleanup();
 });
 

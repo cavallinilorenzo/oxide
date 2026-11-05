@@ -12,12 +12,18 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dossier::{VerificationDossier, VerificationState};
-use crate::{CommandOutcome, Core, PermissionMode, Result, github};
+use crate::{CommandOutcome, Core, Error, PermissionMode, Result, git, github};
 
 /// Opens the Dossier section in a pull request body.
 pub const SECTION_START: &str = "<!-- oxide:dossier:start -->";
 /// Closes the Dossier section in a pull request body.
 pub const SECTION_END: &str = "<!-- oxide:dossier:end -->";
+
+/// Records the branch commit a published section describes, so an update can tell whether the
+/// section still matches the pull request's head.
+const COMMIT_PREFIX: &str = "<!-- oxide:dossier:commit:";
+/// Records the options the author published with, so an update regenerates the same section.
+const OPTIONS_PREFIX: &str = "<!-- oxide:dossier:options:";
 
 const REDACTED: &str = "[REDACTED]";
 
@@ -58,6 +64,86 @@ pub struct DossierSection {
     pub visibility: RepositoryVisibility,
 }
 
+/// Where the Dossier section in a pull request body stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DossierSectionState {
+    /// The body has no section: never published here, or removed by hand.
+    Missing,
+    /// The section describes the pull request's head commit.
+    UpToDate,
+    /// The branch moved after the section was published.
+    OutOfDate,
+}
+
+/// What a push from Oxide, or the user's refresh, did to a pull request's Dossier section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierUpdate {
+    pub state: DossierUpdateState,
+    /// The pull request the update was about, when one was found.
+    pub pull_request: Option<u32>,
+    /// Why an update failed, when it did. The push itself still succeeded.
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DossierUpdateState {
+    /// The section now describes the pushed branch.
+    Updated,
+    /// The section already described the pushed branch.
+    UpToDate,
+    /// The branch has no open pull request.
+    NoPullRequest,
+    /// The pull request body has no section; a removed one is not re-added.
+    NoSection,
+    /// The update failed; the push itself did not.
+    Failed,
+}
+
+impl DossierUpdate {
+    fn updated(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::Updated,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn up_to_date(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::UpToDate,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn no_pull_request() -> Self {
+        Self {
+            state: DossierUpdateState::NoPullRequest,
+            pull_request: None,
+            message: None,
+        }
+    }
+
+    fn no_section(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::NoSection,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn failed(pull_request: Option<u32>, message: impl Into<String>) -> Self {
+        Self {
+            state: DossierUpdateState::Failed,
+            pull_request,
+            message: Some(message.into()),
+        }
+    }
+}
+
 impl Core {
     /// The Dossier section for the pull request about to be opened from a Thread's branch,
     /// computed now and not stored.
@@ -72,9 +158,121 @@ impl Core {
         let visibility =
             github::repository_visibility(&self.gh, &cwd).unwrap_or(RepositoryVisibility::Unknown);
         Ok(DossierSection {
-            markdown: render_section(&dossier, options),
+            markdown: render_section(&dossier, options, git::head(&cwd).as_deref()),
             visibility,
         })
+    }
+
+    /// Updates the Dossier section of the branch's open pull request after a push from Oxide.
+    /// Nothing here fails the push: a failure is returned for the app to report.
+    pub(crate) fn update_published_dossier(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+    ) -> DossierUpdate {
+        let cwd = match self.git_target(project_id, Some(thread_id)) {
+            Ok(target) => target.root,
+            Err(error) => return DossierUpdate::failed(None, error.to_string()),
+        };
+        let found = github::current_pull_request_body(&self.gh, &cwd);
+        let (number, body) = match found {
+            Ok(Some(found)) => found,
+            Ok(None) => return DossierUpdate::no_pull_request(),
+            Err(error) => return DossierUpdate::failed(None, error.to_string()),
+        };
+        match self.republish_section(project_id, thread_id, number, &body) {
+            Ok(update) => update,
+            Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
+        }
+    }
+
+    /// Recomputes and republishes a pull request's Dossier section because the user asked.
+    /// Refuses a pull request whose section was removed rather than re-adding it.
+    pub fn refresh_published_dossier(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+    ) -> Result<DossierUpdate> {
+        let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        let (body, head) = github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        // Publish evidence for the pull request's head, never for a checkout that is ahead or
+        // behind it: a Dossier that describes another commit is worse than none.
+        if !head.is_empty() && git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "This checkout is not at the pull request's head; check the branch out and pull it \
+                 before refreshing the Dossier."
+                    .into(),
+            ));
+        }
+        let update = self.republish_section(project_id, thread_id, number, &body)?;
+        if update.state == DossierUpdateState::NoSection {
+            return Err(Error::Github(
+                "This pull request has no Dossier section; a removed section is not re-added."
+                    .into(),
+            ));
+        }
+        Ok(update)
+    }
+
+    /// The one update path: replace the marked range of `body` with a section computed now.
+    fn republish_section(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+        body: &str,
+    ) -> Result<DossierUpdate> {
+        match markers(body) {
+            Markers::None => return Ok(DossierUpdate::no_section(number)),
+            // A half-deleted pair leaves text that reads as a Dossier but is not one. Say so
+            // instead of silently leaving it, and never re-add what the author removed.
+            Markers::Incomplete => {
+                return Err(Error::Github(
+                    "The Dossier markers are incomplete; remove the leftover marker or publish \
+                     the section again."
+                        .into(),
+                ));
+            }
+            Markers::Complete => {}
+        }
+        if has_extra_section(body) {
+            return Err(Error::Github(
+                "The description has more than one Dossier section; remove the extra one before \
+                 Oxide can update it."
+                    .into(),
+            ));
+        }
+        let current = section(body).expect("a complete pair of markers has a section");
+        let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        // Read the head once, so the section and the commit it records describe the same tree.
+        let head = git::head(&cwd);
+        let section = render_section(
+            &self.branch_dossier(thread_id)?,
+            &section_options(body),
+            head.as_deref(),
+        );
+        if section == current {
+            return Ok(DossierUpdate::up_to_date(number));
+        }
+        if section.chars().count() > MAX_BODY_CHARS {
+            return Err(Error::Github(format!(
+                "The Dossier is longer than GitHub's {} characters.",
+                MAX_BODY_CHARS
+            )));
+        }
+        // Read, replace and write are not atomic with GitHub: a body edited in the browser
+        // between the read and `gh pr edit` keeps the edit only until the next update.
+        let updated = replace_section(body, &section)
+            .ok_or_else(|| Error::Github("The Dossier markers are incomplete.".into()))?;
+        if updated.chars().count() > MAX_BODY_CHARS {
+            return Err(Error::Github(format!(
+                "The description would be longer than GitHub's {} characters.",
+                MAX_BODY_CHARS
+            )));
+        }
+        github::edit_pull_request_body(&self.gh, &cwd, number, &updated)?;
+        Ok(DossierUpdate::updated(number))
     }
 }
 
@@ -112,12 +310,109 @@ fn delimit(text: &str) -> Option<String> {
     (!inner.is_empty()).then(|| format!("{SECTION_START}\n{inner}\n{SECTION_END}"))
 }
 
-/// The delimited Markdown of a Dossier.
+/// How the Dossier markers in a body stand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Markers {
+    /// No start marker. A lone end marker is an invisible HTML comment and harmless.
+    None,
+    /// A start marker with no end marker after it.
+    Incomplete,
+    Complete,
+}
+
+fn markers(body: &str) -> Markers {
+    let Some(start) = body.find(SECTION_START) else {
+        return Markers::None;
+    };
+    if body[start..].find(SECTION_END).is_some() {
+        Markers::Complete
+    } else {
+        Markers::Incomplete
+    }
+}
+
+/// The delimited section of `body`, markers included. `None` unless both markers are present in
+/// order.
+pub(crate) fn section(body: &str) -> Option<&str> {
+    if markers(body) != Markers::Complete {
+        return None;
+    }
+    let start = body.find(SECTION_START)?;
+    let end = body[start..].find(SECTION_END)? + start + SECTION_END.len();
+    Some(&body[start..end])
+}
+
+/// Whether `body` carries a second complete section after the first, such as a pasted copy.
+fn has_extra_section(body: &str) -> bool {
+    let Some(first) = section(body) else {
+        return false;
+    };
+    let start = body.find(first).unwrap_or_default();
+    section(&body[start + first.len()..]).is_some()
+}
+
+/// `body` with the marked range replaced by `section`, leaving every byte outside it alone.
+/// `None` when the body has no complete section.
+pub(crate) fn replace_section(body: &str, section: &str) -> Option<String> {
+    let start = body.find(SECTION_START)?;
+    let end = body[start..].find(SECTION_END)? + start + SECTION_END.len();
+    Some(format!("{}{section}{}", &body[..start], &body[end..]))
+}
+
+/// Where the Dossier section in `body` stands relative to the branch's `head` commit.
+pub(crate) fn section_state(body: &str, head: &str) -> DossierSectionState {
+    match markers(body) {
+        Markers::None => DossierSectionState::Missing,
+        // An incomplete pair or a pasted second section cannot be trusted to describe anything.
+        Markers::Incomplete => DossierSectionState::OutOfDate,
+        Markers::Complete if has_extra_section(body) => DossierSectionState::OutOfDate,
+        Markers::Complete => match section(body).and_then(|s| metadata(s, COMMIT_PREFIX)) {
+            Some(commit) if commit == head => DossierSectionState::UpToDate,
+            _ => DossierSectionState::OutOfDate,
+        },
+    }
+}
+
+/// The options the published section was rendered with; everything off when it recorded none.
+/// A section published before the options were recorded falls back to the safe default.
+fn section_options(body: &str) -> DossierSectionOptions {
+    let mut options = DossierSectionOptions::default();
+    let Some(recorded) = section(body).and_then(|s| metadata(s, OPTIONS_PREFIX)) else {
+        return options;
+    };
+    for pair in recorded.split(',') {
+        match pair.split_once('=') {
+            Some(("prompts", "true")) => options.include_prompts = true,
+            Some(("message", "true")) => options.include_agent_message = true,
+            _ => {}
+        }
+    }
+    options
+}
+
+/// The text after an HTML-comment `prefix` inside `body`, up to the closing ` -->`.
+fn metadata<'a>(body: &'a str, prefix: &str) -> Option<&'a str> {
+    let start = body.find(prefix)? + prefix.len();
+    let end = body[start..].find(" -->")? + start;
+    Some(&body[start..end])
+}
+
+/// The delimited Markdown of a Dossier. It records the commit and the options it was rendered
+/// for, so a later update regenerates the same section and can tell whether it is still current.
 pub(crate) fn render_section(
     dossier: &VerificationDossier,
     options: &DossierSectionOptions,
+    commit: Option<&str>,
 ) -> String {
-    let mut out = String::from("## Verification Dossier\n\n");
+    let mut out = String::new();
+    if let Some(commit) = commit.filter(|commit| !commit.is_empty()) {
+        out.push_str(&format!("{COMMIT_PREFIX}{commit} -->\n"));
+    }
+    out.push_str(&format!(
+        "{OPTIONS_PREFIX}prompts={},message={} -->\n",
+        options.include_prompts, options.include_agent_message
+    ));
+    out.push_str("## Verification Dossier\n\n");
     out.push_str(
         "_Computed by Oxide from the Thread's Transcript, Checkpoints and GitHub, without an LLM._\n",
     );
@@ -650,6 +945,67 @@ mod tests {
         assert_eq!(
             with_section("", "x"),
             format!("{SECTION_START}\nx\n{SECTION_END}")
+        );
+    }
+
+    #[test]
+    fn an_update_replaces_the_section_and_leaves_every_other_byte_alone() {
+        let body = format!("  before  \n\n{SECTION_START}\nold\n{SECTION_END}\n\nafter\n\n");
+        let new = format!("{SECTION_START}\nnew\n{SECTION_END}");
+        assert_eq!(
+            replace_section(&body, &new).unwrap(),
+            format!("  before  \n\n{new}\n\nafter\n\n")
+        );
+        assert_eq!(replace_section("no markers here", &new), None);
+    }
+
+    #[test]
+    fn incomplete_or_duplicated_markers_are_never_trusted_or_silently_rewritten() {
+        let head = "abc123";
+        let open = format!("Body\n\n{SECTION_START}\nold");
+        assert_eq!(section(&open), None);
+        assert_eq!(section_state(&open, head), DossierSectionState::OutOfDate);
+
+        let twice = format!(
+            "{SECTION_START}\n{COMMIT_PREFIX}{head} -->\nfirst\n{SECTION_END}\n\n\
+             {SECTION_START}\n{COMMIT_PREFIX}other -->\nsecond\n{SECTION_END}"
+        );
+        assert_eq!(
+            section_state(&twice, head),
+            DossierSectionState::OutOfDate,
+            "a second section must not be reported as up to date"
+        );
+
+        // Metadata outside the section cannot claim the section's commit.
+        let forged = format!("{COMMIT_PREFIX}{head} -->\n\n{SECTION_START}\nold\n{SECTION_END}");
+        assert_eq!(section_state(&forged, head), DossierSectionState::OutOfDate);
+    }
+
+    #[test]
+    fn the_section_records_its_commit_and_the_options_it_was_published_with() {
+        let dossier = VerificationDossier::default();
+        let options = DossierSectionOptions {
+            include_prompts: true,
+            include_agent_message: false,
+        };
+        let section = render_section(&dossier, &options, Some("abc123"));
+
+        assert_eq!(
+            section_state(&section, "abc123"),
+            DossierSectionState::UpToDate
+        );
+        assert_eq!(
+            section_state(&section, "def456"),
+            DossierSectionState::OutOfDate
+        );
+        assert_eq!(
+            section_state("no section", "abc123"),
+            DossierSectionState::Missing
+        );
+        assert_eq!(section_options(&section), options);
+        assert_eq!(
+            section_options("no options recorded"),
+            DossierSectionOptions::default()
         );
     }
 }

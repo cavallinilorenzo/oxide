@@ -15,14 +15,14 @@ pub enum CommentScope {
 }
 
 impl CommentScope {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Turn => "turn",
             Self::Uncommitted => "uncommitted",
             Self::Branch => "branch",
         }
     }
-    fn parse(s: &str) -> Self {
+    pub(crate) fn parse(s: &str) -> Self {
         match s {
             "turn" => Self::Turn,
             "branch" => Self::Branch,
@@ -33,7 +33,7 @@ impl CommentScope {
 
 /// Which side of the Diff the line is on: `Old` for a removed line, `New` for an added or
 /// unchanged one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CommentSide {
     Old,
@@ -41,13 +41,13 @@ pub enum CommentSide {
 }
 
 impl CommentSide {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Old => "old",
             Self::New => "new",
         }
     }
-    fn parse(s: &str) -> Self {
+    pub(crate) fn parse(s: &str) -> Self {
         if s == "old" { Self::Old } else { Self::New }
     }
 }
@@ -78,6 +78,9 @@ pub struct LineComment {
     pub body: String,
     /// The line no longer holds the quoted code.
     pub outdated: bool,
+    /// The reviewing Provider, when this draft is a kept Blind review finding; `None` when the
+    /// user wrote it.
+    pub provider: Option<String>,
 }
 
 /// A new draft Line comment on a pull request's Diff, before any review is submitted.
@@ -169,6 +172,7 @@ impl Core {
             code: new.code,
             body: new.body,
             outdated: false,
+            provider: None,
         })
     }
 
@@ -196,7 +200,7 @@ impl Core {
         let mut comments: Vec<LineComment> = {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             let mut stmt = db.prepare(
-                "SELECT id, scope, path, side, line, code, body FROM line_comments
+                "SELECT id, scope, path, side, line, code, body, provider FROM line_comments
                  WHERE thread_id = ?1 ORDER BY id",
             )?;
             stmt.query_map([thread_id], |r| {
@@ -210,6 +214,7 @@ impl Core {
                     code: r.get(5)?,
                     body: r.get(6)?,
                     outdated: false,
+                    provider: r.get(7)?,
                 })
             })?
             .collect::<std::result::Result<_, _>>()?

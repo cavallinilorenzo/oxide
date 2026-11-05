@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::blind_review::BlindReviewSummary;
 use crate::git_diff::{Diff, DiffFile};
 use crate::github::PullRequestCheck;
 use crate::thread::{ItemSnapshot, TurnSnapshot};
@@ -265,6 +266,8 @@ pub struct VerificationDossier {
     pub pull_request_known: bool,
     /// Approvals and the Permission modes the Turns used.
     pub supervision: Supervision,
+    /// The Blind reviews of this change, who ran each and how many findings were kept.
+    pub blind_reviews: Vec<BlindReviewSummary>,
 }
 
 impl Core {
@@ -383,6 +386,7 @@ impl Core {
             issue,
         );
         dossier.supervision = supervision(&snapshot.turns);
+        dossier.blind_reviews = self.blind_review_summaries(thread_id)?;
         Ok((root, dossier))
     }
 

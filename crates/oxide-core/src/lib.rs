@@ -41,7 +41,10 @@ mod usage_poll;
 mod worktree;
 
 pub use activity::{Notification, NotificationKind, System};
-pub use blind_review::{BlindReviewProviderOption, BlindReviewRequest};
+pub use blind_review::{
+    BlindReviewFinding, BlindReviewProviderOption, BlindReviewRequest, BlindReviewSummary,
+    FindingDecision,
+};
 pub use board::{BoardCard, BoardEvent, PendingApproval};
 pub use continuation::{ContinuedThread, RECAP_MAX_CHARS};
 pub use files::{FileContent, FileEntry};
@@ -772,6 +775,21 @@ impl Core {
             }
             tx.execute(
                 "DELETE FROM line_comments WHERE thread_id = ?1",
+                [thread_id],
+            )?;
+            // A Blind review's findings die with the review or with the change it reviewed.
+            tx.execute(
+                "DELETE FROM blind_review_findings WHERE review_id IN
+                 (SELECT id FROM blind_reviews WHERE thread_id = ?1 OR review_thread_id = ?1)",
+                [thread_id],
+            )?;
+            tx.execute(
+                "DELETE FROM blind_reviews WHERE thread_id = ?1 OR review_thread_id = ?1",
+                [thread_id],
+            )?;
+            // A review Thread whose change was deleted loses the link, not its own history.
+            tx.execute(
+                "UPDATE threads SET blind_review_of = NULL WHERE blind_review_of = ?1",
                 [thread_id],
             )?;
             tx.execute("DELETE FROM restores WHERE thread_id = ?1", [thread_id])?;

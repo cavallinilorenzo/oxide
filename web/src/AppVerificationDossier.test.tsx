@@ -86,6 +86,7 @@ const dossier = {
       { mode: null, turns: 1 },
     ],
   },
+  blindReviews: [{ reviewThreadId: 9, provider: "codex", findings: 4, kept: 3 }],
 };
 const calls: { command: string; args: unknown }[] = [];
 
@@ -164,6 +165,17 @@ it("shows branch coverage, pull request checks and supervision in Branch scope",
   expect(supervision).toContain("Unknown 1");
 });
 
+it("names the Blind reviewer and how many findings were kept", async () => {
+  await openDiff();
+  const section = await vi.waitFor(() => {
+    const section = host.querySelector<HTMLElement>('[aria-label="Blind reviews"]');
+    expect(section).not.toBeNull();
+    return section!;
+  });
+  expect(section.textContent).toContain("codex");
+  expect(section.textContent).toContain("3 of 4 findings kept");
+});
+
 it("shows each risk signal and links its files into the Diff", async () => {
   await openDiff();
   await vi.waitFor(() => expect(host.querySelectorAll('[aria-label^="Risk signal: "]')).toHaveLength(4));
@@ -204,7 +216,7 @@ it("shows what was asked and keeps the agent's claim apart from the computed che
   expect(claim.textContent).toContain("Agent claim");
   expect(claim.textContent).toContain("All 12 tests pass.");
   expect(claim.textContent).toContain("not checked by Oxide");
-  const checks = host.querySelector<HTMLElement>(".dossier-checks")!;
+  const checks = host.querySelector<HTMLElement>('[aria-label="Verification commands"]')!;
   expect(checks.textContent).toContain("pytest");
   expect(checks.textContent).not.toContain("All 12 tests pass.");
 });

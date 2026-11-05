@@ -1018,6 +1018,7 @@ pub struct VerificationDossier {
     pub pull_request: Option<DossierPullRequest>,
     pub pull_request_known: bool,
     pub supervision: Supervision,
+    pub blind_reviews: Vec<BlindReviewSummary>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -1995,6 +1996,8 @@ pub struct LineComment {
     code: String,
     body: String,
     outdated: bool,
+    /// The reviewing Provider for a kept Blind review finding.
+    provider: Option<String>,
 }
 
 #[tauri::command]
@@ -3202,6 +3205,41 @@ pub struct BlindReviewRequest {
     pub issue: Option<String>,
 }
 
+/// What the reviewer decided about one finding.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FindingDecision {
+    Pending,
+    Kept,
+    Dismissed,
+}
+
+/// One finding of a Blind review, anchored to the reviewed Diff or kept as plain text.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BlindReviewFinding {
+    pub id: u32,
+    pub review_thread_id: u32,
+    pub provider: String,
+    pub path: Option<String>,
+    pub side: Option<CommentSide>,
+    pub line: Option<u32>,
+    pub code: String,
+    pub body: String,
+    pub plain: bool,
+    pub decision: FindingDecision,
+}
+
+/// Who reviewed a change and how many findings were kept.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BlindReviewSummary {
+    pub review_thread_id: u32,
+    pub provider: String,
+    pub findings: u32,
+    pub kept: u32,
+}
+
 #[tauri::command]
 #[specta::specta]
 fn blind_review_providers(
@@ -3230,6 +3268,40 @@ async fn start_blind_review(
     git_blocking(&core, move |core| core.start_blind_review(req))
         .await
         .map(|thread| convert(&thread))
+}
+
+/// The Blind review findings of a Thread (or of a review Thread itself), parsed once from the
+/// review's closing message and validated against the reviewed Diff.
+#[tauri::command]
+#[specta::specta]
+async fn list_blind_review_findings(
+    core: State<'_, Arc<Core>>,
+    thread_id: u32,
+) -> Result<Vec<BlindReviewFinding>, AppError> {
+    git_blocking(&core, move |core| {
+        core.list_blind_review_findings(thread_id)
+    })
+    .await
+    .map(|findings| convert(&findings))
+}
+
+/// Keeps one finding: an anchored finding becomes a draft Line comment on the reviewed Thread.
+#[tauri::command]
+#[specta::specta]
+async fn keep_blind_review_finding(
+    core: State<'_, Arc<Core>>,
+    id: u32,
+) -> Result<Option<LineComment>, AppError> {
+    git_blocking(&core, move |core| core.keep_blind_review_finding(id))
+        .await
+        .map(|comment| comment.as_ref().map(convert))
+}
+
+/// Dismisses one finding, so it never reaches the Thread.
+#[tauri::command]
+#[specta::specta]
+async fn dismiss_blind_review_finding(core: State<'_, Arc<Core>>, id: u32) -> Result<(), AppError> {
+    git_blocking(&core, move |core| core.dismiss_blind_review_finding(id)).await
 }
 
 #[tauri::command]
@@ -3975,6 +4047,9 @@ pub fn builder() -> Builder<tauri::Wry> {
         dispatch_thread,
         blind_review_providers,
         start_blind_review,
+        list_blind_review_findings,
+        keep_blind_review_finding,
+        dismiss_blind_review_finding,
         get_project_setup_command,
         set_project_setup_command,
         get_project_verification_commands,

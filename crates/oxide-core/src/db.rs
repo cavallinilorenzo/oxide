@@ -317,6 +317,43 @@ pub const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE threads ADD COLUMN blind_review INTEGER NOT NULL DEFAULT 0;
 ",
+    // Blind review findings (#338): the review Thread, the Thread it reviewed, the reviewing
+    // Provider and the Diff scope it saw; then each finding, anchored to a line of the reviewed
+    // Diff or kept as plain text, with the reviewer's keep or dismiss decision. Kept findings
+    // become Line comment drafts on the reviewed Thread.
+    "
+    ALTER TABLE threads ADD COLUMN blind_review_of INTEGER REFERENCES threads(id);
+
+    CREATE TABLE blind_reviews (
+        id INTEGER PRIMARY KEY,
+        thread_id INTEGER REFERENCES threads(id),
+        review_thread_id INTEGER NOT NULL UNIQUE REFERENCES threads(id),
+        provider TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX blind_reviews_by_thread ON blind_reviews(thread_id, id);
+
+    CREATE TABLE blind_review_findings (
+        id INTEGER PRIMARY KEY,
+        review_id INTEGER NOT NULL REFERENCES blind_reviews(id),
+        path TEXT,
+        side TEXT,
+        line INTEGER,
+        code TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        anchored INTEGER NOT NULL DEFAULT 0,
+        decision TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX blind_review_findings_by_review ON blind_review_findings(review_id, id);
+
+    ALTER TABLE line_comments ADD COLUMN provider TEXT;
+    ALTER TABLE line_comments ADD COLUMN finding_id INTEGER
+        REFERENCES blind_review_findings(id) ON DELETE SET NULL;
+    CREATE UNIQUE INDEX line_comments_by_finding ON line_comments(finding_id)
+        WHERE finding_id IS NOT NULL;
+",
 ];
 
 /// Starts a transaction that will write. `IMMEDIATE` takes the write lock up front:

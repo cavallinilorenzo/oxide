@@ -12,6 +12,8 @@ export interface DraftLineComment {
   body: string;
   /** The line no longer holds the quoted code. */
   outdated?: boolean;
+  /** The reviewing Provider, for a draft kept from a Blind review. */
+  provider?: string | null;
 }
 
 interface Props {
@@ -34,6 +36,7 @@ export function LineCommentList({ comments, edit, remove }: Props) {
               {c.path}:{c.line}
             </span>
             {c.side === "old" && <span className="chip">removed line</span>}
+            {c.provider && <span className="chip">{c.provider} review</span>}
             {c.outdated && (
               <span className="chip warn" title="This line has changed since you commented.">
                 Outdated

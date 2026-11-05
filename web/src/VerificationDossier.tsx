@@ -78,6 +78,7 @@ export function VerificationDossier({
   const issueUrl = issue?.url ?? null;
   const prompts = dossier?.intent.prompts ?? [];
   const claim = dossier?.claim ?? null;
+  const blindReviews = dossier?.blindReviews ?? [];
   return (
     <section className="dossier" aria-label="Verification dossier">
       {query.state === "ready" && (issue || prompts.length > 0) && (
@@ -123,6 +124,30 @@ export function VerificationDossier({
               </ol>
             </details>
           )}
+        </section>
+      )}
+      {query.state === "ready" && blindReviews.length > 0 && (
+        <section className="dossier-blind-reviews" aria-label="Blind reviews">
+          <div className="dossier-head">
+            <span className="dossier-title">Blind review</span>
+            <span className="dossier-count">
+              {blindReviews.length} review{blindReviews.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <ul className="dossier-checks">
+            {blindReviews.map((review) => (
+              <li
+                key={review.reviewThreadId}
+                className="dossier-check"
+                aria-label={`${review.provider}: ${review.kept} of ${review.findings} findings kept`}
+              >
+                <span className="dossier-kind">{review.provider}</span>
+                <span className="dossier-meta">
+                  {review.kept} of {review.findings} finding{review.findings === 1 ? "" : "s"} kept
+                </span>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       <div className="dossier-head">

@@ -9,6 +9,7 @@ import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
 import { splitPath } from "./diffView";
 import { commitPaths } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
+import { BlindReviewFindings } from "./BlindReviewFindings";
 import { LineComments } from "./LineComments";
 import { PullRequestReviewDrafts } from "./PullRequestReviewDrafts";
 import { reviewThreadsPrefix } from "./reviewKeys";
@@ -591,6 +592,9 @@ function DiffBody({ projectId, threadId, threadProvider, threadIssue, onThreadCr
           )}
           {revertError && <div className="error" role="alert">{revertError}</div>}
         </div>
+      )}
+      {threadId !== null && (
+        <BlindReviewFindings projectId={projectId} threadId={threadId} refreshKey={`${refreshKey}#${focusTick}`} />
       )}
       {threadId !== null && <LineComments projectId={projectId} threadId={threadId} working={threadWorking} refreshKey={`${refreshKey}#${focusTick}`} />}
       {scope === "pr" && reviewedPr !== null && (

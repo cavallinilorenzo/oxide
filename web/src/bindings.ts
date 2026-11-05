@@ -53,6 +53,15 @@ export const commands = {
 	dispatchThread: (request: DispatchRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("dispatch_thread", { request })),
 	blindReviewProviders: (currentProvider: string | null) => typedError<BlindReviewProviderOption[], AppError>(__TAURI_INVOKE("blind_review_providers", { currentProvider })),
 	startBlindReview: (request: BlindReviewRequest_Deserialize) => typedError<Thread_Serialize, AppError>(__TAURI_INVOKE("start_blind_review", { request })),
+	/**
+	 *  The Blind review findings of a Thread (or of a review Thread itself), parsed once from the
+	 *  review's closing message and validated against the reviewed Diff.
+	 */
+	listBlindReviewFindings: (threadId: number) => typedError<BlindReviewFinding_Serialize[], AppError>(__TAURI_INVOKE("list_blind_review_findings", { threadId })),
+	/**  Keeps one finding: an anchored finding becomes a draft Line comment on the reviewed Thread. */
+	keepBlindReviewFinding: (id: number) => typedError<LineComment_Serialize | null, AppError>(__TAURI_INVOKE("keep_blind_review_finding", { id })),
+	/**  Dismisses one finding, so it never reaches the Thread. */
+	dismissBlindReviewFinding: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("dismiss_blind_review_finding", { id })),
 	getProjectSetupCommand: (projectId: number) => typedError<string | null, AppError>(__TAURI_INVOKE("get_project_setup_command", { projectId })),
 	setProjectSetupCommand: (projectId: number, command: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_project_setup_command", { projectId, command })),
 	/**  The Project's own Verification commands, besides the built-in patterns. */
@@ -180,11 +189,11 @@ export const commands = {
 	pendingRestore: (threadId: number) => typedError<PendingRestore | null, AppError>(__TAURI_INVOKE("pending_restore", { threadId })),
 	/**  Takes a file, or one hunk of it, out of the Uncommitted or Turn diff of a Thread's checkout. */
 	revertDiff: (projectId: number, threadId: number | null, scope: RevertScope, path: string, hunk: RevertHunk | null, confirmDelete: boolean) => typedError<null, AppError>(__TAURI_INVOKE("revert_diff", { projectId, threadId, scope, path, hunk, confirmDelete })),
-	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
+	addLineComment: (threadId: number, comment: NewLineComment) => typedError<LineComment_Serialize, AppError>(__TAURI_INVOKE("add_line_comment", { threadId, comment })),
 	editLineComment: (id: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_line_comment", { id, body })),
 	deleteLineComment: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("delete_line_comment", { id })),
 	/**  A Thread's draft comments, each flagged when its line has changed. */
-	listLineComments: (threadId: number) => typedError<LineComment[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
+	listLineComments: (threadId: number) => typedError<LineComment_Serialize[], AppError>(__TAURI_INVOKE("list_line_comments", { threadId })),
 	/**  Sends every draft to the Thread as one prompt. */
 	sendLineComments: (threadId: number) => typedError<null, AppError>(__TAURI_INVOKE("send_line_comments", { threadId })),
 	/**  Sends a request that addresses selected reviewer comments, counting it as a review round. */
@@ -396,6 +405,37 @@ export type BackendProbe_Serialize = {
 
 export type BenchmarkPhase = { phase: "loading" } | { phase: "warmup" } | { phase: "measuring"; run: number };
 
+/**  One finding of a Blind review, anchored to the reviewed Diff or kept as plain text. */
+export type BlindReviewFinding = BlindReviewFinding_Serialize | BlindReviewFinding_Deserialize;
+
+/**  One finding of a Blind review, anchored to the reviewed Diff or kept as plain text. */
+export type BlindReviewFinding_Deserialize = {
+	id: number,
+	reviewThreadId: number,
+	provider: string,
+	path?: string | null,
+	side?: CommentSide | null,
+	line?: number | null,
+	code: string,
+	body: string,
+	plain: boolean,
+	decision: FindingDecision,
+};
+
+/**  One finding of a Blind review, anchored to the reviewed Diff or kept as plain text. */
+export type BlindReviewFinding_Serialize = {
+	id: number,
+	reviewThreadId: number,
+	provider: string,
+	path: string | null,
+	side: CommentSide | null,
+	line: number | null,
+	code: string,
+	body: string,
+	plain: boolean,
+	decision: FindingDecision,
+};
+
 export type BlindReviewProviderOption = {
 	provider: string,
 	name: string,
@@ -425,6 +465,14 @@ export type BlindReviewRequest_Serialize = {
 	scope: string,
 	turnIndex: number | null,
 	issue: string | null,
+};
+
+/**  Who reviewed a change and how many findings were kept. */
+export type BlindReviewSummary = {
+	reviewThreadId: number,
+	provider: string,
+	findings: number,
+	kept: number,
 };
 
 /**  A Thread on the Thread Board with the Approvals it is waiting on. */
@@ -928,6 +976,9 @@ export type FileEntry = {
 	isDir: boolean,
 };
 
+/**  What the reviewer decided about one finding. */
+export type FindingDecision = "pending" | "kept" | "dismissed";
+
 /**  Status of a follow-up fix candidate in the Review ledger. */
 export type FollowUpStatus = "candidate" | "confirmed" | "dismissed";
 
@@ -1131,7 +1182,9 @@ export type LanguageTool_Serialize = {
 	documentation: string,
 };
 
-export type LineComment = {
+export type LineComment = LineComment_Serialize | LineComment_Deserialize;
+
+export type LineComment_Deserialize = {
 	id: number,
 	threadId: number,
 	scope: CommentScope,
@@ -1141,6 +1194,22 @@ export type LineComment = {
 	code: string,
 	body: string,
 	outdated: boolean,
+	/**  The reviewing Provider for a kept Blind review finding. */
+	provider?: string | null,
+};
+
+export type LineComment_Serialize = {
+	id: number,
+	threadId: number,
+	scope: CommentScope,
+	path: string,
+	side: CommentSide,
+	line: number,
+	code: string,
+	body: string,
+	outdated: boolean,
+	/**  The reviewing Provider for a kept Blind review finding. */
+	provider: string | null,
 };
 
 export type MemoryPool = MemoryPool_Serialize | MemoryPool_Deserialize;
@@ -2360,6 +2429,7 @@ export type VerificationDossier_Deserialize = {
 	pullRequest?: DossierPullRequest_Deserialize | null,
 	pullRequestKnown: boolean,
 	supervision: Supervision_Deserialize,
+	blindReviews: BlindReviewSummary[],
 };
 
 /**
@@ -2377,6 +2447,7 @@ export type VerificationDossier_Serialize = {
 	pullRequest: DossierPullRequest_Serialize | null,
 	pullRequestKnown: boolean,
 	supervision: Supervision_Serialize,
+	blindReviews: BlindReviewSummary[],
 };
 
 export type VerificationKind = "test" | "lint" | "typeCheck" | "build" | "other";

@@ -14,6 +14,7 @@ mod detection_cache;
 pub mod dictation;
 mod discovery;
 mod dossier;
+mod dossier_publish;
 mod error;
 mod files;
 mod git;
@@ -98,6 +99,9 @@ pub use dossier::{
     AgentClaim, BranchCommit, DossierIntent, DossierIssue, DossierPullRequest, LARGE_DIFF_LINES,
     PermissionModeUse, RiskSignal, RiskSignalKind, Supervision, VerificationCommand,
     VerificationDossier, VerificationKind, VerificationState,
+};
+pub use dossier_publish::{
+    DossierSection, DossierSectionOptions, RepositoryVisibility, SECTION_END, SECTION_START,
 };
 pub use error::{Error, Result};
 pub use oxide_provider::{
@@ -2003,10 +2007,26 @@ impl Core {
     ) -> Result<PullRequest> {
         let cwd = self.git_target(project_id, thread_id)?.root;
         let mut input = input.clone();
+        // A section from an earlier attempt goes first, so a `Closes` inside it cannot stand in
+        // for the one this pull request needs.
+        if input.dossier_section.is_some() {
+            input.body = dossier_publish::without_section(&input.body);
+        }
         if let Some(branch) = git::status(&cwd)?.branch
             && let Some(n) = self.issue_of_branch(project_id, &branch)?
         {
             input.body = worktree::closing_issue(&input.body, n);
+        }
+        // After `Closes`, so the section's text can never stand in for it.
+        if let Some(section) = &input.dossier_section {
+            input.body = dossier_publish::with_section(&input.body, section);
+        }
+        // Before the push: GitHub refuses a longer body only after the branch is already out.
+        if input.body.chars().count() > dossier_publish::MAX_BODY_CHARS {
+            return Err(Error::Github(format!(
+                "The description is longer than GitHub's {} characters; shorten it or the Dossier preview.",
+                dossier_publish::MAX_BODY_CHARS
+            )));
         }
         self.git
             .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))

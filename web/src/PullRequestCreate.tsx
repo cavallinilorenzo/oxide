@@ -6,7 +6,7 @@ import {
   GitPullRequestIcon,
   SyncIcon,
 } from "@primer/octicons-react";
-import { commands, type PullRequest } from "./bindings";
+import { commands, type DossierSection, type PullRequest } from "./bindings";
 import { createPrBlockedReason } from "./gitAction";
 import { describeCreatePrError } from "./createPullRequestError";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -34,6 +34,70 @@ export function PullRequestCreate({
   const [blocked, setBlocked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const [dossierRetry, setDossierRetry] = useState(0);
+  const [publishDossier, setPublishDossier] = useState(true);
+  const [includePrompts, setIncludePrompts] = useState(false);
+  const [includeMessage, setIncludeMessage] = useState(false);
+  const [fetched, setFetched] = useState<{
+    key: string;
+    section: DossierSection | null;
+    error: string | null;
+  } | null>(null);
+  const [dossierText, setDossierText] = useState("");
+  const ready = !loading && !blocked && base !== "";
+  const offersDossier = threadId !== null;
+  // A preview answers one set of options; another set means a new one is on its way.
+  const dossierKey = `${projectId}:${threadId}:${includePrompts}:${includeMessage}:${dossierRetry}`;
+  const current = fetched?.key === dossierKey ? fetched : null;
+  const section = current?.section ?? null;
+  const dossierError = current?.error ?? null;
+  useEffect(() => {
+    if (!offersDossier || !ready || !publishDossier) return;
+    let active = true;
+    void commands
+      .dossierPullRequestSection(
+        projectId,
+        threadId,
+        includePrompts,
+        includeMessage,
+      )
+      .then((result) => {
+        if (!active) return;
+        if (result.status === "error")
+          setFetched({
+            key: dossierKey,
+            section: null,
+            error: result.error.message,
+          });
+        else {
+          setFetched({ key: dossierKey, section: result.data, error: null });
+          setDossierText(result.data.markdown);
+        }
+      })
+      .catch((cause) => {
+        if (active)
+          setFetched({
+            key: dossierKey,
+            section: null,
+            error: cause instanceof Error ? cause.message : String(cause),
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    projectId,
+    threadId,
+    offersDossier,
+    ready,
+    publishDossier,
+    includePrompts,
+    includeMessage,
+    dossierKey,
+  ]);
+  // Publishing needs a previewed section; without one the body goes out as written.
+  const publishing = offersDossier && publishDossier;
+  const previewPending = publishing && section === null && !dossierError;
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -69,19 +133,27 @@ export function PullRequestCreate({
     };
   }, [projectId, threadId, retry]);
   async function submit() {
-    if (busy || loading || blocked || !title.trim() || !base || base === head)
+    if (
+      busy ||
+      loading ||
+      blocked ||
+      !title.trim() ||
+      !base ||
+      base === head ||
+      previewPending
+    )
       return;
     setBusy(true);
     setError(null);
     try {
-      const result = await commands.createPullRequest(
-        projectId,
-        threadId,
-        title.trim(),
+      const result = await commands.createPullRequest(projectId, threadId, {
+        title: title.trim(),
         body,
         base,
         draft,
-      );
+        dossierSection:
+          publishing && section && dossierText.trim() ? dossierText : null,
+      });
       if (result.status === "error") setError(result.error.message);
       else onCreated(result.data);
     } catch (cause) {
@@ -159,6 +231,71 @@ export function PullRequestCreate({
             placeholder="Describe the change and how you tested it."
             rows={9}
           />
+          {offersDossier && (
+            <fieldset className="pr-create-dossier" disabled={busy}>
+              <legend>Verification Dossier</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={publishDossier}
+                  onChange={(e) => setPublishDossier(e.target.checked)}
+                />{" "}
+                Add the Dossier to the description
+              </label>
+              {publishDossier && (
+                <>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includePrompts}
+                      onChange={(e) => setIncludePrompts(e.target.checked)}
+                    />{" "}
+                    Include my prompts
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={includeMessage}
+                      onChange={(e) => setIncludeMessage(e.target.checked)}
+                    />{" "}
+                    Include the agent’s closing message
+                  </label>
+                  {section && (
+                    <>
+                      <p role="status" className="pr-create-visibility">
+                        {visibilityNotice(section.visibility)}
+                      </p>
+                      <MarkdownEditor
+                        label="Dossier preview"
+                        value={dossierText}
+                        onChange={setDossierText}
+                        disabled={busy}
+                        rows={10}
+                      />
+                      <p className="dim">
+                        Editing or toggling an option above rewrites this
+                        preview. Clear it to publish nothing.
+                      </p>
+                    </>
+                  )}
+                  {previewPending && (
+                    <p role="status">Preparing the Dossier…</p>
+                  )}
+                  {dossierError && (
+                    <p role="alert">
+                      The Dossier could not be prepared: {dossierError}{" "}
+                      <button
+                        type="button"
+                        onClick={() => setDossierRetry((n) => n + 1)}
+                      >
+                        Try again
+                      </button>
+                    </p>
+                  )}
+                </>
+              )}
+            </fieldset>
+          )}
           <label className="pr-create-draft">
             <input
               type="checkbox"
@@ -174,7 +311,9 @@ export function PullRequestCreate({
           <button
             className="btn primary"
             type="submit"
-            disabled={busy || !title.trim() || !base || base === head}
+            disabled={
+              busy || !title.trim() || !base || base === head || previewPending
+            }
           >
             {busy ? (
               <SyncIcon size={14} className="spin" />
@@ -213,4 +352,17 @@ export function PullRequestCreate({
       )}
     </form>
   );
+}
+
+function visibilityNotice(visibility: DossierSection["visibility"]): string {
+  switch (visibility) {
+    case "public":
+      return "This repository is public: anyone can read the Dossier once the pull request is open.";
+    case "private":
+      return "This repository is private: only people with access to it can read the Dossier.";
+    case "internal":
+      return "This repository is internal: everyone in your organization can read the Dossier.";
+    default:
+      return "Oxide could not tell who can read this repository. Treat the Dossier as public.";
+  }
 }

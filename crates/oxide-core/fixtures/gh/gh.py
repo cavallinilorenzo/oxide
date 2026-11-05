@@ -16,16 +16,21 @@ import subprocess
 import sys
 import time
 
+# Real gh speaks UTF-8 on every OS, and so does Core. Python would otherwise use the locale code
+# page on Windows (cp1252), turning a UTF-8 body read from stdin into mojibake.
+for stream in (sys.stdin, sys.stdout, sys.stderr):
+    stream.reconfigure(encoding="utf-8")
+
 here = os.path.dirname(os.path.abspath(__file__))
 state_path = os.path.join(here, "state.json")
 args = sys.argv[1:]
 
 calls_dir = os.path.join(here, "calls")
 os.makedirs(calls_dir, exist_ok=True)
-with open(os.path.join(calls_dir, "%020d-%d.json" % (time.time_ns(), os.getpid())), "w") as f:
+with open(os.path.join(calls_dir, "%020d-%d.json" % (time.time_ns(), os.getpid())), "w", encoding="utf-8") as f:
     f.write(json.dumps({"args": args, "cwd": os.getcwd()}))
 
-with open(state_path) as f:
+with open(state_path, encoding="utf-8") as f:
     state = json.load(f)
 
 
@@ -44,7 +49,7 @@ def read_body():
 
 
 def save():
-    with open(state_path, "w") as f:
+    with open(state_path, "w", encoding="utf-8") as f:
         json.dump(state, f)
 
 
@@ -61,7 +66,7 @@ def number_arg():
 
 
 def branch():
-    out = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
+    out = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, encoding="utf-8")
     return out.stdout.strip()
 
 
@@ -213,7 +218,7 @@ if args[:2] == ["pr", "checkout"]:
         ["git", "fetch", "-q", "origin", head],
         ["git", "checkout", "-q", "-B", head, "FETCH_HEAD"],
     ):
-        out = subprocess.run(cmd, capture_output=True, text=True)
+        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         if out.returncode != 0:
             sys.stderr.write(out.stderr)
             sys.exit(1)

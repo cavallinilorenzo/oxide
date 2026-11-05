@@ -1,5 +1,7 @@
 ## Agent skills
 
+Workflow: see `/ask`. Before verifying or reviewing, read `docs/agents/engineering.md`.
+
 ### Issue tracker
 
 Issues live in GitHub Issues for `cavallinilorenzo/oxide` (via the `gh` CLI). See `docs/agents/issue-tracker.md`.

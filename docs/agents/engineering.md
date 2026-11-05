@@ -15,7 +15,7 @@ Read by `/verify`, `/judge`, `/build`, `/ship`, `/ui` and `/release`.
 
 ## Recipe
 
-- setup: `pnpm --dir web install --frozen-lockfile` (Rust needs CMake, a C/C++ compiler and libclang, see `docs/dictation.md`; install `cargo-nextest` with `cargo install --locked cargo-nextest`; the `oxide-core::dispatch` test `deleting_a_board_thread_preserves_unsaved_buffers_and_stops_editor_processes_after_save` fails with "Pyright is not installed" on a machine without Pyright, so install it before trusting a red `rust-test`)
+- setup: `pnpm --dir web install --frozen-lockfile` (Rust needs CMake, a C/C++ compiler and libclang, see `docs/dictation.md`; install `cargo-nextest` with `cargo install --locked cargo-nextest`; two `oxide-core` tests (`deleting_a_board_thread_preserves_unsaved_buffers_and_stops_editor_processes_after_save` and `language_server_transports_unsaved_diagnostics_and_completion`) run a fixture language server with the command `python`, so a modern `python` must be on the PATH, not only `python3` (macOS ships only `python3`: symlink it into a directory on the PATH). Without it `rust-test` fails with "Pyright is not installed", which is misleading)
 - checks:
   - `node tools/check.mjs fast` (rustfmt, ESLint, TypeScript)
   - `node tools/check.mjs` (everything the PR lanes run on this OS: Vitest, web build, Clippy, Rust tests, bindings check, app bundle)

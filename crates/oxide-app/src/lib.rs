@@ -2407,6 +2407,22 @@ async fn pull(
     git_blocking(&core, move |core| core.pull_in(project_id, thread_id)).await
 }
 
+/// Fast-forwards a Thread checkout only if it is still on the pull request's branch.
+#[tauri::command]
+#[specta::specta]
+async fn pull_pull_request_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: u32,
+    expected_branch: String,
+    expected_head: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_thread_branch(project_id, thread_id, &expected_branch, &expected_head)
+    })
+    .await
+}
+
 /// Commits exactly the given files; other staged state is untouched.
 #[tauri::command]
 #[specta::specta]
@@ -2423,7 +2439,8 @@ async fn commit(
     .await
 }
 
-/// Pushes the current branch; never forced.
+/// Pushes the current branch; never forced. A Dossier update that fails is reported in the
+/// outcome rather than failing the push.
 #[tauri::command]
 #[specta::specta]
 async fn push(
@@ -2431,11 +2448,12 @@ async fn push(
     project_id: u32,
     thread_id: Option<u32>,
     allow_protected: bool,
-) -> Result<(), AppError> {
+) -> Result<PushOutcome, AppError> {
     git_blocking(&core, move |core| {
         core.push_in(project_id, thread_id, allow_protected)
     })
     .await
+    .map(|outcome| convert(&outcome))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
@@ -2587,6 +2605,10 @@ pub struct PullRequestDetail {
     pub pull_request: PullRequest,
     pub phase: PullRequestPhase,
     pub body: String,
+    /// The commit the pull request's head points at.
+    pub head_sha: String,
+    /// Whether the Dossier section in `body` describes an earlier commit than `head_sha`.
+    pub dossier_out_of_date: bool,
     pub checks: Vec<PullRequestCheck>,
     pub comments: Vec<PullRequestComment>,
     pub merge_state: MergeState,
@@ -2710,6 +2732,11 @@ pub struct NewPullRequest {
     pub draft: bool,
     /// The previewed Dossier section to publish in the body; `None` leaves the body as written.
     pub dossier_section: Option<String>,
+    /// Explicit local consent, independent of edits to the Dossier preview.
+    pub dossier_include_prompts: bool,
+    pub dossier_include_agent_message: bool,
+    /// The checkout commit the preview was computed from.
+    pub dossier_head_sha: Option<String>,
 }
 
 /// Who can read the repository a pull request is opened in.
@@ -2728,6 +2755,35 @@ pub enum RepositoryVisibility {
 pub struct DossierSection {
     pub markdown: String,
     pub visibility: RepositoryVisibility,
+    pub head_sha: String,
+}
+
+/// What a push from Oxide did besides moving the branch.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutcome {
+    /// The published Dossier update; `None` for a push with no Thread to compute one from.
+    pub dossier: Option<DossierUpdate>,
+}
+
+/// What a push from Oxide, or the user's refresh, did to a pull request's Dossier section.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierUpdate {
+    pub state: DossierUpdateState,
+    pub pull_request: Option<u32>,
+    /// Why an update failed, when it did. The push itself still succeeded.
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DossierUpdateState {
+    Updated,
+    UpToDate,
+    NoPullRequest,
+    NoSection,
+    Failed,
 }
 
 /// Whether `gh` works and the branch's open pull request. Runs `gh` only when
@@ -2818,11 +2874,33 @@ async fn create_pull_request(
                 base: pull_request.base,
                 draft: pull_request.draft,
                 dossier_section: pull_request.dossier_section,
+                dossier_options: Some(oxide_core::DossierSectionOptions {
+                    include_prompts: pull_request.dossier_include_prompts,
+                    include_agent_message: pull_request.dossier_include_agent_message,
+                }),
+                dossier_head_sha: pull_request.dossier_head_sha,
             },
         )
     })
     .await
     .map(|pr| convert(&pr))
+}
+
+/// Recomputes and republishes a pull request's Dossier section, because the branch moved outside
+/// Oxide. A section removed by hand is not re-added.
+#[tauri::command]
+#[specta::specta]
+async fn refresh_pull_request_dossier(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: u32,
+    number: u32,
+) -> Result<DossierUpdate, AppError> {
+    git_blocking(&core, move |core| {
+        core.refresh_published_dossier(project_id, thread_id, number)
+    })
+    .await
+    .map(|update| convert(&update))
 }
 
 /// Availability of GitHub CLI for issues, and guidance if missing/logged out.
@@ -4138,6 +4216,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_branch,
         fetch_project,
         pull,
+        pull_pull_request_branch,
         commit,
         push,
         pull_request_state,
@@ -4148,6 +4227,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         open_pull_request,
         list_pull_requests,
         pull_request_detail,
+        refresh_pull_request_dossier,
         pull_request_review_threads,
         comment_pull_request,
         merge_pull_request,

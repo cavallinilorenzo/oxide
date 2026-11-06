@@ -153,6 +153,9 @@ export function PullRequestCreate({
         draft,
         dossierSection:
           publishing && section && dossierText.trim() ? dossierText : null,
+        dossierIncludePrompts: includePrompts,
+        dossierIncludeAgentMessage: includeMessage,
+        dossierHeadSha: publishing && section ? section.headSha : null,
       });
       if (result.status === "error") setError(result.error.message);
       else onCreated(result.data);
@@ -274,7 +277,10 @@ export function PullRequestCreate({
                       />
                       <p className="dim">
                         Editing or toggling an option above rewrites this
-                        preview. Clear it to publish nothing.
+                        preview. These choices persist for this pull request;
+                        opted-in prompts and closing messages from later Turns
+                        are included in future updates. Clear the preview to
+                        publish nothing.
                       </p>
                     </>
                   )}

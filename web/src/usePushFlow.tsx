@@ -6,6 +6,14 @@ type Outcome = { status: "ok"; data: unknown } | { status: "error"; error: AppEr
 
 type Pending = { before: () => Promise<Outcome> | null };
 
+/** A push that worked can still leave the published Dossier behind; that is a notice, not a
+ *  failure, so the branch stays pushed and the user is told. */
+function dossierWarning(data: unknown): string | null {
+  const dossier = (data as { dossier?: { state: string; message?: string | null } | null } | null)?.dossier;
+  if (dossier?.state !== "failed") return null;
+  return `Pushed, but the Dossier was not updated: ${dossier.message ?? "unknown error"}`;
+}
+
 /** Runs an optional step (a commit) and then pushes, asking first when the
  *  branch is `main`: push there, or branch off and push the new branch.
  *  `threadId` names the checkout every step acts on; `null` is the Project's main checkout. */
@@ -13,6 +21,7 @@ export function usePushFlow(projectId: number, threadId: number | null, onDone: 
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function execute(
     before: Pending["before"],
@@ -20,6 +29,7 @@ export function usePushFlow(projectId: number, threadId: number | null, onDone: 
   ) {
     setBusy(true);
     setError(null);
+    setWarning(null);
     const steps: (() => Promise<Outcome> | null)[] = [];
     if ("branch" in mode) steps.push(() => commands.createBranch(projectId, threadId, mode.branch));
     steps.push(before, () => commands.push(projectId, threadId, "main" in mode && mode.main));
@@ -32,6 +42,8 @@ export function usePushFlow(projectId: number, threadId: number | null, onDone: 
           failed = true;
           break;
         }
+        const note = result ? dossierWarning(result.data) : null;
+        if (note) setWarning(note);
       }
     } catch (cause) {
       failed = true;
@@ -73,7 +85,15 @@ export function usePushFlow(projectId: number, threadId: number | null, onDone: 
     />
   );
 
-  return { start, dialog, busy, error, clearError: () => setError(null) };
+  return {
+    start,
+    dialog,
+    busy,
+    error,
+    warning,
+    clearError: () => setError(null),
+    clearWarning: () => setWarning(null),
+  };
 }
 
 function MainGuard(props: {

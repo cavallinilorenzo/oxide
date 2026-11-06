@@ -91,7 +91,7 @@ use thread_actor::ThreadActorHandle;
 pub use worktree::{DeleteOutcome, DispatchRequest};
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use attachments::{
     AttachmentError, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_PROMPT, PromptInput,
@@ -104,7 +104,8 @@ pub use dossier::{
     VerificationDossier, VerificationKind, VerificationState,
 };
 pub use dossier_publish::{
-    DossierSection, DossierSectionOptions, RepositoryVisibility, SECTION_END, SECTION_START,
+    DossierSection, DossierSectionOptions, DossierUpdate, DossierUpdateState, RepositoryVisibility,
+    SECTION_END, SECTION_START,
 };
 pub use error::{Error, Result};
 pub use oxide_provider::{
@@ -154,6 +155,14 @@ pub struct ProjectSummary {
 pub struct Selection {
     pub project_id: u32,
     pub thread_id: Option<u32>,
+}
+
+/// What a push from Oxide did besides moving the branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutcome {
+    /// The published Dossier update; `None` for a push with no Thread to compute one from.
+    pub dossier: Option<DossierUpdate>,
 }
 
 /// How long quitting waits for interrupted Turns to wind down before killing their processes.
@@ -793,6 +802,10 @@ impl Core {
                 [thread_id],
             )?;
             tx.execute("DELETE FROM restores WHERE thread_id = ?1", [thread_id])?;
+            tx.execute(
+                "DELETE FROM app_state WHERE key GLOB ?1",
+                [format!("dossier_options:{project_id}:{thread_id}:*")],
+            )?;
             tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
             tx.execute(
                 "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",
@@ -1927,6 +1940,65 @@ impl Core {
         self.switch_branch(project_id, thread_id, git::pull)
     }
 
+    /// Fast-forwards a Thread checkout only if it is still on the pull request's branch.
+    pub fn pull_thread_branch(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        expected_branch: &str,
+        expected_head: &str,
+    ) -> Result<()> {
+        self.switch_branch(project_id, Some(thread_id), |cwd| {
+            let actual = git::status(cwd)?.branch;
+            if actual.as_deref() != Some(expected_branch) {
+                return Err(Error::Git(format!(
+                    "This Thread's checkout is on `{}` rather than the pull request branch `{expected_branch}`; check out the pull request branch before pulling.",
+                    actual.as_deref().unwrap_or("detached HEAD")
+                )));
+            }
+            if expected_head.is_empty()
+                || !expected_head.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(Error::Git(
+                    "GitHub did not report a valid pull request head commit.".into(),
+                ));
+            }
+            let remote = git::run(
+                cwd,
+                &["config", "--get", &format!("branch.{expected_branch}.remote")],
+            )?
+            .trim()
+            .to_string();
+            let merge_ref = git::run(
+                cwd,
+                &["config", "--get", &format!("branch.{expected_branch}.merge")],
+            )?
+            .trim()
+            .to_string();
+            let expected_merge_ref = format!("refs/heads/{expected_branch}");
+            if remote == "." || merge_ref != expected_merge_ref {
+                return Err(Error::Git(format!(
+                    "This checkout is not tracking the pull request branch `{expected_branch}`."
+                )));
+            }
+            git::run(cwd, &["fetch", "--no-tags", &remote, &merge_ref])?;
+            let fetched = git::run(cwd, &["rev-parse", "--verify", "FETCH_HEAD^{commit}"])?;
+            if fetched.trim() != expected_head {
+                return Err(Error::Git(
+                    "The configured upstream does not match the pull request's current head; no checkout changes were made."
+                        .into(),
+                ));
+            }
+            git::run(cwd, &["merge", "--ff-only", "--no-edit", expected_head])?;
+            if git::head(cwd).as_deref() != Some(expected_head) {
+                return Err(Error::Git(
+                    "The checkout did not fast-forward to the pull request's current head.".into(),
+                ));
+            }
+            Ok(())
+        })
+    }
+
     /// Commits exactly the given files of the main checkout with `message`,
     /// leaving other staged state alone.
     pub fn commit(&self, project_id: u32, paths: &[String], message: &str) -> Result<()> {
@@ -1947,19 +2019,25 @@ impl Core {
 
     /// Pushes the current branch (upstream set on the first push, never
     /// forced). Pushing `main`/`master` needs `allow_protected`.
-    pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<()> {
+    pub fn push(&self, project_id: u32, allow_protected: bool) -> Result<PushOutcome> {
         self.push_in(project_id, None, allow_protected)
     }
 
-    /// [`Core::push`] from a Thread's checkout (`None`: the main one).
+    /// [`Core::push`] from a Thread's checkout (`None`: the main one). After a successful push
+    /// from a Thread, the published Dossier of the branch's pull request is updated; a failure
+    /// there is reported in the outcome and never fails the push.
     pub fn push_in(
         &self,
         project_id: u32,
         thread_id: Option<u32>,
         allow_protected: bool,
-    ) -> Result<()> {
+    ) -> Result<PushOutcome> {
         let cwd = self.git_target(project_id, thread_id)?.root;
-        self.git.mutate(&cwd, || git::push(&cwd, allow_protected))
+        self.git.mutate(&cwd, || git::push(&cwd, allow_protected))?;
+        Ok(PushOutcome {
+            dossier: thread_id
+                .map(|thread_id| self.update_published_dossier(project_id, thread_id)),
+        })
     }
 
     /// Replaces the directories `gh` is looked up in (default: the process PATH
@@ -2025,6 +2103,32 @@ impl Core {
     ) -> Result<PullRequest> {
         let cwd = self.git_target(project_id, thread_id)?.root;
         let mut input = input.clone();
+        if let Some(section) = input.dossier_section.as_deref() {
+            let expected_head = input.dossier_head_sha.as_deref().ok_or_else(|| {
+                Error::Github(
+                    "A published Dossier section must include the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                )
+            })?;
+            if git::head(&cwd).as_deref() != Some(expected_head) {
+                return Err(Error::Github(
+                    "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
+            if dossier_publish::is_dossier_markdown(section)
+                && dossier_publish::section_commit(section) != Some(expected_head)
+            {
+                return Err(Error::Github(
+                    "The Dossier section does not match the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                ));
+            }
+            if thread_id.is_some() && input.dossier_options.is_none() {
+                return Err(Error::Github(
+                    "A Thread Dossier preview must include its explicit disclosure choices. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
+        }
         // A section from an earlier attempt goes first, so a `Closes` inside it cannot stand in
         // for the one this pull request needs.
         if input.dossier_section.is_some() {
@@ -2046,8 +2150,27 @@ impl Core {
                 dossier_publish::MAX_BODY_CHARS
             )));
         }
-        self.git
-            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))
+        let pull_request = self
+            .git
+            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))?;
+        if let (Some(thread_id), Some(options)) = (thread_id, input.dossier_options.as_ref())
+            && input.dossier_section.is_some()
+        {
+            self.remember_dossier_options(
+                project_id,
+                thread_id,
+                pull_request.number,
+                &pull_request.url,
+                options,
+            )
+                .map_err(|error| {
+                    Error::Github(format!(
+                        "Pull request #{} was created, but Oxide could not save its Dossier disclosure choices; later updates will use the safe defaults. {error}",
+                        pull_request.number
+                    ))
+                })?;
+        }
+        Ok(pull_request)
     }
 
     /// Availability of GitHub CLI for issues, and guidance if missing/logged out.
@@ -2167,7 +2290,11 @@ impl Core {
     /// A pull request's description, checks, conversation, allowed merge
     /// methods and changed files.
     pub fn pull_request_detail(&self, project_id: u32, number: u32) -> Result<PullRequestDetail> {
-        github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)
+        let mut detail =
+            github::pull_request_detail(&self.gh, &self.main_checkout(project_id)?, number)?;
+        detail.dossier_out_of_date = dossier_publish::section_state(&detail.body, &detail.head_sha)
+            == dossier_publish::DossierSectionState::OutOfDate;
+        Ok(detail)
     }
 
     /// A pull request's inline review threads, anchored to the lines of its diff.

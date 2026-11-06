@@ -2,7 +2,7 @@ import { Skeleton } from "./Skeleton";
 import { shortcutLabel } from "./shortcuts";
 import { useEffect, useState } from "react";
 import { useQuery, type QueryResult } from "./queryCache";
-import { CheckCircleIcon, EyeIcon, GitCommitIcon, HistoryIcon, InfoIcon, RepoPushIcon, SyncIcon, UndoIcon } from "@primer/octicons-react";
+import { CheckCircleIcon, EyeIcon, GitCommitIcon, HistoryIcon, InfoIcon, RepoPushIcon, SyncIcon, UndoIcon, XIcon } from "@primer/octicons-react";
 import { commands, type BlindReviewProviderOption, type Diff, type DiffFile, type PendingRestore, type PullRequestReviewThread, type RestoreChange, type RestorePreview, type Thread, type TurnPick } from "./bindings";
 import { matchDiffFile } from "./diffOpen";
 import { showsConcurrencyNote, turnLabel, type PanelScope } from "./diffScope";
@@ -638,6 +638,14 @@ function DiffBody({ projectId, threadId, threadProvider, threadIssue, onThreadCr
               {push.busy ? <SyncIcon size={14} className="spin" /> : <RepoPushIcon size={14} />} Commit &amp; Push
             </button>
           </div>
+          {push.warning && (
+            <div className="git-note" role="status" title={push.warning}>
+              <span>{push.warning}</span>
+              <button type="button" className="icon-btn sm" aria-label="Dismiss notice" onClick={push.clearWarning}>
+                <XIcon size={12} />
+              </button>
+            </div>
+          )}
           {(commitError ?? push.error) && (
             <div className="error" role="alert">
               {commitError ?? push.error}

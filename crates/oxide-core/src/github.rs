@@ -2,6 +2,7 @@
 //! is whatever `gh` resolves from the checkout. Nothing here runs unless the
 //! user asked: there is no polling.
 
+use crate::dossier_publish::DossierSectionOptions;
 use crate::git;
 use crate::git_diff::{Diff, parse_patch};
 use crate::line_comments::{CommentSide, PullRequestLineComment};
@@ -273,6 +274,11 @@ pub struct PullRequestDetail {
     pub pull_request: PullRequest,
     pub phase: PullRequestPhase,
     pub body: String,
+    /// The commit the pull request's head points at.
+    pub head_sha: String,
+    /// Whether the Dossier section in `body` describes an earlier commit than `head_sha`. Set by
+    /// Core, which owns the section format.
+    pub dossier_out_of_date: bool,
     pub checks: Vec<PullRequestCheck>,
     pub comments: Vec<PullRequestComment>,
     pub merge_state: MergeState,
@@ -326,6 +332,10 @@ pub struct PullRequestInput {
     pub draft: bool,
     /// The Dossier section the author chose to publish; `None` leaves the body as written.
     pub dossier_section: Option<String>,
+    /// The author's disclosure choices, separate from the editable section preview.
+    pub dossier_options: Option<DossierSectionOptions>,
+    /// The commit the Dossier preview was computed from, supplied separately from its Markdown.
+    pub dossier_head_sha: Option<String>,
 }
 
 /// One of the user's GitHub repositories, as offered for cloning.
@@ -878,6 +888,23 @@ fn current_branch(cwd: &Path) -> Result<String> {
 /// request. The caller holds the checkout's Git lock.
 pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Result<PullRequest> {
     gh.require_ready(cwd)?;
+    let check_dossier_head = || -> Result<()> {
+        if input.dossier_section.is_some() {
+            let expected = input.dossier_head_sha.as_deref().ok_or_else(|| {
+                Error::Github(
+                    "A published Dossier section must include the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                )
+            })?;
+            if git::head(cwd).as_deref() != Some(expected) {
+                return Err(Error::Github(
+                    "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
+    };
+    check_dossier_head()?;
     let status = git::status(cwd)?;
     let branch = current_branch(cwd)?;
     if status.protected {
@@ -898,6 +925,7 @@ pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Res
     if status.ahead > 0 || status.unpublished {
         git::push(cwd, false)?;
     }
+    check_dossier_head()?;
     let mut args = vec![
         "pr",
         "create",
@@ -950,6 +978,84 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
         )));
     }
     Ok(pr.url)
+}
+
+/// The body of the branch's open pull request, when it has one. A repository with no GitHub remote
+/// has no published Dossier to update; failures to use GitHub are errors so the push can report
+/// that the Dossier could not be updated.
+pub fn current_pull_request_body(
+    gh: &Gh,
+    cwd: &Path,
+) -> Result<Option<(u32, String, String, String)>> {
+    gh.require_ready(cwd)?;
+    let json = match gh.run(
+        cwd,
+        &["pr", "view", "--json", "number,body,state,headRefOid,url"],
+    ) {
+        Ok(json) => json,
+        Err(GhError::Failed(message))
+            if message.contains("no pull requests found")
+                || message.contains("no git remotes")
+                || message.contains("none of the git remotes") =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let value = parse(&json)?;
+    if value["state"].as_str() != Some("OPEN") {
+        return Ok(None);
+    }
+    let url = text(&value["url"]);
+    if !url.starts_with("https://") {
+        return Err(Error::Github(
+            "GitHub did not report a valid pull request URL.".into(),
+        ));
+    }
+    Ok(Some((
+        value["number"].as_u64().unwrap_or_default() as u32,
+        text(&value["body"]),
+        text(&value["headRefOid"]),
+        url,
+    )))
+}
+
+/// One pull request's body and the commit its head points at.
+pub fn pull_request_body_and_head(
+    gh: &Gh,
+    cwd: &Path,
+    number: u32,
+) -> Result<(String, String, String)> {
+    gh.require_ready(cwd)?;
+    let json = gh.run(
+        cwd,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "body,headRefOid,url",
+        ],
+    )?;
+    let value = parse(&json)?;
+    let url = text(&value["url"]);
+    if !url.starts_with("https://") {
+        return Err(Error::Github(
+            "GitHub did not report a valid pull request URL.".into(),
+        ));
+    }
+    Ok((text(&value["body"]), text(&value["headRefOid"]), url))
+}
+
+/// Replaces a pull request's body, leaving its other fields alone.
+pub fn edit_pull_request_body(gh: &Gh, cwd: &Path, number: u32, body: &str) -> Result<()> {
+    gh.require_ready(cwd)?;
+    gh.run_with_stdin(
+        cwd,
+        &["pr", "edit", &number.to_string(), "--body-file", "-"],
+        body,
+    )?;
+    Ok(())
 }
 
 /// Open pull requests of the repository, optionally only the user's own and
@@ -1158,7 +1264,7 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     gh.require_ready(cwd)?;
     let n = number.to_string();
     let fields = format!(
-        "{PR_FIELDS},body,comments,reviews,latestReviews,reviewRequests,assignees,labels,\
+        "{PR_FIELDS},body,headRefOid,comments,reviews,latestReviews,reviewRequests,assignees,labels,\
          additions,deletions,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup"
     );
     // Independent round trips to GitHub: run them side by side.
@@ -1192,6 +1298,8 @@ pub fn pull_request_detail(gh: &Gh, cwd: &Path, number: u32) -> Result<PullReque
     Ok(PullRequestDetail {
         phase: phase_from(&v),
         body: text(&v["body"]),
+        head_sha: text(&v["headRefOid"]),
+        dossier_out_of_date: false,
         checks: list("statusCheckRollup")
             .iter()
             .map(|v| {

@@ -14,6 +14,46 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it("reports a failed Dossier update after a successful push without failing the push", async () => {
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({
+    status: "ok",
+    data: {
+      branch: "topic",
+      upstream: "origin/topic",
+      ahead: 0,
+      behind: 0,
+      added: 0,
+      removed: 0,
+      changedFiles: 0,
+      protected: false,
+      unpublished: false,
+      pickerDisabledReason: null,
+    },
+  });
+  vi.spyOn(commands, "push").mockResolvedValue({
+    status: "ok",
+    data: { dossier: { state: "failed", pullRequest: 5, message: "HTTP 502" } },
+  });
+  const refreshed = vi.fn();
+  function Harness() {
+    const flow = usePushFlow(1, 7, refreshed);
+    return (
+      <>
+        <button onClick={() => void flow.start(() => null)}>Push</button>
+        <p role="status">{flow.warning}</p>
+        <p role="alert">{flow.error}</p>
+      </>
+    );
+  }
+  await act(async () => root.render(<Harness />));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.querySelector('[role="status"]')!.textContent).toContain(
+    "Pushed, but the Dossier was not updated: HTTP 502",
+  );
+  expect(host.querySelector('[role="alert"]')!.textContent).toBe("");
+  expect(refreshed).toHaveBeenCalledOnce();
+});
+
 it("reports a transport rejection after committing and exits the busy state without opening a PR", async () => {
   vi.spyOn(commands, "gitStatus").mockResolvedValue({
     status: "ok",

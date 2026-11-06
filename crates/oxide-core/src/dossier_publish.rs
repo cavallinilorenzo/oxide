@@ -9,15 +9,27 @@
 //! The section is delimited by HTML comment markers; publishing replaces a previous section
 //! instead of stacking a second one.
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::dossier::{VerificationDossier, VerificationState};
-use crate::{CommandOutcome, Core, PermissionMode, Result, github};
+use crate::{CommandOutcome, Core, Error, PermissionMode, Result, git, github};
 
 /// Opens the Dossier section in a pull request body.
 pub const SECTION_START: &str = "<!-- oxide:dossier:start -->";
 /// Closes the Dossier section in a pull request body.
 pub const SECTION_END: &str = "<!-- oxide:dossier:end -->";
+
+/// Records the branch commit a published section describes, so an update can tell whether the
+/// section still matches the pull request's head.
+const COMMIT_PREFIX: &str = "<!-- oxide:dossier:commit:";
+/// Echoes the disclosure choices in the published section; refresh authority is stored locally,
+/// never read back from this collaborator-editable PR body.
+const OPTIONS_PREFIX: &str = "<!-- oxide:dossier:options:";
+
+/// How often, and how far apart, to re-read the pull request head after a push.
+const HEAD_CATCH_UP_ATTEMPTS: u32 = 4;
+const HEAD_CATCH_UP_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
 const REDACTED: &str = "[REDACTED]";
 
@@ -56,9 +68,121 @@ pub struct DossierSection {
     /// The delimited Markdown that would be appended to the pull request body.
     pub markdown: String,
     pub visibility: RepositoryVisibility,
+    /// The checkout commit the preview was computed from.
+    pub head_sha: String,
+}
+
+/// Where the Dossier section in a pull request body stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DossierSectionState {
+    /// The body has no section: never published here, or removed by hand.
+    Missing,
+    /// The section describes the pull request's head commit.
+    UpToDate,
+    /// The branch moved after the section was published.
+    OutOfDate,
+}
+
+/// What a push from Oxide, or the user's refresh, did to a pull request's Dossier section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DossierUpdate {
+    pub state: DossierUpdateState,
+    /// The pull request the update was about, when one was found.
+    pub pull_request: Option<u32>,
+    /// Why an update failed, when it did. The push itself still succeeded.
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DossierUpdateState {
+    /// The section now describes the pushed branch.
+    Updated,
+    /// The section already described the pushed branch.
+    UpToDate,
+    /// The branch has no open pull request.
+    NoPullRequest,
+    /// The pull request body has no section; a removed one is not re-added.
+    NoSection,
+    /// The update failed; the push itself did not.
+    Failed,
+}
+
+struct RepublishTarget<'a> {
+    project_id: u32,
+    thread_id: u32,
+    number: u32,
+    expected_head: &'a str,
+    repository_url: &'a str,
+    explicit_refresh: bool,
+}
+
+impl DossierUpdate {
+    fn updated(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::Updated,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn up_to_date(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::UpToDate,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn no_pull_request() -> Self {
+        Self {
+            state: DossierUpdateState::NoPullRequest,
+            pull_request: None,
+            message: None,
+        }
+    }
+
+    fn no_section(pull_request: u32) -> Self {
+        Self {
+            state: DossierUpdateState::NoSection,
+            pull_request: Some(pull_request),
+            message: None,
+        }
+    }
+
+    fn failed(pull_request: Option<u32>, message: impl Into<String>) -> Self {
+        Self {
+            state: DossierUpdateState::Failed,
+            pull_request,
+            message: Some(message.into()),
+        }
+    }
 }
 
 impl Core {
+    /// Remembers the author's explicit disclosure choices locally. PR-body comments are editable
+    /// by collaborators and must never be treated as authority to publish Thread prompts.
+    pub(crate) fn remember_dossier_options(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+        repository_url: &str,
+        options: &DossierSectionOptions,
+    ) -> Result<()> {
+        let key = dossier_options_key(project_id, thread_id, number, repository_url);
+        let value = encode_options(options);
+        let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
+        db.execute(
+            "INSERT INTO app_state (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// The Dossier section for the pull request about to be opened from a Thread's branch,
     /// computed now and not stored.
     pub fn dossier_pull_request_section(
@@ -67,15 +191,273 @@ impl Core {
         thread_id: u32,
         options: &DossierSectionOptions,
     ) -> Result<DossierSection> {
-        let dossier = self.branch_dossier(thread_id)?;
         let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        let head_sha = git::head(&cwd).ok_or_else(|| {
+            Error::Github("This checkout has no HEAD commit to preview a Dossier for.".into())
+        })?;
+        let dossier = self.branch_dossier(thread_id)?;
         let visibility =
             github::repository_visibility(&self.gh, &cwd).unwrap_or(RepositoryVisibility::Unknown);
+        if git::head(&cwd).as_deref() != Some(head_sha.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier preview was being computed; refresh the preview."
+                    .into(),
+            ));
+        }
         Ok(DossierSection {
-            markdown: render_section(&dossier, options),
+            markdown: render_section(&dossier, options, Some(&head_sha)),
             visibility,
+            head_sha,
         })
     }
+
+    /// Updates the Dossier section of the branch's open pull request after a push from Oxide.
+    /// Nothing here fails the push: a failure is returned for the app to report.
+    pub(crate) fn update_published_dossier(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+    ) -> DossierUpdate {
+        let cwd = match self.git_target(project_id, Some(thread_id)) {
+            Ok(target) => target.root,
+            Err(error) => return DossierUpdate::failed(None, error.to_string()),
+        };
+        // GitHub can report the previous head for a moment after a push, so give it a few
+        // seconds to catch up with the commit just pushed before calling the update failed.
+        let local_head = git::head(&cwd);
+        let mut attempt = 0;
+        let (number, body, head, repository_url) = loop {
+            match github::current_pull_request_body(&self.gh, &cwd) {
+                Ok(Some(found)) => {
+                    attempt += 1;
+                    if found.2.is_empty()
+                        || local_head.as_deref() == Some(found.2.as_str())
+                        || attempt >= HEAD_CATCH_UP_ATTEMPTS
+                    {
+                        break found;
+                    }
+                    std::thread::sleep(HEAD_CATCH_UP_DELAY);
+                }
+                Ok(None) => return DossierUpdate::no_pull_request(),
+                Err(error) => return DossierUpdate::failed(None, error.to_string()),
+            }
+        };
+        if head.is_empty() {
+            return DossierUpdate::failed(
+                Some(number),
+                "GitHub did not report the pull request's head commit; the Dossier was not updated.",
+            );
+        }
+        match self.republish_section(
+            RepublishTarget {
+                project_id,
+                thread_id,
+                number,
+                expected_head: &head,
+                repository_url: &repository_url,
+                explicit_refresh: false,
+            },
+            &body,
+        ) {
+            Ok(update) => update,
+            Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
+        }
+    }
+
+    /// Recomputes and republishes a pull request's Dossier section because the user asked.
+    /// Refuses a pull request whose section was removed rather than re-adding it.
+    pub fn refresh_published_dossier(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+    ) -> Result<DossierUpdate> {
+        let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        let (body, head, repository_url) =
+            github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        if head.is_empty() {
+            return Err(Error::Github(
+                "GitHub did not report the pull request's head commit; the Dossier was not refreshed."
+                    .into(),
+            ));
+        }
+        // Publish evidence for the pull request's head, never for a checkout that is ahead or
+        // behind it: a Dossier that describes another commit is worse than none.
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "This checkout is not at the pull request's head; check the branch out and pull it \
+                 before refreshing the Dossier."
+                    .into(),
+            ));
+        }
+        let update = self.republish_section(
+            RepublishTarget {
+                project_id,
+                thread_id,
+                number,
+                expected_head: &head,
+                repository_url: &repository_url,
+                explicit_refresh: true,
+            },
+            &body,
+        )?;
+        if update.state == DossierUpdateState::NoSection {
+            return Err(Error::Github(
+                "This pull request has no Dossier section; a removed section is not re-added."
+                    .into(),
+            ));
+        }
+        Ok(update)
+    }
+
+    /// The one update path: replace the marked range of `body` with a section computed now.
+    fn republish_section(&self, target: RepublishTarget<'_>, body: &str) -> Result<DossierUpdate> {
+        let RepublishTarget {
+            project_id,
+            thread_id,
+            number,
+            expected_head,
+            repository_url,
+            explicit_refresh,
+        } = target;
+        match markers(body) {
+            Markers::None => return Ok(DossierUpdate::no_section(number)),
+            // A half-deleted pair leaves text that reads as a Dossier but is not one. Say so
+            // instead of silently leaving it, and never re-add what the author removed.
+            Markers::Incomplete => {
+                return Err(Error::Github(
+                    "The Dossier markers are incomplete; remove the leftover marker or publish \
+                     the section again."
+                        .into(),
+                ));
+            }
+            Markers::Complete => {}
+        }
+        if has_extra_section(body) {
+            return Err(Error::Github(
+                "The description has more than one Dossier section; remove the extra one before \
+                 Oxide can update it."
+                    .into(),
+            ));
+        }
+        let current = section(body).expect("a complete pair of markers has a section");
+        let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        // Bind both the evidence and its recorded commit to the GitHub head throughout dossier
+        // computation.
+        let head = git::head(&cwd).ok_or_else(|| {
+            Error::Github("This checkout has no HEAD commit; the Dossier was not updated.".into())
+        })?;
+        if expected_head != head {
+            return Err(Error::Github(
+                "This checkout is not at the pull request's head; check the branch out and pull it \
+                 before refreshing the Dossier."
+                    .into(),
+            ));
+        }
+        let saved_options =
+            self.dossier_section_options(project_id, thread_id, number, repository_url)?;
+        if saved_options.is_none() && !explicit_refresh {
+            return Err(Error::Github(
+                "This device has no saved Dossier opt-in for this pull request. Refresh the section manually once to enable future updates."
+                    .into(),
+            ));
+        }
+        let options = saved_options.unwrap_or_default();
+        let rendered_section =
+            render_section(&self.branch_dossier(thread_id)?, &options, Some(&head));
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier was being computed; refresh it again.".into(),
+            ));
+        }
+        if explicit_refresh && saved_options.is_none() {
+            // The user explicitly refreshed this section. Save the safe defaults locally so
+            // future pushes may update it without trusting editable PR-body metadata.
+            self.remember_dossier_options(project_id, thread_id, number, repository_url, &options)?;
+        }
+        if rendered_section == current {
+            return Ok(DossierUpdate::up_to_date(number));
+        }
+        if rendered_section.chars().count() > MAX_BODY_CHARS {
+            return Err(Error::Github(format!(
+                "The Dossier is longer than GitHub's {} characters.",
+                MAX_BODY_CHARS
+            )));
+        }
+        // Re-read immediately before writing so an edit outside the markers made while the
+        // Dossier was computed is preserved. Refuse to overwrite a concurrently changed section
+        // or a branch that moved on GitHub. GitHub has no conditional body update, so a final race
+        // remains between this read and `gh pr edit`.
+        let (latest_body, latest_head, latest_repository_url) =
+            github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        if latest_repository_url != repository_url {
+            return Err(Error::Github(
+                "The pull request repository changed while the Dossier was being computed; refresh it again."
+                    .into(),
+            ));
+        }
+        if expected_head != latest_head {
+            return Err(Error::Github(
+                "The pull request moved while the Dossier was being computed; refresh it again."
+                    .into(),
+            ));
+        }
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier was being computed; refresh it again.".into(),
+            ));
+        }
+        if section(&latest_body) != Some(current) || has_extra_section(&latest_body) {
+            return Err(Error::Github(
+                "The Dossier section changed while it was being computed; refresh it again.".into(),
+            ));
+        }
+        let updated = replace_section(&latest_body, &rendered_section)
+            .ok_or_else(|| Error::Github("The Dossier markers are incomplete.".into()))?;
+        if updated.chars().count() > MAX_BODY_CHARS {
+            return Err(Error::Github(format!(
+                "The description would be longer than GitHub's {} characters.",
+                MAX_BODY_CHARS
+            )));
+        }
+        github::edit_pull_request_body(&self.gh, &cwd, number, &updated)?;
+        Ok(DossierUpdate::updated(number))
+    }
+
+    fn dossier_section_options(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+        repository_url: &str,
+    ) -> Result<Option<DossierSectionOptions>> {
+        let key = dossier_options_key(project_id, thread_id, number, repository_url);
+        let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
+        let recorded = db
+            .query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [&key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(recorded.as_deref().map(decode_options))
+    }
+}
+
+fn dossier_options_key(
+    project_id: u32,
+    thread_id: u32,
+    number: u32,
+    repository_url: &str,
+) -> String {
+    format!("dossier_options:{project_id}:{thread_id}:{number}:{repository_url}")
+}
+
+fn encode_options(options: &DossierSectionOptions) -> String {
+    format!(
+        "prompts={},message={}",
+        options.include_prompts, options.include_agent_message
+    )
 }
 
 /// `body` with `section` as its one Dossier section: a previous section is replaced, and an
@@ -94,10 +476,10 @@ pub(crate) fn with_section(body: &str, section: &str) -> String {
 
 /// `body` without any text between the Dossier markers, markers included.
 pub(crate) fn without_section(body: &str) -> String {
-    let Some(start) = body.find(SECTION_START) else {
+    let Some(start) = find_marker(body, SECTION_START) else {
         return body.to_string();
     };
-    let Some(end) = body[start..].find(SECTION_END).map(|end| start + end) else {
+    let Some(end) = find_marker(&body[start..], SECTION_END).map(|end| start + end) else {
         return body.to_string();
     };
     let after = &body[end + SECTION_END.len()..];
@@ -112,12 +494,131 @@ fn delimit(text: &str) -> Option<String> {
     (!inner.is_empty()).then(|| format!("{SECTION_START}\n{inner}\n{SECTION_END}"))
 }
 
-/// The delimited Markdown of a Dossier.
+/// How the Dossier markers in a body stand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Markers {
+    /// No start marker. A lone end marker is an invisible HTML comment and harmless.
+    None,
+    /// A start marker with no end marker after it.
+    Incomplete,
+    Complete,
+}
+
+/// The first occurrence of `marker` in `text` that stands alone on its line. A marker quoted in
+/// prose or in a code span is the author's text, not a Dossier boundary.
+fn find_marker(text: &str, marker: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = text[from..].find(marker) {
+        let at = from + found;
+        let after = &text[at + marker.len()..];
+        let starts_line = at == 0 || text[..at].ends_with('\n');
+        let ends_line = after.is_empty() || after.starts_with('\n') || after.starts_with("\r\n");
+        if starts_line && ends_line {
+            return Some(at);
+        }
+        from = at + marker.len();
+    }
+    None
+}
+
+fn markers(body: &str) -> Markers {
+    let Some(start) = find_marker(body, SECTION_START) else {
+        return Markers::None;
+    };
+    if find_marker(&body[start..], SECTION_END).is_some() {
+        Markers::Complete
+    } else {
+        Markers::Incomplete
+    }
+}
+
+/// The delimited section of `body`, markers included. `None` unless both markers are present in
+/// order.
+pub(crate) fn section(body: &str) -> Option<&str> {
+    if markers(body) != Markers::Complete {
+        return None;
+    }
+    let start = find_marker(body, SECTION_START)?;
+    let end = find_marker(&body[start..], SECTION_END)? + start + SECTION_END.len();
+    Some(&body[start..end])
+}
+
+pub(crate) fn section_commit(markdown: &str) -> Option<&str> {
+    section(markdown).and_then(|section| metadata(section, COMMIT_PREFIX))
+}
+
+pub(crate) fn is_dossier_markdown(markdown: &str) -> bool {
+    section(markdown).is_some_and(|section| section.contains("## Verification Dossier"))
+}
+
+/// Whether any Dossier marker remains after the first complete section.
+fn has_extra_section(body: &str) -> bool {
+    let Some(first) = section(body) else {
+        return false;
+    };
+    let start = find_marker(body, SECTION_START).unwrap_or_default();
+    let trailing = &body[start + first.len()..];
+    find_marker(trailing, SECTION_START).is_some() || find_marker(trailing, SECTION_END).is_some()
+}
+
+/// `body` with the marked range replaced by `section`, leaving every byte outside it alone.
+/// `None` when the body has no complete section.
+pub(crate) fn replace_section(body: &str, section: &str) -> Option<String> {
+    let start = find_marker(body, SECTION_START)?;
+    let end = find_marker(&body[start..], SECTION_END)? + start + SECTION_END.len();
+    Some(format!("{}{section}{}", &body[..start], &body[end..]))
+}
+
+/// Where the Dossier section in `body` stands relative to the branch's `head` commit.
+pub(crate) fn section_state(body: &str, head: &str) -> DossierSectionState {
+    match markers(body) {
+        Markers::None => DossierSectionState::Missing,
+        // An incomplete pair or a pasted second section cannot be trusted to describe anything.
+        Markers::Incomplete => DossierSectionState::OutOfDate,
+        Markers::Complete if has_extra_section(body) => DossierSectionState::OutOfDate,
+        Markers::Complete => match section(body).and_then(|s| metadata(s, COMMIT_PREFIX)) {
+            Some(commit) if commit == head => DossierSectionState::UpToDate,
+            _ => DossierSectionState::OutOfDate,
+        },
+    }
+}
+
+/// A saved consent record, or the safe default if it is missing or malformed.
+fn decode_options(recorded: &str) -> DossierSectionOptions {
+    let mut options = DossierSectionOptions::default();
+    for pair in recorded.split(',') {
+        match pair.split_once('=') {
+            Some(("prompts", "true")) => options.include_prompts = true,
+            Some(("message", "true")) => options.include_agent_message = true,
+            _ => {}
+        }
+    }
+    options
+}
+
+/// The text after an HTML-comment `prefix` inside `body`, up to the closing ` -->`.
+fn metadata<'a>(body: &'a str, prefix: &str) -> Option<&'a str> {
+    let start = body.find(prefix)? + prefix.len();
+    let end = body[start..].find(" -->")? + start;
+    Some(&body[start..end])
+}
+
+/// The delimited Markdown of a Dossier. It records the commit and echoes the disclosure choices;
+/// local app state is authoritative for those choices during later updates.
 pub(crate) fn render_section(
     dossier: &VerificationDossier,
     options: &DossierSectionOptions,
+    commit: Option<&str>,
 ) -> String {
-    let mut out = String::from("## Verification Dossier\n\n");
+    let mut out = String::new();
+    if let Some(commit) = commit.filter(|commit| !commit.is_empty()) {
+        out.push_str(&format!("{COMMIT_PREFIX}{commit} -->\n"));
+    }
+    out.push_str(&format!(
+        "{OPTIONS_PREFIX}prompts={},message={} -->\n",
+        options.include_prompts, options.include_agent_message
+    ));
+    out.push_str("## Verification Dossier\n\n");
     out.push_str(
         "_Computed by Oxide from the Thread's Transcript, Checkpoints and GitHub, without an LLM._\n",
     );
@@ -268,6 +769,7 @@ const SECRET_FLAGS: &[&str] = &[
     "secret",
     "user",
     "api-key",
+    "api-token",
     "apikey",
     "auth",
     "authorization",
@@ -278,6 +780,10 @@ const SECRET_FLAGS: &[&str] = &[
     "client-secret",
     "access-token",
     "auth-token",
+    "proxy-user",
+    "bearer-token",
+    "refresh-token",
+    "id-token",
 ];
 
 /// Flags whose value is a request body or form, which can carry a secret anywhere inside.
@@ -313,6 +819,12 @@ pub(crate) fn redact_command(command: &str) -> String {
     let mut out = String::new();
     let mut redact_next = false;
     let mut previous = "";
+    let mut docker_login = false;
+    let mut docker_seen = false;
+    let mut password_cli = false;
+    let mut curl_seen = false;
+    let mut env_seen = false;
+    let mut shell_command = false;
     let mut rest = command;
     while !rest.is_empty() {
         let space_len = rest.len() - rest.trim_start().len();
@@ -324,10 +836,50 @@ pub(crate) fn redact_command(command: &str) -> String {
         let end = word_end(rest);
         let word = &rest[..end];
         rest = &rest[end..];
+        let bare = word.trim_matches(|c| matches!(c, '"' | '\''));
+        let executable = executable_name(bare);
+        if executable == "docker" {
+            docker_seen = true;
+        } else if docker_seen && bare.eq_ignore_ascii_case("login") {
+            docker_login = true;
+        }
+        password_cli |= ["mysql", "mariadb", "mongosh"].contains(&executable.as_str());
+        curl_seen |= executable == "curl";
+        env_seen |= executable == "env";
+        shell_command |= is_shell_program(bare);
+        let separated_password = bare.eq_ignore_ascii_case("-p") && (docker_login || password_cli);
+        let attached_password = bare.to_ascii_lowercase().starts_with("-p")
+            && bare.len() > 2
+            && (docker_login || password_cli);
+        let attached_curl_auth =
+            curl_seen && bare.len() > 2 && (bare.starts_with("-u") || bare.starts_with("-U"));
+        let env_split_option = env_seen
+            && (bare.eq_ignore_ascii_case("-s") || bare.eq_ignore_ascii_case("--split-string"));
+        let attached_env_split =
+            env_seen && bare.len() > 2 && bare.to_ascii_lowercase().starts_with("-s");
+        let shell_code_option = shell_command && is_shell_code_option(bare);
+        if shell_code_option {
+            shell_command = false;
+        }
         let redacted = if redact_next {
             redact_next = false;
             Some(replace_value(word))
-        } else if previous == "-u" && word.contains(':') && !word.contains("//") {
+        } else if separated_password {
+            redact_next = true;
+            None
+        } else if attached_password {
+            Some(format!("-p{REDACTED}"))
+        } else if attached_curl_auth {
+            Some(format!("{}{}", &bare[..2], REDACTED))
+        } else if env_split_option || shell_code_option {
+            redact_next = true;
+            Some(word.to_string())
+        } else if attached_env_split {
+            Some(format!("{}{}", &bare[..2], REDACTED))
+        } else if (previous.eq_ignore_ascii_case("-u") || previous.eq_ignore_ascii_case("-U"))
+            && word.contains(':')
+            && !word.contains("//")
+        {
             // `curl -u user:pass`; `git push -u origin` has no colon and stays.
             Some(replace_value(word))
         } else {
@@ -337,6 +889,27 @@ pub(crate) fn redact_command(command: &str) -> String {
         previous = word;
     }
     out
+}
+
+fn executable_name(word: &str) -> String {
+    word.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(word)
+        .to_ascii_lowercase()
+}
+
+fn is_shell_program(word: &str) -> bool {
+    let name = executable_name(word);
+    ["sh", "bash", "zsh", "dash", "fish", "ksh", "ash"].contains(&name.as_str())
+}
+
+fn is_shell_code_option(word: &str) -> bool {
+    let option = word.to_ascii_lowercase();
+    option == "--command"
+        || (option.starts_with('-')
+            && !option.starts_with("--")
+            && option[1..].chars().all(|ch| ch.is_ascii_alphabetic())
+            && option[1..].contains('c'))
 }
 
 /// Where the shell word at the start of `text` ends: whitespace outside quotes.
@@ -385,6 +958,12 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
         *redact_next = true;
         return None;
     }
+    if (bare.starts_with('{') || bare.starts_with('['))
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(bare)
+        && json_has_secret_key(&value)
+    {
+        return Some(replace_value(word));
+    }
     // `Authorization: Bearer x`, `X-Api-Key: x`, `"password": "x"` inside one quoted word.
     if let Some((name, value)) = bare.split_once(':')
         && !value.starts_with("//")
@@ -411,11 +990,6 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
                         None
                     }
                 };
-            }
-        } else if bare.len() > 2 && bare.starts_with("-p") && !bare.starts_with("-p=") {
-            // `-phunter2`: a short flag with its value glued on, as `mysql` takes a password.
-            if !bare[2..].contains(['/', '.']) && bare[2..].chars().any(|c| c.is_ascii_digit()) {
-                return Some(format!("-p{REDACTED}"));
             }
         }
     }
@@ -462,18 +1036,43 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
     looks_secret(bare).then(|| replace_value(word))
 }
 
+fn json_has_secret_key(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .any(|(name, value)| is_secret_name(name) || json_has_secret_key(value)),
+        serde_json::Value::Array(values) => values.iter().any(json_has_secret_key),
+        _ => false,
+    }
+}
+
 /// Whether a header, query or JSON key names a secret.
 fn is_secret_name(name: &str) -> bool {
-    let name = name
-        .trim_matches(|c: char| matches!(c, '"' | '\'' | '{' | ' '))
-        .to_ascii_lowercase();
-    let words: Vec<&str> = name.split(['-', '_', ' ']).collect();
+    let raw = name.trim_matches(|c: char| matches!(c, '"' | '\'' | '{' | ' '));
+    let chars: Vec<char> = raw.chars().collect();
+    let mut normalized = String::with_capacity(raw.len());
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            let previous = chars[index - 1];
+            let next_is_lower = chars
+                .get(index + 1)
+                .is_some_and(|next| next.is_ascii_lowercase());
+            let boundary = previous.is_ascii_lowercase()
+                || previous.is_ascii_digit()
+                || (previous.is_ascii_uppercase() && next_is_lower);
+            if boundary && !normalized.ends_with(['-', '_', ' ']) {
+                normalized.push('-');
+            }
+        }
+        normalized.push(ch.to_ascii_lowercase());
+    }
+    let words: Vec<&str> = normalized.split(['-', '_', ' ']).collect();
     SECRET_WORDS
         .iter()
-        .any(|secret| name == *secret || words.contains(secret))
-        || name.contains("apikey")
-        || name.contains("api-key")
-        || name.contains("api_key")
+        .any(|secret| normalized == *secret || words.contains(secret))
+        || normalized.contains("apikey")
+        || normalized.contains("api-key")
+        || normalized.contains("api_key")
 }
 
 fn is_env_name(name: &str) -> bool {
@@ -594,19 +1193,68 @@ mod tests {
                 "curl -u [REDACTED] https://x.test",
             ),
             (
+                "curl -U proxy:hunter4 https://x.test",
+                "curl -U [REDACTED] https://x.test",
+            ),
+            (
+                "curl -Uproxy:hunter4 https://x.test",
+                "curl -U[REDACTED] https://x.test",
+            ),
+            (
+                "curl --proxy-user proxy:hunter4 https://x.test",
+                "curl --proxy-user [REDACTED] https://x.test",
+            ),
+            (
+                "curl --proxy-user=proxy:hunter4 https://x.test",
+                "curl --proxy-user=[REDACTED] https://x.test",
+            ),
+            (
+                r#"sh -c 'curl -H "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789" https://x.test'"#,
+                "sh -c '[REDACTED]'",
+            ),
+            (
+                "env -S 'bash -c curl --token abc123 https://x.test'",
+                "env -S '[REDACTED]'",
+            ),
+            (
                 "curl https://x.test/a?access_token=abc&page=2",
                 "curl https://x.test/a?access_token=[REDACTED]&page=2",
             ),
             (
                 r#"curl -d '{"password":"x y"}' u"#,
-                "curl -d '{\"password\": [REDACTED]' u",
+                "curl -d '[REDACTED]' u",
             ),
             (
                 r#"curl --data '{"password":"x y"}' u"#,
                 "curl --data '[REDACTED]' u",
             ),
             ("mysql -phunter2 db", "mysql -p[REDACTED] db"),
+            ("mysql -psecret db", "mysql -p[REDACTED] db"),
+            (
+                "/usr/bin/mysql -psecret db",
+                "/usr/bin/mysql -p[REDACTED] db",
+            ),
+            ("docker login -p s3cr3t", "docker login -p [REDACTED]"),
+            (
+                "/usr/bin/docker login -p s3cr3t",
+                "/usr/bin/docker login -p [REDACTED]",
+            ),
+            ("docker login -p=s3cr3t", "docker login -p[REDACTED]"),
             ("tool --api_key abc", "tool --api_key [REDACTED]"),
+            ("tool --api-token abc123", "tool --api-token [REDACTED]"),
+            (
+                "tool --bearer-token abc123",
+                "tool --bearer-token [REDACTED]",
+            ),
+            (
+                "curl -ualice:hunter2 https://x.test",
+                "curl -u[REDACTED] https://x.test",
+            ),
+            (r#"tool '{"refreshToken":"abc123"}'"#, "tool '[REDACTED]'"),
+            (
+                r#"tool '{"name":"build", "accessToken":"abc123"}'"#,
+                "tool '[REDACTED]'",
+            ),
         ];
         for (input, expected) in cases {
             assert_eq!(redact_command(input), expected, "{input}");
@@ -624,6 +1272,19 @@ mod tests {
         ] {
             assert_eq!(redact_command(command), command);
         }
+    }
+
+    #[test]
+    fn markers_quoted_in_prose_are_not_a_section() {
+        let body = format!("Wraps the Dossier in `{SECTION_START}` and `{SECTION_END}`.");
+        assert_eq!(markers(&body), Markers::None);
+        assert_eq!(section(&body), None);
+        assert_eq!(section_state(&body, "abc"), DossierSectionState::Missing);
+        assert_eq!(replace_section(&body, "x"), None);
+        assert_eq!(without_section(&body), body);
+        let published = with_section(&body, "facts");
+        assert!(published.starts_with(&body), "{published}");
+        assert_eq!(section(&published).map(|s| s.contains("facts")), Some(true));
     }
 
     #[test]
@@ -650,6 +1311,77 @@ mod tests {
         assert_eq!(
             with_section("", "x"),
             format!("{SECTION_START}\nx\n{SECTION_END}")
+        );
+    }
+
+    #[test]
+    fn an_update_replaces_the_section_and_leaves_every_other_byte_alone() {
+        let body = format!("  before  \n\n{SECTION_START}\nold\n{SECTION_END}\n\nafter\n\n");
+        let new = format!("{SECTION_START}\nnew\n{SECTION_END}");
+        assert_eq!(
+            replace_section(&body, &new).unwrap(),
+            format!("  before  \n\n{new}\n\nafter\n\n")
+        );
+        assert_eq!(replace_section("no markers here", &new), None);
+    }
+
+    #[test]
+    fn incomplete_or_duplicated_markers_are_never_trusted_or_silently_rewritten() {
+        let head = "abc123";
+        let open = format!("Body\n\n{SECTION_START}\nold");
+        assert_eq!(section(&open), None);
+        assert_eq!(section_state(&open, head), DossierSectionState::OutOfDate);
+
+        let twice = format!(
+            "{SECTION_START}\n{COMMIT_PREFIX}{head} -->\nfirst\n{SECTION_END}\n\n\
+             {SECTION_START}\n{COMMIT_PREFIX}other -->\nsecond\n{SECTION_END}"
+        );
+        assert_eq!(
+            section_state(&twice, head),
+            DossierSectionState::OutOfDate,
+            "a second section must not be reported as up to date"
+        );
+
+        let dangling = format!(
+            "{SECTION_START}\n{COMMIT_PREFIX}{head} -->\nfirst\n{SECTION_END}\n\n{SECTION_START}\nunfinished"
+        );
+        assert_eq!(
+            section_state(&dangling, head),
+            DossierSectionState::OutOfDate,
+            "a dangling second marker must not be reported as up to date"
+        );
+
+        // Metadata outside the section cannot claim the section's commit.
+        let forged = format!("{COMMIT_PREFIX}{head} -->\n\n{SECTION_START}\nold\n{SECTION_END}");
+        assert_eq!(section_state(&forged, head), DossierSectionState::OutOfDate);
+    }
+
+    #[test]
+    fn the_section_records_its_commit_and_the_options_it_was_published_with() {
+        let dossier = VerificationDossier::default();
+        let options = DossierSectionOptions {
+            include_prompts: true,
+            include_agent_message: false,
+        };
+        let section = render_section(&dossier, &options, Some("abc123"));
+
+        assert_eq!(
+            section_state(&section, "abc123"),
+            DossierSectionState::UpToDate
+        );
+        assert_eq!(
+            section_state(&section, "def456"),
+            DossierSectionState::OutOfDate
+        );
+        assert_eq!(
+            section_state("no section", "abc123"),
+            DossierSectionState::Missing
+        );
+        assert!(section.contains(&format!("{OPTIONS_PREFIX}prompts=true,message=false -->")));
+        assert_eq!(decode_options("prompts=true,message=false"), options);
+        assert_eq!(
+            decode_options("malformed"),
+            DossierSectionOptions::default()
         );
     }
 }

@@ -138,6 +138,39 @@ it("reports why a revert failed and does not refresh", async () => {
   expect(onChanged).not.toHaveBeenCalled();
 });
 
+it("reports a failed Dossier update after Commit & Push", async () => {
+  vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: diffOf("src/first.rs") } as never);
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({
+    status: "ok",
+    data: {
+      branch: "topic", upstream: "origin/topic", ahead: 1, behind: 0,
+      added: 1, removed: 0, changedFiles: 1, protected: false, unpublished: false,
+      pickerDisabledReason: null,
+    },
+  } as never);
+  vi.spyOn(commands, "commit").mockResolvedValue({ status: "ok", data: null } as never);
+  vi.spyOn(commands, "push").mockResolvedValue({
+    status: "ok",
+    data: { dossier: { state: "failed", pullRequest: 5, message: "HTTP 502" } },
+  } as never);
+  await render();
+  const message = host.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(message, "Ship it");
+    message.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click(host.querySelector("button.primary"));
+
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(
+    "Pushed, but the Dossier was not updated: HTTP 502",
+  );
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(commands.push).toHaveBeenCalledWith(1, null, false);
+  await click(host.querySelector('[aria-label="Dismiss notice"]'));
+  expect(commands.commit).toHaveBeenCalledOnce();
+  expect(host.querySelector('[role="status"]')).toBeNull();
+});
+
 it("offers no revert in Branch scope or while a Turn is running", async () => {
   vi.spyOn(commands, "gitDiff").mockResolvedValue({ status: "ok", data: { base: "main", files: [fileOf("src/a.rs", "modified")] } } as never);
   await renderRevert({ scope: "branch" });

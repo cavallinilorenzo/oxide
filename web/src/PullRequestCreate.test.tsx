@@ -40,6 +40,7 @@ beforeEach(() => {
       markdown:
         "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
       visibility: "public",
+      headSha: "abc123",
     },
   });
   vi.spyOn(commands, "pullRequestBaseBranches").mockResolvedValue({
@@ -86,6 +87,9 @@ it("submits a prefilled draft and keeps the form and diagnostics when the push f
     draft: true,
     dossierSection:
       "<!-- oxide:dossier:start -->\nfacts\n<!-- oxide:dossier:end -->",
+    dossierIncludePrompts: false,
+    dossierIncludeAgentMessage: false,
+    dossierHeadSha: "abc123",
   });
   expect(created).not.toHaveBeenCalled();
   expect(host.querySelector('[role="alert"]')?.textContent).toContain(

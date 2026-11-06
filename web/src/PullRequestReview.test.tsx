@@ -27,6 +27,8 @@ function detail(overrides: Partial<PullRequestDetail_Serialize> = {}): PullReque
     },
     phase: "open",
     body: "Bumps react-virtual.\n\nUpdates from 3.14.21 to 3.14.22",
+    headSha: "abc123",
+    dossierOutOfDate: false,
     checks: [
       { name: "web", state: "failure", url: "https://github.com/me/oxide/actions/runs/1", required: true },
       { name: "rust", state: "success", url: null, required: false },

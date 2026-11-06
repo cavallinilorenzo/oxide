@@ -213,10 +213,15 @@ export const commands = {
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId, threadId })),
+	/**  Fast-forwards a Thread checkout only if it is still on the pull request's branch. */
+	pullPullRequestBranch: (projectId: number, threadId: number, expectedBranch: string, expectedHead: string) => typedError<null, AppError>(__TAURI_INVOKE("pull_pull_request_branch", { projectId, threadId, expectedBranch, expectedHead })),
 	/**  Commits exactly the given files; other staged state is untouched. */
 	commit: (projectId: number, threadId: number | null, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, threadId, paths, message })),
-	/**  Pushes the current branch; never forced. */
-	push: (projectId: number, threadId: number | null, allowProtected: boolean) => typedError<null, AppError>(__TAURI_INVOKE("push", { projectId, threadId, allowProtected })),
+	/**
+	 *  Pushes the current branch; never forced. A Dossier update that fails is reported in the
+	 *  outcome rather than failing the push.
+	 */
+	push: (projectId: number, threadId: number | null, allowProtected: boolean) => typedError<PushOutcome_Serialize, AppError>(__TAURI_INVOKE("push", { projectId, threadId, allowProtected })),
 	/**
 	 *  Whether `gh` works and the branch's open pull request. Runs `gh` only when
 	 *  asked; the Surface decides when to refresh.
@@ -238,6 +243,11 @@ export const commands = {
 	listPullRequests: (projectId: number, mine: boolean, search: string) => typedError<PullRequest[], AppError>(__TAURI_INVOKE("list_pull_requests", { projectId, mine, search })),
 	/**  One pull request's description, checks, conversation and changed files. */
 	pullRequestDetail: (projectId: number, number: number) => typedError<PullRequestDetail_Serialize, AppError>(__TAURI_INVOKE("pull_request_detail", { projectId, number })),
+	/**
+	 *  Recomputes and republishes a pull request's Dossier section, because the branch moved outside
+	 *  Oxide. A section removed by hand is not re-added.
+	 */
+	refreshPullRequestDossier: (projectId: number, threadId: number, number: number) => typedError<DossierUpdate_Serialize, AppError>(__TAURI_INVOKE("refresh_pull_request_dossier", { projectId, threadId, number })),
 	pullRequestReviewThreads: (projectId: number, number: number) => typedError<PullRequestReviewThread_Serialize[], AppError>(__TAURI_INVOKE("pull_request_review_threads", { projectId, number })),
 	commentPullRequest: (projectId: number, number: number, body: string) => typedError<null, AppError>(__TAURI_INVOKE("comment_pull_request", { projectId, number, body })),
 	mergePullRequest: (projectId: number, number: number, method: MergeMethod, deleteBranch: boolean, auto: boolean) => typedError<null, AppError>(__TAURI_INVOKE("merge_pull_request", { projectId, number, method, deleteBranch, auto })),
@@ -937,6 +947,28 @@ export type DossierPullRequest_Serialize = {
 export type DossierSection = {
 	markdown: string,
 	visibility: RepositoryVisibility,
+	headSha: string,
+};
+
+/**  What a push from Oxide, or the user's refresh, did to a pull request's Dossier section. */
+export type DossierUpdate = DossierUpdate_Serialize | DossierUpdate_Deserialize;
+
+export type DossierUpdateState = "updated" | "upToDate" | "noPullRequest" | "noSection" | "failed";
+
+/**  What a push from Oxide, or the user's refresh, did to a pull request's Dossier section. */
+export type DossierUpdate_Deserialize = {
+	state: DossierUpdateState,
+	pullRequest?: number | null,
+	/**  Why an update failed, when it did. The push itself still succeeded. */
+	message?: string | null,
+};
+
+/**  What a push from Oxide, or the user's refresh, did to a pull request's Dossier section. */
+export type DossierUpdate_Serialize = {
+	state: DossierUpdateState,
+	pullRequest: number | null,
+	/**  Why an update failed, when it did. The push itself still succeeded. */
+	message: string | null,
 };
 
 export type ExecutionDetails = ExecutionDetails_Serialize | ExecutionDetails_Deserialize;
@@ -1288,6 +1320,11 @@ export type NewPullRequest_Deserialize = {
 	draft: boolean,
 	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
 	dossierSection?: string | null,
+	/**  Explicit local consent, independent of edits to the Dossier preview. */
+	dossierIncludePrompts: boolean,
+	dossierIncludeAgentMessage: boolean,
+	/**  The checkout commit the preview was computed from. */
+	dossierHeadSha?: string | null,
 };
 
 /**  What the author chose for a new pull request. */
@@ -1298,6 +1335,11 @@ export type NewPullRequest_Serialize = {
 	draft: boolean,
 	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
 	dossierSection: string | null,
+	/**  Explicit local consent, independent of edits to the Dossier preview. */
+	dossierIncludePrompts: boolean,
+	dossierIncludeAgentMessage: boolean,
+	/**  The checkout commit the preview was computed from. */
+	dossierHeadSha: string | null,
 };
 
 /**  An Approval the Provider is still waiting on. */
@@ -1511,6 +1553,10 @@ export type PullRequestDetail_Deserialize = {
 	pullRequest: PullRequest,
 	phase: PullRequestPhase,
 	body: string,
+	/**  The commit the pull request's head points at. */
+	headSha: string,
+	/**  Whether the Dossier section in `body` describes an earlier commit than `head_sha`. */
+	dossierOutOfDate: boolean,
 	checks: PullRequestCheck_Deserialize[],
 	comments: PullRequestComment_Deserialize[],
 	mergeState: MergeState,
@@ -1536,6 +1582,10 @@ export type PullRequestDetail_Serialize = {
 	pullRequest: PullRequest,
 	phase: PullRequestPhase,
 	body: string,
+	/**  The commit the pull request's head points at. */
+	headSha: string,
+	/**  Whether the Dossier section in `body` describes an earlier commit than `head_sha`. */
+	dossierOutOfDate: boolean,
 	checks: PullRequestCheck_Serialize[],
 	comments: PullRequestComment_Serialize[],
 	mergeState: MergeState,
@@ -1645,6 +1695,21 @@ export type PullRequestState_Serialize = {
 	branch: string | null,
 	defaultBranch: string | null,
 	pullRequest: PullRequest | null,
+};
+
+/**  What a push from Oxide did besides moving the branch. */
+export type PushOutcome = PushOutcome_Serialize | PushOutcome_Deserialize;
+
+/**  What a push from Oxide did besides moving the branch. */
+export type PushOutcome_Deserialize = {
+	/**  The published Dossier update; `None` for a push with no Thread to compute one from. */
+	dossier?: DossierUpdate_Deserialize | null,
+};
+
+/**  What a push from Oxide did besides moving the branch. */
+export type PushOutcome_Serialize = {
+	/**  The published Dossier update; `None` for a push with no Thread to compute one from. */
+	dossier: DossierUpdate_Serialize | null,
 };
 
 /**  Who can read the repository a pull request is opened in. */

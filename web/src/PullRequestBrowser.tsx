@@ -16,6 +16,7 @@ import {
   GitPullRequestIcon,
   MarkGithubIcon,
   SearchIcon,
+  SyncIcon,
   ToolsIcon,
 } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
@@ -449,6 +450,20 @@ export function PullRequestReview({
     return ok;
   }
 
+  const refreshDossier = (owner: number) =>
+    change("dossier", () => commands.refreshPullRequestDossier(projectId, owner, number));
+  const pullAndRefreshDossier = (owner: number) =>
+    change("dossier", async () => {
+      const pulled = await commands.pullPullRequestBranch(
+        projectId,
+        owner,
+        pr.head,
+        detail.headSha,
+      );
+      if (pulled.status === "error") return pulled;
+      onChanged();
+      return commands.refreshPullRequestDossier(projectId, owner, number);
+    });
   const setDraft = (draft: boolean) => change("ready", () => commands.setPullRequestDraft(projectId, number, draft));
   const edit = (partial: Partial<PullRequestEdit>) =>
     change("edit", () => commands.editPullRequest(projectId, number, { ...NO_EDIT, ...partial }));
@@ -524,6 +539,40 @@ export function PullRequestReview({
         {live && git === null && <p className="pr-note">{gitError ? `The selected Thread's checkout is unavailable: ${gitError}` : "Select a Thread to check this branch out in its checkout."} Reviewing files needs no checkout.</p>}
         {live && git?.pickerDisabledReason && <p className="pr-note">{git.pickerDisabledReason}</p>}
 
+        {live && detail.dossierOutOfDate && (
+          <div className="pr-dossier-stale" role="status">
+            <span>
+              The Dossier in this description may not describe this branch's latest commit.
+              {ownerThread
+                ? " Refresh it with the evidence Oxide has now."
+                : " Open the Thread that owns this branch to refresh it."}
+            </span>
+            {ownerThread && (
+              <>
+                <button
+                  className={pending === "dossier" ? "pending" : undefined}
+                  disabled={busy}
+                  title={`Recompute the Dossier from Thread #${ownerThread.id} and replace only the marked section`}
+                  onClick={() => void refreshDossier(ownerThread.id)}
+                >
+                  <Working on={pending === "dossier"} label="Refreshing…">
+                    <SyncIcon size={14} /> Refresh Dossier
+                  </Working>
+                </button>
+                <button
+                  className={pending === "dossier" ? "pending" : undefined}
+                  disabled={busy}
+                  title={`Fast-forward Thread #${ownerThread.id}'s checkout, then refresh only the marked Dossier section`}
+                  onClick={() => void pullAndRefreshDossier(ownerThread.id)}
+                >
+                  <Working on={pending === "dossier"} label="Pulling and refreshing…">
+                    <SyncIcon size={14} /> Pull &amp; Refresh
+                  </Working>
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {detail.body.trim() && <Description body={detail.body} />}
         {live && <MergeStatus
             requirements={requirements}

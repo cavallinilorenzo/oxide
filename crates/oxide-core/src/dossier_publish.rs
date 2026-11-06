@@ -27,6 +27,10 @@ const COMMIT_PREFIX: &str = "<!-- oxide:dossier:commit:";
 /// never read back from this collaborator-editable PR body.
 const OPTIONS_PREFIX: &str = "<!-- oxide:dossier:options:";
 
+/// How often, and how far apart, to re-read the pull request head after a push.
+const HEAD_CATCH_UP_ATTEMPTS: u32 = 4;
+const HEAD_CATCH_UP_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 const REDACTED: &str = "[REDACTED]";
 
 /// Most files or commits listed under one heading; the rest are counted.
@@ -218,11 +222,25 @@ impl Core {
             Ok(target) => target.root,
             Err(error) => return DossierUpdate::failed(None, error.to_string()),
         };
-        let found = github::current_pull_request_body(&self.gh, &cwd);
-        let (number, body, head, repository_url) = match found {
-            Ok(Some(found)) => found,
-            Ok(None) => return DossierUpdate::no_pull_request(),
-            Err(error) => return DossierUpdate::failed(None, error.to_string()),
+        // GitHub can report the previous head for a moment after a push, so give it a few
+        // seconds to catch up with the commit just pushed before calling the update failed.
+        let local_head = git::head(&cwd);
+        let mut attempt = 0;
+        let (number, body, head, repository_url) = loop {
+            match github::current_pull_request_body(&self.gh, &cwd) {
+                Ok(Some(found)) => {
+                    attempt += 1;
+                    if found.2.is_empty()
+                        || local_head.as_deref() == Some(found.2.as_str())
+                        || attempt >= HEAD_CATCH_UP_ATTEMPTS
+                    {
+                        break found;
+                    }
+                    std::thread::sleep(HEAD_CATCH_UP_DELAY);
+                }
+                Ok(None) => return DossierUpdate::no_pull_request(),
+                Err(error) => return DossierUpdate::failed(None, error.to_string()),
+            }
         };
         if head.is_empty() {
             return DossierUpdate::failed(
@@ -458,10 +476,10 @@ pub(crate) fn with_section(body: &str, section: &str) -> String {
 
 /// `body` without any text between the Dossier markers, markers included.
 pub(crate) fn without_section(body: &str) -> String {
-    let Some(start) = body.find(SECTION_START) else {
+    let Some(start) = find_marker(body, SECTION_START) else {
         return body.to_string();
     };
-    let Some(end) = body[start..].find(SECTION_END).map(|end| start + end) else {
+    let Some(end) = find_marker(&body[start..], SECTION_END).map(|end| start + end) else {
         return body.to_string();
     };
     let after = &body[end + SECTION_END.len()..];
@@ -486,11 +504,28 @@ enum Markers {
     Complete,
 }
 
+/// The first occurrence of `marker` in `text` that stands alone on its line. A marker quoted in
+/// prose or in a code span is the author's text, not a Dossier boundary.
+fn find_marker(text: &str, marker: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = text[from..].find(marker) {
+        let at = from + found;
+        let after = &text[at + marker.len()..];
+        let starts_line = at == 0 || text[..at].ends_with('\n');
+        let ends_line = after.is_empty() || after.starts_with('\n') || after.starts_with("\r\n");
+        if starts_line && ends_line {
+            return Some(at);
+        }
+        from = at + marker.len();
+    }
+    None
+}
+
 fn markers(body: &str) -> Markers {
-    let Some(start) = body.find(SECTION_START) else {
+    let Some(start) = find_marker(body, SECTION_START) else {
         return Markers::None;
     };
-    if body[start..].find(SECTION_END).is_some() {
+    if find_marker(&body[start..], SECTION_END).is_some() {
         Markers::Complete
     } else {
         Markers::Incomplete
@@ -503,8 +538,8 @@ pub(crate) fn section(body: &str) -> Option<&str> {
     if markers(body) != Markers::Complete {
         return None;
     }
-    let start = body.find(SECTION_START)?;
-    let end = body[start..].find(SECTION_END)? + start + SECTION_END.len();
+    let start = find_marker(body, SECTION_START)?;
+    let end = find_marker(&body[start..], SECTION_END)? + start + SECTION_END.len();
     Some(&body[start..end])
 }
 
@@ -521,16 +556,16 @@ fn has_extra_section(body: &str) -> bool {
     let Some(first) = section(body) else {
         return false;
     };
-    let start = body.find(first).unwrap_or_default();
+    let start = find_marker(body, SECTION_START).unwrap_or_default();
     let trailing = &body[start + first.len()..];
-    trailing.contains(SECTION_START) || trailing.contains(SECTION_END)
+    find_marker(trailing, SECTION_START).is_some() || find_marker(trailing, SECTION_END).is_some()
 }
 
 /// `body` with the marked range replaced by `section`, leaving every byte outside it alone.
 /// `None` when the body has no complete section.
 pub(crate) fn replace_section(body: &str, section: &str) -> Option<String> {
-    let start = body.find(SECTION_START)?;
-    let end = body[start..].find(SECTION_END)? + start + SECTION_END.len();
+    let start = find_marker(body, SECTION_START)?;
+    let end = find_marker(&body[start..], SECTION_END)? + start + SECTION_END.len();
     Some(format!("{}{section}{}", &body[..start], &body[end..]))
 }
 
@@ -1237,6 +1272,19 @@ mod tests {
         ] {
             assert_eq!(redact_command(command), command);
         }
+    }
+
+    #[test]
+    fn markers_quoted_in_prose_are_not_a_section() {
+        let body = format!("Wraps the Dossier in `{SECTION_START}` and `{SECTION_END}`.");
+        assert_eq!(markers(&body), Markers::None);
+        assert_eq!(section(&body), None);
+        assert_eq!(section_state(&body, "abc"), DossierSectionState::Missing);
+        assert_eq!(replace_section(&body, "x"), None);
+        assert_eq!(without_section(&body), body);
+        let published = with_section(&body, "facts");
+        assert!(published.starts_with(&body), "{published}");
+        assert_eq!(section(&published).map(|s| s.contains("facts")), Some(true));
     }
 
     #[test]

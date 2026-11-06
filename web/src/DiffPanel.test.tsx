@@ -166,6 +166,9 @@ it("reports a failed Dossier update after Commit & Push", async () => {
   );
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(commands.push).toHaveBeenCalledWith(1, null, false);
+  await click(host.querySelector('[aria-label="Dismiss notice"]'));
+  expect(commands.commit).toHaveBeenCalledOnce();
+  expect(host.querySelector('[role="status"]')).toBeNull();
 });
 
 it("offers no revert in Branch scope or while a Turn is running", async () => {

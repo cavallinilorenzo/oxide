@@ -64,6 +64,8 @@ pub struct DossierSection {
     /// The delimited Markdown that would be appended to the pull request body.
     pub markdown: String,
     pub visibility: RepositoryVisibility,
+    /// The checkout commit the preview was computed from.
+    pub head_sha: String,
 }
 
 /// Where the Dossier section in a pull request body stands.
@@ -175,13 +177,23 @@ impl Core {
         thread_id: u32,
         options: &DossierSectionOptions,
     ) -> Result<DossierSection> {
-        let dossier = self.branch_dossier(thread_id)?;
         let cwd = self.git_target(project_id, Some(thread_id))?.root;
+        let head_sha = git::head(&cwd).ok_or_else(|| {
+            Error::Github("This checkout has no HEAD commit to preview a Dossier for.".into())
+        })?;
+        let dossier = self.branch_dossier(thread_id)?;
         let visibility =
             github::repository_visibility(&self.gh, &cwd).unwrap_or(RepositoryVisibility::Unknown);
+        if git::head(&cwd).as_deref() != Some(head_sha.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier preview was being computed; refresh the preview."
+                    .into(),
+            ));
+        }
         Ok(DossierSection {
-            markdown: render_section(&dossier, options, git::head(&cwd).as_deref()),
+            markdown: render_section(&dossier, options, Some(&head_sha)),
             visibility,
+            head_sha,
         })
     }
 
@@ -719,10 +731,11 @@ pub(crate) fn redact_command(command: &str) -> String {
     let mut out = String::new();
     let mut redact_next = false;
     let mut previous = "";
-    let mut program = String::new();
     let mut docker_login = false;
     let mut docker_seen = false;
     let mut password_cli = false;
+    let mut curl_seen = false;
+    let mut env_seen = false;
     let mut shell_command = false;
     let mut rest = command;
     while !rest.is_empty() {
@@ -736,21 +749,26 @@ pub(crate) fn redact_command(command: &str) -> String {
         let word = &rest[..end];
         rest = &rest[end..];
         let bare = word.trim_matches(|c| matches!(c, '"' | '\''));
-        if program.is_empty() {
-            program = bare.to_ascii_lowercase();
-        }
-        if bare.eq_ignore_ascii_case("docker") {
+        let executable = executable_name(bare);
+        if executable == "docker" {
             docker_seen = true;
         } else if docker_seen && bare.eq_ignore_ascii_case("login") {
             docker_login = true;
         }
-        password_cli |=
-            ["mysql", "mariadb", "mongosh"].contains(&bare.to_ascii_lowercase().as_str());
+        password_cli |= ["mysql", "mariadb", "mongosh"].contains(&executable.as_str());
+        curl_seen |= executable == "curl";
+        env_seen |= executable == "env";
         shell_command |= is_shell_program(bare);
         let separated_password = bare.eq_ignore_ascii_case("-p") && (docker_login || password_cli);
         let attached_password = bare.to_ascii_lowercase().starts_with("-p")
             && bare.len() > 2
             && (docker_login || password_cli);
+        let attached_curl_auth =
+            curl_seen && bare.len() > 2 && (bare.starts_with("-u") || bare.starts_with("-U"));
+        let env_split_option = env_seen
+            && (bare.eq_ignore_ascii_case("-s") || bare.eq_ignore_ascii_case("--split-string"));
+        let attached_env_split =
+            env_seen && bare.len() > 2 && bare.to_ascii_lowercase().starts_with("-s");
         let shell_code_option = shell_command && is_shell_code_option(bare);
         if shell_code_option {
             shell_command = false;
@@ -763,9 +781,13 @@ pub(crate) fn redact_command(command: &str) -> String {
             None
         } else if attached_password {
             Some(format!("-p{REDACTED}"))
-        } else if shell_code_option {
+        } else if attached_curl_auth {
+            Some(format!("{}{}", &bare[..2], REDACTED))
+        } else if env_split_option || shell_code_option {
             redact_next = true;
             Some(word.to_string())
+        } else if attached_env_split {
+            Some(format!("{}{}", &bare[..2], REDACTED))
         } else if previous == "-u" && word.contains(':') && !word.contains("//") {
             // `curl -u user:pass`; `git push -u origin` has no colon and stays.
             Some(replace_value(word))
@@ -778,8 +800,15 @@ pub(crate) fn redact_command(command: &str) -> String {
     out
 }
 
+fn executable_name(word: &str) -> String {
+    word.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(word)
+        .to_ascii_lowercase()
+}
+
 fn is_shell_program(word: &str) -> bool {
-    let name = word.rsplit('/').next().unwrap_or(word).to_ascii_lowercase();
+    let name = executable_name(word);
     ["sh", "bash", "zsh", "dash", "fish", "ksh", "ash"].contains(&name.as_str())
 }
 
@@ -1077,6 +1106,10 @@ mod tests {
                 "sh -c '[REDACTED]'",
             ),
             (
+                "env -S 'bash -c curl --token abc123 https://x.test'",
+                "env -S '[REDACTED]'",
+            ),
+            (
                 "curl https://x.test/a?access_token=abc&page=2",
                 "curl https://x.test/a?access_token=[REDACTED]&page=2",
             ),
@@ -1090,13 +1123,25 @@ mod tests {
             ),
             ("mysql -phunter2 db", "mysql -p[REDACTED] db"),
             ("mysql -psecret db", "mysql -p[REDACTED] db"),
+            (
+                "/usr/bin/mysql -psecret db",
+                "/usr/bin/mysql -p[REDACTED] db",
+            ),
             ("docker login -p s3cr3t", "docker login -p [REDACTED]"),
+            (
+                "/usr/bin/docker login -p s3cr3t",
+                "/usr/bin/docker login -p [REDACTED]",
+            ),
             ("docker login -p=s3cr3t", "docker login -p[REDACTED]"),
             ("tool --api_key abc", "tool --api_key [REDACTED]"),
             ("tool --api-token abc123", "tool --api-token [REDACTED]"),
             (
                 "tool --bearer-token abc123",
                 "tool --bearer-token [REDACTED]",
+            ),
+            (
+                "curl -ualice:hunter2 https://x.test",
+                "curl -u[REDACTED] https://x.test",
             ),
             (r#"tool '{"refreshToken":"abc123"}'"#, "tool '[REDACTED]'"),
             (

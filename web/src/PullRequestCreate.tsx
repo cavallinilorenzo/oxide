@@ -155,6 +155,7 @@ export function PullRequestCreate({
           publishing && section && dossierText.trim() ? dossierText : null,
         dossierIncludePrompts: includePrompts,
         dossierIncludeAgentMessage: includeMessage,
+        dossierHeadSha: publishing && section ? section.headSha : null,
       });
       if (result.status === "error") setError(result.error.message);
       else onCreated(result.data);

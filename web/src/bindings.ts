@@ -947,6 +947,7 @@ export type DossierPullRequest_Serialize = {
 export type DossierSection = {
 	markdown: string,
 	visibility: RepositoryVisibility,
+	headSha: string,
 };
 
 /**  What a push from Oxide, or the user's refresh, did to a pull request's Dossier section. */
@@ -1322,6 +1323,8 @@ export type NewPullRequest_Deserialize = {
 	/**  Explicit local consent, independent of edits to the Dossier preview. */
 	dossierIncludePrompts: boolean,
 	dossierIncludeAgentMessage: boolean,
+	/**  The checkout commit the preview was computed from. */
+	dossierHeadSha?: string | null,
 };
 
 /**  What the author chose for a new pull request. */
@@ -1335,6 +1338,8 @@ export type NewPullRequest_Serialize = {
 	/**  Explicit local consent, independent of edits to the Dossier preview. */
 	dossierIncludePrompts: boolean,
 	dossierIncludeAgentMessage: boolean,
+	/**  The checkout commit the preview was computed from. */
+	dossierHeadSha: string | null,
 };
 
 /**  An Approval the Provider is still waiting on. */

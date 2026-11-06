@@ -202,6 +202,7 @@ fn input(title: &str, base: &str, draft: bool) -> PullRequestInput {
         draft,
         dossier_section: None,
         dossier_options: None,
+        dossier_head_sha: None,
     }
 }
 

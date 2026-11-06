@@ -334,6 +334,8 @@ pub struct PullRequestInput {
     pub dossier_section: Option<String>,
     /// The author's disclosure choices, separate from the editable section preview.
     pub dossier_options: Option<DossierSectionOptions>,
+    /// The commit the Dossier preview was computed from, supplied separately from its Markdown.
+    pub dossier_head_sha: Option<String>,
 }
 
 /// One of the user's GitHub repositories, as offered for cloning.
@@ -886,6 +888,19 @@ fn current_branch(cwd: &Path) -> Result<String> {
 /// request. The caller holds the checkout's Git lock.
 pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Result<PullRequest> {
     gh.require_ready(cwd)?;
+    let check_dossier_head = || -> Result<()> {
+        if input.dossier_section.is_some()
+            && let Some(expected) = input.dossier_head_sha.as_deref()
+            && git::head(cwd).as_deref() != Some(expected)
+        {
+            return Err(Error::Github(
+                "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
+                    .into(),
+            ));
+        }
+        Ok(())
+    };
+    check_dossier_head()?;
     let status = git::status(cwd)?;
     let branch = current_branch(cwd)?;
     if status.protected {
@@ -906,6 +921,7 @@ pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Res
     if status.ahead > 0 || status.unpublished {
         git::push(cwd, false)?;
     }
+    check_dossier_head()?;
     let mut args = vec![
         "pr",
         "create",

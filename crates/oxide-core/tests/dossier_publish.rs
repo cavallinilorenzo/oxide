@@ -265,6 +265,7 @@ fn create(f: &Fixture, body: &str, section: Option<String>) -> String {
                 draft: false,
                 dossier_section: section,
                 dossier_options: None,
+                dossier_head_sha: None,
             },
         )
         .unwrap();
@@ -459,6 +460,7 @@ fn a_description_over_githubs_limit_is_refused_before_the_branch_is_pushed() {
                 draft: false,
                 dossier_section: Some("facts".into()),
                 dossier_options: None,
+                dossier_head_sha: None,
             },
         )
         .unwrap_err()
@@ -512,6 +514,7 @@ fn create_with_section(f: &Fixture, id: u32, body: &str) -> (u32, String) {
                 draft: false,
                 dossier_section: Some(section.markdown),
                 dossier_options: Some(DossierSectionOptions::default()),
+                dossier_head_sha: Some(section.head_sha),
             },
         )
         .unwrap();
@@ -548,6 +551,42 @@ fn a_push_from_oxide_updates_only_the_text_between_the_markers() {
 }
 
 #[test]
+fn creating_a_pull_request_refuses_a_preview_from_an_older_head() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let options = DossierSectionOptions::default();
+    let preview = f
+        .core
+        .dossier_pull_request_section(f.project_id, id, &options)
+        .unwrap();
+    commit_change(&f, "b.txt");
+
+    let error = f
+        .core
+        .create_pull_request_in(
+            f.project_id,
+            Some(id),
+            &PullRequestInput {
+                title: "T".into(),
+                body: "Fixes it.".into(),
+                base: "main".into(),
+                draft: false,
+                dossier_section: Some(preview.markdown),
+                dossier_options: Some(options),
+                dossier_head_sha: Some(preview.head_sha),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("branch moved after the Dossier preview"),
+        "{error}"
+    );
+    assert!(gh_state(&f)["prs"].as_object().unwrap().is_empty());
+}
+
+#[test]
 fn a_push_keeps_the_options_the_section_was_published_with() {
     let f = fixture(Some("PRIVATE"));
     let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
@@ -571,6 +610,7 @@ fn a_push_keeps_the_options_the_section_was_published_with() {
                 draft: false,
                 dossier_section: Some(section.markdown),
                 dossier_options: Some(options),
+                dossier_head_sha: Some(section.head_sha),
             },
         )
         .unwrap();
@@ -664,6 +704,7 @@ fn editing_the_dossier_preview_cannot_override_explicit_disclosure_choices() {
                 draft: false,
                 dossier_section: Some(edited),
                 dossier_options: Some(DossierSectionOptions::default()),
+                dossier_head_sha: Some(section.head_sha),
             },
         )
         .unwrap();
@@ -701,6 +742,7 @@ fn deleting_a_thread_also_deletes_its_dossier_disclosure_choices() {
                 draft: false,
                 dossier_section: Some(section.markdown),
                 dossier_options: Some(options),
+                dossier_head_sha: Some(section.head_sha),
             },
         )
         .unwrap();

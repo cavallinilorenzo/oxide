@@ -2103,6 +2103,15 @@ impl Core {
     ) -> Result<PullRequest> {
         let cwd = self.git_target(project_id, thread_id)?.root;
         let mut input = input.clone();
+        if thread_id.is_some()
+            && input.dossier_section.is_some()
+            && (input.dossier_options.is_none() || input.dossier_head_sha.is_none())
+        {
+            return Err(Error::Github(
+                "A Thread Dossier preview must include its explicit disclosure choices and base commit. Refresh the preview before creating the pull request."
+                    .into(),
+            ));
+        }
         // A section from an earlier attempt goes first, so a `Closes` inside it cannot stand in
         // for the one this pull request needs.
         if input.dossier_section.is_some() {

@@ -641,7 +641,7 @@ function DiffBody({ projectId, threadId, threadProvider, threadIssue, onThreadCr
           {push.warning && (
             <div className="git-note" role="status" title={push.warning}>
               <span>{push.warning}</span>
-              <button className="icon-btn sm" aria-label="Dismiss notice" onClick={push.clearWarning}>
+              <button type="button" className="icon-btn sm" aria-label="Dismiss notice" onClick={push.clearWarning}>
                 <XIcon size={12} />
               </button>
             </div>

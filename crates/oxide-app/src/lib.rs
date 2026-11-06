@@ -2735,6 +2735,8 @@ pub struct NewPullRequest {
     /// Explicit local consent, independent of edits to the Dossier preview.
     pub dossier_include_prompts: bool,
     pub dossier_include_agent_message: bool,
+    /// The checkout commit the preview was computed from.
+    pub dossier_head_sha: Option<String>,
 }
 
 /// Who can read the repository a pull request is opened in.
@@ -2753,6 +2755,7 @@ pub enum RepositoryVisibility {
 pub struct DossierSection {
     pub markdown: String,
     pub visibility: RepositoryVisibility,
+    pub head_sha: String,
 }
 
 /// What a push from Oxide did besides moving the branch.
@@ -2875,6 +2878,7 @@ async fn create_pull_request(
                     include_prompts: pull_request.dossier_include_prompts,
                     include_agent_message: pull_request.dossier_include_agent_message,
                 }),
+                dossier_head_sha: pull_request.dossier_head_sha,
             },
         )
     })

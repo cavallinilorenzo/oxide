@@ -96,6 +96,7 @@ beforeEach(() => {
       case "refresh_pull_request_dossier":
         prDetail = { ...prDetail, dossierOutOfDate: false };
         return { state: "updated", pullRequest: 5, message: null };
+      case "pull": if (fail) throw { message: fail }; return null;
       case "checkout_pull_request": if (fail) throw { message: fail }; return null;
       case "issues_state": return { availability: "ready", guidance: null };
       case "list_issues": return [issue];
@@ -247,6 +248,23 @@ it("shows a Dossier published for an earlier commit as out of date and refreshes
   expect(text()).toContain("may not describe this branch's latest commit");
   await click(byText("Refresh Dossier"));
   expect(called("refresh_pull_request_dossier")).toEqual([{ projectId: 1, threadId: 2, number: 5 }]);
+  await vi.waitFor(() => expect(text()).not.toContain("may not describe this branch's latest commit"));
+});
+
+it("can fast-forward the owning Thread checkout before refreshing the Dossier", async () => {
+  prDetail = {
+    ...baseDetail,
+    dossierOutOfDate: true,
+    pullRequest: { ...pullRequest, head: "feat-alpha" },
+  };
+  await open("Pull request");
+  await click(byText("Fix the thing"));
+  await click(byText("Pull & Refresh"));
+  expect(called("pull")).toEqual([{ projectId: 1, threadId: 2 }]);
+  expect(called("refresh_pull_request_dossier")).toEqual([{ projectId: 1, threadId: 2, number: 5 }]);
+  expect(calls.findIndex((call) => call.command === "pull")).toBeLessThan(
+    calls.findIndex((call) => call.command === "refresh_pull_request_dossier"),
+  );
   await vi.waitFor(() => expect(text()).not.toContain("may not describe this branch's latest commit"));
 });
 

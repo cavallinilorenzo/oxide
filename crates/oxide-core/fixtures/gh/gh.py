@@ -267,7 +267,7 @@ if args[:2] == ["pr", "view"]:
         sys.stderr.write('no pull requests found for branch "%s"\n' % branch())
         sys.exit(1)
     pr = dict(pr)
-    if not pr.get("headRefOid"):
+    if "headRefOid" not in pr:
         pr["headRefOid"] = head_oid(pr)
     print(json.dumps(pr))
     sys.exit(0)

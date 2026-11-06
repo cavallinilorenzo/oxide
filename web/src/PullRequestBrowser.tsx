@@ -452,6 +452,13 @@ export function PullRequestReview({
 
   const refreshDossier = (owner: number) =>
     change("dossier", () => commands.refreshPullRequestDossier(projectId, owner, number));
+  const pullAndRefreshDossier = (owner: number) =>
+    change("dossier", async () => {
+      const pulled = await commands.pull(projectId, owner);
+      return pulled.status === "error"
+        ? pulled
+        : commands.refreshPullRequestDossier(projectId, owner, number);
+    });
   const setDraft = (draft: boolean) => change("ready", () => commands.setPullRequestDraft(projectId, number, draft));
   const edit = (partial: Partial<PullRequestEdit>) =>
     change("edit", () => commands.editPullRequest(projectId, number, { ...NO_EDIT, ...partial }));
@@ -536,16 +543,28 @@ export function PullRequestReview({
                 : " Open the Thread that owns this branch to refresh it."}
             </span>
             {ownerThread && (
-              <button
-                className={pending === "dossier" ? "pending" : undefined}
-                disabled={busy}
-                title={`Recompute the Dossier from Thread #${ownerThread.id} and replace only the marked section`}
-                onClick={() => void refreshDossier(ownerThread.id)}
-              >
-                <Working on={pending === "dossier"} label="Refreshing…">
-                  <SyncIcon size={14} /> Refresh Dossier
-                </Working>
-              </button>
+              <>
+                <button
+                  className={pending === "dossier" ? "pending" : undefined}
+                  disabled={busy}
+                  title={`Recompute the Dossier from Thread #${ownerThread.id} and replace only the marked section`}
+                  onClick={() => void refreshDossier(ownerThread.id)}
+                >
+                  <Working on={pending === "dossier"} label="Refreshing…">
+                    <SyncIcon size={14} /> Refresh Dossier
+                  </Working>
+                </button>
+                <button
+                  className={pending === "dossier" ? "pending" : undefined}
+                  disabled={busy}
+                  title={`Fast-forward Thread #${ownerThread.id}'s checkout, then refresh only the marked Dossier section`}
+                  onClick={() => void pullAndRefreshDossier(ownerThread.id)}
+                >
+                  <Working on={pending === "dossier"} label="Pulling and refreshing…">
+                    <SyncIcon size={14} /> Pull &amp; Refresh
+                  </Working>
+                </button>
+              </>
             )}
           </div>
         )}

@@ -175,12 +175,18 @@ impl Core {
             Err(error) => return DossierUpdate::failed(None, error.to_string()),
         };
         let found = github::current_pull_request_body(&self.gh, &cwd);
-        let (number, body) = match found {
+        let (number, body, head) = match found {
             Ok(Some(found)) => found,
             Ok(None) => return DossierUpdate::no_pull_request(),
             Err(error) => return DossierUpdate::failed(None, error.to_string()),
         };
-        match self.republish_section(project_id, thread_id, number, &body) {
+        if head.is_empty() {
+            return DossierUpdate::failed(
+                Some(number),
+                "GitHub did not report the pull request's head commit; the Dossier was not updated.",
+            );
+        }
+        match self.republish_section(project_id, thread_id, number, &body, &head) {
             Ok(update) => update,
             Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
         }
@@ -196,16 +202,22 @@ impl Core {
     ) -> Result<DossierUpdate> {
         let cwd = self.git_target(project_id, Some(thread_id))?.root;
         let (body, head) = github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        if head.is_empty() {
+            return Err(Error::Github(
+                "GitHub did not report the pull request's head commit; the Dossier was not refreshed."
+                    .into(),
+            ));
+        }
         // Publish evidence for the pull request's head, never for a checkout that is ahead or
         // behind it: a Dossier that describes another commit is worse than none.
-        if !head.is_empty() && git::head(&cwd).as_deref() != Some(head.as_str()) {
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
             return Err(Error::Github(
                 "This checkout is not at the pull request's head; check the branch out and pull it \
                  before refreshing the Dossier."
                     .into(),
             ));
         }
-        let update = self.republish_section(project_id, thread_id, number, &body)?;
+        let update = self.republish_section(project_id, thread_id, number, &body, &head)?;
         if update.state == DossierUpdateState::NoSection {
             return Err(Error::Github(
                 "This pull request has no Dossier section; a removed section is not re-added."
@@ -222,6 +234,7 @@ impl Core {
         thread_id: u32,
         number: u32,
         body: &str,
+        expected_head: &str,
     ) -> Result<DossierUpdate> {
         match markers(body) {
             Markers::None => return Ok(DossierUpdate::no_section(number)),
@@ -245,25 +258,60 @@ impl Core {
         }
         let current = section(body).expect("a complete pair of markers has a section");
         let cwd = self.git_target(project_id, Some(thread_id))?.root;
-        // Read the head once, so the section and the commit it records describe the same tree.
-        let head = git::head(&cwd);
-        let section = render_section(
+        // Bind both the evidence and its recorded commit to the GitHub head throughout dossier
+        // computation.
+        let head = git::head(&cwd).ok_or_else(|| {
+            Error::Github("This checkout has no HEAD commit; the Dossier was not updated.".into())
+        })?;
+        if expected_head != head {
+            return Err(Error::Github(
+                "This checkout is not at the pull request's head; check the branch out and pull it \
+                 before refreshing the Dossier."
+                    .into(),
+            ));
+        }
+        let rendered_section = render_section(
             &self.branch_dossier(thread_id)?,
             &section_options(body),
-            head.as_deref(),
+            Some(&head),
         );
-        if section == current {
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier was being computed; refresh it again.".into(),
+            ));
+        }
+        if rendered_section == current {
             return Ok(DossierUpdate::up_to_date(number));
         }
-        if section.chars().count() > MAX_BODY_CHARS {
+        if rendered_section.chars().count() > MAX_BODY_CHARS {
             return Err(Error::Github(format!(
                 "The Dossier is longer than GitHub's {} characters.",
                 MAX_BODY_CHARS
             )));
         }
-        // Read, replace and write are not atomic with GitHub: a body edited in the browser
-        // between the read and `gh pr edit` keeps the edit only until the next update.
-        let updated = replace_section(body, &section)
+        // Re-read immediately before writing so an edit outside the markers made while the
+        // Dossier was computed is preserved. Refuse to overwrite a concurrently changed section
+        // or a branch that moved on GitHub. GitHub has no conditional body update, so a final race
+        // remains between this read and `gh pr edit`.
+        let (latest_body, latest_head) =
+            github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        if expected_head != latest_head {
+            return Err(Error::Github(
+                "The pull request moved while the Dossier was being computed; refresh it again."
+                    .into(),
+            ));
+        }
+        if git::head(&cwd).as_deref() != Some(head.as_str()) {
+            return Err(Error::Github(
+                "The checkout moved while the Dossier was being computed; refresh it again.".into(),
+            ));
+        }
+        if section(&latest_body) != Some(current) || has_extra_section(&latest_body) {
+            return Err(Error::Github(
+                "The Dossier section changed while it was being computed; refresh it again.".into(),
+            ));
+        }
+        let updated = replace_section(&latest_body, &rendered_section)
             .ok_or_else(|| Error::Github("The Dossier markers are incomplete.".into()))?;
         if updated.chars().count() > MAX_BODY_CHARS {
             return Err(Error::Github(format!(

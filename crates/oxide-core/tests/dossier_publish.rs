@@ -609,6 +609,35 @@ fn a_push_with_nothing_new_leaves_an_up_to_date_section_alone() {
 }
 
 #[test]
+fn a_push_does_not_publish_when_the_pull_request_head_does_not_match() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let (number, before) = create_with_section(&f, id, "Fixes it.");
+    let mut state = gh_state(&f);
+    for pr in state["prs"].as_object_mut().unwrap().values_mut() {
+        if pr["number"] == number {
+            pr["headRefOid"] = "a-different-head".into();
+        }
+    }
+    set_gh_state(&f, &state);
+    commit_change(&f, "b.txt");
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    let update = outcome.dossier.unwrap();
+    assert_eq!(update.state, DossierUpdateState::Failed);
+    assert!(
+        update
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not at the pull request's head"),
+        "{update:?}"
+    );
+    assert_eq!(published_body(&f, number), before);
+}
+
+#[test]
 fn a_half_removed_marker_is_reported_and_the_body_is_left_alone() {
     let f = fixture(Some("PUBLIC"));
     let id = thread_with_turn(&f, "go", &[], "done");
@@ -692,6 +721,41 @@ fn a_failed_dossier_update_does_not_fail_the_push_and_is_reported() {
 }
 
 #[test]
+fn a_push_reports_when_github_authentication_is_unavailable() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let mut state = gh_state(&f);
+    state["auth"] = serde_json::json!("logged_out");
+    set_gh_state(&f, &state);
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    let update = outcome
+        .dossier
+        .expect("the unavailable update is reported beside the push");
+    assert_eq!(update.state, DossierUpdateState::Failed);
+    assert!(
+        update
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("gh auth login"),
+        "{update:?}"
+    );
+    let remote = f
+        .work
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("remote.git");
+    assert_eq!(
+        git_output(&f.work, &["rev-parse", "HEAD"]),
+        git_output(&remote, &["rev-parse", "feature"])
+    );
+}
+
+#[test]
 fn a_push_outside_oxide_shows_the_section_as_out_of_date_until_it_is_refreshed() {
     let f = fixture(Some("PUBLIC"));
     let id = thread_with_turn(&f, "go", &[], "done");
@@ -745,6 +809,53 @@ fn a_refresh_from_a_checkout_behind_the_head_is_refused() {
         .to_string();
 
     assert!(error.contains("not at the pull request's head"), "{error}");
+    assert_eq!(published_body(&f, number), before);
+}
+
+#[test]
+fn a_refresh_can_follow_a_fast_forward_pull_of_an_outside_push() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let (number, _) = create_with_section(&f, id, "Fixes it.");
+    commit_change(&f, "b.txt");
+    git(&f.work, &["push", "-q", "origin", "HEAD"]);
+    git(&f.work, &["reset", "-q", "--hard", "HEAD~1"]);
+
+    f.core.pull_in(f.project_id, Some(id)).unwrap();
+    f.core
+        .refresh_published_dossier(f.project_id, id, number)
+        .unwrap();
+
+    let detail = f.core.pull_request_detail(f.project_id, number).unwrap();
+    assert!(!detail.dossier_out_of_date);
+    assert!(
+        detail.body.contains("Change out of band"),
+        "{}",
+        detail.body
+    );
+}
+
+#[test]
+fn a_refresh_without_a_reported_pull_request_head_is_refused() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let (number, _) = create_with_section(&f, id, "Fixes it.");
+    let before = published_body(&f, number);
+    let mut state = gh_state(&f);
+    for pr in state["prs"].as_object_mut().unwrap().values_mut() {
+        if pr["number"] == number {
+            pr["headRefOid"] = "".into();
+        }
+    }
+    set_gh_state(&f, &state);
+
+    let error = f
+        .core
+        .refresh_published_dossier(f.project_id, id, number)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("did not report"), "{error}");
     assert_eq!(published_body(&f, number), before);
 }
 

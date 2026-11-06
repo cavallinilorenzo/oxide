@@ -957,14 +957,15 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
     Ok(pr.url)
 }
 
-/// The body of the branch's open pull request, when it has one. A missing or logged-out `gh`,
-/// and a repository with no GitHub remote, mean nobody published a Dossier from here: `None`
-/// rather than a failure the push would have to report on every push.
-pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, String)>> {
-    if gh.require_ready(cwd).is_err() {
-        return Ok(None);
-    }
-    let json = match gh.run(cwd, &["pr", "view", "--json", "number,body,state"]) {
+/// The body of the branch's open pull request, when it has one. A repository with no GitHub remote
+/// has no published Dossier to update; failures to use GitHub are errors so the push can report
+/// that the Dossier could not be updated.
+pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, String, String)>> {
+    gh.require_ready(cwd)?;
+    let json = match gh.run(
+        cwd,
+        &["pr", "view", "--json", "number,body,state,headRefOid"],
+    ) {
         Ok(json) => json,
         Err(GhError::Failed(message))
             if message.contains("no pull requests found")
@@ -982,6 +983,7 @@ pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, Str
     Ok(Some((
         value["number"].as_u64().unwrap_or_default() as u32,
         text(&value["body"]),
+        text(&value["headRefOid"]),
     )))
 }
 

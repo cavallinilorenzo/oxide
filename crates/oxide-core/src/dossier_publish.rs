@@ -156,9 +156,10 @@ impl Core {
         project_id: u32,
         thread_id: u32,
         number: u32,
+        repository_url: &str,
         options: &DossierSectionOptions,
     ) -> Result<()> {
-        let key = dossier_options_key(project_id, thread_id, number);
+        let key = dossier_options_key(project_id, thread_id, number, repository_url);
         let value = encode_options(options);
         let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
         db.execute(
@@ -209,7 +210,7 @@ impl Core {
             Err(error) => return DossierUpdate::failed(None, error.to_string()),
         };
         let found = github::current_pull_request_body(&self.gh, &cwd);
-        let (number, body, head) = match found {
+        let (number, body, head, repository_url) = match found {
             Ok(Some(found)) => found,
             Ok(None) => return DossierUpdate::no_pull_request(),
             Err(error) => return DossierUpdate::failed(None, error.to_string()),
@@ -220,7 +221,15 @@ impl Core {
                 "GitHub did not report the pull request's head commit; the Dossier was not updated.",
             );
         }
-        match self.republish_section(project_id, thread_id, number, &body, &head, false) {
+        match self.republish_section(
+            project_id,
+            thread_id,
+            number,
+            &body,
+            &head,
+            &repository_url,
+            false,
+        ) {
             Ok(update) => update,
             Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
         }
@@ -235,7 +244,8 @@ impl Core {
         number: u32,
     ) -> Result<DossierUpdate> {
         let cwd = self.git_target(project_id, Some(thread_id))?.root;
-        let (body, head) = github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        let (body, head, repository_url) =
+            github::pull_request_body_and_head(&self.gh, &cwd, number)?;
         if head.is_empty() {
             return Err(Error::Github(
                 "GitHub did not report the pull request's head commit; the Dossier was not refreshed."
@@ -251,7 +261,15 @@ impl Core {
                     .into(),
             ));
         }
-        let update = self.republish_section(project_id, thread_id, number, &body, &head, true)?;
+        let update = self.republish_section(
+            project_id,
+            thread_id,
+            number,
+            &body,
+            &head,
+            &repository_url,
+            true,
+        )?;
         if update.state == DossierUpdateState::NoSection {
             return Err(Error::Github(
                 "This pull request has no Dossier section; a removed section is not re-added."
@@ -269,6 +287,7 @@ impl Core {
         number: u32,
         body: &str,
         expected_head: &str,
+        repository_url: &str,
         explicit_refresh: bool,
     ) -> Result<DossierUpdate> {
         match markers(body) {
@@ -305,7 +324,8 @@ impl Core {
                     .into(),
             ));
         }
-        let saved_options = self.dossier_section_options(project_id, thread_id, number)?;
+        let saved_options =
+            self.dossier_section_options(project_id, thread_id, number, repository_url)?;
         if saved_options.is_none() && !explicit_refresh {
             return Err(Error::Github(
                 "This device has no saved Dossier opt-in for this pull request. Refresh the section manually once to enable future updates."
@@ -323,7 +343,7 @@ impl Core {
         if explicit_refresh && saved_options.is_none() {
             // The user explicitly refreshed this section. Save the safe defaults locally so
             // future pushes may update it without trusting editable PR-body metadata.
-            self.remember_dossier_options(project_id, thread_id, number, &options)?;
+            self.remember_dossier_options(project_id, thread_id, number, repository_url, &options)?;
         }
         if rendered_section == current {
             return Ok(DossierUpdate::up_to_date(number));
@@ -338,8 +358,14 @@ impl Core {
         // Dossier was computed is preserved. Refuse to overwrite a concurrently changed section
         // or a branch that moved on GitHub. GitHub has no conditional body update, so a final race
         // remains between this read and `gh pr edit`.
-        let (latest_body, latest_head) =
+        let (latest_body, latest_head, latest_repository_url) =
             github::pull_request_body_and_head(&self.gh, &cwd, number)?;
+        if latest_repository_url != repository_url {
+            return Err(Error::Github(
+                "The pull request repository changed while the Dossier was being computed; refresh it again."
+                    .into(),
+            ));
+        }
         if expected_head != latest_head {
             return Err(Error::Github(
                 "The pull request moved while the Dossier was being computed; refresh it again."
@@ -373,8 +399,9 @@ impl Core {
         project_id: u32,
         thread_id: u32,
         number: u32,
+        repository_url: &str,
     ) -> Result<Option<DossierSectionOptions>> {
-        let key = dossier_options_key(project_id, thread_id, number);
+        let key = dossier_options_key(project_id, thread_id, number, repository_url);
         let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
         let recorded = db
             .query_row(
@@ -387,8 +414,13 @@ impl Core {
     }
 }
 
-fn dossier_options_key(project_id: u32, thread_id: u32, number: u32) -> String {
-    format!("dossier_options:{project_id}:{thread_id}:{number}")
+fn dossier_options_key(
+    project_id: u32,
+    thread_id: u32,
+    number: u32,
+    repository_url: &str,
+) -> String {
+    format!("dossier_options:{project_id}:{thread_id}:{number}:{repository_url}")
 }
 
 fn encode_options(options: &DossierSectionOptions) -> String {
@@ -693,6 +725,7 @@ const SECRET_FLAGS: &[&str] = &[
     "client-secret",
     "access-token",
     "auth-token",
+    "proxy-user",
     "bearer-token",
     "refresh-token",
     "id-token",
@@ -788,7 +821,10 @@ pub(crate) fn redact_command(command: &str) -> String {
             Some(word.to_string())
         } else if attached_env_split {
             Some(format!("{}{}", &bare[..2], REDACTED))
-        } else if previous == "-u" && word.contains(':') && !word.contains("//") {
+        } else if (previous.eq_ignore_ascii_case("-u") || previous.eq_ignore_ascii_case("-U"))
+            && word.contains(':')
+            && !word.contains("//")
+        {
             // `curl -u user:pass`; `git push -u origin` has no colon and stays.
             Some(replace_value(word))
         } else {
@@ -1100,6 +1136,22 @@ mod tests {
             (
                 "curl -u admin:hunter4 https://x.test",
                 "curl -u [REDACTED] https://x.test",
+            ),
+            (
+                "curl -U proxy:hunter4 https://x.test",
+                "curl -U [REDACTED] https://x.test",
+            ),
+            (
+                "curl -Uproxy:hunter4 https://x.test",
+                "curl -U[REDACTED] https://x.test",
+            ),
+            (
+                "curl --proxy-user proxy:hunter4 https://x.test",
+                "curl --proxy-user [REDACTED] https://x.test",
+            ),
+            (
+                "curl --proxy-user=proxy:hunter4 https://x.test",
+                "curl --proxy-user=[REDACTED] https://x.test",
             ),
             (
                 r#"sh -c 'curl -H "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789" https://x.test'"#,

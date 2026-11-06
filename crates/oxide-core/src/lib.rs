@@ -2139,7 +2139,13 @@ impl Core {
         if let (Some(thread_id), Some(options)) = (thread_id, input.dossier_options.as_ref())
             && input.dossier_section.is_some()
         {
-            self.remember_dossier_options(project_id, thread_id, pull_request.number, options)
+            self.remember_dossier_options(
+                project_id,
+                thread_id,
+                pull_request.number,
+                &pull_request.url,
+                options,
+            )
                 .map_err(|error| {
                     Error::Github(format!(
                         "Pull request #{} was created, but Oxide could not save its Dossier disclosure choices; later updates will use the safe defaults. {error}",

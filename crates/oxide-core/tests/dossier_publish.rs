@@ -651,7 +651,16 @@ fn an_unrecognized_dossier_needs_an_explicit_refresh_before_auto_updates() {
     let id = thread_with_turn(&f, "go", &[], "done");
     let (number, before) = create_with_section(&f, id, "Fixes it.");
     let db = rusqlite::Connection::open(f._tmp.path().join("home/oxide.db")).unwrap();
-    let key = format!("dossier_options:{}:{id}:{number}", f.project_id);
+    let repository_url = f
+        .core
+        .pull_request_detail(f.project_id, number)
+        .unwrap()
+        .pull_request
+        .url;
+    let key = format!(
+        "dossier_options:{}:{id}:{number}:{repository_url}",
+        f.project_id
+    );
     db.execute("DELETE FROM app_state WHERE key = ?1", [&key])
         .unwrap();
     commit_change(&f, "b.txt");
@@ -679,6 +688,59 @@ fn an_unrecognized_dossier_needs_an_explicit_refresh_before_auto_updates() {
     commit_change(&f, "c.txt");
     let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
     assert_eq!(outcome.dossier.unwrap().state, DossierUpdateState::Updated);
+}
+
+#[test]
+fn dossier_consent_does_not_carry_to_a_different_pull_request_repository() {
+    let f = fixture(Some("PRIVATE"));
+    let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
+    let options = DossierSectionOptions {
+        include_prompts: true,
+        include_agent_message: false,
+    };
+    let section = f
+        .core
+        .dossier_pull_request_section(f.project_id, id, &options)
+        .unwrap();
+    let pr = f
+        .core
+        .create_pull_request_in(
+            f.project_id,
+            Some(id),
+            &PullRequestInput {
+                title: "T".into(),
+                body: "Fixes it.".into(),
+                base: "main".into(),
+                draft: false,
+                dossier_section: Some(section.markdown),
+                dossier_options: Some(options),
+                dossier_head_sha: Some(section.head_sha),
+            },
+        )
+        .unwrap();
+    let before = published_body(&f, pr.number);
+    let mut state = gh_state(&f);
+    for found in state["prs"].as_object_mut().unwrap().values_mut() {
+        if found["number"] == pr.number {
+            found["url"] = format!("https://github.com/other/repo/pull/{}", pr.number).into();
+        }
+    }
+    set_gh_state(&f, &state);
+    commit_change(&f, "b.txt");
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    let update = outcome.dossier.unwrap();
+    assert_eq!(update.state, DossierUpdateState::Failed);
+    assert!(
+        update
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no saved Dossier opt-in"),
+        "{update:?}"
+    );
+    assert_eq!(published_body(&f, pr.number), before);
 }
 
 #[test]
@@ -747,7 +809,10 @@ fn deleting_a_thread_also_deletes_its_dossier_disclosure_choices() {
         )
         .unwrap();
     let db = rusqlite::Connection::open(f._tmp.path().join("home/oxide.db")).unwrap();
-    let key = format!("dossier_options:{}:{id}:{}", f.project_id, pr.number);
+    let key = format!(
+        "dossier_options:{}:{id}:{}:{}",
+        f.project_id, pr.number, pr.url
+    );
     let saved: String = db
         .query_row(
             "SELECT value FROM app_state WHERE key = ?1",

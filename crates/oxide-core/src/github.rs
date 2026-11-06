@@ -979,11 +979,14 @@ pub fn pull_request_url(gh: &Gh, cwd: &Path) -> Result<String> {
 /// The body of the branch's open pull request, when it has one. A repository with no GitHub remote
 /// has no published Dossier to update; failures to use GitHub are errors so the push can report
 /// that the Dossier could not be updated.
-pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, String, String)>> {
+pub fn current_pull_request_body(
+    gh: &Gh,
+    cwd: &Path,
+) -> Result<Option<(u32, String, String, String)>> {
     gh.require_ready(cwd)?;
     let json = match gh.run(
         cwd,
-        &["pr", "view", "--json", "number,body,state,headRefOid"],
+        &["pr", "view", "--json", "number,body,state,headRefOid,url"],
     ) {
         Ok(json) => json,
         Err(GhError::Failed(message))
@@ -999,15 +1002,26 @@ pub fn current_pull_request_body(gh: &Gh, cwd: &Path) -> Result<Option<(u32, Str
     if value["state"].as_str() != Some("OPEN") {
         return Ok(None);
     }
+    let url = text(&value["url"]);
+    if !url.starts_with("https://") {
+        return Err(Error::Github(
+            "GitHub did not report a valid pull request URL.".into(),
+        ));
+    }
     Ok(Some((
         value["number"].as_u64().unwrap_or_default() as u32,
         text(&value["body"]),
         text(&value["headRefOid"]),
+        url,
     )))
 }
 
 /// One pull request's body and the commit its head points at.
-pub fn pull_request_body_and_head(gh: &Gh, cwd: &Path, number: u32) -> Result<(String, String)> {
+pub fn pull_request_body_and_head(
+    gh: &Gh,
+    cwd: &Path,
+    number: u32,
+) -> Result<(String, String, String)> {
     gh.require_ready(cwd)?;
     let json = gh.run(
         cwd,
@@ -1016,11 +1030,17 @@ pub fn pull_request_body_and_head(gh: &Gh, cwd: &Path, number: u32) -> Result<(S
             "view",
             &number.to_string(),
             "--json",
-            "body,headRefOid",
+            "body,headRefOid,url",
         ],
     )?;
     let value = parse(&json)?;
-    Ok((text(&value["body"]), text(&value["headRefOid"])))
+    let url = text(&value["url"]);
+    if !url.starts_with("https://") {
+        return Err(Error::Github(
+            "GitHub did not report a valid pull request URL.".into(),
+        ));
+    }
+    Ok((text(&value["body"]), text(&value["headRefOid"]), url))
 }
 
 /// Replaces a pull request's body, leaving its other fields alone.

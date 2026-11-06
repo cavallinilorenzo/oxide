@@ -606,6 +606,42 @@ fn a_body_edit_cannot_opt_in_to_publishing_prompts_or_claims() {
 }
 
 #[test]
+fn an_unrecognized_dossier_needs_an_explicit_refresh_before_auto_updates() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    let (number, before) = create_with_section(&f, id, "Fixes it.");
+    let db = rusqlite::Connection::open(f._tmp.path().join("home/oxide.db")).unwrap();
+    let key = format!("dossier_options:{}:{id}:{number}", f.project_id);
+    db.execute("DELETE FROM app_state WHERE key = ?1", [&key])
+        .unwrap();
+    commit_change(&f, "b.txt");
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    let update = outcome.dossier.unwrap();
+    assert_eq!(update.state, DossierUpdateState::Failed);
+    assert!(
+        update
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no saved Dossier opt-in"),
+        "{update:?}"
+    );
+    assert_eq!(published_body(&f, number), before);
+
+    f.core
+        .refresh_published_dossier(f.project_id, id, number)
+        .unwrap();
+    let refreshed = published_body(&f, number);
+    assert_ne!(refreshed, before);
+
+    commit_change(&f, "c.txt");
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+    assert_eq!(outcome.dossier.unwrap().state, DossierUpdateState::Updated);
+}
+
+#[test]
 fn editing_the_dossier_preview_cannot_override_explicit_disclosure_choices() {
     let f = fixture(Some("PRIVATE"));
     let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");

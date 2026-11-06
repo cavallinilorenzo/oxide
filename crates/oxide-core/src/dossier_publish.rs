@@ -208,7 +208,7 @@ impl Core {
                 "GitHub did not report the pull request's head commit; the Dossier was not updated.",
             );
         }
-        match self.republish_section(project_id, thread_id, number, &body, &head) {
+        match self.republish_section(project_id, thread_id, number, &body, &head, false) {
             Ok(update) => update,
             Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
         }
@@ -239,7 +239,7 @@ impl Core {
                     .into(),
             ));
         }
-        let update = self.republish_section(project_id, thread_id, number, &body, &head)?;
+        let update = self.republish_section(project_id, thread_id, number, &body, &head, true)?;
         if update.state == DossierUpdateState::NoSection {
             return Err(Error::Github(
                 "This pull request has no Dossier section; a removed section is not re-added."
@@ -257,6 +257,7 @@ impl Core {
         number: u32,
         body: &str,
         expected_head: &str,
+        explicit_refresh: bool,
     ) -> Result<DossierUpdate> {
         match markers(body) {
             Markers::None => return Ok(DossierUpdate::no_section(number)),
@@ -292,13 +293,25 @@ impl Core {
                     .into(),
             ));
         }
-        let options = self.dossier_section_options(project_id, thread_id, number)?;
+        let saved_options = self.dossier_section_options(project_id, thread_id, number)?;
+        if saved_options.is_none() && !explicit_refresh {
+            return Err(Error::Github(
+                "This device has no saved Dossier opt-in for this pull request. Refresh the section manually once to enable future updates."
+                    .into(),
+            ));
+        }
+        let options = saved_options.unwrap_or_default();
         let rendered_section =
             render_section(&self.branch_dossier(thread_id)?, &options, Some(&head));
         if git::head(&cwd).as_deref() != Some(head.as_str()) {
             return Err(Error::Github(
                 "The checkout moved while the Dossier was being computed; refresh it again.".into(),
             ));
+        }
+        if explicit_refresh && saved_options.is_none() {
+            // The user explicitly refreshed this section. Save the safe defaults locally so
+            // future pushes may update it without trusting editable PR-body metadata.
+            self.remember_dossier_options(project_id, thread_id, number, &options)?;
         }
         if rendered_section == current {
             return Ok(DossierUpdate::up_to_date(number));
@@ -348,7 +361,7 @@ impl Core {
         project_id: u32,
         thread_id: u32,
         number: u32,
-    ) -> Result<DossierSectionOptions> {
+    ) -> Result<Option<DossierSectionOptions>> {
         let key = dossier_options_key(project_id, thread_id, number);
         let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
         let recorded = db
@@ -358,7 +371,7 @@ impl Core {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        Ok(recorded.as_deref().map(decode_options).unwrap_or_default())
+        Ok(recorded.as_deref().map(decode_options))
     }
 }
 
@@ -708,6 +721,9 @@ pub(crate) fn redact_command(command: &str) -> String {
     let mut previous = "";
     let mut program = String::new();
     let mut docker_login = false;
+    let mut docker_seen = false;
+    let mut password_cli = false;
+    let mut shell_command = false;
     let mut rest = command;
     while !rest.is_empty() {
         let space_len = rest.len() - rest.trim_start().len();
@@ -722,17 +738,34 @@ pub(crate) fn redact_command(command: &str) -> String {
         let bare = word.trim_matches(|c| matches!(c, '"' | '\''));
         if program.is_empty() {
             program = bare.to_ascii_lowercase();
-        } else if program == "docker" && bare.eq_ignore_ascii_case("login") {
+        }
+        if bare.eq_ignore_ascii_case("docker") {
+            docker_seen = true;
+        } else if docker_seen && bare.eq_ignore_ascii_case("login") {
             docker_login = true;
         }
-        let separated_password = bare.eq_ignore_ascii_case("-p")
-            && (docker_login || ["mysql", "mariadb", "mongosh"].contains(&program.as_str()));
+        password_cli |=
+            ["mysql", "mariadb", "mongosh"].contains(&bare.to_ascii_lowercase().as_str());
+        shell_command |= is_shell_program(bare);
+        let separated_password = bare.eq_ignore_ascii_case("-p") && (docker_login || password_cli);
+        let attached_password = bare.to_ascii_lowercase().starts_with("-p")
+            && bare.len() > 2
+            && (docker_login || password_cli);
+        let shell_code_option = shell_command && is_shell_code_option(bare);
+        if shell_code_option {
+            shell_command = false;
+        }
         let redacted = if redact_next {
             redact_next = false;
             Some(replace_value(word))
         } else if separated_password {
             redact_next = true;
             None
+        } else if attached_password {
+            Some(format!("-p{REDACTED}"))
+        } else if shell_code_option {
+            redact_next = true;
+            Some(word.to_string())
         } else if previous == "-u" && word.contains(':') && !word.contains("//") {
             // `curl -u user:pass`; `git push -u origin` has no colon and stays.
             Some(replace_value(word))
@@ -743,6 +776,20 @@ pub(crate) fn redact_command(command: &str) -> String {
         previous = word;
     }
     out
+}
+
+fn is_shell_program(word: &str) -> bool {
+    let name = word.rsplit('/').next().unwrap_or(word).to_ascii_lowercase();
+    ["sh", "bash", "zsh", "dash", "fish", "ksh", "ash"].contains(&name.as_str())
+}
+
+fn is_shell_code_option(word: &str) -> bool {
+    let option = word.to_ascii_lowercase();
+    option == "--command"
+        || (option.starts_with('-')
+            && !option.starts_with("--")
+            && option[1..].chars().all(|ch| ch.is_ascii_alphabetic())
+            && option[1..].contains('c'))
 }
 
 /// Where the shell word at the start of `text` ends: whitespace outside quotes.
@@ -791,6 +838,12 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
         *redact_next = true;
         return None;
     }
+    if (bare.starts_with('{') || bare.starts_with('['))
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(bare)
+        && json_has_secret_key(&value)
+    {
+        return Some(replace_value(word));
+    }
     // `Authorization: Bearer x`, `X-Api-Key: x`, `"password": "x"` inside one quoted word.
     if let Some((name, value)) = bare.split_once(':')
         && !value.starts_with("//")
@@ -817,11 +870,6 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
                         None
                     }
                 };
-            }
-        } else if bare.len() > 2 && bare.starts_with("-p") && !bare.starts_with("-p=") {
-            // `-phunter2`: a short flag with its value glued on, as `mysql` takes a password.
-            if !bare[2..].contains(['/', '.']) && bare[2..].chars().any(|c| c.is_ascii_digit()) {
-                return Some(format!("-p{REDACTED}"));
             }
         }
     }
@@ -866,6 +914,16 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
         }
     }
     looks_secret(bare).then(|| replace_value(word))
+}
+
+fn json_has_secret_key(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .any(|(name, value)| is_secret_name(name) || json_has_secret_key(value)),
+        serde_json::Value::Array(values) => values.iter().any(json_has_secret_key),
+        _ => false,
+    }
 }
 
 /// Whether a header, query or JSON key names a secret.
@@ -1015,28 +1073,35 @@ mod tests {
                 "curl -u [REDACTED] https://x.test",
             ),
             (
+                r#"sh -c 'curl -H "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789" https://x.test'"#,
+                "sh -c '[REDACTED]'",
+            ),
+            (
                 "curl https://x.test/a?access_token=abc&page=2",
                 "curl https://x.test/a?access_token=[REDACTED]&page=2",
             ),
             (
                 r#"curl -d '{"password":"x y"}' u"#,
-                "curl -d '{\"password\": [REDACTED]' u",
+                "curl -d '[REDACTED]' u",
             ),
             (
                 r#"curl --data '{"password":"x y"}' u"#,
                 "curl --data '[REDACTED]' u",
             ),
             ("mysql -phunter2 db", "mysql -p[REDACTED] db"),
+            ("mysql -psecret db", "mysql -p[REDACTED] db"),
             ("docker login -p s3cr3t", "docker login -p [REDACTED]"),
+            ("docker login -p=s3cr3t", "docker login -p[REDACTED]"),
             ("tool --api_key abc", "tool --api_key [REDACTED]"),
             ("tool --api-token abc123", "tool --api-token [REDACTED]"),
             (
                 "tool --bearer-token abc123",
                 "tool --bearer-token [REDACTED]",
             ),
+            (r#"tool '{"refreshToken":"abc123"}'"#, "tool '[REDACTED]'"),
             (
-                r#"tool '{"refreshToken":"abc123"}'"#,
-                r#"tool '{"refreshToken": [REDACTED]'"#,
+                r#"tool '{"name":"build", "accessToken":"abc123"}'"#,
+                "tool '[REDACTED]'",
             ),
         ];
         for (input, expected) in cases {

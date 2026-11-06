@@ -213,6 +213,8 @@ export const commands = {
 	fetchProject: (projectId: number) => typedError<boolean, AppError>(__TAURI_INVOKE("fetch_project", { projectId })),
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId, threadId })),
+	/**  Fast-forwards a Thread checkout only if it is still on the pull request's branch. */
+	pullPullRequestBranch: (projectId: number, threadId: number, expectedBranch: string) => typedError<null, AppError>(__TAURI_INVOKE("pull_pull_request_branch", { projectId, threadId, expectedBranch })),
 	/**  Commits exactly the given files; other staged state is untouched. */
 	commit: (projectId: number, threadId: number | null, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, threadId, paths, message })),
 	/**

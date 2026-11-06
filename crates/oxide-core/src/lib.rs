@@ -1936,6 +1936,25 @@ impl Core {
         self.switch_branch(project_id, thread_id, git::pull)
     }
 
+    /// Fast-forwards a Thread checkout only if it is still on the pull request's branch.
+    pub fn pull_thread_branch(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        expected_branch: &str,
+    ) -> Result<()> {
+        self.switch_branch(project_id, Some(thread_id), |cwd| {
+            let actual = git::status(cwd)?.branch;
+            if actual.as_deref() != Some(expected_branch) {
+                return Err(Error::Git(format!(
+                    "This Thread's checkout is on `{}` rather than the pull request branch `{expected_branch}`; check out the pull request branch before pulling.",
+                    actual.as_deref().unwrap_or("detached HEAD")
+                )));
+            }
+            git::pull(cwd)
+        })
+    }
+
     /// Commits exactly the given files of the main checkout with `message`,
     /// leaving other staged state alone.
     pub fn commit(&self, project_id: u32, paths: &[String], message: &str) -> Result<()> {
@@ -2061,8 +2080,19 @@ impl Core {
                 dossier_publish::MAX_BODY_CHARS
             )));
         }
-        self.git
-            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))
+        let pull_request = self
+            .git
+            .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))?;
+        if let (Some(thread_id), Some(section)) = (thread_id, input.dossier_section.as_deref()) {
+            self.remember_dossier_options(project_id, thread_id, pull_request.number, section)
+                .map_err(|error| {
+                    Error::Github(format!(
+                        "Pull request #{} was created, but Oxide could not save its Dossier disclosure choices; later updates will use the safe defaults. {error}",
+                        pull_request.number
+                    ))
+                })?;
+        }
+        Ok(pull_request)
     }
 
     /// Availability of GitHub CLI for issues, and guidance if missing/logged out.

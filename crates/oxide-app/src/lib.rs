@@ -2407,6 +2407,21 @@ async fn pull(
     git_blocking(&core, move |core| core.pull_in(project_id, thread_id)).await
 }
 
+/// Fast-forwards a Thread checkout only if it is still on the pull request's branch.
+#[tauri::command]
+#[specta::specta]
+async fn pull_pull_request_branch(
+    core: State<'_, Arc<Core>>,
+    project_id: u32,
+    thread_id: u32,
+    expected_branch: String,
+) -> Result<(), AppError> {
+    git_blocking(&core, move |core| {
+        core.pull_thread_branch(project_id, thread_id, &expected_branch)
+    })
+    .await
+}
+
 /// Commits exactly the given files; other staged state is untouched.
 #[tauri::command]
 #[specta::specta]
@@ -4189,6 +4204,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         create_branch,
         fetch_project,
         pull,
+        pull_pull_request_branch,
         commit,
         push,
         pull_request_state,

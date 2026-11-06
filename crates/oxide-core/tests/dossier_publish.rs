@@ -500,8 +500,9 @@ fn create_with_section(f: &Fixture, id: u32, body: &str) -> (u32, String) {
         .unwrap();
     let pr = f
         .core
-        .create_pull_request(
+        .create_pull_request_in(
             f.project_id,
+            Some(id),
             &PullRequestInput {
                 title: "T".into(),
                 body: body.into(),
@@ -560,8 +561,9 @@ fn a_push_keeps_the_options_the_section_was_published_with() {
         .unwrap();
     let pr = f
         .core
-        .create_pull_request(
+        .create_pull_request_in(
             f.project_id,
+            Some(id),
             &PullRequestInput {
                 title: "T".into(),
                 body: "Fixes it.".into(),
@@ -573,6 +575,8 @@ fn a_push_keeps_the_options_the_section_was_published_with() {
         .unwrap();
 
     let before = published_body(&f, pr.number);
+    let tampered = before.replace("prompts=true,message=false", "prompts=false,message=true");
+    set_published_body(&f, pr.number, &tampered);
     commit_change(&f, "b.txt");
     let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
 
@@ -580,6 +584,23 @@ fn a_push_keeps_the_options_the_section_was_published_with() {
     let after = published_body(&f, pr.number);
     assert_ne!(section_of(&after), section_of(&before));
     assert!(after.contains("PROMPT-TEXT"), "{after}");
+    assert!(!after.contains("CLAIM-TEXT"), "{after}");
+}
+
+#[test]
+fn a_body_edit_cannot_opt_in_to_publishing_prompts_or_claims() {
+    let f = fixture(Some("PRIVATE"));
+    let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
+    let (number, before) = create_with_section(&f, id, "Fixes it.");
+    let tampered = before.replace("prompts=false,message=false", "prompts=true,message=true");
+    set_published_body(&f, number, &tampered);
+    commit_change(&f, "b.txt");
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    assert_eq!(outcome.dossier.unwrap().state, DossierUpdateState::Updated);
+    let after = published_body(&f, number);
+    assert!(!after.contains("PROMPT-TEXT"), "{after}");
     assert!(!after.contains("CLAIM-TEXT"), "{after}");
 }
 
@@ -821,7 +842,9 @@ fn a_refresh_can_follow_a_fast_forward_pull_of_an_outside_push() {
     git(&f.work, &["push", "-q", "origin", "HEAD"]);
     git(&f.work, &["reset", "-q", "--hard", "HEAD~1"]);
 
-    f.core.pull_in(f.project_id, Some(id)).unwrap();
+    f.core
+        .pull_thread_branch(f.project_id, id, "feature")
+        .unwrap();
     f.core
         .refresh_published_dossier(f.project_id, id, number)
         .unwrap();
@@ -833,6 +856,28 @@ fn a_refresh_can_follow_a_fast_forward_pull_of_an_outside_push() {
         "{}",
         detail.body
     );
+}
+
+#[test]
+fn pull_for_refresh_refuses_a_thread_checkout_on_another_branch() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    create_with_section(&f, id, "Fixes it.");
+    git(&f.work, &["checkout", "-q", "-b", "other", "main"]);
+    let before = git_output(&f.work, &["rev-parse", "HEAD"]);
+
+    let error = f
+        .core
+        .pull_thread_branch(f.project_id, id, "feature")
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("rather than the pull request branch"),
+        "{error}"
+    );
+    assert_eq!(git_output(&f.work, &["branch", "--show-current"]), "other");
+    assert_eq!(git_output(&f.work, &["rev-parse", "HEAD"]), before);
 }
 
 #[test]

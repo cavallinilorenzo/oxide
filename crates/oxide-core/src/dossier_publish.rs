@@ -9,6 +9,7 @@
 //! The section is delimited by HTML comment markers; publishing replaces a previous section
 //! instead of stacking a second one.
 
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::dossier::{VerificationDossier, VerificationState};
@@ -22,7 +23,8 @@ pub const SECTION_END: &str = "<!-- oxide:dossier:end -->";
 /// Records the branch commit a published section describes, so an update can tell whether the
 /// section still matches the pull request's head.
 const COMMIT_PREFIX: &str = "<!-- oxide:dossier:commit:";
-/// Records the options the author published with, so an update regenerates the same section.
+/// Echoes the disclosure choices in the published section; refresh authority is stored locally,
+/// never read back from this collaborator-editable PR body.
 const OPTIONS_PREFIX: &str = "<!-- oxide:dossier:options:";
 
 const REDACTED: &str = "[REDACTED]";
@@ -145,6 +147,27 @@ impl DossierUpdate {
 }
 
 impl Core {
+    /// Remembers the author's explicit disclosure choices locally. PR-body comments are editable
+    /// by collaborators and must never be treated as authority to publish Thread prompts.
+    pub(crate) fn remember_dossier_options(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+        section: &str,
+    ) -> Result<()> {
+        let options = section_options(section);
+        let key = dossier_options_key(project_id, thread_id, number);
+        let value = encode_options(&options);
+        let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
+        db.execute(
+            "INSERT INTO app_state (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// The Dossier section for the pull request about to be opened from a Thread's branch,
     /// computed now and not stored.
     pub fn dossier_pull_request_section(
@@ -270,11 +293,9 @@ impl Core {
                     .into(),
             ));
         }
-        let rendered_section = render_section(
-            &self.branch_dossier(thread_id)?,
-            &section_options(body),
-            Some(&head),
-        );
+        let options = self.dossier_section_options(project_id, thread_id, number)?;
+        let rendered_section =
+            render_section(&self.branch_dossier(thread_id)?, &options, Some(&head));
         if git::head(&cwd).as_deref() != Some(head.as_str()) {
             return Err(Error::Github(
                 "The checkout moved while the Dossier was being computed; refresh it again.".into(),
@@ -322,6 +343,35 @@ impl Core {
         github::edit_pull_request_body(&self.gh, &cwd, number, &updated)?;
         Ok(DossierUpdate::updated(number))
     }
+
+    fn dossier_section_options(
+        &self,
+        project_id: u32,
+        thread_id: u32,
+        number: u32,
+    ) -> Result<DossierSectionOptions> {
+        let key = dossier_options_key(project_id, thread_id, number);
+        let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
+        let recorded = db
+            .query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [&key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(recorded.as_deref().map(decode_options).unwrap_or_default())
+    }
+}
+
+fn dossier_options_key(project_id: u32, thread_id: u32, number: u32) -> String {
+    format!("dossier_options:{project_id}:{thread_id}:{number}")
+}
+
+fn encode_options(options: &DossierSectionOptions) -> String {
+    format!(
+        "prompts={},message={}",
+        options.include_prompts, options.include_agent_message
+    )
 }
 
 /// `body` with `section` as its one Dossier section: a previous section is replaced, and an
@@ -421,13 +471,19 @@ pub(crate) fn section_state(body: &str, head: &str) -> DossierSectionState {
     }
 }
 
-/// The options the published section was rendered with; everything off when it recorded none.
-/// A section published before the options were recorded falls back to the safe default.
+/// Reads options from the locally generated section at the moment the author publishes it.
 fn section_options(body: &str) -> DossierSectionOptions {
-    let mut options = DossierSectionOptions::default();
-    let Some(recorded) = section(body).and_then(|s| metadata(s, OPTIONS_PREFIX)) else {
-        return options;
+    let Some(section) = section(body) else {
+        return DossierSectionOptions::default();
     };
+    metadata(section, OPTIONS_PREFIX)
+        .map(decode_options)
+        .unwrap_or_default()
+}
+
+/// A saved consent record, or the safe default if it is missing or malformed.
+fn decode_options(recorded: &str) -> DossierSectionOptions {
+    let mut options = DossierSectionOptions::default();
     for pair in recorded.split(',') {
         match pair.split_once('=') {
             Some(("prompts", "true")) => options.include_prompts = true,
@@ -445,8 +501,8 @@ fn metadata<'a>(body: &'a str, prefix: &str) -> Option<&'a str> {
     Some(&body[start..end])
 }
 
-/// The delimited Markdown of a Dossier. It records the commit and the options it was rendered
-/// for, so a later update regenerates the same section and can tell whether it is still current.
+/// The delimited Markdown of a Dossier. It records the commit and echoes the disclosure choices;
+/// local app state is authoritative for those choices during later updates.
 pub(crate) fn render_section(
     dossier: &VerificationDossier,
     options: &DossierSectionOptions,
@@ -1022,6 +1078,15 @@ mod tests {
             section_state(&twice, head),
             DossierSectionState::OutOfDate,
             "a second section must not be reported as up to date"
+        );
+
+        let dangling = format!(
+            "{SECTION_START}\n{COMMIT_PREFIX}{head} -->\nfirst\n{SECTION_END}\n\n{SECTION_START}\nunfinished"
+        );
+        assert_eq!(
+            section_state(&dangling, head),
+            DossierSectionState::OutOfDate,
+            "a dangling second marker must not be reported as up to date"
         );
 
         // Metadata outside the section cannot claim the section's commit.

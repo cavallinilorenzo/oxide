@@ -454,10 +454,10 @@ export function PullRequestReview({
     change("dossier", () => commands.refreshPullRequestDossier(projectId, owner, number));
   const pullAndRefreshDossier = (owner: number) =>
     change("dossier", async () => {
-      const pulled = await commands.pull(projectId, owner);
-      return pulled.status === "error"
-        ? pulled
-        : commands.refreshPullRequestDossier(projectId, owner, number);
+      const pulled = await commands.pullPullRequestBranch(projectId, owner, pr.head);
+      if (pulled.status === "error") return pulled;
+      onChanged();
+      return commands.refreshPullRequestDossier(projectId, owner, number);
     });
   const setDraft = (draft: boolean) => change("ready", () => commands.setPullRequestDraft(projectId, number, draft));
   const edit = (partial: Partial<PullRequestEdit>) =>

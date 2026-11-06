@@ -2415,9 +2415,10 @@ async fn pull_pull_request_branch(
     project_id: u32,
     thread_id: u32,
     expected_branch: String,
+    expected_head: String,
 ) -> Result<(), AppError> {
     git_blocking(&core, move |core| {
-        core.pull_thread_branch(project_id, thread_id, &expected_branch)
+        core.pull_thread_branch(project_id, thread_id, &expected_branch, &expected_head)
     })
     .await
 }
@@ -2731,6 +2732,9 @@ pub struct NewPullRequest {
     pub draft: bool,
     /// The previewed Dossier section to publish in the body; `None` leaves the body as written.
     pub dossier_section: Option<String>,
+    /// Explicit local consent, independent of edits to the Dossier preview.
+    pub dossier_include_prompts: bool,
+    pub dossier_include_agent_message: bool,
 }
 
 /// Who can read the repository a pull request is opened in.
@@ -2867,6 +2871,10 @@ async fn create_pull_request(
                 base: pull_request.base,
                 draft: pull_request.draft,
                 dossier_section: pull_request.dossier_section,
+                dossier_options: Some(oxide_core::DossierSectionOptions {
+                    include_prompts: pull_request.dossier_include_prompts,
+                    include_agent_message: pull_request.dossier_include_agent_message,
+                }),
             },
         )
     })

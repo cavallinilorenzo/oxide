@@ -264,6 +264,7 @@ fn create(f: &Fixture, body: &str, section: Option<String>) -> String {
                 base: "main".into(),
                 draft: false,
                 dossier_section: section,
+                dossier_options: None,
             },
         )
         .unwrap();
@@ -457,6 +458,7 @@ fn a_description_over_githubs_limit_is_refused_before_the_branch_is_pushed() {
                 base: "main".into(),
                 draft: false,
                 dossier_section: Some("facts".into()),
+                dossier_options: None,
             },
         )
         .unwrap_err()
@@ -509,6 +511,7 @@ fn create_with_section(f: &Fixture, id: u32, body: &str) -> (u32, String) {
                 base: "main".into(),
                 draft: false,
                 dossier_section: Some(section.markdown),
+                dossier_options: Some(DossierSectionOptions::default()),
             },
         )
         .unwrap();
@@ -548,16 +551,13 @@ fn a_push_from_oxide_updates_only_the_text_between_the_markers() {
 fn a_push_keeps_the_options_the_section_was_published_with() {
     let f = fixture(Some("PRIVATE"));
     let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
+    let options = DossierSectionOptions {
+        include_prompts: true,
+        include_agent_message: false,
+    };
     let section = f
         .core
-        .dossier_pull_request_section(
-            f.project_id,
-            id,
-            &DossierSectionOptions {
-                include_prompts: true,
-                include_agent_message: false,
-            },
-        )
+        .dossier_pull_request_section(f.project_id, id, &options)
         .unwrap();
     let pr = f
         .core
@@ -570,6 +570,7 @@ fn a_push_keeps_the_options_the_section_was_published_with() {
                 base: "main".into(),
                 draft: false,
                 dossier_section: Some(section.markdown),
+                dossier_options: Some(options),
             },
         )
         .unwrap();
@@ -602,6 +603,92 @@ fn a_body_edit_cannot_opt_in_to_publishing_prompts_or_claims() {
     let after = published_body(&f, number);
     assert!(!after.contains("PROMPT-TEXT"), "{after}");
     assert!(!after.contains("CLAIM-TEXT"), "{after}");
+}
+
+#[test]
+fn editing_the_dossier_preview_cannot_override_explicit_disclosure_choices() {
+    let f = fixture(Some("PRIVATE"));
+    let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
+    let section = f
+        .core
+        .dossier_pull_request_section(f.project_id, id, &DossierSectionOptions::default())
+        .unwrap();
+    let edited = section
+        .markdown
+        .replace("prompts=false,message=false", "prompts=true,message=true");
+    let pr = f
+        .core
+        .create_pull_request_in(
+            f.project_id,
+            Some(id),
+            &PullRequestInput {
+                title: "T".into(),
+                body: "Fixes it.".into(),
+                base: "main".into(),
+                draft: false,
+                dossier_section: Some(edited),
+                dossier_options: Some(DossierSectionOptions::default()),
+            },
+        )
+        .unwrap();
+    commit_change(&f, "b.txt");
+
+    let outcome = f.core.push_in(f.project_id, Some(id), false).unwrap();
+
+    assert_eq!(outcome.dossier.unwrap().state, DossierUpdateState::Updated);
+    let after = published_body(&f, pr.number);
+    assert!(!after.contains("PROMPT-TEXT"), "{after}");
+    assert!(!after.contains("CLAIM-TEXT"), "{after}");
+}
+
+#[test]
+fn deleting_a_thread_also_deletes_its_dossier_disclosure_choices() {
+    let f = fixture(Some("PRIVATE"));
+    let id = thread_with_turn(&f, "PROMPT-TEXT", &[], "CLAIM-TEXT");
+    let options = DossierSectionOptions {
+        include_prompts: true,
+        include_agent_message: false,
+    };
+    let section = f
+        .core
+        .dossier_pull_request_section(f.project_id, id, &options)
+        .unwrap();
+    let pr = f
+        .core
+        .create_pull_request_in(
+            f.project_id,
+            Some(id),
+            &PullRequestInput {
+                title: "T".into(),
+                body: "Fixes it.".into(),
+                base: "main".into(),
+                draft: false,
+                dossier_section: Some(section.markdown),
+                dossier_options: Some(options),
+            },
+        )
+        .unwrap();
+    let db = rusqlite::Connection::open(f._tmp.path().join("home/oxide.db")).unwrap();
+    let key = format!("dossier_options:{}:{id}:{}", f.project_id, pr.number);
+    let saved: String = db
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            [&key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved, "prompts=true,message=false");
+
+    f.core.delete_thread(id, true).unwrap();
+
+    let remaining: u32 = db
+        .query_row(
+            "SELECT COUNT(*) FROM app_state WHERE key GLOB ?1",
+            [format!("dossier_options:{}:{id}:*", f.project_id)],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0);
 }
 
 #[test]
@@ -841,9 +928,17 @@ fn a_refresh_can_follow_a_fast_forward_pull_of_an_outside_push() {
     commit_change(&f, "b.txt");
     git(&f.work, &["push", "-q", "origin", "HEAD"]);
     git(&f.work, &["reset", "-q", "--hard", "HEAD~1"]);
+    let remote = f
+        .work
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("remote.git");
+    let expected_head = git_output(&remote, &["rev-parse", "refs/heads/feature"]);
 
     f.core
-        .pull_thread_branch(f.project_id, id, "feature")
+        .pull_thread_branch(f.project_id, id, "feature", &expected_head)
         .unwrap();
     f.core
         .refresh_published_dossier(f.project_id, id, number)
@@ -865,10 +960,11 @@ fn pull_for_refresh_refuses_a_thread_checkout_on_another_branch() {
     create_with_section(&f, id, "Fixes it.");
     git(&f.work, &["checkout", "-q", "-b", "other", "main"]);
     let before = git_output(&f.work, &["rev-parse", "HEAD"]);
+    let expected_head = before.clone();
 
     let error = f
         .core
-        .pull_thread_branch(f.project_id, id, "feature")
+        .pull_thread_branch(f.project_id, id, "feature", &expected_head)
         .unwrap_err()
         .to_string();
 
@@ -877,6 +973,31 @@ fn pull_for_refresh_refuses_a_thread_checkout_on_another_branch() {
         "{error}"
     );
     assert_eq!(git_output(&f.work, &["branch", "--show-current"]), "other");
+    assert_eq!(git_output(&f.work, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn pull_for_refresh_refuses_an_upstream_that_is_not_the_pr_branch() {
+    let f = fixture(Some("PUBLIC"));
+    let id = thread_with_turn(&f, "go", &[], "done");
+    create_with_section(&f, id, "Fixes it.");
+    git(&f.work, &["config", "branch.feature.remote", "origin"]);
+    git(
+        &f.work,
+        &["config", "branch.feature.merge", "refs/heads/main"],
+    );
+    let before = git_output(&f.work, &["rev-parse", "HEAD"]);
+
+    let error = f
+        .core
+        .pull_thread_branch(f.project_id, id, "feature", &before)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("not tracking the pull request branch"),
+        "{error}"
+    );
     assert_eq!(git_output(&f.work, &["rev-parse", "HEAD"]), before);
 }
 

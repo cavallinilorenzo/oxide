@@ -454,7 +454,12 @@ export function PullRequestReview({
     change("dossier", () => commands.refreshPullRequestDossier(projectId, owner, number));
   const pullAndRefreshDossier = (owner: number) =>
     change("dossier", async () => {
-      const pulled = await commands.pullPullRequestBranch(projectId, owner, pr.head);
+      const pulled = await commands.pullPullRequestBranch(
+        projectId,
+        owner,
+        pr.head,
+        detail.headSha,
+      );
       if (pulled.status === "error") return pulled;
       onChanged();
       return commands.refreshPullRequestDossier(projectId, owner, number);

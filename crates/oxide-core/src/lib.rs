@@ -802,6 +802,10 @@ impl Core {
                 [thread_id],
             )?;
             tx.execute("DELETE FROM restores WHERE thread_id = ?1", [thread_id])?;
+            tx.execute(
+                "DELETE FROM app_state WHERE key GLOB ?1",
+                [format!("dossier_options:{project_id}:{thread_id}:*")],
+            )?;
             tx.execute("DELETE FROM turns WHERE thread_id = ?1", [thread_id])?;
             tx.execute(
                 "UPDATE threads SET continued_from = NULL WHERE continued_from = ?1",
@@ -1942,6 +1946,7 @@ impl Core {
         project_id: u32,
         thread_id: u32,
         expected_branch: &str,
+        expected_head: &str,
     ) -> Result<()> {
         self.switch_branch(project_id, Some(thread_id), |cwd| {
             let actual = git::status(cwd)?.branch;
@@ -1951,7 +1956,46 @@ impl Core {
                     actual.as_deref().unwrap_or("detached HEAD")
                 )));
             }
-            git::pull(cwd)
+            if expected_head.is_empty()
+                || !expected_head.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(Error::Git(
+                    "GitHub did not report a valid pull request head commit.".into(),
+                ));
+            }
+            let remote = git::run(
+                cwd,
+                &["config", "--get", &format!("branch.{expected_branch}.remote")],
+            )?
+            .trim()
+            .to_string();
+            let merge_ref = git::run(
+                cwd,
+                &["config", "--get", &format!("branch.{expected_branch}.merge")],
+            )?
+            .trim()
+            .to_string();
+            let expected_merge_ref = format!("refs/heads/{expected_branch}");
+            if remote == "." || merge_ref != expected_merge_ref {
+                return Err(Error::Git(format!(
+                    "This checkout is not tracking the pull request branch `{expected_branch}`."
+                )));
+            }
+            git::run(cwd, &["fetch", "--no-tags", &remote, &merge_ref])?;
+            let fetched = git::run(cwd, &["rev-parse", "--verify", "FETCH_HEAD^{commit}"])?;
+            if fetched.trim() != expected_head {
+                return Err(Error::Git(
+                    "The configured upstream does not match the pull request's current head; no checkout changes were made."
+                        .into(),
+                ));
+            }
+            git::run(cwd, &["merge", "--ff-only", "--no-edit", expected_head])?;
+            if git::head(cwd).as_deref() != Some(expected_head) {
+                return Err(Error::Git(
+                    "The checkout did not fast-forward to the pull request's current head.".into(),
+                ));
+            }
+            Ok(())
         })
     }
 
@@ -2083,8 +2127,10 @@ impl Core {
         let pull_request = self
             .git
             .mutate(&cwd, || github::create_pull_request(&self.gh, &cwd, &input))?;
-        if let (Some(thread_id), Some(section)) = (thread_id, input.dossier_section.as_deref()) {
-            self.remember_dossier_options(project_id, thread_id, pull_request.number, section)
+        if let (Some(thread_id), Some(options)) = (thread_id, input.dossier_options.as_ref())
+            && input.dossier_section.is_some()
+        {
+            self.remember_dossier_options(project_id, thread_id, pull_request.number, options)
                 .map_err(|error| {
                     Error::Github(format!(
                         "Pull request #{} was created, but Oxide could not save its Dossier disclosure choices; later updates will use the safe defaults. {error}",

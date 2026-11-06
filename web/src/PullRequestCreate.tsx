@@ -153,6 +153,8 @@ export function PullRequestCreate({
         draft,
         dossierSection:
           publishing && section && dossierText.trim() ? dossierText : null,
+        dossierIncludePrompts: includePrompts,
+        dossierIncludeAgentMessage: includeMessage,
       });
       if (result.status === "error") setError(result.error.message);
       else onCreated(result.data);

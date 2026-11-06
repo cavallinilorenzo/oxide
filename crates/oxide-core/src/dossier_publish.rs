@@ -154,11 +154,10 @@ impl Core {
         project_id: u32,
         thread_id: u32,
         number: u32,
-        section: &str,
+        options: &DossierSectionOptions,
     ) -> Result<()> {
-        let options = section_options(section);
         let key = dossier_options_key(project_id, thread_id, number);
-        let value = encode_options(&options);
+        let value = encode_options(options);
         let db = self.db.lock().unwrap_or_else(|error| error.into_inner());
         db.execute(
             "INSERT INTO app_state (key, value) VALUES (?1, ?2) \
@@ -440,13 +439,14 @@ pub(crate) fn section(body: &str) -> Option<&str> {
     Some(&body[start..end])
 }
 
-/// Whether `body` carries a second complete section after the first, such as a pasted copy.
+/// Whether any Dossier marker remains after the first complete section.
 fn has_extra_section(body: &str) -> bool {
     let Some(first) = section(body) else {
         return false;
     };
     let start = body.find(first).unwrap_or_default();
-    section(&body[start + first.len()..]).is_some()
+    let trailing = &body[start + first.len()..];
+    trailing.contains(SECTION_START) || trailing.contains(SECTION_END)
 }
 
 /// `body` with the marked range replaced by `section`, leaving every byte outside it alone.
@@ -469,16 +469,6 @@ pub(crate) fn section_state(body: &str, head: &str) -> DossierSectionState {
             _ => DossierSectionState::OutOfDate,
         },
     }
-}
-
-/// Reads options from the locally generated section at the moment the author publishes it.
-fn section_options(body: &str) -> DossierSectionOptions {
-    let Some(section) = section(body) else {
-        return DossierSectionOptions::default();
-    };
-    metadata(section, OPTIONS_PREFIX)
-        .map(decode_options)
-        .unwrap_or_default()
 }
 
 /// A saved consent record, or the safe default if it is missing or malformed.
@@ -667,6 +657,7 @@ const SECRET_FLAGS: &[&str] = &[
     "secret",
     "user",
     "api-key",
+    "api-token",
     "apikey",
     "auth",
     "authorization",
@@ -677,6 +668,9 @@ const SECRET_FLAGS: &[&str] = &[
     "client-secret",
     "access-token",
     "auth-token",
+    "bearer-token",
+    "refresh-token",
+    "id-token",
 ];
 
 /// Flags whose value is a request body or form, which can carry a secret anywhere inside.
@@ -1006,6 +1000,11 @@ mod tests {
             ),
             ("mysql -phunter2 db", "mysql -p[REDACTED] db"),
             ("tool --api_key abc", "tool --api_key [REDACTED]"),
+            ("tool --api-token abc123", "tool --api-token [REDACTED]"),
+            (
+                "tool --bearer-token abc123",
+                "tool --bearer-token [REDACTED]",
+            ),
         ];
         for (input, expected) in cases {
             assert_eq!(redact_command(input), expected, "{input}");
@@ -1115,9 +1114,10 @@ mod tests {
             section_state("no section", "abc123"),
             DossierSectionState::Missing
         );
-        assert_eq!(section_options(&section), options);
+        assert!(section.contains(&format!("{OPTIONS_PREFIX}prompts=true,message=false -->")));
+        assert_eq!(decode_options("prompts=true,message=false"), options);
         assert_eq!(
-            section_options("no options recorded"),
+            decode_options("malformed"),
             DossierSectionOptions::default()
         );
     }

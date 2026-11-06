@@ -2,6 +2,7 @@
 //! is whatever `gh` resolves from the checkout. Nothing here runs unless the
 //! user asked: there is no polling.
 
+use crate::dossier_publish::DossierSectionOptions;
 use crate::git;
 use crate::git_diff::{Diff, parse_patch};
 use crate::line_comments::{CommentSide, PullRequestLineComment};
@@ -331,6 +332,8 @@ pub struct PullRequestInput {
     pub draft: bool,
     /// The Dossier section the author chose to publish; `None` leaves the body as written.
     pub dossier_section: Option<String>,
+    /// The author's disclosure choices, separate from the editable section preview.
+    pub dossier_options: Option<DossierSectionOptions>,
 }
 
 /// One of the user's GitHub repositories, as offered for cloning.

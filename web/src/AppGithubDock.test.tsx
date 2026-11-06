@@ -261,7 +261,7 @@ it("can fast-forward the owning Thread checkout before refreshing the Dossier", 
   await click(byText("Fix the thing"));
   await click(byText("Pull & Refresh"));
   expect(called("pull_pull_request_branch")).toEqual([
-    { projectId: 1, threadId: 2, expectedBranch: "feat-alpha" },
+    { projectId: 1, threadId: 2, expectedBranch: "feat-alpha", expectedHead: "abc123" },
   ]);
   expect(called("refresh_pull_request_dossier")).toEqual([{ projectId: 1, threadId: 2, number: 5 }]);
   expect(calls.findIndex((call) => call.command === "pull_pull_request_branch")).toBeLessThan(

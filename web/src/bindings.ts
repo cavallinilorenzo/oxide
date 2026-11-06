@@ -214,7 +214,7 @@ export const commands = {
 	/**  `git pull --ff-only`. */
 	pull: (projectId: number, threadId: number | null) => typedError<null, AppError>(__TAURI_INVOKE("pull", { projectId, threadId })),
 	/**  Fast-forwards a Thread checkout only if it is still on the pull request's branch. */
-	pullPullRequestBranch: (projectId: number, threadId: number, expectedBranch: string) => typedError<null, AppError>(__TAURI_INVOKE("pull_pull_request_branch", { projectId, threadId, expectedBranch })),
+	pullPullRequestBranch: (projectId: number, threadId: number, expectedBranch: string, expectedHead: string) => typedError<null, AppError>(__TAURI_INVOKE("pull_pull_request_branch", { projectId, threadId, expectedBranch, expectedHead })),
 	/**  Commits exactly the given files; other staged state is untouched. */
 	commit: (projectId: number, threadId: number | null, paths: string[], message: string) => typedError<null, AppError>(__TAURI_INVOKE("commit", { projectId, threadId, paths, message })),
 	/**
@@ -1319,6 +1319,9 @@ export type NewPullRequest_Deserialize = {
 	draft: boolean,
 	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
 	dossierSection?: string | null,
+	/**  Explicit local consent, independent of edits to the Dossier preview. */
+	dossierIncludePrompts: boolean,
+	dossierIncludeAgentMessage: boolean,
 };
 
 /**  What the author chose for a new pull request. */
@@ -1329,6 +1332,9 @@ export type NewPullRequest_Serialize = {
 	draft: boolean,
 	/**  The previewed Dossier section to publish in the body; `None` leaves the body as written. */
 	dossierSection: string | null,
+	/**  Explicit local consent, independent of edits to the Dossier preview. */
+	dossierIncludePrompts: boolean,
+	dossierIncludeAgentMessage: boolean,
 };
 
 /**  An Approval the Provider is still waiting on. */

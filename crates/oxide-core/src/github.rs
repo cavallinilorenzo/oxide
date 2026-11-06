@@ -889,14 +889,18 @@ fn current_branch(cwd: &Path) -> Result<String> {
 pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Result<PullRequest> {
     gh.require_ready(cwd)?;
     let check_dossier_head = || -> Result<()> {
-        if input.dossier_section.is_some()
-            && let Some(expected) = input.dossier_head_sha.as_deref()
-            && git::head(cwd).as_deref() != Some(expected)
-        {
-            return Err(Error::Github(
-                "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
-                    .into(),
-            ));
+        if input.dossier_section.is_some() {
+            let expected = input.dossier_head_sha.as_deref().ok_or_else(|| {
+                Error::Github(
+                    "A published Dossier section must include the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                )
+            })?;
+            if git::head(cwd).as_deref() != Some(expected) {
+                return Err(Error::Github(
+                    "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
         }
         Ok(())
     };

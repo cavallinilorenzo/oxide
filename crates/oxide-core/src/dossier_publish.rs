@@ -508,6 +508,14 @@ pub(crate) fn section(body: &str) -> Option<&str> {
     Some(&body[start..end])
 }
 
+pub(crate) fn section_commit(markdown: &str) -> Option<&str> {
+    section(markdown).and_then(|section| metadata(section, COMMIT_PREFIX))
+}
+
+pub(crate) fn is_dossier_markdown(markdown: &str) -> bool {
+    section(markdown).is_some_and(|section| section.contains("## Verification Dossier"))
+}
+
 /// Whether any Dossier marker remains after the first complete section.
 fn has_extra_section(body: &str) -> bool {
     let Some(first) = section(body) else {

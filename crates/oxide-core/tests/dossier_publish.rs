@@ -254,6 +254,7 @@ fn thread_with_turn(f: &Fixture, prompt: &str, commands: &[&str], claim: &str) -
 }
 
 fn create(f: &Fixture, body: &str, section: Option<String>) -> String {
+    let head = git_output(&f.work, &["rev-parse", "HEAD"]);
     let pr = f
         .core
         .create_pull_request(
@@ -265,7 +266,7 @@ fn create(f: &Fixture, body: &str, section: Option<String>) -> String {
                 draft: false,
                 dossier_section: section,
                 dossier_options: None,
-                dossier_head_sha: None,
+                dossier_head_sha: Some(head),
             },
         )
         .unwrap();
@@ -460,7 +461,7 @@ fn a_description_over_githubs_limit_is_refused_before_the_branch_is_pushed() {
                 draft: false,
                 dossier_section: Some("facts".into()),
                 dossier_options: None,
-                dossier_head_sha: None,
+                dossier_head_sha: Some(git_output(&f.work, &["rev-parse", "HEAD"])),
             },
         )
         .unwrap_err()

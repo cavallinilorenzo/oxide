@@ -2103,14 +2103,31 @@ impl Core {
     ) -> Result<PullRequest> {
         let cwd = self.git_target(project_id, thread_id)?.root;
         let mut input = input.clone();
-        if thread_id.is_some()
-            && input.dossier_section.is_some()
-            && (input.dossier_options.is_none() || input.dossier_head_sha.is_none())
-        {
-            return Err(Error::Github(
-                "A Thread Dossier preview must include its explicit disclosure choices and base commit. Refresh the preview before creating the pull request."
-                    .into(),
-            ));
+        if let Some(section) = input.dossier_section.as_deref() {
+            let expected_head = input.dossier_head_sha.as_deref().ok_or_else(|| {
+                Error::Github(
+                    "A published Dossier section must include the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                )
+            })?;
+            if git::head(&cwd).as_deref() != Some(expected_head) {
+                return Err(Error::Github(
+                    "The branch moved after the Dossier preview. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
+            if dossier_publish::is_dossier_markdown(section)
+                && dossier_publish::section_commit(section) != Some(expected_head)
+            {
+                return Err(Error::Github(
+                    "The Dossier section does not match the commit its preview was computed from. Refresh the preview before creating the pull request.".into(),
+                ));
+            }
+            if thread_id.is_some() && input.dossier_options.is_none() {
+                return Err(Error::Github(
+                    "A Thread Dossier preview must include its explicit disclosure choices. Refresh the preview before creating the pull request."
+                        .into(),
+                ));
+            }
         }
         // A section from an earlier attempt goes first, so a `Closes` inside it cannot stand in
         // for the one this pull request needs.

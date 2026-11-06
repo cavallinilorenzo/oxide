@@ -106,6 +106,15 @@ pub enum DossierUpdateState {
     Failed,
 }
 
+struct RepublishTarget<'a> {
+    project_id: u32,
+    thread_id: u32,
+    number: u32,
+    expected_head: &'a str,
+    repository_url: &'a str,
+    explicit_refresh: bool,
+}
+
 impl DossierUpdate {
     fn updated(pull_request: u32) -> Self {
         Self {
@@ -222,13 +231,15 @@ impl Core {
             );
         }
         match self.republish_section(
-            project_id,
-            thread_id,
-            number,
+            RepublishTarget {
+                project_id,
+                thread_id,
+                number,
+                expected_head: &head,
+                repository_url: &repository_url,
+                explicit_refresh: false,
+            },
             &body,
-            &head,
-            &repository_url,
-            false,
         ) {
             Ok(update) => update,
             Err(error) => DossierUpdate::failed(Some(number), error.to_string()),
@@ -262,13 +273,15 @@ impl Core {
             ));
         }
         let update = self.republish_section(
-            project_id,
-            thread_id,
-            number,
+            RepublishTarget {
+                project_id,
+                thread_id,
+                number,
+                expected_head: &head,
+                repository_url: &repository_url,
+                explicit_refresh: true,
+            },
             &body,
-            &head,
-            &repository_url,
-            true,
         )?;
         if update.state == DossierUpdateState::NoSection {
             return Err(Error::Github(
@@ -280,16 +293,15 @@ impl Core {
     }
 
     /// The one update path: replace the marked range of `body` with a section computed now.
-    fn republish_section(
-        &self,
-        project_id: u32,
-        thread_id: u32,
-        number: u32,
-        body: &str,
-        expected_head: &str,
-        repository_url: &str,
-        explicit_refresh: bool,
-    ) -> Result<DossierUpdate> {
+    fn republish_section(&self, target: RepublishTarget<'_>, body: &str) -> Result<DossierUpdate> {
+        let RepublishTarget {
+            project_id,
+            thread_id,
+            number,
+            expected_head,
+            repository_url,
+            explicit_refresh,
+        } = target;
         match markers(body) {
             Markers::None => return Ok(DossierUpdate::no_section(number)),
             // A half-deleted pair leaves text that reads as a Dossier but is not one. Say so

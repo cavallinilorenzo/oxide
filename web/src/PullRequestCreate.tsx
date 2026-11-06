@@ -276,7 +276,10 @@ export function PullRequestCreate({
                       />
                       <p className="dim">
                         Editing or toggling an option above rewrites this
-                        preview. Clear it to publish nothing.
+                        preview. These choices persist for this pull request;
+                        opted-in prompts and closing messages from later Turns
+                        are included in future updates. Clear the preview to
+                        publish nothing.
                       </p>
                     </>
                   )}

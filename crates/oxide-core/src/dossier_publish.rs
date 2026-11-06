@@ -706,6 +706,8 @@ pub(crate) fn redact_command(command: &str) -> String {
     let mut out = String::new();
     let mut redact_next = false;
     let mut previous = "";
+    let mut program = String::new();
+    let mut docker_login = false;
     let mut rest = command;
     while !rest.is_empty() {
         let space_len = rest.len() - rest.trim_start().len();
@@ -717,9 +719,20 @@ pub(crate) fn redact_command(command: &str) -> String {
         let end = word_end(rest);
         let word = &rest[..end];
         rest = &rest[end..];
+        let bare = word.trim_matches(|c| matches!(c, '"' | '\''));
+        if program.is_empty() {
+            program = bare.to_ascii_lowercase();
+        } else if program == "docker" && bare.eq_ignore_ascii_case("login") {
+            docker_login = true;
+        }
+        let separated_password = bare.eq_ignore_ascii_case("-p")
+            && (docker_login || ["mysql", "mariadb", "mongosh"].contains(&program.as_str()));
         let redacted = if redact_next {
             redact_next = false;
             Some(replace_value(word))
+        } else if separated_password {
+            redact_next = true;
+            None
         } else if previous == "-u" && word.contains(':') && !word.contains("//") {
             // `curl -u user:pass`; `git push -u origin` has no colon and stays.
             Some(replace_value(word))
@@ -857,16 +870,31 @@ fn redact_word(word: &str, redact_next: &mut bool) -> Option<String> {
 
 /// Whether a header, query or JSON key names a secret.
 fn is_secret_name(name: &str) -> bool {
-    let name = name
-        .trim_matches(|c: char| matches!(c, '"' | '\'' | '{' | ' '))
-        .to_ascii_lowercase();
-    let words: Vec<&str> = name.split(['-', '_', ' ']).collect();
+    let raw = name.trim_matches(|c: char| matches!(c, '"' | '\'' | '{' | ' '));
+    let chars: Vec<char> = raw.chars().collect();
+    let mut normalized = String::with_capacity(raw.len());
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            let previous = chars[index - 1];
+            let next_is_lower = chars
+                .get(index + 1)
+                .is_some_and(|next| next.is_ascii_lowercase());
+            let boundary = previous.is_ascii_lowercase()
+                || previous.is_ascii_digit()
+                || (previous.is_ascii_uppercase() && next_is_lower);
+            if boundary && !normalized.ends_with(['-', '_', ' ']) {
+                normalized.push('-');
+            }
+        }
+        normalized.push(ch.to_ascii_lowercase());
+    }
+    let words: Vec<&str> = normalized.split(['-', '_', ' ']).collect();
     SECRET_WORDS
         .iter()
-        .any(|secret| name == *secret || words.contains(secret))
-        || name.contains("apikey")
-        || name.contains("api-key")
-        || name.contains("api_key")
+        .any(|secret| normalized == *secret || words.contains(secret))
+        || normalized.contains("apikey")
+        || normalized.contains("api-key")
+        || normalized.contains("api_key")
 }
 
 fn is_env_name(name: &str) -> bool {
@@ -999,11 +1027,16 @@ mod tests {
                 "curl --data '[REDACTED]' u",
             ),
             ("mysql -phunter2 db", "mysql -p[REDACTED] db"),
+            ("docker login -p s3cr3t", "docker login -p [REDACTED]"),
             ("tool --api_key abc", "tool --api_key [REDACTED]"),
             ("tool --api-token abc123", "tool --api-token [REDACTED]"),
             (
                 "tool --bearer-token abc123",
                 "tool --bearer-token [REDACTED]",
+            ),
+            (
+                r#"tool '{"refreshToken":"abc123"}'"#,
+                r#"tool '{"refreshToken": [REDACTED]'"#,
             ),
         ];
         for (input, expected) in cases {

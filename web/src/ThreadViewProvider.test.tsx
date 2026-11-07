@@ -55,7 +55,7 @@ function mockThreadCalls(onSubscribe: (command: string, args: unknown) => unknow
   });
 }
 
-const render = (threadId: number, initialProvider: string) => act(async () => root.render(
+const render = (threadId: number | null, initialProvider?: string) => act(async () => root.render(
   <ThreadView
     threadId={threadId}
     projectId={1}
@@ -84,6 +84,33 @@ it("renders a new Thread with the configured default Provider before its Transcr
   expect(host.textContent).not.toContain("Claude");
 
   await act(async () => finish(snapshot(8, "antigravity")));
+});
+
+it("starts a new Thread with no branding until Settings name the default Provider", async () => {
+  let finishSettings!: (value: unknown) => void;
+  mockIPC((command) => {
+    switch (command) {
+      // The Transcript never arrives while the test looks at the draft.
+      case "subscribe_thread": return new Promise(() => {});
+      case "get_settings": return new Promise((resolve) => { finishSettings = resolve; });
+      case "get_provider_capabilities": return { supportedPermissionModes: [], reportsUsageLimits: false, midThreadModelSwitch: true };
+      case "get_model_catalog": case "list_slash_commands": return [];
+      case "git_status": return { branch: "main", changedFiles: 0 };
+      default: return null;
+    }
+  });
+
+  await render(null);
+
+  // Settings still loading: no Provider is guessed, so no brand mark and no "Claude" anywhere.
+  expect(host.textContent).not.toContain("Claude");
+  expect(host.querySelector('.thread-avatar [aria-label="Claude Code"]')).toBeNull();
+
+  await act(async () => finishSettings({ settings: { defaultProvider: "antigravity", providers: {} }, errors: [] }));
+
+  expect(host.querySelector('.thread-avatar [aria-label="Antigravity"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="Model: antigravity"]')).not.toBeNull();
+  expect(host.textContent).not.toContain("Claude");
 });
 
 it("switches Provider branding immediately when another Thread is selected", async () => {

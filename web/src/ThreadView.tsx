@@ -228,7 +228,8 @@ export function ThreadView({
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   // Start from the known Thread Provider, not a Claude placeholder: settings only refine it later.
-  const [draftProvider, setDraftProvider] = useState<string>(() => initialProvider ?? "claude");
+  // Empty until Settings arrive: guessing a Provider would brand the draft with one the user never chose.
+  const [draftProvider, setDraftProvider] = useState<string>(() => initialProvider ?? "");
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const shortcuts = useShortcuts();
@@ -301,6 +302,7 @@ export function ThreadView({
     const generation = { active: true };
     slashGeneration.current = generation;
     setSlashCommands([]);
+    if (!slashProvider) return;
     void (async () => {
       const cached = await commands.listSlashCommands(slashProvider, projectId, threadId, false);
       if (!active) return;
@@ -808,6 +810,7 @@ export function ThreadView({
   }, [openPermissionsWhenReady, providerCaps]);
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
+    if (!currentProvider) return;
     let active = true;
     void commands.getModelCatalog(currentProvider, false).then((res) => {
       if (active && res.status === "ok") setCatalog({ provider: currentProvider, models: res.data });
@@ -826,6 +829,7 @@ export function ThreadView({
   const effortName = currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : null;
 
   useEffect(() => {
+    if (!currentProvider) return;
     let active = true;
     void commands.getProviderCapabilities(currentProvider).then((res) => {
       if (active && res.status === "ok") {
@@ -938,6 +942,7 @@ export function ThreadView({
 
   useEffect(() => {
     let active = true;
+    if (!currentProvider) return;
     if (currentProvider === "claude") {
       void commands.detectProvider("claude").then((res) => {
         if (active && res.status === "ok") {
@@ -1024,6 +1029,7 @@ export function ThreadView({
         if (!mode) setCommandError("Choose ask, auto-edit, or full.");
         else {
           const result = providerCaps ? null : await commands.getProviderCapabilities(currentProvider);
+          if (result?.status === "ok") setProviderCaps({ provider: currentProvider, caps: result.data });
           const supported = providerCaps?.supportedPermissionModes ?? (result?.status === "ok" ? result.data.supportedPermissionModes : null);
           if (!supported) setCommandError("Could not load permission modes for this Provider.");
           else if (!supported.includes(mode)) setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);

@@ -35,34 +35,34 @@ export function summarizeAttention(cards: CardsByProject): AttentionSummary {
   return sum;
 }
 
-/** What one Card asks of the user, or `null` when it is not waiting. */
-export function attentionItem(projectId: number, card: BoardCard): AttentionItem | null {
+/** What one Card asks of the user, or `null` when it is not waiting: its reason and where a jump goes. */
+export function attentionTargetOf(card: BoardCard): { reason: AttentionReason; kind: AttentionTarget["kind"] } | null {
   const { thread, pendingApprovals } = card;
-  let reason: AttentionReason;
-  let kind: AttentionTarget["kind"];
   if (thread.status === "needs-input") {
     const approval = pendingApprovals[0];
-    if (approval) {
-      reason = { kind: "approval", summary: approval.summary, approvalId: approval.approvalId };
-      kind = "approval";
-    } else {
-      reason = { kind: "needs-input" };
-      kind = "answer";
-    }
-  } else if (thread.status === "error" || thread.status === "interrupted") {
-    reason = { kind: thread.status };
-    kind = "recovery";
-  } else {
-    return null;
+    return approval
+      ? { reason: { kind: "approval", summary: approval.summary, approvalId: approval.approvalId }, kind: "approval" }
+      : { reason: { kind: "needs-input" }, kind: "answer" };
   }
-  const approvalId = reason.kind === "approval" ? reason.approvalId : null;
+  if (thread.status === "error" || thread.status === "interrupted") {
+    return { reason: { kind: thread.status }, kind: "recovery" };
+  }
+  return null;
+}
+
+/** What one Card asks of the user, as a tray item, or `null` when it is not waiting. */
+export function attentionItem(projectId: number, card: BoardCard): AttentionItem | null {
+  const { thread } = card;
+  const request = attentionTargetOf(card);
+  if (!request) return null;
+  const approvalId = request.reason.kind === "approval" ? request.reason.approvalId : null;
   return {
     projectId,
     threadId: thread.id,
     title: threadTitle(thread),
     branch: thread.branch ?? null,
-    reason,
-    target: { kind, projectId, threadId: thread.id, approvalId },
+    reason: request.reason,
+    target: { kind: request.kind, projectId, threadId: thread.id, approvalId },
   };
 }
 
@@ -93,16 +93,34 @@ export function attentionLabel(sum: AttentionSummary): string {
  * Core's pending Approval carries no request time, so Thread activity stands in for it.
  */
 export function attentionTarget(cards: CardsByProject, order: number[]): AttentionTarget | null {
-  const all = order.flatMap((projectId) => (cards[projectId] ?? []).map((card) => ({ projectId, card })));
-  const approvals = all.filter(({ card }) => card.pendingApprovals.length > 0 && card.thread.status === "needs-input")
+  const all = order.flatMap((projectId) => (cards[projectId] ?? []).flatMap((card) => {
+    const request = attentionTargetOf(card);
+    return request ? [{ projectId, card, request }] : [];
+  }));
+  const approvals = all.filter(({ request }) => request.kind === "approval")
     .sort((a, b) => a.card.thread.updatedAt.localeCompare(b.card.thread.updatedAt) || a.card.thread.id - b.card.thread.id);
   if (approvals[0]) {
-    const { projectId, card } = approvals[0];
-    return { kind: "approval", projectId, threadId: card.thread.id, approvalId: card.pendingApprovals[0].approvalId };
+    const { projectId, card, request } = approvals[0];
+    return {
+      kind: "approval",
+      projectId,
+      threadId: card.thread.id,
+      approvalId: request.reason.kind === "approval" ? request.reason.approvalId : null,
+    };
   }
-  for (const [kind, statuses] of [["answer", ["needs-input"]], ["recovery", ["error", "interrupted"]]] as const) {
-    const found = all.find(({ card }) => (statuses as readonly string[]).includes(card.thread.status));
+  for (const kind of ["answer", "recovery"] as const) {
+    const found = all.find(({ request }) => request.kind === kind);
     if (found) return { kind, projectId: found.projectId, threadId: found.card.thread.id, approvalId: null };
   }
   return null;
+}
+
+/** The tray label for a reason; it sits beside the reason's type in this module. */
+export function attentionReasonLabel(reason: AttentionReason): string {
+  switch (reason.kind) {
+    case "approval": return "Pending Approval";
+    case "needs-input": return "Needs Input";
+    case "error": return "Failed Turn";
+    case "interrupted": return "Interrupted";
+  }
 }

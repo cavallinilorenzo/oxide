@@ -30,7 +30,7 @@ import {
   TrashIcon,
 } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
-import { attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
+import { attentionGroups, attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
 import { AttentionButton } from "./AttentionButton";
 import { useAttention } from "./useAttention";
 import { useAttentionFocus } from "./useAttentionFocus";
@@ -52,7 +52,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
 import { displayPath, middleEllipsis, readablePath } from "./headerLines";
-import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
+import { actionForKey, adjacentThreadId, ATTENTION_SHORTCUT, formatAccelerator, matchesAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { createDefaultThread } from "./createDefaultThread";
@@ -138,6 +138,10 @@ export function App() {
   const [codeRequest, setCodeRequest] = useState<(CodeOpenRequest & { contextKey: string }) | null>(null);
   const codeSequence = useRef(0);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  // A New Thread request that reopened an empty Thread: the selection may not change, so
+  // ThreadView gets a one-shot request to focus the composer and show a cue.
+  const [newThreadFocus, setNewThreadFocus] = useState<{ threadId: number; id: number } | null>(null);
+  const newThreadFocusSequence = useRef(0);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   // The Project and Thread of the last session: `undefined` until read, `null` once applied.
@@ -165,6 +169,10 @@ export function App() {
   const openProjectIds = useMemo(() => sidebarProjects(projects ?? []).map((project) => project.id), [projects]);
   const attentionCards = useAttention(openProjectIds);
   const attention = summarizeAttention(attentionCards);
+  const attentionTray = useMemo(
+    () => attentionGroups(attentionCards, sidebarProjects(projects ?? []).map(({ id, name }) => ({ id, name }))),
+    [attentionCards, projects],
+  );
   // A requested jump: kept until its Thread is shown and the response focused, so loading or failure never drops it.
   const [attentionJump, setAttentionJump] = useState<{ target: AttentionTarget; failed: boolean } | null>(null);
   const pendingThread = useRef<number | null>(null);
@@ -459,9 +467,13 @@ export function App() {
       const r = counts[i];
       return r.status === "ok" && r.data.turnCount === 0;
     });
+    const askForComposerFocus = (threadId: number) =>
+      setNewThreadFocus({ threadId, id: ++newThreadFocusSequence.current });
     if (empty) {
       setShowBoard(false);
       setSelectedThreadId(empty.id);
+      // Reopening the Thread that is already open is visually a no-op: the request makes it felt.
+      askForComposerFocus(empty.id);
 
       return;
     }
@@ -471,13 +483,13 @@ export function App() {
       setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
+      askForComposerFocus(created.id);
 
     }
   }, [selected, threads, createThreadIn]);
 
-  /** Jumps to the Thread holding the most urgent request. Never answers or clears it. */
-  const jumpToAttention = () => {
-    const target = attentionTarget(attentionCards, openProjectIds);
+  /** Jumps to a Thread waiting on the user, by default the most urgent. Never answers or clears it. */
+  const jumpToAttention = useCallback((target: AttentionTarget | null = attentionTarget(attentionCards, openProjectIds)) => {
     if (!target) return;
     setShowSettings(false);
     setShowBoard(false);
@@ -491,7 +503,7 @@ export function App() {
       setSelectedThreadId(null);
     }
     setAttentionJump({ target, failed: false });
-  };
+  }, [attentionCards, openProjectIds, selectedId]);
 
   // Focus the response once its Thread is on screen; background updates never reach this.
   const jumpTarget = attentionJump && !attentionJump.failed ? attentionJump.target : null;
@@ -671,6 +683,13 @@ export function App() {
       }
 
       const action = actionForKey(e, shortcuts);
+      // The built-in attention shortcut goes straight to the most urgent request, without the tray.
+      // A user's own binding on the same keys wins.
+      if (!action && matchesAccelerator(e, ATTENTION_SHORTCUT)) {
+        e.preventDefault();
+        jumpToAttention();
+        return;
+      }
       // The Model picker belongs to the open Thread, which handles it.
       if (!action || action === "modelPicker") return;
       if (action === "newThread") {
@@ -750,7 +769,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread, jumpToAttention]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -862,7 +881,8 @@ export function App() {
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
-        <AttentionButton summary={attention} failed={attentionJump?.failed ?? false} onActivate={jumpToAttention}
+        <AttentionButton summary={attention} groups={attentionTray} failed={attentionJump?.failed ?? false}
+          onActivate={() => jumpToAttention()} onJump={jumpToAttention}
           onRetry={() => setAttentionJump((current) => current && { ...current, failed: false })} />
         {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
@@ -1068,6 +1088,9 @@ export function App() {
 
                   }}
                   transcriptRevision={transcriptRevision}
+                  initialProvider={selectedThread?.provider}
+                  newThreadFocus={newThreadFocus?.threadId === currentThreadId ? newThreadFocus : null}
+                  onNewThreadFocusHandled={() => setNewThreadFocus(null)}
                 />
               </DiffOpenContext.Provider>
             </main>

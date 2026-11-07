@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type PullRequestReviewThread, type RestoreChange } from "./bindings";
 import { DiffPanel } from "./DiffPanel";
-import { clearQueryCache } from "./queryCache";
+import { clearQueryCache, QUERY_STALE_MS } from "./queryCache";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -58,18 +58,26 @@ it("opens the selected Git patch in Code with the keyboard and removes the small
 });
 
 it("shows the last diff of the scope at once when coming back, then refreshes it", async () => {
-  await render();
-  expect(host.textContent).toContain("first.rs");
-  await act(() => root.unmount());
-  root = createRoot(host);
+  vi.useFakeTimers();
+  try {
+    await render();
+    expect(host.textContent).toContain("first.rs");
+    await act(() => root.unmount());
+    // Coming back more than the staleness threshold later: the cached patch shows while the
+    // scope is fetched again.
+    await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS + 1));
+    root = createRoot(host);
 
-  let resolve!: (r: Awaited<ReturnType<typeof commands.gitDiff>>) => void;
-  vi.mocked(commands.gitDiff).mockImplementation(() => new Promise((r) => (resolve = r)));
-  await render();
-  expect(host.textContent).toContain("first.rs");
-  expect(host.textContent).not.toContain("Loading…");
-  await act(async () => resolve({ status: "ok", data: diffOf("src/second.rs") } as never));
-  expect(host.textContent).toContain("second.rs");
+    let resolve!: (r: Awaited<ReturnType<typeof commands.gitDiff>>) => void;
+    vi.mocked(commands.gitDiff).mockImplementation(() => new Promise((r) => (resolve = r)));
+    await render();
+    expect(host.textContent).toContain("first.rs");
+    expect(host.textContent).not.toContain("Loading…");
+    await act(async () => resolve({ status: "ok", data: diffOf("src/second.rs") } as never));
+    expect(host.textContent).toContain("second.rs");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("remembers each scope's own diff", async () => {

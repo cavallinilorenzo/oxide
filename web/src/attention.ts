@@ -1,8 +1,24 @@
 import type { BoardCard } from "./bindings";
+import { threadTitle } from "./threadList";
 
 export type CardsByProject = Record<number, BoardCard[]>;
 export type AttentionSummary = { approvals: number; needsInput: number; error: number; interrupted: number; total: number };
 export type AttentionTarget = { kind: "approval" | "answer" | "recovery"; projectId: number; threadId: number; approvalId: string | null };
+export type AttentionReason =
+  | { kind: "approval"; summary: string; approvalId: string }
+  | { kind: "needs-input" }
+  | { kind: "error" }
+  | { kind: "interrupted" };
+/** One Thread waiting on the user, as the Attention Center tray shows it. */
+export type AttentionItem = {
+  projectId: number;
+  threadId: number;
+  title: string;
+  branch: string | null;
+  reason: AttentionReason;
+  target: AttentionTarget;
+};
+export type AttentionGroup = { projectId: number; projectName: string; items: AttentionItem[] };
 
 /** Counts Threads waiting on the user across Projects; `approvals` is the subset holding a pending Approval. */
 export function summarizeAttention(cards: CardsByProject): AttentionSummary {
@@ -17,6 +33,48 @@ export function summarizeAttention(cards: CardsByProject): AttentionSummary {
     }
   }
   return sum;
+}
+
+/** What one Card asks of the user, or `null` when it is not waiting. */
+export function attentionItem(projectId: number, card: BoardCard): AttentionItem | null {
+  const { thread, pendingApprovals } = card;
+  let reason: AttentionReason;
+  let kind: AttentionTarget["kind"];
+  if (thread.status === "needs-input") {
+    const approval = pendingApprovals[0];
+    if (approval) {
+      reason = { kind: "approval", summary: approval.summary, approvalId: approval.approvalId };
+      kind = "approval";
+    } else {
+      reason = { kind: "needs-input" };
+      kind = "answer";
+    }
+  } else if (thread.status === "error" || thread.status === "interrupted") {
+    reason = { kind: thread.status };
+    kind = "recovery";
+  } else {
+    return null;
+  }
+  const approvalId = reason.kind === "approval" ? reason.approvalId : null;
+  return {
+    projectId,
+    threadId: thread.id,
+    title: threadTitle(thread),
+    branch: thread.branch ?? null,
+    reason,
+    target: { kind, projectId, threadId: thread.id, approvalId },
+  };
+}
+
+/** The waiting Threads grouped by Project in sidebar order; Projects with nothing pending are omitted. */
+export function attentionGroups(cards: CardsByProject, projects: { id: number; name: string }[]): AttentionGroup[] {
+  return projects.flatMap(({ id, name }) => {
+    const items = (cards[id] ?? []).flatMap((card) => {
+      const item = attentionItem(id, card);
+      return item ? [item] : [];
+    });
+    return items.length > 0 ? [{ projectId: id, projectName: name, items }] : [];
+  });
 }
 
 export function attentionLabel(sum: AttentionSummary): string {

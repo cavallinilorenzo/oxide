@@ -32,7 +32,7 @@ import {
   type Thread,
 } from "./bindings";
 import { Avatar } from "./Avatar";
-import { invalidateQueries, updateQueries, useQuery, type QueryResult } from "./queryCache";
+import { getQueryData, invalidateQueries, setQueryData, updateQueries, useQuery, type QueryResult } from "./queryCache";
 import { RefreshNotice } from "./RefreshNotice";
 import { Checks } from "./PullRequestChecks";
 import { Markdown } from "./PullRequestMarkdown";
@@ -69,6 +69,13 @@ export function PullRequestStateIcon({ draft, size = 16 }: { draft: boolean; siz
   ) : (
     <GitPullRequestIcon size={size} className="pr-state-open" />
   );
+}
+
+/** Where the list's summary of a pull request is cached. The detail query has a different shape
+ *  (`PullRequestDetail` plus the checkout's Git status), so a summary is never written there:
+ *  the review reads this key for an instant hero and lets the detail fetch fill in the rest. */
+export function pullRequestPreviewKey(projectId: number, number: number): string {
+  return `p${projectId}:prs:preview:${number}`;
 }
 
 function Branches({ head, base }: { head: string; base: string }) {
@@ -122,6 +129,7 @@ export function PullRequestBrowser({ projectId, projectName, threadId, threads, 
   }, [outcome]);
 
   if (creating) return <PullRequestCreate projectId={projectId} threadId={threadId} onCancel={() => setCreating(false)} onCreated={(pr) => {
+    setQueryData(pullRequestPreviewKey(projectId, pr.number), pr);
     setCreating(false); setOpened(pr.number); onChanged();
   }} />;
 
@@ -201,7 +209,15 @@ export function PullRequestBrowser({ projectId, projectName, threadId, threads, 
           <ul className="pr-list" aria-label="Open pull requests">
             {list.data.map((pr) => (
               <li key={pr.number}>
-                <button className="pr-row" onClick={() => setOpened(pr.number)}>
+                <button
+                  className="pr-row"
+                  onClick={() => {
+                    // The list already knows this pull request's summary: hand it to the review
+                    // so the hero paints before the much slower detail call returns.
+                    setQueryData(pullRequestPreviewKey(projectId, pr.number), pr);
+                    setOpened(pr.number);
+                  }}
+                >
                   <PullRequestStateIcon draft={pr.draft} />
                   <span className="pr-row-body">
                     <span className="pr-row-title">{pr.title}</span>
@@ -321,17 +337,21 @@ export function PullRequestReview({
     if (result.status === "error") setError(result.error.message);
   }
 
-  const loadedPr = loaded.state === "ready" ? loaded.detail.pullRequest : null;
+  // What the repository list already told us, if this pull request came from there. It only has
+  // the summary fields, so it paints the hero while the detail query supplies checks, diff and
+  // comments; it is never written into the detail query's own key.
+  const preview = getQueryData<PullRequest>(pullRequestPreviewKey(projectId, number));
+  const shownPr = loaded.state === "ready" ? loaded.detail.pullRequest : (preview ?? null);
   const nav = (
     <div className="pr-nav">
       <button className="pr-back" onClick={() => onBack()}>
         <ArrowLeftIcon size={14} /> Pull requests
       </button>
       <span className="grow" />
-      {loadedPr && (
+      {shownPr && (
         <button
           className="pr-github"
-          onClick={() => void openLink(loadedPr.url)}
+          onClick={() => void openLink(shownPr.url)}
           title="Open this pull request on GitHub"
           aria-label="Open on GitHub"
         >
@@ -344,6 +364,7 @@ export function PullRequestReview({
     return (
       <div className="pr-review" aria-busy>
         {nav}
+        {preview && <PreviewHeader pr={preview} />}
         <Skeleton kind="detail" label="Loading pull request…" />
       </div>
     );
@@ -720,6 +741,29 @@ export function PullRequestReview({
         </footer>
       )}
     </div>
+  );
+}
+
+/** The header the list's summary can already paint: title, number, state, author and branches. */
+function PreviewHeader({ pr }: { pr: PullRequest }) {
+  return (
+    <header className="pr-hero">
+      <h3 className="pr-title">
+        {pr.title} <span className="pr-number">#{pr.number}</span>
+      </h3>
+      <div className="pr-hero-meta">
+        <span className={`pr-status ${pr.draft ? "draft" : "open"}`}>
+          <PullRequestStateIcon draft={pr.draft} size={14} />
+          {pr.draft ? "Draft" : "Open"}
+        </span>
+        <Avatar login={pr.author} size={20} />
+        <span className="pr-row-author">
+          <strong>{pr.author}</strong>
+          {pr.createdAt && <> opened {relativeTime(pr.createdAt)} ago</>}
+        </span>
+      </div>
+      <Branches head={pr.head} base={pr.base} />
+    </header>
   );
 }
 

@@ -233,6 +233,16 @@ it("opens the Model picker for /model without an argument", async () => {
   expect(container.querySelector('[role="dialog"][aria-label="Model Selector"]')).not.toBeNull();
 });
 
+it("opens the Model picker on the first Enter from the slash menu", async () => {
+  setupSlash();
+  await renderSlash("/model");
+  await flush();
+  expect(options()).toHaveLength(1);
+  await press("Enter");
+  await flush();
+  expect(container.querySelector('[role="dialog"][aria-label="Model Selector"]')).not.toBeNull();
+});
+
 it("resolves /model <name> against the active Provider's catalog", async () => {
   const calls = setupSlash();
   await renderSlash("/model sonnet");

@@ -43,12 +43,17 @@ function namesCommand(command: SlashCommand, typed: string): boolean {
  * What picking `command` from the menu does. A command that requires an argument is completed to
  * `/name ` so the argument can follow; Tab does the same for any command. Enter on one whose
  * argument is absent or optional runs it once its name (or alias) is typed, else completes the name.
+ *
+ * Oxide routes always handle an empty argument themselves (`/model` opens the picker, `/rename`
+ * starts renaming, `/permissions` opens its menu), so their catalog hint never forces a second
+ * Enter. Only passthrough/native commands may genuinely need one.
  */
 export function pickSlashCommand(
   command: SlashCommand,
   key: "Enter" | "Tab",
   typed: string,
 ): { insert: string } | { submit: true } {
-  if (key === "Tab" || slashArgumentRequired(command.argumentHint)) return { insert: `/${command.name} ` };
+  const needsArgument = command.route !== "oxide" && slashArgumentRequired(command.argumentHint);
+  if (key === "Tab" || needsArgument) return { insert: `/${command.name} ` };
   return namesCommand(command, typed) ? { submit: true } : { insert: `/${command.name}` };
 }

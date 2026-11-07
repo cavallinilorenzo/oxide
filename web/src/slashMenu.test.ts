@@ -61,6 +61,13 @@ describe("pickSlashCommand", () => {
       expect(pickSlashCommand(model, "Enter", "/mod")).toEqual({ insert: "/model" });
     }
   });
+  it("runs an Oxide command on the first Enter even when its catalog hint looks required", () => {
+    const model = { ...cmd("model", { argumentHint: "<model>" }), route: "oxide" as const };
+    expect(pickSlashCommand(model, "Enter", "/model")).toEqual({ submit: true });
+    expect(pickSlashCommand(model, "Enter", "/mod")).toEqual({ insert: "/model" });
+    const compact = { ...cmd("compact", { argumentHint: "<instructions>" }), route: "passthrough" as const };
+    expect(pickSlashCommand(compact, "Enter", "/compact")).toEqual({ insert: "/compact " });
+  });
   it("submits when the typed word is an alias of the highlighted command", () => {
     const clear = cmd("clear", { aliases: ["reset", "new"] });
     expect(pickSlashCommand(clear, "Enter", "/reset")).toEqual({ submit: true });

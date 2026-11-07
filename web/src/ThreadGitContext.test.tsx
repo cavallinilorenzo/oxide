@@ -81,13 +81,3 @@ it("sends the displayed Thread for branch actions even when the Project terminal
   const git = calls.filter((c) => ["git_status", "list_branches", "pull", "push", "commit", "checkout_branch", "create_branch"].includes(c.command));
   expect(git.every((c) => c.args.threadId === 3)).toBe(true);
 });
-
-it("has no Git target in the Board view and does not reuse the previous Thread's toolbar", async () => {
-  boot(3, () => status("oxide/feature-three", 2));
-  await act(async () => root.render(<App />));
-  await flush();
-  expect(container.querySelector(".git-header")).not.toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Thread Board of Project"]')!.click());
-  await flush();
-  expect(container.querySelector(".git-header")).toBeNull();
-});

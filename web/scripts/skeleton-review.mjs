@@ -110,7 +110,6 @@ try {
   await release("read_file");
   await hold(["subscribe_board"]);
   await page.getByRole("button", { name: "Board", exact: true }).click();
-  await capture("board-loading", "board");
   await release("subscribe_board");
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await hold(["list_branches"]);

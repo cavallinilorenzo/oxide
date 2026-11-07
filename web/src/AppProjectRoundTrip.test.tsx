@@ -22,7 +22,6 @@ vi.mock("./TerminalSurface", () => ({ TerminalSurface: () => <div className="ter
 vi.mock("./DiffPanel", () => ({ DiffPanel: () => <div className="diff-panel">Diff content</div> }));
 vi.mock("./PullRequestPanel", () => ({ PullRequestPanel: () => <div className="pr-panel">PR content</div> }));
 vi.mock("./IssuesSurface", () => ({ IssuesSurface: () => <div className="issues-surface">Issues content</div> }));
-vi.mock("./BoardView", () => ({ BoardView: ({ projectId }: { projectId: number }) => <main aria-label="Thread Board">Board {projectId}</main> }));
 vi.mock("./SettingsView", () => ({ SettingsView: ({ onClose }: { onClose: () => void }) => <div className="settings-view"><button onClick={onClose}>Close</button></div> }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
@@ -88,7 +87,7 @@ const press = (key: string, init: KeyboardEventInit = {}) =>
     window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
   });
 
-it("preserves selected Thread and dock state across Settings and Board round trips", async () => {
+it("preserves selected Thread and dock state across Settings round trips", async () => {
   await act(async () => root.render(<App />));
   await settle();
 
@@ -114,20 +113,6 @@ it("preserves selected Thread and dock state across Settings and Board round tri
   await press("Escape");
   await settle();
   expect(host.querySelector('.settings-view')).toBeNull();
-  expect(host.querySelector('[data-thread="11"]')).not.toBeNull();
-  expect(host.querySelector('#workspace-tools')?.hasAttribute("hidden")).toBe(false);
-  expect(host.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
-
-  // Open Board with Mod+B
-  await press("B", { ctrlKey: true });
-  await settle();
-  expect(host.querySelector('[aria-label="Thread Board"]')).not.toBeNull();
-  expect(host.querySelector('#workspace-tools')?.hasAttribute("hidden")).toBe(true);
-
-  // Close Board with Mod+B
-  await press("B", { ctrlKey: true });
-  await settle();
-  expect(host.querySelector('[aria-label="Thread Board"]')).toBeNull();
   expect(host.querySelector('[data-thread="11"]')).not.toBeNull();
   expect(host.querySelector('#workspace-tools')?.hasAttribute("hidden")).toBe(false);
   expect(host.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");

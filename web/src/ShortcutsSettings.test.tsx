@@ -9,9 +9,8 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const container = document.createElement("div");
 document.body.append(container);
 const root = createRoot(container);
-afterEach(async () => { await act(async () => root.render(null)); });
-
 const seen = { shortcuts: DEFAULT_SHORTCUTS as Shortcuts };
+afterEach(async () => { await act(async () => root.render(null)); seen.shortcuts = DEFAULT_SHORTCUTS; });
 function Harness() {
   const [shortcuts, setShortcuts] = useState<Shortcuts>(DEFAULT_SHORTCUTS);
   const change = (next: Shortcuts) => { seen.shortcuts = next; setShortcuts(next); };
@@ -35,6 +34,13 @@ it("records a new shortcut for an action, then resets it", async () => {
 
   act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Reset Terminal shortcut"]')!.click());
   expect(seen.shortcuts.terminal).toBe("Mod+Shift+T");
+});
+
+it("records keys even when the clicked button never took focus (macOS)", async () => {
+  await act(async () => root.render(<Harness />));
+  act(() => keyButton("Diff").click());
+  await press(document.body as unknown as HTMLButtonElement, { key: "y", code: "KeyY", metaKey: true });
+  expect(seen.shortcuts.diff).toBe("Mod+Y");
 });
 
 it("refuses a shortcut another action uses, and Esc cancels recording", async () => {

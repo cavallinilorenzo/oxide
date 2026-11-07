@@ -16,7 +16,7 @@ import {
 } from "@primer/octicons-react";
 import { commands, type AppError, type GitBranch, type GitStatus } from "./bindings";
 import { canCreateBranch, filterBranches } from "./branchFilter";
-import { createPrBlockedReason, nextAction, pushBlockedReason } from "./gitAction";
+import { AGENT_BUSY, createPrBlockedReason, nextAction, pushBlockedReason } from "./gitAction";
 import { usePushFlow } from "./usePushFlow";
 
 interface GitHeaderProps {
@@ -25,6 +25,8 @@ interface GitHeaderProps {
   threadId: number;
   /** Changes whenever a Thread's status does, so the picker lock stays current. */
   threadsKey: string;
+  /** The Thread's agent has not finished its Turn (working, or waiting on the user). */
+  agentBusy: boolean;
   onOpenDiff: () => void;
   onOpenPullRequest: () => void;
   /** Called after Git changed the checkout or its remote, so other views reload. */
@@ -40,7 +42,7 @@ export function GitHeader(props: GitHeaderProps) {
   return <GitHeaderBody key={`${props.projectId}:${props.threadId}`} {...props} />;
 }
 
-function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPullRequest, onChanged }: GitHeaderProps) {
+function GitHeaderBody({ projectId, threadId, threadsKey, agentBusy, onOpenDiff, onOpenPullRequest, onChanged }: GitHeaderProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -122,7 +124,7 @@ function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPull
       </div>
     ) : null;
   }
-  const action = nextAction(status);
+  const action = nextAction(status, agentBusy);
   const pushNow = () => push.start(() => null);
   const disabledReason = status.pickerDisabledReason ?? (busy ? "Working…" : null);
   const dirty = status.changedFiles > 0;
@@ -171,14 +173,14 @@ function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPull
           {busy ? <SyncIcon size={14} className="spin" /> : <RepoPullIcon size={14} />} Pull
         </button>
       )}
-      <div ref={actionsRef} className={`split-button${action.kind === "up-to-date" ? "" : " primary"}`}>
+      <div ref={actionsRef} className={`split-button${action.kind === "up-to-date" || action.kind === "busy" ? "" : " primary"}`}>
         <button
           className={`git-primary${busy || push.busy ? " pending" : ""}`}
-          disabled={busy || push.busy || action.kind === "up-to-date" || action.blockedReason !== null}
+          disabled={busy || push.busy || action.kind === "up-to-date" || action.kind === "busy" || action.blockedReason !== null}
           title={action.blockedReason ?? undefined}
           onClick={() => (action.kind === "commit-push" ? onOpenDiff() : void pushNow())}
         >
-          {busy || push.busy ? <SyncIcon size={14} className="spin" /> : action.kind === "up-to-date" ? <CheckIcon size={14} /> : action.kind === "commit-push" ? <GitCommitIcon size={14} /> : <RepoPushIcon size={14} />}
+          {busy || push.busy || action.kind === "busy" ? <SyncIcon size={14} className="spin" /> : action.kind === "up-to-date" ? <CheckIcon size={14} /> : action.kind === "commit-push" ? <GitCommitIcon size={14} /> : <RepoPushIcon size={14} />}
           {action.label.replace(/^✓\s*/, "")}
         </button>
         <button
@@ -198,21 +200,21 @@ function GitHeaderBody({ projectId, threadId, threadsKey, onOpenDiff, onOpenPull
               if (e.key === "Escape") setMenuOpen(false);
             }}
           >
-            <button role="menuitem" disabled={!dirty} onClick={() => (setMenuOpen(false), onOpenDiff())}>
+            <button role="menuitem" disabled={!dirty || agentBusy} onClick={() => (setMenuOpen(false), onOpenDiff())}>
               <GitCommitIcon size={14} /> Commit…
             </button>
             <button
               role="menuitem"
-              disabled={!(status.ahead > 0 || status.unpublished) || pushBlockedReason(status) !== null}
-              title={pushBlockedReason(status) ?? undefined}
+              disabled={agentBusy || !(status.ahead > 0 || status.unpublished) || pushBlockedReason(status) !== null}
+              title={agentBusy ? AGENT_BUSY : (pushBlockedReason(status) ?? undefined)}
               onClick={() => (setMenuOpen(false), void pushNow())}
             >
               <RepoPushIcon size={14} /> Push
             </button>
             <button
               role="menuitem"
-              disabled={createPrBlockedReason(status) !== null}
-              title={createPrBlockedReason(status) ?? undefined}
+              disabled={agentBusy || createPrBlockedReason(status) !== null}
+              title={agentBusy ? AGENT_BUSY : (createPrBlockedReason(status) ?? undefined)}
               onClick={() => (setMenuOpen(false), onOpenPullRequest())}
             >
               <GitPullRequestIcon size={14} /> Create PR

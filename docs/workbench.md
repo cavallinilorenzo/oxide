@@ -3,8 +3,7 @@
 The header's **Chat / Terminal / Code** control changes the central work area.
 Switching modes keeps open buffers and terminal processes alive. Ordinary Threads
 share their Project's checkout; Board Threads get their own editor and terminal
-in their worktree. Board remains available beside the mode switch and with Ctrl+B
-(⌘B on macOS).
+in their worktree.
 
 ## Terminal
 

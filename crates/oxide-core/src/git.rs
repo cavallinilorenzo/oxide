@@ -145,6 +145,28 @@ pub(crate) fn head(cwd: &Path) -> Option<String> {
         .filter(|sha| !sha.is_empty())
 }
 
+/// Whether HEAD holds a commit no remote-tracking branch has.
+fn has_unpushed_commits(cwd: &Path) -> bool {
+    run(cwd, &["rev-list", "--count", "HEAD", "--not", "--remotes"])
+        .ok()
+        .and_then(|n| n.trim().parse::<u32>().ok())
+        .is_none_or(|n| n > 0)
+}
+
+/// How many commits HEAD has beyond `base`, preferring its remote-tracking branch;
+/// `None` when neither exists locally, so the caller cannot tell.
+pub(crate) fn commits_beyond(cwd: &Path, base: &str) -> Option<u32> {
+    let remote = format!("origin/{base}");
+    let reference = [remote.as_str(), base]
+        .into_iter()
+        .find(|name| ref_exists(cwd, name))?;
+    run(cwd, &["rev-list", "--count", &format!("{reference}..HEAD")])
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
 pub(crate) fn ref_exists(cwd: &Path, name: &str) -> bool {
     succeeds(
         cwd,
@@ -218,7 +240,9 @@ pub fn status(cwd: &Path) -> Result<GitStatus> {
     status.unpublished = has_head
         && status.branch.is_some()
         && status.upstream.is_none()
-        && succeeds(cwd, &["config", "--get", "remote.origin.url"]);
+        && succeeds(cwd, &["config", "--get", "remote.origin.url"])
+        // A branch cut from main with no commit of its own has nothing to publish.
+        && has_unpushed_commits(cwd);
 
     let base = if has_head {
         "HEAD".to_string()

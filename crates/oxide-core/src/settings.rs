@@ -88,7 +88,6 @@ pub struct Shortcuts {
     pub next_thread: String,
     pub close_thread: String,
     pub toggle_tools: String,
-    pub toggle_board: String,
     pub open_settings: String,
     pub toggle_sidebar: String,
     pub maximize_surface: String,
@@ -111,7 +110,6 @@ impl Default for Shortcuts {
             next_thread: s("Mod+ArrowDown"),
             close_thread: s("Mod+Shift+W"),
             toggle_tools: s("Mod+\\"),
-            toggle_board: s("Mod+B"),
             open_settings: s("Mod+,"),
             toggle_sidebar: s("Mod+Shift+E"),
             maximize_surface: s("Mod+Shift+Enter"),
@@ -121,7 +119,7 @@ impl Default for Shortcuts {
 
 impl Shortcuts {
     /// Every shortcut as `(settings key, accelerator)`.
-    fn slots(&mut self) -> [(&'static str, &mut String); 17] {
+    fn slots(&mut self) -> [(&'static str, &mut String); 16] {
         [
             ("dictation", &mut self.dictation),
             ("newThread", &mut self.new_thread),
@@ -136,7 +134,6 @@ impl Shortcuts {
             ("nextThread", &mut self.next_thread),
             ("closeThread", &mut self.close_thread),
             ("toggleTools", &mut self.toggle_tools),
-            ("toggleBoard", &mut self.toggle_board),
             ("openSettings", &mut self.open_settings),
             ("toggleSidebar", &mut self.toggle_sidebar),
             ("maximizeSurface", &mut self.maximize_surface),
@@ -189,6 +186,8 @@ fn accelerator_problem(accelerator: &str) -> Option<String> {
 fn shortcuts(obj: Option<Map<String, Value>>, errors: &mut Vec<FieldError>) -> Shortcuts {
     let mut obj = obj.unwrap_or_default();
     let mut shortcuts = Shortcuts::default();
+    // The Thread Board is gone: a file saved while it existed still carries its shortcut.
+    obj.remove("toggleBoard");
     let in_file: Vec<String> = obj.keys().cloned().collect();
     for (key, slot) in shortcuts.slots() {
         let default = slot.clone();

@@ -18,7 +18,6 @@ import {
   GitPullRequestIcon,
   IssueOpenedIcon,
   PlusIcon,
-  ProjectIcon,
   RepoIcon,
   SearchIcon,
   TerminalIcon,
@@ -29,7 +28,6 @@ import {
   type Icon,
   TrashIcon,
 } from "@primer/octicons-react";
-import { BoardView } from "./BoardView";
 import { attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
 import { AttentionButton } from "./AttentionButton";
 import { useAttention } from "./useAttention";
@@ -54,7 +52,7 @@ import { useElementSize, usePanelSize } from "./usePanelSize";
 import { displayPath, middleEllipsis, readablePath } from "./headerLines";
 import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
-import { getDraft, setDraft } from "./threadDrafts";
+import { getDraft, isUnusedThread, setDraft } from "./threadDrafts";
 import { createDefaultThread } from "./createDefaultThread";
 import { filterThreads, relativeAge, sidebarProjects, threadTitle } from "./threadList";
 import { rovingTab } from "./editorTabs";
@@ -118,7 +116,6 @@ export function App() {
   const overlays = useRef<WorkspaceOverlaysHandle>(null);
   // A Project picked in the palette that should get a new Thread once its Threads have loaded.
   const pendingNewThread = useRef<number | null>(null);
-  const [showBoard, setShowBoard] = useState(false);
   const [createPrRequest, setCreatePrRequest] = useState(0);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const onProjectsScanned = useCallback((next: Project[]) => {
@@ -175,7 +172,7 @@ export function App() {
   /** Full-screen editing only makes sense with a file open in Files. */
   const canMaximize = activeTool === "Files" && workbenchContext !== null && filesOpen[workbenchContext.key] === true;
   const maximized = wantsMaximized && canMaximize;
-  const dockRequested = showTools && !showSettings && !showBoard;
+  const dockRequested = showTools && !showSettings;
   const layout = workspaceLayout(bodySize.width, bodySize.height, {
     sidebar: sidebarSize.preferred, tools: toolsSize.preferred, terminal: null,
   }, dockRequested, { sidebarVisible: showSidebar, priority: regionPriority, maximized });
@@ -195,7 +192,7 @@ export function App() {
   }
   const selectSurface = useCallback((name: string, explicit = true) => {
     setActiveTool(name);
-    setShowTools(true); setShowSettings(false); setShowBoard(false); setRegionPriority("tools");
+    setShowTools(true); setShowSettings(false); setRegionPriority("tools");
     // The first explicit visit opens the Project's first shell; later visits and Thread changes never spawn one.
     if (name === "Terminal" && explicit && workbenchContext) {
       setTerminals((previous) => (previous[workbenchContext.projectId]?.tabs.length ?? 0) > 0 ? previous : openTab(previous, workbenchContext.projectId, workbenchContext));
@@ -397,7 +394,6 @@ export function App() {
         if (currentProjectRef.current === projectId) {
           setSelectedThreadId(owner.id);
           setMaximized(false);
-          setShowBoard(false);
         }
       }
       return;
@@ -418,22 +414,20 @@ export function App() {
         setSelectedThreadId(thread.id);
 
         setMaximized(false);
-        setShowBoard(false);
       }
     }
   };
 
-  // Only one empty Thread (no Turn yet) at a time: asking for another reopens it.
+  // Only one unused Thread (no Turn, no draft, not working) at a time: asking for another reopens it.
   const startNewThread = useCallback(async () => {
     if (!selected) return;
     setMaximized(false);
     const counts = await Promise.all((threads ?? []).map((t) => commands.listTurns(t.id, 0, 1)));
-    const empty = threads?.find((_, i) => {
+    const empty = threads?.find((t, i) => {
       const r = counts[i];
-      return r.status === "ok" && r.data.turnCount === 0;
+      return r.status === "ok" && isUnusedThread(t, r.data.turnCount, drafts);
     });
     if (empty) {
-      setShowBoard(false);
       setSelectedThreadId(empty.id);
 
       return;
@@ -441,19 +435,17 @@ export function App() {
     const created = await createThreadIn(selected.id);
     if (created) {
       setMaximized(false);
-      setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
 
     }
-  }, [selected, threads, createThreadIn]);
+  }, [selected, threads, drafts, createThreadIn]);
 
   /** Jumps to the Thread holding the most urgent request. Never answers or clears it. */
   const jumpToAttention = () => {
     const target = attentionTarget(attentionCards, openProjectIds);
     if (!target) return;
     setShowSettings(false);
-    setShowBoard(false);
     setMaximized(false);
     if (target.projectId === selectedId) setSelectedThreadId(target.threadId);
     else {
@@ -472,7 +464,7 @@ export function App() {
   const onJumpFailed = useCallback(() => setAttentionJump((current) => current && { ...current, failed: true }), []);
   useAttentionFocus(
     jumpTarget,
-    jumpTarget !== null && selectedId === jumpTarget.projectId && currentThreadId === jumpTarget.threadId && !showBoard && !showSettings,
+    jumpTarget !== null && selectedId === jumpTarget.projectId && currentThreadId === jumpTarget.threadId && !showSettings,
     onJumpFocused, onJumpFailed,
   );
 
@@ -488,7 +480,6 @@ export function App() {
   const openProject = useCallback((project: Project) => {
     restore.current = null;
     setShowSettings(false);
-    setShowBoard(false);
     const opened = { ...project, open: true, hidden: false };
     setProjects((prev) => [opened, ...(prev?.filter((p) => p.id !== project.id) ?? [])]);
     if (project.id !== selectedId) {
@@ -559,9 +550,8 @@ export function App() {
       const centre = document.querySelector<HTMLElement>('.centre-column');
       if (centre && !centre.hidden) {
         const settings = centre.querySelector<HTMLElement>('.settings-view button, .settings-view input');
-        const board = centre.querySelector<HTMLElement>('.board-view button, .board-view [tabindex="0"]');
         const thread = centre.querySelector<HTMLElement>('.centre [role="textbox"], .centre textarea, .centre .empty-state button, .centre button');
-        (settings ?? board ?? thread)?.focus();
+        (settings ?? thread)?.focus();
       } else {
         const handle = document.querySelector<HTMLElement>('.thread-restore-handle, button[aria-label="Restore Thread"]');
         handle?.focus();
@@ -655,14 +645,13 @@ export function App() {
       }
       e.preventDefault();
       if (action === "closeThread") {
-        if (currentThreadId !== null && !showSettings && !showBoard) void closeThread(currentThreadId);
+        if (currentThreadId !== null && !showSettings) void closeThread(currentThreadId);
       } else if (action === "openProject") {
         overlays.current?.openPalette();
       } else if (action === "previousThread" || action === "nextThread") {
         const next = adjacentThreadId(threads?.map((thread) => thread.id) ?? [], currentThreadId, action === "nextThread" ? 1 : -1);
         if (next === null || next === currentThreadId) return;
         setShowSettings(false);
-        setShowBoard(false);
         setMaximized(false);
         selectThread(next);
       } else if (action === "files" || action === "diff" || action === "pullRequests" || action === "issues" || action === "terminal") {
@@ -673,7 +662,6 @@ export function App() {
         const willShow = !dockVisible;
         setShowTools(willShow);
         setRegionPriority("tools");
-        setShowBoard(false);
         setShowSettings(false);
         if (willShow) {
           requestAnimationFrame(() => focusRegion("dock"));
@@ -710,11 +698,6 @@ export function App() {
             requestAnimationFrame(() => focusRegion("dock"));
           }
         }
-      } else if (action === "toggleBoard") {
-        setMaximized(false);
-        setShowBoard((v) => !v);
-        setShowSettings(false);
-        requestAnimationFrame(() => focusRegion("centre"));
       } else {
         setSettingsSection(null);
         setShowSettings(true);
@@ -723,7 +706,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread]);
+  }, [shortcuts, selected, startNewThread, closeThread, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -819,7 +802,7 @@ export function App() {
             <strong>{selected.name}</strong>
             {selected.missing && <span className="badge">missing</span>}
           </span>
-          {selectedThread && !showBoard && !showSettings && (() => {
+          {selectedThread && !showSettings && (() => {
             const folder = selectedThread.worktreePath ?? selected.path;
             return <span className="header-folder" data-tauri-drag-region title={readablePath(folder)}>
               <FileDirectoryIcon size={12} />
@@ -837,7 +820,7 @@ export function App() {
         {openError && <span className="error header-error" role="alert">{openError}</span>}
         <AttentionButton summary={attention} failed={attentionJump?.failed ?? false} onActivate={jumpToAttention}
           onRetry={() => setAttentionJump((current) => current && { ...current, failed: false })} />
-        {selected && !selected.missing && currentThreadId !== null && !showBoard && (
+        {selected && !selected.missing && currentThreadId !== null && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
             <FileDirectoryIcon size={16} />
           </button>
@@ -852,7 +835,6 @@ export function App() {
             setShowTools(willShow);
             setRegionPriority("tools");
             setShowSettings(false);
-            setShowBoard(false);
             if (willShow) requestAnimationFrame(() => focusRegion("dock"));
           }}
         >
@@ -883,7 +865,6 @@ export function App() {
                 setSelectedId(next?.id ?? null);
                 setThreads(null);
                 setSelectedThreadId(null);
-                setShowBoard(false);
               }
               return listed.status === "error" ? listed.error.message : null;
             }}
@@ -900,7 +881,6 @@ export function App() {
             onSelectThread={(threadId) => {
               setMaximized(false);
               setShowSettings(false);
-              setShowBoard(false);
               selectThread(threadId);
             }}
             onDeleteThread={(threadId) => void deleteThread(threadId)}
@@ -909,20 +889,6 @@ export function App() {
             }}
             onRenameThread={onThreadTitleChange}
             onOpenPalette={() => overlays.current?.openPalette()}
-            boardOpen={showBoard && !showSettings}
-            onOpenBoard={(p) => {
-              setMaximized(false);
-              // The Board button toggles: pressing it again returns to the Project's Thread and dock.
-              if (p.id === selected?.id && showBoard && !showSettings) { setShowBoard(false); return; }
-              if (p.id !== selected?.id) {
-                restore.current = null;
-                setSelectedId(p.id);
-                setThreads(null);
-                setSelectedThreadId(null);
-              }
-              setShowSettings(false);
-              setShowBoard(true);
-            }}
             onOpenSettings={() => { setSettingsSection(null); setShowSettings(true); }}
             settingsOpen={showSettings}
           />
@@ -940,19 +906,6 @@ export function App() {
             <main className="centre empty-thread" aria-label="Project load error"><p className="error" role="alert">Could not load Threads for {selected?.name}: {threadLoadError.message}</p><button className="btn" onClick={() => { setThreadLoadError(null); setThreadReload((value) => value + 1); }}>Retry</button></main>
           ) : starting ? (
             <main className="centre thread-loading" aria-label="Loading Project"><Skeleton kind="conversation" label="Loading Threads…" /></main>
-          ) : selected && showBoard ? (
-            <BoardView
-              key={selected.id}
-              projectId={selected.id}
-              onOpenThread={(id) => {
-                setShowBoard(false);
-                selectThread(id);
-              }}
-              onDeleteThread={(id) => void deleteThread(id)}
-              onDispatched={(thread) =>
-                setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)])
-              }
-            />
           ) : selected && currentThreadId === null ? (
             <ProjectOverview project={selected} threads={threads ?? []}
               onNewThread={() => void startNewThread()}
@@ -962,13 +915,13 @@ export function App() {
                 setThreads((previous) => [thread, ...(previous ?? []).filter((t) => t.id !== thread.id)]);
                 selectThread(thread.id);
               }}
-              onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
+              onOpenDiff={openDiff}
               onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (
             <main className="centre" aria-label="Thread">
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
-                  visible={!showSettings && !showBoard && !(maximized && dockVisible)}
+                  visible={!showSettings && !(maximized && dockVisible)}
                   onOpenDefaultDiff={() => {
                     setShowTools(true);
                     setActiveTool("Diff");
@@ -982,6 +935,7 @@ export function App() {
                       projectId={selected.id}
                       threadId={currentThreadId}
                       threadsKey={threadsKey}
+                      agentBusy={selectedThread ? ["working", "needs-input"].includes(selectedThread.status) : false}
                       onOpenDiff={() => openDiff()}
                       onOpenPullRequest={openPullRequest}
                       onChanged={onGitChanged}
@@ -1123,7 +1077,7 @@ export function App() {
               </Suspense></div>
             )}
             {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onOpenLanguageSettings={() => { setSettingsSection("language"); setMaximized(false); setShowBoard(false); setShowSettings(true); }} onOpenFilesChange={(open) => setFilesOpen((previous) => previous[context.key] === open ? previous : { ...previous, [context.key]: open })} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
+              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onOpenLanguageSettings={() => { setSettingsSection("language"); setMaximized(false); setShowSettings(true); }} onOpenFilesChange={(open) => setFilesOpen((previous) => previous[context.key] === open ? previous : { ...previous, [context.key]: open })} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
             </Fragment>)}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
               const projectId = Number(id); const isSelectedProject = projectId === selected?.id;
@@ -1145,13 +1099,12 @@ export function App() {
                   projectId={selected.id}
                   projectName={selected.name}
                   onDispatched={(thread) => {
-                    // The Thread opens through the same dispatch/setup flow as the Board's; if the
+                    // The Thread opens through the same dispatch/setup flow; if the
                     // user moved to another Project meanwhile, it only joins that Project's list there.
                     if (currentProjectRef.current !== thread.projectId) return;
                     setThreads((prev) => [thread, ...(prev ?? []).filter((t) => t.id !== thread.id)]);
                     setSelectedThreadId(thread.id);
                     setShowSettings(false);
-                    setShowBoard(false);
                     setMaximized(false);
                   }}
                 />
@@ -1176,9 +1129,6 @@ interface SidebarProps {
   onRenameThread?: (threadId: number, newTitle: string) => void;
   /** ⌘⇧N: every known Project, scanned ones included, is found there. */
   onOpenPalette: () => void;
-  /** The central Board is showing (for the selected Project). */
-  boardOpen: boolean;
-  onOpenBoard: (p: Project) => void;
   onOpenSettings: () => void;
   settingsOpen: boolean;
 }
@@ -1196,8 +1146,6 @@ function Sidebar({
   onNewThread,
   onRenameThread,
   onOpenPalette,
-  boardOpen,
-  onOpenBoard,
   onOpenSettings,
   settingsOpen,
 }: SidebarProps) {
@@ -1337,10 +1285,6 @@ function Sidebar({
                     <RepoIcon size={13} />
                     <span className="project-name">{p.name}</span>
                     {p.missing && <span className="badge">missing</span>}
-                  </button>
-                  <button className="row-action board-action" aria-pressed={isSelected && boardOpen} onClick={() => onOpenBoard(p)}
-                    aria-label={`Thread Board of ${p.name}`} title={`Thread Board of ${p.name} (${keys("toggleBoard")})`}>
-                    <ProjectIcon size={13} />
                   </button>
                   <button className="row-action" onClick={() => void close(p)} disabled={closingProjectId === p.id} aria-busy={closingProjectId === p.id} aria-label={`Close ${p.name}`} title={closingProjectId === p.id ? "Closing Project…" : `Close Project (it stays in ${keys("openProject")})`}>
                     <XIcon size={13} />

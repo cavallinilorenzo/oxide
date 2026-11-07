@@ -1220,6 +1220,7 @@ export function App() {
                     key={workbenchContext.key}
                     projectId={workbenchContext.projectId}
                     threadId={workbenchContext.threadId}
+                    revision={gitRevision + turnRevision.count}
                     onOpenFile={(path) => openCodeFile(path)}
                   />
                 </Suspense>

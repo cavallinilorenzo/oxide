@@ -6,6 +6,8 @@ import { EditorFileTree } from "./EditorFileTree";
 interface FilesPanelProps {
   projectId: number;
   threadId: number | null;
+  /** Changes after checkout mutations (commits, checkouts, Turns), so the tree refetches. */
+  revision: number;
   /** Opens the file in the Project's central Code workspace. */
   onOpenFile: (path: string) => void;
 }
@@ -16,7 +18,7 @@ export function FilesPanel(props: FilesPanelProps) {
 }
 
 /** The Files Surface: a full-width navigator. A click selects; a double click opens Code. */
-function FilesExplorer({ projectId, threadId, onOpenFile }: FilesPanelProps) {
+function FilesExplorer({ projectId, threadId, revision, onOpenFile }: FilesPanelProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [collapseToken, setCollapseToken] = useState(0);
   const [query, setQuery] = useState("");
@@ -51,8 +53,6 @@ function FilesExplorer({ projectId, threadId, onOpenFile }: FilesPanelProps) {
   const trimmedQuery = query.trim();
   const currentSearch = trimmedQuery && search?.query === trimmedQuery ? search : null;
   const searching = Boolean(trimmedQuery) && currentSearch === null;
-
-  const open = (path: string) => onOpenFile(path);
 
   return (
     <section className="files files-navigation" aria-label="Files">
@@ -95,11 +95,11 @@ function FilesExplorer({ projectId, threadId, onOpenFile }: FilesPanelProps) {
               aria-selected={selected === path}
               title={path}
               onClick={() => setSelected(path)}
-              onDoubleClick={() => open(path)}
+              onDoubleClick={() => onOpenFile(path)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  open(path);
+                  onOpenFile(path);
                 }
               }}
             >
@@ -115,9 +115,9 @@ function FilesExplorer({ projectId, threadId, onOpenFile }: FilesPanelProps) {
             threadId={threadId}
             selected={selected}
             onOpen={(path) => setSelected(path)}
-            onKeep={open}
+            onKeep={onOpenFile}
             collapseToken={collapseToken}
-            revision={0}
+            revision={revision}
           />
         </div>
       )}

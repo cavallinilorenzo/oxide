@@ -48,6 +48,10 @@ const thread = {
   updatedAt: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z",
   branch: null, worktreePath: null, issueNumber: null,
 };
+const secondThread = {
+  ...thread, id: 3, title: "Beta work",
+  updatedAt: "2026-01-01T00:00:01Z", createdAt: "2026-01-01T00:00:01Z",
+};
 
 beforeEach(() => {
   clearQueryCache();
@@ -58,7 +62,7 @@ beforeEach(() => {
     switch (command) {
       case "list_projects": case "rescan_projects": return [project];
       case "last_selection": return { projectId: 1, threadId: 2 };
-      case "list_threads": return [thread];
+      case "list_threads": return [thread, secondThread];
       case "list_dir": return (payload as { path: string }).path === ""
         ? [
             { path: "src", name: "src", isDir: true },
@@ -155,16 +159,23 @@ it("switches between the Thread and the Project's Code workspace without losing 
   expect(codeView().dataset.openPath).toBe("src/app.ts");
 });
 
-it("reopening the Code view after choosing a Thread keeps the dock navigator and its selection", async () => {
+it("reopening the Code view after switching Threads keeps the dock navigator, its selection and the open buffer", async () => {
   await openFilesDock();
   await act(async () => fileRow().click());
   await dblclick(fileRow());
   await settle();
+  expect(fileRow().closest('[role="treeitem"]')?.getAttribute("aria-selected")).toBe("true");
 
-  // Selecting another Thread is the Thread view, then Code returns to the same buffer.
-  await act(async () => host.querySelector<HTMLElement>('.thread-item')!.click());
+  // Another Thread in the same checkout: picking it shows that conversation, not the Code view.
+  const beta = Array.from(host.querySelectorAll<HTMLElement>(".thread-item"))
+    .find((item) => item.textContent?.includes("Beta work"))!;
+  await act(async () => beta.click());
   await settle();
+  expect(threadMain().hasAttribute("hidden")).toBe(false);
+  expect(threadMain().textContent).toContain("Conversation 3");
   expect(host.querySelector('button[aria-label="Code view"]')).not.toBeNull();
+
+  // Code is still the same Project workspace: the buffer and the Files selection survive.
   await click('button[aria-label="Code view"]');
   await settle();
   expect(codeView().dataset.openPath).toBe("src/app.ts");

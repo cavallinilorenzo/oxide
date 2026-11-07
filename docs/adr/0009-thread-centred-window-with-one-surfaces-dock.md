@@ -33,3 +33,20 @@ This decision preserves native Provider adapters (ADR-0001), Oxide-owned
 Transcripts (ADR-0002), the React streaming boundary (ADR-0003) and permanent
 Thread/worktree deletion (ADR-0005). It changes presentation and explicit tool
 ownership, without changing Provider protocols, staging policy or deletion rules.
+
+## Amendment — 2026-11-07: Files is a navigator; Code lives in the centre
+
+The sentence above that "Files owns the editor" no longer holds. The Files Surface
+is now a full-width navigator for the selected checkout: a click selects a file,
+and a double click (or Enter/Space on a focused row) opens it in the Project's
+**Code workspace**, an editor that lives in the centre beside the Thread. The
+centre carries a Thread/Code switch, so the conversation and the editor share the
+central area, and each Project keeps its own Code workspace and open buffers while
+the user moves between Threads.
+
+This supersedes only the editor-ownership part of the original decision. The rest
+stands: there is still one right dock for Diff, Files, Terminal, Pull request and
+Issues, a Surface still maximizes and restores its own working state, and the
+sidebar/dock fitting rules are unchanged. The Files Surface no longer hosts an
+editor, so maximizing it widens the navigator rather than an editor. Thread and
+Terminal ownership rules from the original text remain as written.

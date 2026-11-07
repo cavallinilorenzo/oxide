@@ -17,7 +17,7 @@ export function workspaceLayout(
   options: { sidebarVisible?: boolean; priority?: "sidebar" | "tools"; maximized?: boolean } = {},
 ) {
   const centreMin = 360;
-  const sidebarMin = 208;
+  const sidebarMin = 160;
   const compact = width < sidebarMin + TOOLS_MIN + centreMin;
   const maximized = toolsRequested && options.maximized === true;
   const sidebarRequested = options.sidebarVisible !== false;

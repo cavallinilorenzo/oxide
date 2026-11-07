@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import "./skeleton.css";
 
-type SkeletonKind = "list" | "detail" | "form" | "tree" | "code" | "diff" | "board" | "conversation" | "picker";
+type SkeletonKind = "list" | "detail" | "form" | "tree" | "code" | "diff" | "conversation" | "picker";
 
 /** Content-shaped placeholders. Mount only while the corresponding content is unavailable. */
 export function Skeleton({ kind = "list", label = "Loading…", rows = 4, style }: {
@@ -64,15 +64,6 @@ export function Skeleton({ kind = "list", label = "Loading…", rows = 4, style 
           {line("24%", "skeleton-meta")}{line("100%", "skeleton-field")}
           {line("18%", "skeleton-meta")}{line("100%", "skeleton-textarea")}
           {line("32%", "skeleton-field")}
-        </div>}
-        {kind === "board" && <div className="board-columns">
-          {["Needs input", "Working", "Completed"].map((title) => <section className="board-column" key={title}>
-            <h3 className="board-column-title">{title}</h3>
-            <div className="board-cards">{[0, 1].map((i) => <div className="board-card" key={i}>
-              {line(i ? "62%" : "82%")}{line("46%", "skeleton-meta")}
-              {line("30%", "skeleton-field")}
-            </div>)}</div>
-          </section>)}
         </div>}
         {kind === "conversation" && conversation}
       </div>

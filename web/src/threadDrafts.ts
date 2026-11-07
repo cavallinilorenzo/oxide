@@ -27,6 +27,19 @@ export function clearDraft(
   return next;
 }
 
+/**
+ * Whether a Thread is still a clean slate that "new Thread" may reopen: no Turn recorded,
+ * nothing typed in its composer, and no Turn running. A prompt just sent has no Turn on
+ * record until the first output arrives, so the status and the draft count as use too.
+ */
+export function isUnusedThread(
+  thread: { id: number; status: string },
+  turnCount: number,
+  drafts: Record<number, string>,
+): boolean {
+  return turnCount === 0 && thread.status !== "working" && getDraft(drafts, thread.id).trim() === "";
+}
+
 /** Truncates prompt to match Core's title truncation: first non-empty line up to 60 characters. */
 export function truncateTitle(prompt: string): string {
   let start = 0;

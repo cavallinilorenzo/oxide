@@ -335,6 +335,21 @@ mod settings {
     }
 
     #[test]
+    fn a_settings_file_saved_with_the_removed_board_shortcut_still_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::open(tmp.path()).unwrap();
+        let rx = watch(&core);
+        std::fs::write(
+            tmp.path().join("settings.json"),
+            r#"{ "shortcuts": { "toggleBoard": "Mod+B", "terminal": "Mod+Alt+T" } }"#,
+        )
+        .unwrap();
+        let state = next(&rx);
+        assert!(state.errors.is_empty(), "{:?}", state.errors);
+        assert_eq!(state.settings.shortcuts.terminal, "Mod+Alt+T");
+    }
+
+    #[test]
     fn sidebar_and_surface_maximize_shortcuts_have_defaults_and_accept_enter() {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::open(tmp.path()).unwrap();

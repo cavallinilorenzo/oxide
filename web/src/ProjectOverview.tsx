@@ -3,7 +3,6 @@ import {
   FileDiffIcon,
   GitPullRequestIcon,
   PlusIcon,
-  ProjectIcon,
   RepoIcon,
 } from "@primer/octicons-react";
 import type { Project, Thread } from "./bindings";
@@ -17,7 +16,6 @@ export function ProjectOverview({
   onNewThread,
   onOpenThread,
   onSuggestionAccepted,
-  onOpenBoard,
   onOpenDiff,
   onOpenPullRequest,
 }: {
@@ -26,7 +24,6 @@ export function ProjectOverview({
   onNewThread: () => void;
   onOpenThread: (id: number) => void;
   onSuggestionAccepted: (thread: Thread) => void;
-  onOpenBoard: () => void;
   onOpenDiff: () => void;
   onOpenPullRequest: () => void;
 }) {
@@ -54,9 +51,6 @@ export function ProjectOverview({
             onClick={onNewThread}
           >
             <PlusIcon size={16} /> New Thread
-          </button>
-          <button className="btn" onClick={onOpenBoard}>
-            <ProjectIcon size={16} /> Thread Board
           </button>
         </div>
         {project.missing && (

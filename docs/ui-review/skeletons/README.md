@@ -1,6 +1,6 @@
 # Loading skeletons
 
-Content-shaped placeholders now replace text-only waits in Issues and pull request lists/details, issue templates, dispatch settings, directory listings, file content, diffs, the Thread Board, branch/people/model/effort pickers, and Transcript loading (including older paged Turns). Lazy tools also show a skeleton while their JavaScript loads.
+Content-shaped placeholders now replace text-only waits in Issues and pull request lists/details, issue templates, dispatch settings, directory listings, file content, diffs, branch/people/model/effort pickers, and Transcript loading (including older paged Turns). Lazy tools also show a skeleton while their JavaScript loads.
 
 Shapes use Oxide's existing surface colors and content layouts. Each region pulses with one opacity animation; reduced motion keeps static shapes, and hidden/offscreen regions pause. Skeletons expose a single loading status and no focusable controls. Cached data stays visible during background refresh. Existing action feedback (saving, merging, sending) and the startup splash retain their current behavior.
 
@@ -19,8 +19,6 @@ Shapes use Oxide's existing surface colors and content layouts. Each region puls
 ![Issue list loading](issues-loading.png)
 
 ![Diff loading](diff-loading.png)
-
-![Thread Board loading](board-loading.png)
 
 ## Verification
 

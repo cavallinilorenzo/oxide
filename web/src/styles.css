@@ -339,8 +339,6 @@ html.macos .header,
 }
 .row-action:hover:not(:disabled) { color: var(--fg); background: var(--bg4); }
 /* The Board entry never hides: it is how a Project's overview is reached. */
-.row-action.board-action { opacity: 1; }
-.row-action.board-action[aria-pressed="true"] { color: var(--fg); background: var(--bg4); }
 .attention-btn { position: relative; gap: 4px; }
 .attention-btn.active { color: var(--yellow); }
 .attention-count { font: 600 11px var(--mono); }
@@ -403,7 +401,7 @@ html.macos .header,
 /* The branch and Git action sit under the title; the usage rings stay at the far right of the same row. */
 .thread-git { min-width: 0; }
 .thread-header-bar > .usage-rings { flex: none; margin-left: auto; gap: 14px; padding-left: 24px; border-left: 1px solid var(--line); }
-.thread-git .git-header { flex-wrap: nowrap; margin-left: -8px; gap: 6px; }
+.thread-git .git-header { flex-wrap: nowrap; margin-left: 0; gap: 6px; }
 .thread-git .git-header > .branch-picker { flex: 0 1 auto; max-width: 100%; }
 .thread-git .branch-button { width: auto; max-width: 100%; }
 .thread-git .branch-button .branch-name { max-width: min(220px, 40vw); }
@@ -1199,29 +1197,6 @@ section.terminal.terminal-hidden { display: none; }
 .issue-create input, .issue-create textarea { width: 100%; }
 
 /* ── Thread Board ─────────────────────────────────────────── */
-.board { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: auto; min-width: 0; }
-.board-toolbar { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
-.board-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 14px; align-items: start; min-width: 0; }
-.board-column { min-width: 0; }
-.board-column-title { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim); display: flex; gap: 8px; align-items: center; }
-.board-count { color: var(--faint); }
-.board-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.board-card { min-width: 0; padding: 10px 12px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
-.board-card:hover { border-color: var(--line-strong); }
-.board-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-.board-card-title { flex: 1 1 8rem; min-width: 0; justify-content: flex-start; text-align: left; font-weight: 600; background: none; border: 0; padding: 0; white-space: normal; overflow-wrap: anywhere; color: var(--fg-bright); }
-.board-card-title:hover { color: var(--acc2); }
-.board-card-branch { display: inline-flex; align-items: center; gap: 3px; font: 11px var(--mono); color: var(--faint); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board-badge.error { background: #3d1d1d; color: var(--red); }
-.board-badge.interrupted { color: var(--dim); }
-.board-approval { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid #e6b45066; background: #2b241255; border-radius: 8px; }
-.board-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.board-card-actions button { padding: 2px 8px; font-size: 12px; }
-.board-pr { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--green); }
-.board-pr.merged { color: var(--purple); }
-.board-pr.closed { color: var(--dim); }
-.board-pr-failing { color: var(--red); }
-.board-delete-suggestion { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--dim); }
 .setup-command { font-size: 12px; display: grid; gap: 6px; max-width: 40rem; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); }
 .setup-command summary { cursor: pointer; color: var(--dim); }
 .setup-command input { font-family: var(--mono); }

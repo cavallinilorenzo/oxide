@@ -922,6 +922,11 @@ pub fn create_pull_request(gh: &Gh, cwd: &Path, input: &PullRequestInput) -> Res
             "Choose a base branch other than the current one.".into(),
         ));
     }
+    if git::commits_beyond(cwd, base) == Some(0) {
+        return Err(Error::Github(format!(
+            "`{branch}` has no commits beyond `{base}`, so there is nothing to compare. Commit your changes first."
+        )));
+    }
     if status.ahead > 0 || status.unpublished {
         git::push(cwd, false)?;
     }

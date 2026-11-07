@@ -441,6 +441,29 @@ fn create_pushes_when_needed_and_calls_gh_with_the_chosen_title_base_and_draft()
 }
 
 #[test]
+fn create_is_refused_when_the_branch_has_no_commits_beyond_the_base() {
+    let f = fixture();
+    install_gh(&f, ok_state());
+    f.core.create_branch(f.project.id, "feature").unwrap();
+
+    let err = f
+        .core
+        .create_pull_request(f.project.id, &input("Empty", "main", false))
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("no commits beyond `main`"),
+        "{err}"
+    );
+    assert!(f.create_calls().is_empty());
+    assert!(
+        git(&f.remote, &["branch", "--list", "feature"])
+            .trim()
+            .is_empty()
+    );
+}
+
+#[test]
 fn create_without_draft_omits_the_flag_and_skips_the_push_when_published() {
     let f = fixture();
     install_gh(&f, ok_state());

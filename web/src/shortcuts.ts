@@ -25,7 +25,6 @@ export type ShortcutAction =
   | "nextThread"
   | "closeThread"
   | "toggleTools"
-  | "toggleBoard"
   | "openSettings"
   | "toggleSidebar"
   | "maximizeSurface";
@@ -48,7 +47,6 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   nextThread: "Mod+ArrowDown",
   closeThread: "Mod+Shift+W",
   toggleTools: "Mod+\\",
-  toggleBoard: "Mod+B",
   openSettings: "Mod+,",
   toggleSidebar: "Mod+Shift+E",
   maximizeSurface: "Mod+Shift+Enter",
@@ -71,7 +69,6 @@ export const SHORTCUT_ACTIONS: { action: ShortcutAction; label: string; group: s
   { action: "toggleTools", label: "Tools panel", group: "Panels" },
   { action: "toggleSidebar", label: "Toggle sidebar", group: "Panels" },
   { action: "maximizeSurface", label: "Maximize / restore Surface", group: "Panels" },
-  { action: "toggleBoard", label: "Chat / Board", group: "Panels" },
   { action: "openSettings", label: "Settings", group: "Panels" },
 ];
 

@@ -2091,7 +2091,6 @@ export type Shortcuts = {
 	nextThread: string,
 	closeThread: string,
 	toggleTools: string,
-	toggleBoard: string,
 	openSettings: string,
 	toggleSidebar: string,
 	maximizeSurface: string,

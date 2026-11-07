@@ -64,7 +64,7 @@ import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { loadDraftModel, saveDraftModel } from "./draftModel";
-import { parseSlashCommand, modelNameSuggestions, resolveDefaultModel, resolveFavourite, resolveModelQuery } from "./modelPicker";
+import { effortFor, parseSlashCommand, modelNameSuggestions, resolveDefaultModel, resolveFavourite, resolveModelQuery } from "./modelPicker";
 import { cachedCatalogs } from "./modelCatalogCache";
 import { readableModel } from "./headerLines";
 import { filterSlashCommands, pickSlashCommand, slashQuery } from "./slashMenu";
@@ -1063,7 +1063,7 @@ export function ThreadView({
         if (resolution.matches.length > 1) {
           setCommandNotice(`Several models match "${slash.arg}"; using ${resolution.model.name}.`);
         }
-        void handleSelectModelAndEffort(currentProvider, resolution.model.id, currentEffort);
+        void handleSelectModelAndEffort(currentProvider, resolution.model.id, effortFor(resolution.model, currentEffort));
       } else {
         openModelPicker();
       }

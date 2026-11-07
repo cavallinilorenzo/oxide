@@ -253,6 +253,16 @@ it("resolves /model <name> against the active Provider's catalog", async () => {
   expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 
+it("does not carry an Effort the resolved /model does not support", async () => {
+  const calls = setupSlash();
+  await renderSlash("/model haiku");
+  await flush();
+  await act(async () => container.querySelector("form")!.requestSubmit());
+  await flush();
+  expect(setModelCalls(calls)).toEqual([{ threadId: 7, model: "haiku", effort: null }]);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
 it("reports an unmatched /model query with a few available names", async () => {
   const calls = setupSlash();
   await renderSlash("/model gpt");

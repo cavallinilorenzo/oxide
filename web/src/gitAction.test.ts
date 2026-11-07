@@ -30,6 +30,11 @@ describe("nextAction", () => {
     expect(nextAction({ ...clean, behind: 3 })).toMatchObject({ kind: "up-to-date" });
   });
 
+  it("offers nothing while the agent is mid-Turn, whatever changed", () => {
+    expect(nextAction({ ...clean, changedFiles: 2, ahead: 1 }, true)).toMatchObject({ kind: "busy" });
+    expect(nextAction({ ...clean, changedFiles: 2 }, false)).toMatchObject({ kind: "commit-push" });
+  });
+
   it("blocks pushing, with a reason, when behind and ahead", () => {
     const diverged = { ...clean, ahead: 1, behind: 1 };
     expect(nextAction(diverged).blockedReason).toMatch(/Pull/);

@@ -15,7 +15,6 @@ vi.mock("./ThreadView", () => ({
 vi.mock("./GitHeader", () => ({ GitHeader: () => null }));
 vi.mock("./TerminalPanel", () => ({ TerminalPanel: () => null }));
 vi.mock("./QuitDialog", () => ({ QuitDialog: () => null }));
-vi.mock("./BoardView", () => ({ BoardView: ({ projectId }: { projectId: number }) => <main aria-label="Thread Board">Board {projectId}</main> }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
 Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
 const container = document.createElement("div"); document.body.append(container);
@@ -186,19 +185,5 @@ it("updates the indicator from background events without moving focus or the sel
   expect(attentionButton().getAttribute("aria-label")).toContain("2 Threads need you");
   expect(attentionButton().getAttribute("aria-label")).toContain("1 error");
   expect(document.activeElement).toBe(input);
-  expect(shownThread()).toBe("10");
-});
-
-it("keeps an always-visible Board button per Project that toggles the Board and restores the Thread", async () => {
-  setup();
-  await act(async () => root.render(<App />));
-  const boardButton = (name: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="Thread Board of ${name}"]`)!;
-  expect(boardButton("Alpha")).not.toBeNull();
-  expect(boardButton("Beta")).not.toBeNull();
-  await act(async () => boardButton("Alpha").click());
-  expect(container.textContent).toContain("Board 1");
-  expect(boardButton("Alpha").getAttribute("aria-pressed")).toBe("true");
-  await act(async () => boardButton("Alpha").click());
-  expect(container.textContent).not.toContain("Board 1");
   expect(shownThread()).toBe("10");
 });

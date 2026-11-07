@@ -144,6 +144,17 @@ fn commit_handles_deletions_and_renames_and_rejects_bad_input() {
 }
 
 #[test]
+fn a_new_branch_without_a_commit_of_its_own_has_nothing_to_publish() {
+    let f = fixture();
+    f.core.create_branch(f.project.id, "topic").unwrap();
+    let status = f.core.git_status(f.project.id).unwrap();
+    assert!(!status.unpublished && status.ahead == 0);
+
+    commit_file(&f.work, "t.txt", "t\n");
+    assert!(f.core.git_status(f.project.id).unwrap().unpublished);
+}
+
+#[test]
 fn push_sets_upstream_on_first_push_and_publishes_commits() {
     let f = fixture();
     f.core.create_branch(f.project.id, "topic").unwrap();

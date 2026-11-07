@@ -27,7 +27,6 @@ vi.mock("./ThreadView", () => ({
 vi.mock("./GitHeader", () => ({ GitHeader: () => null }));
 vi.mock("./TerminalPanel", () => ({ TerminalPanel: () => null }));
 vi.mock("./QuitDialog", () => ({ QuitDialog: () => null }));
-vi.mock("./BoardView", () => ({ BoardView: () => <main aria-label="Thread Board">Board</main> }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
 Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
 

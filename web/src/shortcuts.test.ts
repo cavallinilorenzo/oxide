@@ -68,7 +68,6 @@ describe("actionForKey with the default shortcuts", () => {
     expect(action({ key: "ArrowUp" })).toBe("previousThread");
     expect(action({ key: "ArrowDown" })).toBe("nextThread");
     expect(action({ key: "\\" })).toBe("toggleTools");
-    expect(action({ key: "b" })).toBe("toggleBoard");
     expect(action({ key: "," })).toBe("openSettings");
     expect(action({ key: "E", shiftKey: true })).toBe("toggleSidebar");
     expect(action({ key: "Enter", shiftKey: true })).toBe("maximizeSurface");

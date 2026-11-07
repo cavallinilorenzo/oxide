@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   acceleratorFromEvent,
   DEFAULT_SHORTCUTS,
@@ -24,7 +24,7 @@ export function ShortcutsSettings({ shortcuts, onChange, errorsFor }: {
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; message: string } | null>(null);
 
-  const record = (action: ShortcutAction, e: React.KeyboardEvent) => {
+  const record = (action: ShortcutAction, e: KeyboardEvent) => {
     // Nothing else may react to the keys being recorded.
     e.preventDefault();
     e.stopPropagation();
@@ -33,7 +33,7 @@ export function ShortcutsSettings({ shortcuts, onChange, errorsFor }: {
       setConflict(null);
       return;
     }
-    const accelerator = acceleratorFromEvent(e.nativeEvent);
+    const accelerator = acceleratorFromEvent(e);
     if (!accelerator) {
       if (!["Meta", "Control", "Alt", "Shift"].includes(e.key)) {
         setConflict({ action, message: "Include ⌘ (Ctrl on Windows and Linux), then a letter, digit, symbol, arrow, Enter or F-key." });
@@ -49,6 +49,15 @@ export function ShortcutsSettings({ shortcuts, onChange, errorsFor }: {
     setRecording(null);
     setConflict(null);
   };
+
+  // Listen on the window, not the button: macOS does not focus a button when it is clicked, so
+  // the button never sees the keys. Capture runs before every other shortcut handler.
+  useEffect(() => {
+    if (recording === null) return;
+    const onKey = (e: KeyboardEvent) => record(recording, e);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
 
   const groups = [...new Set(SHORTCUT_ACTIONS.map(({ group }) => group))];
   return (
@@ -73,7 +82,6 @@ export function ShortcutsSettings({ shortcuts, onChange, errorsFor }: {
                     aria-label={`${label} shortcut`}
                     aria-pressed={isRecording}
                     onClick={() => { setRecording(action); setConflict(null); }}
-                    onKeyDown={isRecording ? (e) => record(action, e) : undefined}
                     onBlur={() => { if (isRecording) { setRecording(null); setConflict(null); } }}
                   >
                     {isRecording ? "Press keys…" : <kbd>{formatAccelerator(shortcuts[action])}</kbd>}

@@ -25,8 +25,7 @@ Projects and recent Threads. One right dock holds Diff, Files, Terminal,
 Pull request and Issues; each Surface can be maximized and restored.
 Work modes are removed. Files contains the editor, and Project terminal tabs
 retain their own checkout. Switching tools or their presentation keeps open files,
-unsaved changes and shell sessions. The Project's sidebar Board button opens its
-Thread Board in the centre and suspends the dock without clearing its state.
+unsaved changes and shell sessions.
 
 Python, C/C++, JavaScript/TypeScript and Rust are the first supported languages.
 Opening the first file of a language offers to download its support, as in Zed.

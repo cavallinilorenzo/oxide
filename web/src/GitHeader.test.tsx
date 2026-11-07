@@ -16,7 +16,7 @@ it("dismisses branch and Git action menus on outside pointer and Escape", async 
   vi.spyOn(commands, "listBranches").mockResolvedValue({ status: "ok", data: [] });
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<GitHeader projectId={1} threadId={7} threadsKey="" onOpenDiff={() => {}} onOpenPullRequest={() => {}} onChanged={() => {}} />));
+  await act(async () => root.render(<GitHeader projectId={1} threadId={7} threadsKey="" agentBusy={false} onOpenDiff={() => {}} onOpenPullRequest={() => {}} onChanged={() => {}} />));
   const branch = host.querySelector<HTMLButtonElement>(".branch-button")!;
   await act(async () => branch.click());
   expect(host.querySelector(".branch-menu")).not.toBeNull();
@@ -38,7 +38,7 @@ function setup() {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   const view = (threadId: number) => (
-    <GitHeader projectId={1} threadId={threadId} threadsKey="" onOpenDiff={() => {}} onOpenPullRequest={() => {}} onChanged={() => {}} />
+    <GitHeader projectId={1} threadId={threadId} threadsKey="" agentBusy={false} onOpenDiff={() => {}} onOpenPullRequest={() => {}} onChanged={() => {}} />
   );
   const cleanup = async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); };
   return { host, root, view, cleanup };
@@ -110,5 +110,17 @@ it("shows a failed status load instead of a stale or main-checkout branch", asyn
   await act(async () => root.render(view(7)));
   expect(host.querySelector("[role='alert']")?.textContent).toContain("missing");
   expect(host.querySelector(".branch-button")).toBeNull();
+  await cleanup();
+});
+
+it("offers no push while the agent is still working, even with unpushed commits", async () => {
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({ status: "ok", data: { ...baseStatus, ahead: 2, upstream: "origin/topic" } });
+  const { host, root, cleanup } = setup();
+  await act(async () => root.render(
+    <GitHeader projectId={1} threadId={7} threadsKey="" agentBusy={true} onOpenDiff={() => {}} onOpenPullRequest={() => {}} onChanged={() => {}} />,
+  ));
+  const primary = host.querySelector<HTMLButtonElement>(".git-primary")!;
+  expect(primary.disabled).toBe(true);
+  expect(primary.textContent).toContain("Working");
   await cleanup();
 });

@@ -22,7 +22,6 @@ vi.mock("./TerminalSurface", () => ({ TerminalSurface: () => <div className="ter
 vi.mock("./DiffPanel", () => ({ DiffPanel: () => <div className="diff-panel">Diff content</div> }));
 vi.mock("./PullRequestPanel", () => ({ PullRequestPanel: () => <div className="pr-panel">PR content</div> }));
 vi.mock("./IssuesSurface", () => ({ IssuesSurface: () => <div className="issues-surface">Issues content</div> }));
-vi.mock("./BoardView", () => ({ BoardView: () => <main aria-label="Thread Board">Board</main> }));
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} } });
 Object.assign(window, { __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
@@ -231,29 +230,6 @@ it("surface shortcut actions select the single Surface and move focus", async ()
   await press("P", { ctrlKey: true, shiftKey: true });
   await settle();
   expect(host.querySelector('[role="tab"][aria-label="Pull request"]')?.getAttribute("aria-selected")).toBe("true");
-});
-
-it("toggles Board with Mod+B preserving Thread selection and dock state", async () => {
-  await act(async () => root.render(<App />));
-  await settle();
-
-  // Open tools dock on Terminal
-  await press("T", { ctrlKey: true, shiftKey: true });
-  await settle();
-  expect(host.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
-
-  // Toggle Board with Mod+B
-  await press("B", { ctrlKey: true });
-  await settle();
-  expect(host.querySelector('[aria-label="Thread Board"]')).not.toBeNull();
-  expect(host.querySelector('#workspace-tools')?.hasAttribute("hidden")).toBe(true);
-
-  // Toggle Board back with Mod+B
-  await press("B", { ctrlKey: true });
-  await settle();
-  expect(host.querySelector('[aria-label="Thread Board"]')).toBeNull();
-  expect(host.querySelector('#workspace-tools')?.hasAttribute("hidden")).toBe(false);
-  expect(host.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
 });
 
 it("overlay dismissal returns focus to the invoker element", async () => {

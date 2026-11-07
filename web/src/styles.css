@@ -344,6 +344,28 @@ html.macos .header,
 .attention-btn { position: relative; gap: 4px; }
 .attention-btn.active { color: var(--yellow); }
 .attention-count { font: 600 11px var(--mono); }
+/* Attention Center tray: pending Threads grouped by Project, each one jump away. */
+.attention-tray { display: flex; flex-direction: column; min-height: 0; }
+.attention-tray-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+.attention-tray-head h2 { margin: 0; font-size: 13px; color: var(--fg-bright); }
+.attention-tray-head span { color: var(--dim); font-size: 11.5px; text-align: right; }
+.attention-empty { margin: 0; padding: 16px 14px; color: var(--dim); }
+.attention-group { padding: 8px 8px 4px; }
+.attention-group h3 { margin: 0; padding: 2px 6px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.attention-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.attention-item { display: grid; gap: 3px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: none; text-align: left; }
+.attention-item:hover:not(:disabled), .attention-item:focus-visible { background: var(--bg3); }
+.attention-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.attention-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.attention-item-branch { display: inline-flex; align-items: center; gap: 3px; flex: none; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--mono); color: var(--faint); }
+.attention-item-reason { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.attention-reason { flex: none; }
+.attention-reason.approval { background: #3a2f12; color: var(--yellow); }
+.attention-reason.needs-input { background: #1f2a3a; color: var(--acc2); }
+.attention-reason.error { background: #3a1d1d; color: var(--red); }
+.attention-reason.interrupted { background: #2a3040; color: var(--dim); }
+.attention-item-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); color: var(--dim); }
+.attention-tray-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); }
 .project-row:is(:hover, :focus-within) .row-action, .thread-row:is(:hover, :focus-within) .row-action { opacity: 1; }
 .thread-row { display: flex; align-items: center; margin: 0 8px; border-radius: var(--radius-control); position: relative; transition: background-color var(--motion-fast) ease-out; }
 .thread-row:hover { background: var(--bg3); }

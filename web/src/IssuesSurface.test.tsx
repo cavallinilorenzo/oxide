@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type IssueDetail, type IssueSummary } from "./bindings";
 import { IssuesSurface } from "./IssuesSurface";
-import { clearQueryCache } from "./queryCache";
+import { clearQueryCache, QUERY_STALE_MS } from "./queryCache";
 import { REFRESH_INTERVAL_MS } from "./useAutoRefresh";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -137,18 +137,35 @@ const remount = async (projectId = 1) => {
   await act(async () => root.render(<IssuesSurface projectId={projectId} />));
 };
 
-it("shows the previous list at once on remount and swaps in the refreshed one", async () => {
+it("renders the previous list at once on remount without asking GitHub again while fresh", async () => {
   await render();
-  let resolve!: (r: Awaited<ReturnType<typeof commands.listIssues>>) => void;
-  vi.mocked(commands.listIssues).mockImplementation(() => new Promise((r) => (resolve = r)));
   const calls = listCalls();
   await remount();
   expect(host.textContent).not.toContain("Loading…");
   expect(host.textContent).toContain("Crash on startup");
-  expect(listCalls()).toBe(calls + 1);
-  await act(async () => resolve({ status: "ok", data: [summary({ number: 8, title: "Fresh one" })] }));
-  expect(host.textContent).toContain("Fresh one");
-  expect(host.textContent).not.toContain("Crash on startup");
+  expect(listCalls()).toBe(calls);
+});
+
+it("revalidates an older cached list in the background while it stays on screen", async () => {
+  vi.useFakeTimers();
+  try {
+    await render();
+    await act(() => root.unmount());
+    await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS + 1));
+    let resolve!: (r: Awaited<ReturnType<typeof commands.listIssues>>) => void;
+    vi.mocked(commands.listIssues).mockImplementation(() => new Promise((r) => (resolve = r)));
+    root = createRoot(host);
+    await act(async () => root.render(<IssuesSurface projectId={1} />));
+    // The cached list is on screen while the background fetch is still pending.
+    expect(host.textContent).toContain("Crash on startup");
+    expect(host.textContent).not.toContain("Loading…");
+    expect(listCalls()).toBe(2);
+    await act(async () => resolve({ status: "ok", data: [summary({ number: 8, title: "Fresh one" })] }));
+    expect(host.textContent).toContain("Fresh one");
+    expect(host.textContent).not.toContain("Crash on startup");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("remembers each filter's own result", async () => {
@@ -173,7 +190,8 @@ it("never shows one Project's issues in another", async () => {
 it("keeps the list and notes the failure when a refresh fails; a first failure shows the error", async () => {
   await render();
   vi.mocked(commands.listIssues).mockResolvedValue({ status: "error", error: { message: "network down" } });
-  await remount();
+  // A refresh is explicit: focus bumps the auto-refresh token even while the cache is fresh.
+  await act(async () => void window.dispatchEvent(new Event("focus")));
   expect(host.textContent).toContain("Crash on startup");
   expect(host.textContent).toContain("network down");
   expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -189,7 +207,7 @@ it("still shows the guidance when gh is not ready, even with a cached list", asy
     status: "ok",
     data: { availability: "notAuthenticated", guidance: "Run gh auth login." },
   } as never);
-  await remount();
+  await act(async () => void window.dispatchEvent(new Event("focus")));
   expect(host.textContent).toContain("Run gh auth login.");
   expect(host.textContent).not.toContain("Crash on startup");
 });

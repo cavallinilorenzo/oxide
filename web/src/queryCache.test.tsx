@@ -2,7 +2,7 @@
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearQueryCache, invalidateQueries, setQueryData, useQuery, type QueryResult, type QueryState } from "./queryCache";
+import { clearQueryCache, invalidateQueries, QUERY_STALE_MS, setQueryData, useQuery, type QueryResult, type QueryState } from "./queryCache";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -20,15 +20,15 @@ let host: HTMLDivElement;
 let root: Root;
 let seen: QueryState<unknown>;
 
-function Probe({ k, fetch }: { k: string; fetch: () => Promise<QueryResult<unknown>> }) {
-  const state = useQuery(k, fetch);
+function Probe({ k, fetch, refresh = 0 }: { k: string; fetch: () => Promise<QueryResult<unknown>>; refresh?: number }) {
+  const state = useQuery(k, fetch, refresh);
   useEffect(() => {
     seen = state;
   });
   return null;
 }
-const mount = (k: string, fetch: () => Promise<QueryResult<unknown>>) =>
-  act(async () => root.render(<Probe k={k} fetch={fetch} />));
+const mount = (k: string, fetch: () => Promise<QueryResult<unknown>>, refresh = 0) =>
+  act(async () => root.render(<Probe k={k} fetch={fetch} refresh={refresh} />));
 
 beforeEach(() => {
   clearQueryCache();
@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 describe("query cache", () => {
-  it("shows loading once, then the last data instantly on remount while refreshing", async () => {
+  it("shows loading once, then renders the cached data on remount without asking again while fresh", async () => {
     let resolveFirst!: () => void;
     await mount("k", () => new Promise((r) => (resolveFirst = () => r(ok("one")))));
     expect(seen.state).toBe("loading");
@@ -49,11 +49,55 @@ describe("query cache", () => {
     await act(() => root.unmount());
 
     root = createRoot(host);
-    const next = deferred<QueryResult<string>>();
-    await mount("k", () => next.promise);
-    expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: true });
-    await act(async () => next.resolve(ok("two")));
-    expect(seen).toMatchObject({ state: "ready", data: "two", refreshing: false });
+    const fetcher = vi.fn(() => never<string>());
+    await mount("k", fetcher);
+    expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("revalidates silently in the background once the cached entry is older than the threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      await mount("k", async () => ok("one"));
+      await act(() => root.unmount());
+      await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS + 1));
+
+      root = createRoot(host);
+      const next = deferred<QueryResult<string>>();
+      const fetcher = vi.fn(() => next.promise);
+      await mount("k", fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      // The old data stays on screen while the refresh runs.
+      expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: true });
+      await act(async () => next.resolve(ok("two")));
+      expect(seen).toMatchObject({ state: "ready", data: "two", refreshing: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not revalidate on mount while the entry is younger than the threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      await mount("k", async () => ok("one"));
+      await act(() => root.unmount());
+      await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS - 1));
+
+      root = createRoot(host);
+      const fetcher = vi.fn(() => never<string>());
+      await mount("k", fetcher);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refetches when the caller bumps its refresh token, even while the entry is fresh", async () => {
+    await mount("k", async () => ok("one"));
+    const fetcher = vi.fn(async () => ok("two"));
+    await mount("k", fetcher, 1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(seen).toMatchObject({ state: "ready", data: "two" });
   });
 
   it("joins an identical fetch already in flight", async () => {
@@ -74,7 +118,10 @@ describe("query cache", () => {
     expect(seen).toEqual({ state: "error", message: "boom" });
 
     setQueryData("b", "kept");
-    await mount("b", async () => fail("later"));
+    const fetcher = async () => fail("later");
+    await mount("b", fetcher);
+    // A manual refresh asks again even though the freshly written data is not stale.
+    await mount("b", fetcher, 1);
     expect(seen).toMatchObject({ state: "ready", data: "kept", refreshError: "later" });
   });
 
@@ -102,6 +149,18 @@ describe("query cache", () => {
     root = createRoot(host);
     await mount("p:1:list", () => never<string>());
     expect(seen.state).toBe("loading");
+  });
+
+  it("refetches an unmounted entry on its next mount after invalidation, even while fresh", async () => {
+    await mount("p:1:list", async () => ok("one"));
+    await act(() => root.unmount());
+    invalidateQueries("p:1:");
+
+    root = createRoot(host);
+    const fetcher = vi.fn(async () => ok("two"));
+    await mount("p:1:list", fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(seen).toMatchObject({ state: "ready", data: "two" });
   });
 
   it("stays bounded", async () => {

@@ -34,11 +34,13 @@ function notify(key: string, invalidated = false) {
   listeners.get(key)?.forEach((l) => l(invalidated));
 }
 
-/** Whether a mount should ask again: nothing cached, invalidated, or older than the threshold. */
-function isStale(key: string): boolean {
+/** Whether a mount should ask again: nothing cached, invalidated, or older than the caller's
+ *  threshold. A threshold of `0` (the default) always asks. */
+function isStale(key: string, staleMs: number): boolean {
   const entry = entries.get(key);
   if (entry === undefined || entry.updatedAt === undefined || entry.stale === true) return true;
-  return Date.now() - entry.updatedAt >= QUERY_STALE_MS;
+  if (staleMs <= 0) return true;
+  return Date.now() - entry.updatedAt >= staleMs;
 }
 
 function subscribe(key: string, listener: (invalidated: boolean) => void): () => void {
@@ -73,11 +75,18 @@ function run<T>(key: string, fetch: () => Promise<QueryResult<T>>, force: boolea
   fetch().then(settle, (e: unknown) => settle({ status: "error", error: { message: String(e) } }));
 }
 
-/** Shows the last known result for `key` at once. A mount only revalidates in the background when
- *  the cached entry is older than `QUERY_STALE_MS` (or was invalidated); a changed `refresh` token
- *  is an explicit ask, so it bypasses the threshold. The caller owns the refresh policy; this owns
- *  what to show meanwhile. */
-export function useQuery<T>(key: string, fetch: () => Promise<QueryResult<T>>, refresh: string | number = 0): QueryState<T> {
+/** Shows the last known result for `key` at once. By default a mount revalidates in the
+ *  background; pass `staleMs` to trust cached data for that long (the GitHub surfaces do, since
+ *  every fetch is a `gh` call). A changed `refresh` token is an explicit ask, so it bypasses the
+ *  threshold, and an invalidation always wins. The caller owns the refresh policy; this owns what
+ *  to show meanwhile. */
+export function useQuery<T>(
+  key: string,
+  fetch: () => Promise<QueryResult<T>>,
+  refresh: string | number = 0,
+  options: { staleMs?: number } = {},
+): QueryState<T> {
+  const staleMs = options.staleMs ?? 0;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const fetchRef = useRef(fetch);
   const seen = useRef<{ key: string; refresh: string | number } | null>(null);
@@ -100,8 +109,8 @@ export function useQuery<T>(key: string, fetch: () => Promise<QueryResult<T>>, r
     // auto-refresh timer: ask again whatever the cache's age. A first mount (or a new key)
     // reuses the cache unless it has gone stale.
     const forced = previous !== null && previous.key === key && previous.refresh !== refresh;
-    if (forced || isStale(key)) run(key, () => fetchRef.current(), forced);
-  }, [key, refresh]);
+    if (forced || isStale(key, staleMs)) run(key, () => fetchRef.current(), forced);
+  }, [key, refresh, staleMs]);
 
   const entry = entries.get(key);
   if (entry?.data !== undefined) {

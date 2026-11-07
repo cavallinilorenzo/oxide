@@ -1,7 +1,7 @@
 import { Skeleton } from "./Skeleton";
 import { CommentIcon, PlusIcon, SearchIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
-import { invalidateQueries, useQuery } from "./queryCache";
+import { invalidateQueries, QUERY_STALE_MS, useQuery } from "./queryCache";
 import { RefreshNotice } from "./RefreshNotice";
 import { commands, type Thread } from "./bindings";
 import { Avatar } from "./Avatar";
@@ -39,7 +39,7 @@ export function IssuesSurface(props: IssuesSurfaceProps) {
 function IssuesViews({ projectId, projectName, refreshKey = 0, onChanged, onDispatched }: IssuesSurfaceProps) {
   const tick = useAutoRefresh();
   const reload = refreshKey + tick;
-  const availability = useQuery(`p${projectId}:issues:state`, () => commands.issuesState(projectId), reload);
+  const availability = useQuery(`p${projectId}:issues:state`, () => commands.issuesState(projectId), reload, { staleMs: QUERY_STALE_MS });
   const [opened, setOpened] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   // Bumped after the list changed under it (a new issue, a closed one), beyond the timer.
@@ -123,6 +123,7 @@ function IssueList({ projectId, projectName, refreshKey, onOpen, onCreate }: Iss
     `p${projectId}:issues:list:${closed}:${mine}:${search}`,
     () => commands.listIssues(projectId, closed, mine, search),
     refreshKey,
+    { staleMs: QUERY_STALE_MS },
   );
 
   useEffect(() => {

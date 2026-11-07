@@ -20,15 +20,15 @@ let host: HTMLDivElement;
 let root: Root;
 let seen: QueryState<unknown>;
 
-function Probe({ k, fetch, refresh = 0 }: { k: string; fetch: () => Promise<QueryResult<unknown>>; refresh?: number }) {
-  const state = useQuery(k, fetch, refresh);
+function Probe({ k, fetch, refresh = 0, staleMs }: { k: string; fetch: () => Promise<QueryResult<unknown>>; refresh?: number; staleMs?: number }) {
+  const state = useQuery(k, fetch, refresh, staleMs === undefined ? undefined : { staleMs });
   useEffect(() => {
     seen = state;
   });
   return null;
 }
-const mount = (k: string, fetch: () => Promise<QueryResult<unknown>>, refresh = 0) =>
-  act(async () => root.render(<Probe k={k} fetch={fetch} refresh={refresh} />));
+const mount = (k: string, fetch: () => Promise<QueryResult<unknown>>, refresh = 0, staleMs?: number) =>
+  act(async () => root.render(<Probe k={k} fetch={fetch} refresh={refresh} staleMs={staleMs} />));
 
 beforeEach(() => {
   clearQueryCache();
@@ -40,32 +40,43 @@ afterEach(async () => {
 });
 
 describe("query cache", () => {
-  it("shows loading once, then renders the cached data on remount without asking again while fresh", async () => {
-    let resolveFirst!: () => void;
-    await mount("k", () => new Promise((r) => (resolveFirst = () => r(ok("one")))));
-    expect(seen.state).toBe("loading");
-    await act(async () => resolveFirst());
+  it("revalidates on remount by default, while showing the cached data at once", async () => {
+    await mount("k", async () => ok("one"));
     expect(seen).toMatchObject({ state: "ready", data: "one" });
     await act(() => root.unmount());
 
     root = createRoot(host);
-    const fetcher = vi.fn(() => never<string>());
+    const next = deferred<QueryResult<string>>();
+    const fetcher = vi.fn(() => next.promise);
     await mount("k", fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: true });
+    await act(async () => next.resolve(ok("two")));
+    expect(seen).toMatchObject({ state: "ready", data: "two" });
+  });
+
+  it("shows cached data on remount without asking again while inside the opt-in staleness window", async () => {
+    await mount("k", async () => ok("one"));
+    await act(() => root.unmount());
+
+    root = createRoot(host);
+    const fetcher = vi.fn(() => never<string>());
+    await mount("k", fetcher, 0, QUERY_STALE_MS);
     expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: false });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("revalidates silently in the background once the cached entry is older than the threshold", async () => {
+  it("revalidates silently in the background once the cached entry is older than the opt-in threshold", async () => {
     vi.useFakeTimers();
     try {
-      await mount("k", async () => ok("one"));
+      await mount("k", async () => ok("one"), 0, QUERY_STALE_MS);
       await act(() => root.unmount());
       await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS + 1));
 
       root = createRoot(host);
       const next = deferred<QueryResult<string>>();
       const fetcher = vi.fn(() => next.promise);
-      await mount("k", fetcher);
+      await mount("k", fetcher, 0, QUERY_STALE_MS);
       expect(fetcher).toHaveBeenCalledTimes(1);
       // The old data stays on screen while the refresh runs.
       expect(seen).toMatchObject({ state: "ready", data: "one", refreshing: true });
@@ -76,16 +87,16 @@ describe("query cache", () => {
     }
   });
 
-  it("does not revalidate on mount while the entry is younger than the threshold", async () => {
+  it("does not revalidate on mount while the entry is younger than the opt-in threshold", async () => {
     vi.useFakeTimers();
     try {
-      await mount("k", async () => ok("one"));
+      await mount("k", async () => ok("one"), 0, QUERY_STALE_MS);
       await act(() => root.unmount());
       await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS - 1));
 
       root = createRoot(host);
       const fetcher = vi.fn(() => never<string>());
-      await mount("k", fetcher);
+      await mount("k", fetcher, 0, QUERY_STALE_MS);
       expect(fetcher).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

@@ -5,7 +5,16 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { GithubSetup } from "./GithubSetup";
 import { LanguageTools } from "./LanguageTools";
 import { UpdatesSettings } from "./UpdatesSettings";
-import { SETTINGS_SECTIONS, useSettingsSection } from "./useSettingsSection";
+import { SETTINGS_CATEGORIES, settingsCategoryFor, type SettingsCategoryId } from "./useSettingsSection";
+import {
+  CommandPaletteIcon,
+  GearIcon,
+  PaintbrushIcon,
+  ServerIcon,
+  SyncIcon,
+  ToolsIcon,
+  UnmuteIcon,
+} from "@primer/octicons-react";
 import { getAppearance, saveAppearance, validateAppearance } from "./appearance";
 import { Skeleton } from "./Skeleton";
 import { listen } from "@tauri-apps/api/event";
@@ -46,6 +55,16 @@ const MODES: { id: PermissionMode; label: string; description: string }[] = [
   { id: "full-access", label: "Full access", description: "Allows all actions without asking for approval." },
 ];
 
+const CATEGORY_ICONS: Record<SettingsCategoryId, typeof GearIcon> = {
+  general: GearIcon,
+  providers: ServerIcon,
+  appearance: PaintbrushIcon,
+  dictation: UnmuteIcon,
+  developer: ToolsIcon,
+  shortcuts: CommandPaletteIcon,
+  updates: SyncIcon,
+};
+
 /** Retain saved values when catalogs change or a Provider is offline. */
 const withSavedValue = (options: DropdownOption<string>[], value: string | null | undefined) =>
   value && !options.some((option) => option.value === value)
@@ -64,7 +83,18 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
   );
   const [catalogs, setCatalogs] = useState<Partial<Record<Provider, ModelInfo[]>>>({});
   const scroller = useRef<HTMLElement>(null);
-  const activeSection = useSettingsSection(scroller, state !== null && draft !== null);
+  const [category, setCategory] = useState<SettingsCategoryId>(() => {
+    const hash = window.location.hash.replace(/^#settings-/, "");
+    return settingsCategoryFor(section) ?? settingsCategoryFor(hash) ?? "general";
+  });
+  // Deep links can change while Settings stays open; follow them without an
+  // effect that would render twice with the old category.
+  const [linkedSection, setLinkedSection] = useState(section);
+  if (section !== linkedSection) {
+    setLinkedSection(section);
+    const next = settingsCategoryFor(section);
+    if (next) setCategory(next);
+  }
 
   useEffect(() => {
     // A valid change on disk replaces the draft (the file is the source of
@@ -94,10 +124,20 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
     };
   }, []);
 
-  const ready = state !== null && draft !== null;
   useEffect(() => {
-    if (ready && section) document.getElementById(`settings-${section}`)?.scrollIntoView({ block: "start" });
-  }, [ready, section]);
+    const onHashChange = () => {
+      const next = settingsCategoryFor(window.location.hash.replace(/^#settings-/, ""));
+      if (next) setCategory(next);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    const hash = `#settings-${category}`;
+    if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [category]);
 
   if (!state || !draft)
     return <main className="settings" aria-label="Settings"><Skeleton kind="form" label="Loading settings…"/></main>;
@@ -149,15 +189,180 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
       </p>
     ));
 
+  const generalPanel = (
+    <section className="settings-section" aria-labelledby="settings-general">
+      <header className="settings-section-header">
+        <h2 id="settings-general">General</h2>
+        <p>Defaults for new Threads and the app.</p>
+      </header>
+      <div className="settings-card">
+        <div className="settings-fields settings-general-fields">
+          <div className="settings-field">
+            <span>Default Provider</span>
+            <Dropdown label="Default Provider" value={draft.defaultProvider}
+              options={PROVIDERS.map((p) => ({ value: p.id, label: p.label, icon: <ProviderMark provider={p.id} /> }))}
+              onChange={(defaultProvider) => set({ defaultProvider })} />
+            {fieldErrors("defaultProvider")}
+          </div>
+        </div>
+        <label className="inline">
+          <input
+            type="checkbox"
+            checked={draft.confirmQuit}
+            onChange={(e) => set({ confirmQuit: e.target.checked })}
+          />
+          Confirm before quitting
+          {fieldErrors("confirmQuit")}
+        </label>
+      </div>
+    </section>
+  );
+
+  const providersPanel = (
+    <section
+      className="settings-section"
+      aria-labelledby="settings-providers"
+    >
+      <header className="settings-section-header">
+        <h2 id="settings-providers">Providers</h2>
+        <p>Choose Provider default for Model and Effort to use the Provider’s defaults.</p>
+      </header>
+      {PROVIDERS.map((p) => {
+        const models = catalogs[p.id] ?? [];
+        const current = draft.providers[p.id];
+        const collapsedModels = collapseEffortVariants(models, current.effort ?? null);
+        const selectedModel = current.model
+          ? collapsedModels.find((item) => modelFamilyId(item.id) === modelFamilyId(current.model!))?.id ?? current.model
+          : "";
+        const model = selectedModelInfo(models, current.model ?? null);
+        const efforts = model?.supportedEfforts ?? [];
+        const hint =
+          p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
+        return (
+          <section
+            className="settings-card"
+            key={p.id}
+            aria-labelledby={`settings-provider-${p.id}`}
+          >
+            <h3
+              className="settings-provider-title"
+              id={`settings-provider-${p.id}`}
+            >
+              <span aria-hidden="true">
+                <ProviderMark provider={p.id} size={20} />
+              </span>
+              {p.label}
+            </h3>
+            {p.id === "claude" && hint && hint.type !== "ok" && (
+              <div className={`provider-hint ${hint.type}`} role="alert">
+                <span>{hint.message}</span>
+                {hint.command && <code>{hint.command}</code>}
+              </div>
+            )}
+            {p.id === "claude" && (
+              <div
+                className="provider-warning"
+                role="note"
+                aria-label="Retention warning"
+              >
+                <strong>Session retention warning:</strong>{" "}
+                {CLAUDE_30_DAY_RETENTION_WARNING}
+              </div>
+            )}
+            <div className="settings-fields">
+              <div className="settings-field">
+                <span>Model</span>
+                <Dropdown label={`${p.label} Model`} value={selectedModel}
+                  options={withSavedValue([
+                    { value: "", label: "Provider default" },
+                    ...collapsedModels.map((m) => ({ value: m.id, label: m.name })),
+                  ], selectedModel)}
+                  onChange={(value) => {
+                    const next = selectedModelInfo(models, value || null);
+                    setProvider(p.id, { model: value || null, effort: next?.supportedEfforts.includes(current.effort ?? "") ? current.effort : null });
+                  }} />
+                {fieldErrors(`providers.${p.id}.model`)}
+              </div>
+              <div className="settings-field">
+                <span>Effort</span>
+                <Dropdown label={`${p.label} Effort`} value={efforts.includes(current.effort ?? "") ? current.effort! : ""}
+                  options={[
+                    { value: "", label: "Provider default" },
+                    ...efforts.map((effort) => ({ value: effort, label: effort })),
+                  ]}
+                  onChange={(value) => setProvider(p.id, { effort: value || null })} />
+                {fieldErrors(`providers.${p.id}.effort`)}
+              </div>
+              <div className="settings-field">
+                <span>Default Permission mode</span>
+                <Dropdown label={`${p.label} Permission mode`} value={current.permissionMode}
+                  options={MODES.filter((m) => p.id !== "antigravity" || m.id !== "ask").map((m) => ({
+                    value: m.id,
+                    label: p.id === "antigravity" && m.id === "auto-edit" ? "Auto-edit (soft-deny)" : m.label,
+                    description: p.id === "antigravity" && m.id === "auto-edit"
+                      ? "Edits files in the Thread’s folder; other actions are denied." : m.description,
+                  }))}
+                  onChange={(permissionMode) => setProvider(p.id, { permissionMode })} />
+                {fieldErrors(`providers.${p.id}.permissionMode`)}
+                <p className="hint">Applies to new Threads after saving.</p>
+              </div>
+            </div>
+            {current.permissionMode === "full-access" && (
+              <div className="provider-warning" role="alert" aria-label={`${p.label} Full access warning`}>
+                <strong>Full access:</strong> {p.label} can modify or delete files and run commands without asking for approval. Only use this with Projects you trust.
+              </div>
+            )}
+            {p.id === "claude" && (
+              <fieldset className="settings-customizations">
+                <legend>Claude Code customizations</legend>
+                {CUSTOMIZATIONS.map(({ key, label }) => (
+                  <label className="inline" key={key}>
+                    <input
+                      type="checkbox"
+                      aria-describedby="settings-customizations-hint"
+                      checked={draft.claudeCustomizations[key]}
+                      onChange={(e) =>
+                        set({
+                          claudeCustomizations: {
+                            ...draft.claudeCustomizations,
+                            [key]: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+                {fieldErrors("claudeCustomizations")}
+                <p className="hint" id="settings-customizations-hint">
+                  Everything off keeps a new Thread’s context window clean.
+                  Applies to Threads started after saving.
+                </p>
+              </fieldset>
+            )}
+          </section>
+        );
+      })}
+    </section>
+  );
+
+  const developerPanel = (
+    <>
+      <header className="settings-category-header">
+        <h2>Developer Tools</h2>
+        <p>Prepare this computer for Git, GitHub and local language intelligence.</p>
+      </header>
+      <section className="settings-section" aria-labelledby="settings-github"><header className="settings-section-header"><h2 id="settings-github">GitHub tools</h2><p>Prepare this computer for Git and GitHub.</p></header><GithubSetup /></section>
+      <section className="settings-section" aria-labelledby="settings-language"><header className="settings-section-header"><h2 id="settings-language">Language tools</h2><p>Local intelligence for your code. No extensions required.</p></header><LanguageTools onRunCommand={onRunCommand} onChanged={() => window.dispatchEvent(new Event("oxide-language-tools-changed"))} /></section>
+    </>
+  );
+
   return (
     <main ref={scroller} className="settings" aria-label="Settings">
       <header className="settings-header">
         <h1>Settings</h1>
         <p>Manage your defaults, Providers and Projects.</p>
       </header>
-      <nav className="settings-nav" aria-label="Settings sections">
-        {SETTINGS_SECTIONS.map(([id, label]) => <a className="tab" key={id} href={`#settings-${id}`} aria-current={activeSection === id ? "location" : undefined} onClick={(e) => { e.preventDefault(); document.getElementById(`settings-${id}`)?.scrollIntoView({ block: "start" }); }}>{label}</a>)}
-      </nav>
       {fileErrors.length > 0 && (
         <section className="error-summary" role="alert">
           <p>
@@ -173,177 +378,58 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
           </ul>
         </section>
       )}
-
-      <AppearanceSettings onDraftChange={(appearance) => {
-        appearanceDraft.current = appearance;
-        editVersion.current++;
-        setSaveStatus((status) => status === "saving" ? status : "idle");
-      }} />
-      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu", model: "small" }} onChange={(dictation) => set({ dictation })} />
-      <section className="settings-section" aria-labelledby="settings-general">
-        <header className="settings-section-header">
-          <h2 id="settings-general">General</h2>
-          <p>Defaults for new Threads and the app.</p>
-        </header>
-        <div className="settings-card">
-          <div className="settings-fields settings-general-fields">
-            <div className="settings-field">
-              <span>Default Provider</span>
-              <Dropdown label="Default Provider" value={draft.defaultProvider}
-                options={PROVIDERS.map((p) => ({ value: p.id, label: p.label, icon: <ProviderMark provider={p.id} /> }))}
-                onChange={(defaultProvider) => set({ defaultProvider })} />
-              {fieldErrors("defaultProvider")}
-            </div>
-          </div>
-          <label className="inline">
-            <input
-              type="checkbox"
-              checked={draft.confirmQuit}
-              onChange={(e) => set({ confirmQuit: e.target.checked })}
-            />
-            Confirm before quitting
-            {fieldErrors("confirmQuit")}
-          </label>
-        </div>
-      </section>
-
-      <section
-        className="settings-section"
-        aria-labelledby="settings-providers"
-      >
-        <header className="settings-section-header">
-          <h2 id="settings-providers">Providers</h2>
-          <p>Choose Provider default for Model and Effort to use the Provider’s defaults.</p>
-        </header>
-        {PROVIDERS.map((p) => {
-          const models = catalogs[p.id] ?? [];
-          const current = draft.providers[p.id];
-          const collapsedModels = collapseEffortVariants(models, current.effort ?? null);
-          const selectedModel = current.model
-            ? collapsedModels.find((item) => modelFamilyId(item.id) === modelFamilyId(current.model!))?.id ?? current.model
-            : "";
-          const model = selectedModelInfo(models, current.model ?? null);
-          const efforts = model?.supportedEfforts ?? [];
-          const hint =
-            p.id === "claude" ? getClaudeCodeHint(claudeDetection) : null;
-          return (
-            <section
-              className="settings-card"
-              key={p.id}
-              aria-labelledby={`settings-provider-${p.id}`}
-            >
-              <h3
-                className="settings-provider-title"
-                id={`settings-provider-${p.id}`}
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings categories">
+          {SETTINGS_CATEGORIES.map(({ id, label }) => {
+            const Icon = CATEGORY_ICONS[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                className="settings-nav-item"
+                aria-current={category === id ? "page" : undefined}
+                onClick={() => setCategory(id)}
               >
-                <span aria-hidden="true">
-                  <ProviderMark provider={p.id} size={20} />
-                </span>
-                {p.label}
-              </h3>
-              {p.id === "claude" && hint && hint.type !== "ok" && (
-                <div className={`provider-hint ${hint.type}`} role="alert">
-                  <span>{hint.message}</span>
-                  {hint.command && <code>{hint.command}</code>}
-                </div>
+                <Icon size={16} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="settings-categories">
+          {SETTINGS_CATEGORIES.map(({ id, label }) => (
+            <section
+              key={id}
+              className="settings-category"
+              data-settings-category={id}
+              aria-label={label}
+              hidden={category !== id}
+            >
+              {id === "general" && generalPanel}
+              {id === "providers" && providersPanel}
+              {id === "appearance" && (
+                <AppearanceSettings onDraftChange={(appearance) => {
+                  appearanceDraft.current = appearance;
+                  editVersion.current++;
+                  setSaveStatus((status) => status === "saving" ? status : "idle");
+                }} />
               )}
-              {p.id === "claude" && (
-                <div
-                  className="provider-warning"
-                  role="note"
-                  aria-label="Retention warning"
-                >
-                  <strong>Session retention warning:</strong>{" "}
-                  {CLAUDE_30_DAY_RETENTION_WARNING}
-                </div>
+              {id === "dictation" && (
+                <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu", model: "small" }} onChange={(dictation) => set({ dictation })} />
               )}
-              <div className="settings-fields">
-                <div className="settings-field">
-                  <span>Model</span>
-                  <Dropdown label={`${p.label} Model`} value={selectedModel}
-                    options={withSavedValue([
-                      { value: "", label: "Provider default" },
-                      ...collapsedModels.map((m) => ({ value: m.id, label: m.name })),
-                    ], selectedModel)}
-                    onChange={(value) => {
-                      const next = selectedModelInfo(models, value || null);
-                      setProvider(p.id, { model: value || null, effort: next?.supportedEfforts.includes(current.effort ?? "") ? current.effort : null });
-                    }} />
-                  {fieldErrors(`providers.${p.id}.model`)}
-                </div>
-                <div className="settings-field">
-                  <span>Effort</span>
-                  <Dropdown label={`${p.label} Effort`} value={efforts.includes(current.effort ?? "") ? current.effort! : ""}
-                    options={[
-                      { value: "", label: "Provider default" },
-                      ...efforts.map((effort) => ({ value: effort, label: effort })),
-                    ]}
-                    onChange={(value) => setProvider(p.id, { effort: value || null })} />
-                  {fieldErrors(`providers.${p.id}.effort`)}
-                </div>
-                <div className="settings-field">
-                  <span>Default Permission mode</span>
-                  <Dropdown label={`${p.label} Permission mode`} value={current.permissionMode}
-                    options={MODES.filter((m) => p.id !== "antigravity" || m.id !== "ask").map((m) => ({
-                      value: m.id,
-                      label: p.id === "antigravity" && m.id === "auto-edit" ? "Auto-edit (soft-deny)" : m.label,
-                      description: p.id === "antigravity" && m.id === "auto-edit"
-                        ? "Edits files in the Thread’s folder; other actions are denied." : m.description,
-                    }))}
-                    onChange={(permissionMode) => setProvider(p.id, { permissionMode })} />
-                  {fieldErrors(`providers.${p.id}.permissionMode`)}
-                  <p className="hint">Applies to new Threads after saving.</p>
-                </div>
-              </div>
-              {current.permissionMode === "full-access" && (
-                <div className="provider-warning" role="alert" aria-label={`${p.label} Full access warning`}>
-                  <strong>Full access:</strong> {p.label} can modify or delete files and run commands without asking for approval. Only use this with Projects you trust.
-                </div>
+              {id === "developer" && developerPanel}
+              {id === "shortcuts" && (
+                <ShortcutsSettings
+                  shortcuts={draft.shortcuts}
+                  onChange={(shortcuts) => set({ shortcuts })}
+                  errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
+                />
               )}
-              {p.id === "claude" && (
-                <fieldset className="settings-customizations">
-                  <legend>Claude Code customizations</legend>
-                  {CUSTOMIZATIONS.map(({ key, label }) => (
-                    <label className="inline" key={key}>
-                      <input
-                        type="checkbox"
-                        aria-describedby="settings-customizations-hint"
-                        checked={draft.claudeCustomizations[key]}
-                        onChange={(e) =>
-                          set({
-                            claudeCustomizations: {
-                              ...draft.claudeCustomizations,
-                              [key]: e.target.checked,
-                            },
-                          })
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                  {fieldErrors("claudeCustomizations")}
-                  <p className="hint" id="settings-customizations-hint">
-                    Everything off keeps a new Thread’s context window clean.
-                    Applies to Threads started after saving.
-                  </p>
-                </fieldset>
-              )}
+              {id === "updates" && <UpdatesSettings />}
             </section>
-          );
-        })}
-      </section>
-
-      <section className="settings-section" aria-labelledby="settings-github"><header className="settings-section-header"><h2 id="settings-github">GitHub tools</h2><p>Prepare this computer for Git and GitHub.</p></header><GithubSetup /></section>
-
-      <section className="settings-section" aria-labelledby="settings-language"><header className="settings-section-header"><h2 id="settings-language">Language tools</h2><p>Local intelligence for your code. No extensions required.</p></header><LanguageTools onRunCommand={onRunCommand} onChanged={() => window.dispatchEvent(new Event("oxide-language-tools-changed"))} /></section>
-
-      <ShortcutsSettings
-        shortcuts={draft.shortcuts}
-        onChange={(shortcuts) => set({ shortcuts })}
-        errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
-      />
-
-      <UpdatesSettings />
+          ))}
+        </div>
+      </div>
       {saveError && <p className="error" role="alert">{saveError}</p>}
       <div className="actions">
         <button className="primary" onClick={save} disabled={saveStatus === "saving"}>

@@ -1383,13 +1383,46 @@ section.terminal.terminal-hidden { display: none; }
   padding: 24px 32px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
   container-type: inline-size;
 }
 .settings h1 { font-size: 22px; margin: 0; color: var(--fg-bright); }
 .settings h2 { font-size: 15px; margin: 0; color: var(--fg-bright); }
 .settings h3 { font-size: 14px; margin: 0; }
-.settings-header p, .settings-section-header p { margin: 4px 0 0; color: var(--dim); }
+.settings-header p, .settings-section-header p, .settings-category-header p { margin: 4px 0 0; color: var(--dim); }
+.settings-header, .settings-layout, .settings > .actions, .settings > .error-summary { width: 100%; max-width: 1120px; margin-inline: auto; }
+.settings-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); align-items: start; gap: 28px; }
+.settings-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.settings-nav-item {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font-weight: 500;
+  text-align: left;
+  white-space: normal;
+}
+.settings-nav-item:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.settings-nav-item[aria-current="page"] { background: var(--bg3); color: var(--fg-bright); }
+.settings-nav-item[aria-current="page"] svg { color: var(--acc2); }
+.settings-categories { min-width: 0; }
+.settings-category { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.settings-category[hidden] { display: none; }
 .settings-section { display: flex; flex-direction: column; gap: 12px; }
 .settings-card {
   min-width: 0;
@@ -1424,6 +1457,11 @@ section.terminal.terminal-hidden { display: none; }
 .shortcut-error { grid-column: 1 / -1; }
 .shortcut-reset-all { display: flex; }
 .settings .error { margin: 0; }
+@container (max-width: 720px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .settings-nav-item { width: auto; }
+}
 @container (max-width: 560px) {
   .settings-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-card { padding: 16px; }

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { commands, type IssueSummary } from "./bindings";
 import { IssueCreate } from "./IssueCreate";
+import { clearQueryCache } from "./queryCache";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement;
@@ -30,6 +31,7 @@ const config = "blank_issues_enabled: false\ncontact_links:\n  - name: Security\
 const created = { number: 9, title: "Crash" } as IssueSummary;
 
 beforeEach(() => {
+  clearQueryCache();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);

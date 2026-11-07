@@ -65,6 +65,7 @@ beforeEach(() => {
       protected: true, unpublished: false, pickerDisabledReason: null },
   });
   vi.spyOn(commands, "pullRequestDetail").mockResolvedValue({ status: "ok", data: detail() });
+  vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({ status: "ok", data: [] });
 });
 afterEach(async () => {
   await act(() => root.unmount());
@@ -85,6 +86,18 @@ const button = (name: string | RegExp) =>
     typeof name === "string" ? b.textContent?.trim() === name || b.getAttribute("aria-label") === name : name.test(`${b.textContent} ${b.getAttribute("aria-label")}`),
   )!;
 const click = (el: HTMLElement) => act(async () => el.click());
+
+it("renders a cached pull request at once on remount without asking GitHub again while fresh", async () => {
+  await render();
+  expect(host.textContent).toContain("chore(deps): bump react-virtual");
+  await act(() => root.unmount());
+
+  root = createRoot(host);
+  await render();
+  expect(host.querySelector(".skeleton")).toBeNull();
+  expect(host.textContent).toContain("chore(deps): bump react-virtual");
+  expect(vi.mocked(commands.pullRequestDetail)).toHaveBeenCalledTimes(1);
+});
 
 it("requests a fix with the PR link, conflicts and every failed check, including optional checks", async () => {
   vi.mocked(commands.pullRequestDetail).mockResolvedValue({ status: "ok", data: detail({

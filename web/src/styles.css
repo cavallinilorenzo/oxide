@@ -615,6 +615,13 @@ html.macos .header,
   flex-direction: column;
 }
 .composer:focus-within { border-color: var(--acc2); box-shadow: 0 8px 24px #0005, inset 0 0 0 1px var(--acc2); }
+/* New Thread asked for while this empty composer was already open: a brief ring says it landed. */
+.composer.composer-focus-cue { animation: composer-focus-cue 600ms ease-out; }
+@keyframes composer-focus-cue {
+  0% { border-color: var(--acc2); box-shadow: 0 8px 24px #0005, 0 0 0 4px color-mix(in srgb, var(--acc2) 35%, transparent); }
+  100% { border-color: var(--line-strong); box-shadow: 0 8px 24px #0005; }
+}
+@media (prefers-reduced-motion: reduce) { .composer.composer-focus-cue { animation: none; box-shadow: 0 8px 24px #0005, 0 0 0 1px var(--acc2); } }
 .composer-lost { padding: 12px; align-items: flex-start; }
 .slash-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 6px; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line-strong); background: #1d2230; border-radius: 10px; box-shadow: 0 10px 30px #0009; z-index: 5; }
 .slash-menu li { min-width: 0; display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }

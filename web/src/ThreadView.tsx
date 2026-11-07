@@ -105,6 +105,19 @@ interface ThreadViewProps {
   onThreadContinued: (continued: ContinuedThread, from: number) => void;
   /** Changes when the Transcript changed outside a Turn, e.g. after a restore; the Thread is read again. */
   transcriptRevision?: number;
+  /**
+   * The Provider the selected Thread is already known to use, from the Thread entity (or the
+   * configured default for a brand-new one). Renders its brand before the Transcript arrives,
+   * instead of falling back to Claude Code branding while loading.
+   */
+  initialProvider?: string;
+  /**
+   * A one-shot New Thread request for this Thread: focus the composer and flash a short cue.
+   * Selecting the empty Thread that is already open changes nothing on screen, so without this
+   * the request would look like a dead button.
+   */
+  newThreadFocus?: { threadId: number; id: number } | null;
+  onNewThreadFocusHandled?: () => void;
 }
 
 
@@ -186,6 +199,9 @@ export function ThreadView({
   onOpenThread,
   onThreadContinued,
   transcriptRevision = 0,
+  initialProvider,
+  newThreadFocus,
+  onNewThreadFocusHandled,
 }: ThreadViewProps) {
   const [settledThreadId, setSettledThreadId] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
@@ -198,6 +214,10 @@ export function ThreadView({
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  /** The one-shot New Thread request already acted on, so a re-render cannot focus twice. */
+  const handledNewThreadFocus = useRef<number | null>(null);
+  /** A short-lived ring on the composer after New Thread reopened the empty Thread. */
+  const [composerFocusCue, setComposerFocusCue] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   /** Attachments taken out of the prompt, forgotten by Core once the prompt is sent. */
   const removedAttachments = useRef(new Set<string>());
@@ -205,7 +225,8 @@ export function ThreadView({
   const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
-  const [draftProvider, setDraftProvider] = useState<string>("claude");
+  // Start from the known Thread Provider, not a Claude placeholder: settings only refine it later.
+  const [draftProvider, setDraftProvider] = useState<string>(() => initialProvider ?? "claude");
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const shortcuts = useShortcuts();
@@ -500,6 +521,11 @@ export function ThreadView({
     };
   }, [threadId, projectId, onInitialLoad]);
 
+  // A draft Thread keeps the Provider identity its parent already knows, before Settings load.
+  useEffect(() => {
+    if (threadId === null && initialProvider) setDraftProvider(initialProvider);
+  }, [threadId, initialProvider]);
+
   // Subscribe to the thread when threadId changes, and again when the Transcript
   // changed outside a Turn, e.g. after a restore.
   useEffect(() => {
@@ -576,6 +602,23 @@ export function ThreadView({
       onPrefillUsed();
     }
   }, [prefill, threadId, onPrefillUsed]);
+
+  // New Thread while this empty Thread is already open: selecting it again changes nothing,
+  // so focus the composer and flash a cue to show the request landed.
+  useEffect(() => {
+    if (!newThreadFocus || newThreadFocus.threadId !== threadId) return;
+    if (handledNewThreadFocus.current === newThreadFocus.id) return;
+    handledNewThreadFocus.current = newThreadFocus.id;
+    composerRef.current?.focus();
+    setComposerFocusCue(true);
+    onNewThreadFocusHandled?.();
+  }, [newThreadFocus, threadId, onNewThreadFocusHandled]);
+
+  useEffect(() => {
+    if (!composerFocusCue) return;
+    const timer = window.setTimeout(() => setComposerFocusCue(false), 600);
+    return () => window.clearTimeout(timer);
+  }, [composerFocusCue]);
 
   const turnCount = transcript.turnOffset + transcript.turns.length;
   // Until the real Turn arrives, the sent prompt stands in for it.
@@ -739,7 +782,12 @@ export function ThreadView({
   const handleSaveRename = () => saveRename(editTitle);
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
-  const currentProvider = transcript.thread?.provider || draftProvider;
+  // Ignore a Transcript from the Thread we just left; until this Thread's own snapshot arrives,
+  // its entity's Provider is the truth, so branding never flickers through another Provider.
+  const loadedProvider = transcript.thread && transcript.thread.id === threadId
+    ? transcript.thread.provider
+    : null;
+  const currentProvider = loadedProvider || initialProvider || draftProvider;
   const providerCaps = providerCapsEntry?.provider === currentProvider ? providerCapsEntry.caps : null;
   useEffect(() => {
     if (openPermissionsWhenReady && providerCaps) {
@@ -1185,7 +1233,7 @@ export function ThreadView({
       ) : (
       <form
         ref={composerFormRef}
-        className={dropActive ? "composer drop-target" : "composer"}
+        className={`composer${dropActive ? " drop-target" : ""}${composerFocusCue ? " composer-focus-cue" : ""}`}
         onSubmit={handleSubmit}
       >
         {slashMatches.length > 0 && (

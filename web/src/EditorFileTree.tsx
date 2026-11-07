@@ -15,6 +15,7 @@ export function EditorFileTree({
   onOpen,
   onKeep,
   revision,
+  collapseToken,
 }: {
   projectId: number;
   threadId: number | null;
@@ -24,6 +25,8 @@ export function EditorFileTree({
   /** Double click: keeps the file open. */
   onKeep?: (path: string) => void;
   revision: number;
+  /** A new value folds every directory back to the checkout root. */
+  collapseToken?: number;
 }) {
   const [directories, setDirectories] = useState<Record<string, FileEntry[]>>(
     {},
@@ -57,6 +60,12 @@ export function EditorFileTree({
   }, [revision, projectId, threadId]);
   // The selected file's folders open so it is visible in the list.
   const [revealed, setRevealed] = useState<string | null>(null);
+  // A new token folds everything; a later selection may unfold its own path again.
+  const [foldedAt, setFoldedAt] = useState(collapseToken);
+  if (collapseToken !== foldedAt) {
+    setFoldedAt(collapseToken);
+    setExpanded(new Set([""]));
+  }
   if (selected !== revealed) {
     setRevealed(selected);
     const parts = (selected ?? "").split("/").slice(0, -1);

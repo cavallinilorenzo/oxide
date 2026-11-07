@@ -1,6 +1,6 @@
 import { DictationController } from "./dictation";
 import { Skeleton } from "./Skeleton";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { invalidateQueries } from "./queryCache";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -30,7 +30,7 @@ import {
   TrashIcon,
 } from "@primer/octicons-react";
 import { BoardView } from "./BoardView";
-import { attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
+import { attentionGroups, attentionTarget, summarizeAttention, type AttentionTarget } from "./attention";
 import { AttentionButton } from "./AttentionButton";
 import { useAttention } from "./useAttention";
 import { useAttentionFocus } from "./useAttentionFocus";
@@ -52,7 +52,7 @@ import { ResizeHandle } from "./ResizeHandle";
 import { workspaceLayout } from "./panelLayout";
 import { useElementSize, usePanelSize } from "./usePanelSize";
 import { displayPath, middleEllipsis, readablePath } from "./headerLines";
-import { actionForKey, adjacentThreadId, formatAccelerator, type ShortcutAction } from "./shortcuts";
+import { actionForKey, adjacentThreadId, ATTENTION_SHORTCUT, formatAccelerator, matchesAccelerator, type ShortcutAction } from "./shortcuts";
 import { useShortcuts } from "./useShortcuts";
 import { getDraft, setDraft } from "./threadDrafts";
 import { createDefaultThread } from "./createDefaultThread";
@@ -66,6 +66,7 @@ const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.
 
 const TerminalSurface = lazy(() => import("./TerminalSurface").then((module) => ({ default: module.TerminalSurface })));
 const CodeWorkbench = lazy(() => import("./CodeWorkbench").then((module) => ({ default: module.CodeWorkbench })));
+const FilesPanel = lazy(() => import("./FilesPanel").then((module) => ({ default: module.FilesPanel })));
 type WorkbenchContext = { key: string; projectId: number; threadId: number | null; rootPath: string };
 
 const DiffPanel = lazy(() => import("./DiffPanel").then((module) => ({ default: module.DiffPanel })));
@@ -95,9 +96,9 @@ export function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [regionPriority, setRegionPriority] = useState<"sidebar" | "tools">("tools");
   const [wantsMaximized, setMaximized] = useState(false);
-  /** Which checkouts have at least one file open in the Files editor. */
-  const [filesOpen, setFilesOpen] = useState<Record<string, boolean>>({});
   const [workbenches, setWorkbenches] = useState<WorkbenchContext[]>([]);
+  /** Per Project, whether the centre shows the Code workspace or the selected Thread. */
+  const [centreViews, setCentreViews] = useState<Record<number, "thread" | "code">>({});
   const [installCommand, setInstallCommand] = useState<{ id: number; command: string } | null>(null);
   const installSequence = useRef(0);
   const shortcuts = useShortcuts();
@@ -159,11 +160,19 @@ export function App() {
     setSelectedThreadId(threadId);
     if (selectedId !== null) {
       selectedThreadsByProject.current[selectedId] = threadId;
+      // Picking a Thread shows its conversation; Code stays one click away.
+      setCentreViews((previous) => previous[selectedId] === "thread" || previous[selectedId] === undefined
+        ? previous
+        : { ...previous, [selectedId]: "thread" });
     }
   }, [selectedId]);
   const openProjectIds = useMemo(() => sidebarProjects(projects ?? []).map((project) => project.id), [projects]);
   const attentionCards = useAttention(openProjectIds);
   const attention = summarizeAttention(attentionCards);
+  const attentionTray = useMemo(
+    () => attentionGroups(attentionCards, sidebarProjects(projects ?? []).map(({ id, name }) => ({ id, name }))),
+    [attentionCards, projects],
+  );
   // A requested jump: kept until its Thread is shown and the response focused, so loading or failure never drops it.
   const [attentionJump, setAttentionJump] = useState<{ target: AttentionTarget; failed: boolean } | null>(null);
   const pendingThread = useRef<number | null>(null);
@@ -176,8 +185,9 @@ export function App() {
     projectId: selected.id, threadId: selectedThread?.worktreePath ? currentThreadId : null,
     rootPath: selectedThread?.worktreePath ?? selected.path,
   } : null, [selected, currentThreadId, selectedThread?.worktreePath]);
-  /** Full-screen editing only makes sense with a file open in Files. */
-  const canMaximize = activeTool === "Files" && workbenchContext !== null && filesOpen[workbenchContext.key] === true;
+  /** The Files navigator rewards a wide layout; the editor itself now lives in the centre. */
+  const canMaximize = activeTool === "Files" && workbenchContext !== null;
+  const centreView = selected ? centreViews[selected.id] ?? "thread" : "thread";
   const maximized = wantsMaximized && canMaximize;
   const dockRequested = showTools && !showSettings && !showBoard;
   const layout = workspaceLayout(bodySize.width, bodySize.height, {
@@ -185,7 +195,7 @@ export function App() {
   }, dockRequested, { sidebarVisible: showSidebar, priority: regionPriority, maximized });
   const dockVisible = layout.toolsVisible;
   const [settingsSection, setSettingsSection] = useState<string | null>(null);
-  const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean }>>({});
+  const [openedSurfaces, setOpenedSurfaces] = useState<Record<string, { files?: boolean; code?: boolean }>>({});
   const [terminals, setTerminals] = useState<TerminalsByProject>({});
   const [visitedTools, setVisitedTools] = useState<Record<string, boolean>>({});
   if (dockRequested && activeTool && selected && !visitedTools[`${selected.id}:${activeTool}`]) {
@@ -218,9 +228,30 @@ export function App() {
     // The command belongs in the selected Thread's checkout, never in a tab opened elsewhere.
     if (workbenchContext) setTerminals((previous) => focusCheckoutTab(previous, workbenchContext.projectId, workbenchContext));
   };
+  /** A checkout's Code workspace mounts on first use and then keeps its buffers. */
+  const ensureCodeWorkspace = useCallback((context: WorkbenchContext) => {
+    setOpenedSurfaces((previous) => previous[context.key]?.code ? previous : {
+      ...previous, [context.key]: { ...previous[context.key], code: true },
+    });
+    setWorkbenches((previous) => previous.some((candidate) => candidate.key === context.key)
+      ? previous : [...previous, context]);
+    setCentreViews((previous) => previous[context.projectId] === "code"
+      ? previous : { ...previous, [context.projectId]: "code" });
+  }, []);
+  const showCodeWorkspace = useCallback(() => {
+    if (!workbenchContext) return;
+    ensureCodeWorkspace(workbenchContext);
+    setMaximized(false);
+    setShowBoard(false);
+    setShowSettings(false);
+  }, [workbenchContext, ensureCodeWorkspace]);
   const openCodeFile = (path: string, diff?: DiffFile, remote = false, review?: ReviewTarget) => {
     if (!workbenchContext) return;
     setCodeRequest({ id: ++codeSequence.current, path, diff, remote, review, contextKey: workbenchContext.key });
+    ensureCodeWorkspace(workbenchContext);
+    setMaximized(false);
+    setShowBoard(false);
+    setShowSettings(false);
     selectSurface("Files");
   };
   useEffect(() => {
@@ -457,9 +488,8 @@ export function App() {
     }
   }, [selected, threads, createThreadIn]);
 
-  /** Jumps to the Thread holding the most urgent request. Never answers or clears it. */
-  const jumpToAttention = () => {
-    const target = attentionTarget(attentionCards, openProjectIds);
+  /** Jumps to a Thread waiting on the user, by default the most urgent. Never answers or clears it. */
+  const jumpToAttention = useCallback((target: AttentionTarget | null = attentionTarget(attentionCards, openProjectIds)) => {
     if (!target) return;
     setShowSettings(false);
     setShowBoard(false);
@@ -473,7 +503,7 @@ export function App() {
       setSelectedThreadId(null);
     }
     setAttentionJump({ target, failed: false });
-  };
+  }, [attentionCards, openProjectIds, selectedId]);
 
   // Focus the response once its Thread is on screen; background updates never reach this.
   const jumpTarget = attentionJump && !attentionJump.failed ? attentionJump.target : null;
@@ -653,6 +683,13 @@ export function App() {
       }
 
       const action = actionForKey(e, shortcuts);
+      // The built-in attention shortcut goes straight to the most urgent request, without the tray.
+      // A user's own binding on the same keys wins.
+      if (!action && matchesAccelerator(e, ATTENTION_SHORTCUT)) {
+        e.preventDefault();
+        jumpToAttention();
+        return;
+      }
       // The Model picker belongs to the open Thread, which handles it.
       if (!action || action === "modelPicker") return;
       if (action === "newThread") {
@@ -732,7 +769,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread]);
+  }, [shortcuts, selected, startNewThread, closeThread, showBoard, showSettings, showTools, activeTool, currentThreadId, threads, selectSurface, layout.sidebarVisible, dockVisible, canMaximize, maximized, focusRegion, selectThread, jumpToAttention]);
 
   // Listen for low-rate thread status changes from backend
   useEffect(() => {
@@ -844,7 +881,8 @@ export function App() {
         {!isWindows && <span className="grow" data-tauri-drag-region />}
         <div className="header-actions" data-tauri-drag-region>
         {openError && <span className="error header-error" role="alert">{openError}</span>}
-        <AttentionButton summary={attention} failed={attentionJump?.failed ?? false} onActivate={jumpToAttention}
+        <AttentionButton summary={attention} groups={attentionTray} failed={attentionJump?.failed ?? false}
+          onActivate={() => jumpToAttention()} onJump={jumpToAttention}
           onRetry={() => setAttentionJump((current) => current && { ...current, failed: false })} />
         {selected && !selected.missing && currentThreadId !== null && !showBoard && (
           <button className="icon-btn" title="Reveal in Finder" aria-label="Reveal in Finder" onClick={() => void revealCheckout()}>
@@ -974,10 +1012,33 @@ export function App() {
               onOpenBoard={() => setShowBoard(true)} onOpenDiff={openDiff}
               onOpenPullRequest={() => { setShowTools(true); setActiveTool("Pull request"); }} />
           ) : selected ? (
-            <main className="centre" aria-label="Thread">
+            <>
+              <div className="centre-view-switch" role="tablist" aria-label="Project workspace">
+                <button
+                  role="tab"
+                  aria-label="Thread view"
+                  aria-selected={centreView === "thread"}
+                  tabIndex={centreView === "thread" ? 0 : -1}
+                  onClick={() => setCentreViews((previous) => ({ ...previous, [selected.id]: "thread" }))}
+                >
+                  Thread
+                </button>
+                <button
+                  role="tab"
+                  aria-label="Code view"
+                  aria-selected={centreView === "code"}
+                  tabIndex={centreView === "code" ? 0 : -1}
+                  disabled={!workbenchContext}
+                  title={workbenchContext ? "The Project's Code workspace" : "Select a Thread to open its checkout in Code"}
+                  onClick={showCodeWorkspace}
+                >
+                  Code
+                </button>
+              </div>
+            <main className="centre" aria-label="Thread" hidden={centreView === "code"}>
               <DiffOpenContext.Provider value={openDiff}>
                 <ThreadView
-                  visible={!showSettings && !showBoard && !(maximized && dockVisible)}
+                  visible={!showSettings && !showBoard && !(maximized && dockVisible) && centreView === "thread"}
                   onOpenDefaultDiff={() => {
                     setShowTools(true);
                     setActiveTool("Diff");
@@ -1033,6 +1094,24 @@ export function App() {
                 />
               </DiffOpenContext.Provider>
             </main>
+            {workbenches.map((context) => openedSurfaces[context.key]?.code && (
+              <Suspense key={context.key} fallback={centreView === "code" && context.key === workbenchContext?.key
+                ? <Skeleton kind="code" label="Loading Code…" /> : null}>
+                <CodeWorkbench
+                  projectId={context.projectId}
+                  threadId={context.threadId}
+                  rootPath={context.rootPath}
+                  contextKey={context.key}
+                  visible={centreView === "code" && context.key === workbenchContext?.key}
+                  showExplorer={false}
+                  onChanged={onGitChanged}
+                  onOpenLanguageSettings={() => { setSettingsSection("language"); setMaximized(false); setShowBoard(false); setShowSettings(true); }}
+                  onBackToDiff={() => selectSurface("Diff")}
+                  openRequest={codeRequest?.contextKey === context.key ? codeRequest : null}
+                />
+              </Suspense>
+            ))}
+            </>
           ) : (
             <main className="centre empty-thread" aria-label="Thread">
               <div className="empty-state">
@@ -1134,9 +1213,18 @@ export function App() {
                 />
               </Suspense></div>
             )}
-            {workbenches.map((context) => <Fragment key={context.key}>
-              {openedSurfaces[context.key]?.files && <Suspense fallback={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key ? <Skeleton kind="code" label="Loading Files…" /> : null}><CodeWorkbench projectId={context.projectId} threadId={context.threadId} rootPath={context.rootPath} contextKey={context.key} visible={dockVisible && activeTool === "Files" && context.key === workbenchContext?.key} onChanged={onGitChanged} onOpenLanguageSettings={() => { setSettingsSection("language"); setMaximized(false); setShowBoard(false); setShowSettings(true); }} onOpenFilesChange={(open) => setFilesOpen((previous) => previous[context.key] === open ? previous : { ...previous, [context.key]: open })} onBackToDiff={() => selectSurface("Diff")} openRequest={codeRequest?.contextKey === context.key ? codeRequest : null} /></Suspense>}
-            </Fragment>)}
+            {workbenchContext && openedSurfaces[workbenchContext.key]?.files && (
+              <div className="surface-content" hidden={activeTool !== "Files"}>
+                <Suspense fallback={dockVisible && activeTool === "Files" ? <Skeleton kind="tree" label="Loading files…" /> : null}>
+                  <FilesPanel
+                    key={workbenchContext.key}
+                    projectId={workbenchContext.projectId}
+                    threadId={workbenchContext.threadId}
+                    onOpenFile={(path) => openCodeFile(path)}
+                  />
+                </Suspense>
+              </div>
+            )}
             {Object.entries(terminalSurfaces).map(([id, state]) => {
               const projectId = Number(id); const isSelectedProject = projectId === selected?.id;
               return <Suspense key={id} fallback={isSelectedProject && dockVisible && activeTool === "Terminal" ? <Skeleton kind="code" label="Loading Terminal…" /> : null}>

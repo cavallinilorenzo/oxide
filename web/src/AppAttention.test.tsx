@@ -62,13 +62,14 @@ const press = (key: string, init: KeyboardEventInit = {}) => act(async () => {
   document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
 });
 
-/** Alpha has an error and an interrupted Thread; Beta has a pending Approval on a branch. */
+/** Alpha has an error, an interrupted Thread and a plain question; Beta has a pending Approval on a branch. */
 function richSetup() {
   const threads: Record<number, Thread[]> = {
     1: [
       thread(10, 1, "working", { title: "Alpha work" }),
       thread(11, 1, "error", { title: "Build failed", branch: "fix/build" }),
       thread(12, 1, "interrupted", { title: "Lost session" }),
+      thread(13, 1, "needs-input", { title: "Waiting on prompt" }),
     ],
     2: [thread(20, 2, "needs-input", { title: "Release check", branch: "feat/beta" })],
   };
@@ -119,6 +120,8 @@ it("lists pending Threads by Project with their branch and urgency reason", asyn
   expect(alpha.textContent).toContain("Failed Turn");
   expect(alpha.textContent).toContain("Lost session");
   expect(alpha.textContent).toContain("Interrupted");
+  expect(alpha.textContent).toContain("Waiting on prompt");
+  expect(alpha.textContent).toContain("Needs Input");
   expect(alpha.textContent).not.toContain("Release check");
   const beta = group("Beta");
   expect(beta.textContent).toContain("Release check");

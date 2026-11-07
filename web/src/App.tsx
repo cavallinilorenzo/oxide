@@ -137,6 +137,10 @@ export function App() {
   const [codeRequest, setCodeRequest] = useState<(CodeOpenRequest & { contextKey: string }) | null>(null);
   const codeSequence = useRef(0);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
+  // A New Thread request that reopened an empty Thread: the selection may not change, so
+  // ThreadView gets a one-shot request to focus the composer and show a cue.
+  const [newThreadFocus, setNewThreadFocus] = useState<{ threadId: number; id: number } | null>(null);
+  const newThreadFocusSequence = useRef(0);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [prefill, setPrefill] = useState<{ threadId: number; text: string } | null>(null);
   // The Project and Thread of the last session: `undefined` until read, `null` once applied.
@@ -432,9 +436,13 @@ export function App() {
       const r = counts[i];
       return r.status === "ok" && r.data.turnCount === 0;
     });
+    const askForComposerFocus = (threadId: number) =>
+      setNewThreadFocus({ threadId, id: ++newThreadFocusSequence.current });
     if (empty) {
       setShowBoard(false);
       setSelectedThreadId(empty.id);
+      // Reopening the Thread that is already open is visually a no-op: the request makes it felt.
+      askForComposerFocus(empty.id);
 
       return;
     }
@@ -444,6 +452,7 @@ export function App() {
       setShowBoard(false);
       setThreads((prev) => [created, ...(prev || [])]);
       setSelectedThreadId(created.id);
+      askForComposerFocus(created.id);
 
     }
   }, [selected, threads, createThreadIn]);
@@ -1018,6 +1027,9 @@ export function App() {
 
                   }}
                   transcriptRevision={transcriptRevision}
+                  initialProvider={selectedThread?.provider}
+                  newThreadFocus={newThreadFocus?.threadId === currentThreadId ? newThreadFocus : null}
+                  onNewThreadFocusHandled={() => setNewThreadFocus(null)}
                 />
               </DiffOpenContext.Provider>
             </main>

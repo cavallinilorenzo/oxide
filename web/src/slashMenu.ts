@@ -21,16 +21,39 @@ export function filterSlashCommands(commands: SlashCommand[], query: string): Sl
 }
 
 /**
- * What picking `command` from the menu does. A command that takes an argument is completed to
- * `/name ` so the argument can follow; Tab does the same for any command. Enter on one that takes
- * none runs it, completing the name first when only a prefix or alias was typed.
+ * Whether the command needs an argument before it can run. `[model]`, `<model>?` and empty
+ * brackets are optional; anything else (e.g. `<instructions>`) is required.
+ */
+export function slashArgumentRequired(argumentHint: string | null | undefined): boolean {
+  const hint = argumentHint?.trim();
+  if (!hint) return false;
+  if (hint.endsWith("?")) return false;
+  if (/^\[[^\]]*\]$/.test(hint)) return false;
+  if (/^\{[^}]*\}$/.test(hint)) return false;
+  return true;
+}
+
+/** Whether the typed `/word` already names `command` (or one of its aliases). */
+function namesCommand(command: SlashCommand, typed: string): boolean {
+  const word = typed.trim().replace(/^\//, "").toLowerCase();
+  return [command.name, ...(command.aliases ?? [])].some((name) => name.toLowerCase() === word);
+}
+
+/**
+ * What picking `command` from the menu does. A command that requires an argument is completed to
+ * `/name ` so the argument can follow; Tab does the same for any command. Enter on one whose
+ * argument is absent or optional runs it once its name (or alias) is typed, else completes the name.
+ *
+ * Oxide routes always handle an empty argument themselves (`/model` opens the picker, `/rename`
+ * starts renaming, `/permissions` opens its menu), so their catalog hint never forces a second
+ * Enter. Only passthrough/native commands may genuinely need one.
  */
 export function pickSlashCommand(
   command: SlashCommand,
   key: "Enter" | "Tab",
   typed: string,
 ): { insert: string } | { submit: true } {
-  const takesArgument = !!command.argumentHint;
-  if (key === "Tab" || takesArgument) return { insert: `/${command.name} ` };
-  return typed === `/${command.name}` ? { submit: true } : { insert: `/${command.name}` };
+  const needsArgument = command.route !== "oxide" && slashArgumentRequired(command.argumentHint);
+  if (key === "Tab" || needsArgument) return { insert: `/${command.name} ` };
+  return namesCommand(command, typed) ? { submit: true } : { insert: `/${command.name}` };
 }

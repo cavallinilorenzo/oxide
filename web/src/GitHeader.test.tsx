@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { commands } from "./bindings";
 import { GitHeader } from "./GitHeader";
+import { clearQueryCache } from "./queryCache";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+// The cache is per window session; each test starts a new one.
+beforeEach(() => clearQueryCache());
 it("dismisses branch and Git action menus on outside pointer and Escape", async () => {
   const status = { branch: "main", upstream: null, ahead: 0, behind: 0, added: 1, removed: 0, changedFiles: 1, pickerDisabledReason: null, protected: true, unpublished: false };
   vi.spyOn(commands, "gitStatus").mockResolvedValue({ status: "ok", data: status });

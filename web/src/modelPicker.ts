@@ -139,6 +139,89 @@ export function selectedModelInfo(models: ModelInfo[], modelId: string | null): 
   return collapseEffortVariants(models.filter((model) => modelFamilyId(model.id) === family), null)[0];
 }
 
+// ---- `/model <name>`: fuzzy resolution inside the active Provider's catalog ----
+
+export interface ModelResolution {
+  /** Every Model family matching the query, best first. */
+  matches: ModelInfo[];
+  /** The Model to select: the best match, or null when nothing matched. */
+  model: ModelInfo | null;
+}
+
+/** A comparable form of a Model id or name: lowercase, punctuation folded to single dashes. */
+function modelKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** How well a query names one Model family; lower is better, null when it does not match at all. */
+function matchRank(query: string, keys: string[]): { tier: number; closeness: number } | null {
+  const compact = keys.map((key) => key.replace(/-/g, ""));
+  const all = [...keys, ...compact];
+  if (all.some((key) => key === query)) return { tier: 0, closeness: 0 };
+  if (all.some((key) => key.startsWith(query))) {
+    return { tier: 1, closeness: Math.min(...all.map((key) => Math.abs(key.length - query.length))) };
+  }
+  if (all.some((key) => key.includes(query))) {
+    return { tier: 2, closeness: Math.min(...all.map((key) => Math.abs(key.length - query.length))) };
+  }
+  // Generous: every word of the query appears somewhere in one key, e.g. "claude sonnet".
+  const words = query.split("-").filter(Boolean);
+  if (words.length > 1 && all.some((key) => words.every((word) => key.includes(word)))) {
+    return { tier: 3, closeness: Math.min(...all.map((key) => Math.abs(key.length - query.length))) };
+  }
+  return null;
+}
+
+/**
+ * Fuzzy-resolve `/model <query>` against the active Provider's catalog: exact ids, names, effort
+ * family ids and generous substrings. Multiple families rank current before legacy, then closest.
+ * Models are collapsed to one row so every effort variant shares its family.
+ */
+export function resolveModelQuery(
+  models: ModelInfo[],
+  query: string,
+  effort: string | null
+): ModelResolution {
+  const wanted = modelKey(query.trim());
+  if (!wanted || models.length === 0) return { matches: [], model: null };
+
+  const variants = new Map<string, ModelInfo[]>();
+  for (const model of models) {
+    const family = modelFamilyId(model.id);
+    variants.set(family, [...(variants.get(family) ?? []), model]);
+  }
+
+  const collapsed = collapseEffortVariants(models, effort);
+  const ranked = collapsed
+    .map((model, index) => {
+      const family = modelFamilyId(model.id);
+      const group = variants.get(family) ?? [model];
+      const keys = [
+        family,
+        model.name,
+        ...group.flatMap((variant) => [variant.id, variant.name]),
+      ].map(modelKey);
+      const rank = matchRank(wanted, keys);
+      return rank ? { model, index, ...rank } : null;
+    })
+    .filter((match): match is { model: ModelInfo; index: number; tier: number; closeness: number } => match !== null)
+    .sort((a, b) =>
+      a.tier - b.tier
+      || Number(a.model.isLegacy) - Number(b.model.isLegacy)
+      || a.closeness - b.closeness
+      || a.index - b.index);
+
+  return { matches: ranked.map((match) => match.model), model: ranked[0]?.model ?? null };
+}
+
+/** A few current Model names to offer when `/model <query>` matches nothing. */
+export function modelNameSuggestions(models: ModelInfo[], limit = 4): string[] {
+  const collapsed = collapseEffortVariants(models, null);
+  const current = collapsed.filter((model) => !model.isLegacy);
+  const names = (current.length > 0 ? current : collapsed).map((model) => model.name);
+  return names.slice(0, limit);
+}
+
 export function resolveDefaultModel(
   catalog: ModelInfo[] | null,
   model: string | null,

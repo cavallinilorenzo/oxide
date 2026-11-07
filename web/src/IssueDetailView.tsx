@@ -8,7 +8,7 @@ import {
   PlayIcon,
 } from "@primer/octicons-react";
 import { useRef, useState } from "react";
-import { useQuery } from "./queryCache";
+import { QUERY_STALE_MS, useQuery } from "./queryCache";
 import { RefreshNotice } from "./RefreshNotice";
 import {
   commands,
@@ -71,7 +71,7 @@ const PILL = { open: "open", completed: "merged", notPlanned: "draft" } as const
  *  discuss it, close it with a reason or reopen it, and start a Thread from it. */
 export function IssueDetailView({ projectId, number, refreshKey, onBack, onChanged, onDispatched }: IssueDetailViewProps) {
   const [reload, setReload] = useState(0);
-  const query = useQuery(`p${projectId}:issues:detail:${number}`, () => commands.issueDetail(projectId, number), refreshKey + reload);
+  const query = useQuery(`p${projectId}:issues:detail:${number}`, () => commands.issueDetail(projectId, number), refreshKey + reload, { staleMs: QUERY_STALE_MS });
   const loaded: Loaded = query.state === "ready" ? { state: "ready", issue: query.data } : query;
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);

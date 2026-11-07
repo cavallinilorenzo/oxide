@@ -61,6 +61,7 @@ it("shows the last diff of the scope at once when coming back, then refreshes it
   await render();
   expect(host.textContent).toContain("first.rs");
   await act(() => root.unmount());
+  // Coming back: the cached patch shows while the scope is fetched again.
   root = createRoot(host);
 
   let resolve!: (r: Awaited<ReturnType<typeof commands.gitDiff>>) => void;

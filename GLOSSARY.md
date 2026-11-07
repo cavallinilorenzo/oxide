@@ -170,8 +170,16 @@ _Avoid_: Turn, Thread, agent message
 One shell session in a Project's terminal tab strip. It keeps the checkout it was opened in, is flagged when that differs from the selected Thread's checkout, and survives Thread selection and Surface changes. Deleting a Board Thread closes only the tabs of its worktree.
 
 **Surface**:
-One of the five tools in the right dock: Diff, Files, Terminal, Pull request or Issues. A Surface can be maximized and restored while keeping its content and working state. The Pull request and Issues lists belong to the Project's repository; only branch actions (opening a pull request, checking one out) act on the selected Thread's checkout and name it. Reviewing a remote pull request records its identity for the Diff Surface and never changes a checkout.
+One of the five tools in the right dock: Diff, Files, Terminal, Pull request or Issues. Files is a navigator, not an editor: it browses the selected checkout and opens files in the **Code workspace**, which lives in the centre beside the Thread. A Surface can be maximized and restored while keeping its content and working state. The Pull request and Issues lists belong to the Project's repository; only branch actions (opening a pull request, checking one out) act on the selected Thread's checkout and name it. Reviewing a remote pull request records its identity for the Diff Surface and never changes a checkout.
 _Avoid_: Tab, pane, widget
+
+**Code workspace**:
+The Project's editor in the centre, one Thread/Code switch away from the conversation. It owns the file tabs, Monaco and the language servers; the Files Surface opens files into it on a double click or Enter/Space, and a Diff can open one too. Each Project keeps its own Code workspace, so moving between Threads keeps the open buffers, and a Board Thread's editor works in its worktree. See **Surface**.
+_Avoid_: Editor pane, code tab, work mode
+
+**Attention Center**:
+The header's tray of Threads waiting on the user across every open Project, grouped by Project: a pending **Approval**, a Thread needing input, a failed Turn or an interrupted one, each with a reason badge. The bell counts them, opens the tray, and jumps to the most urgent: the earliest pending Approval (by Thread activity, then lowest id), else a Thread needing input, else an error or interrupted one, in sidebar order. Opening the tray instead jumps to one Thread and focuses its response; a failed jump offers Retry.
+_Avoid_: Notification center, inbox, alerts
 
 **Diff scope**:
 What the Diff Surface compares: Uncommitted (staged, unstaged and untracked changes against HEAD), Branch (commits since the merge-base with the base branch) or Turn (the files changed between a Turn's two Checkpoints, for any Turn picked by position and prompt, the latest by default; a Turn of a Thread in a shared checkout may include concurrent changes from other Threads), all computed by Git; or PR, the changed files of a pull request opened for review, as GitHub reports them through `gh`. The default is Turn for Threads in the main checkout and Branch for Threads in a worktree of their own; PR is offered only once a pull request was opened for review.

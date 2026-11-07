@@ -1,92 +1,126 @@
-import { Skeleton } from "./Skeleton";
 import { useEffect, useState } from "react";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FileDirectoryFillIcon,
-  FileDirectoryOpenFillIcon,
-  FileIcon,
-} from "@primer/octicons-react";
-import { commands, type FileEntry } from "./bindings";
+import { FileIcon, FoldIcon, SearchIcon } from "@primer/octicons-react";
+import { commands } from "./bindings";
+import { EditorFileTree } from "./EditorFileTree";
 
 interface FilesPanelProps {
   projectId: number;
   threadId: number | null;
+  /** Changes after checkout mutations (commits, checkouts, Turns), so the tree refetches. */
+  revision: number;
+  /** Opens the file in the Project's central Code workspace. */
   onOpenFile: (path: string) => void;
 }
 
-/** A directory's entries once loaded, or why they couldn't be; absent while loading. */
-type Listing = FileEntry[] | { error: string };
-
 /** The tree belongs to one checkout, so a different one remounts it. */
 export function FilesPanel(props: FilesPanelProps) {
-  return <FilesTree key={`${props.projectId}:${props.threadId}`} {...props} />;
+  return <FilesExplorer key={`${props.projectId}:${props.threadId}`} {...props} />;
 }
 
-function FilesTree({ projectId, threadId, onOpenFile }: FilesPanelProps) {
-  const [listings, setListings] = useState<Record<string, Listing>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+/** The Files Surface: a full-width navigator. A click selects; a double click opens Code. */
+function FilesExplorer({ projectId, threadId, revision, onOpenFile }: FilesPanelProps) {
   const [selected, setSelected] = useState<string | null>(null);
-
-  function load(path: string) {
-    return commands.listDir(projectId, threadId, path).then((result) => {
-      const listing = result.status === "ok" ? result.data : { error: result.error.message };
-      setListings((prev) => ({ ...prev, [path]: listing }));
-    });
-  }
+  const [collapseToken, setCollapseToken] = useState(0);
+  const [query, setQuery] = useState("");
+  // The query the results belong to; a newer query renders as still searching.
+  const [search, setSearch] = useState<{ query: string; results: string[]; error: string | null } | null>(null);
 
   useEffect(() => {
-    void load("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, threadId]);
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      void commands
+        .findFiles(projectId, threadId, trimmed)
+        .then((result) => {
+          if (!active) return;
+          setSearch(result.status === "ok"
+            ? { query: trimmed, results: result.data, error: null }
+            : { query: trimmed, results: [], error: result.error.message });
+        })
+        .catch((cause: unknown) => {
+          if (active) {
+            setSearch({ query: trimmed, results: [], error: cause instanceof Error ? cause.message : String(cause) });
+          }
+        });
+    }, 100);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [projectId, threadId, query]);
 
-  function toggle(path: string) {
-    const open = expanded.has(path);
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (open) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-    if (!open && listings[path] === undefined) void load(path);
-  }
-
-  function renderDir(path: string, depth: number) {
-    const indent = { paddingLeft: 8 + depth * 16 };
-    const listing = listings[path];
-    if (listing === undefined) return <Skeleton kind="tree" label="Loading directory…" rows={depth === 0 ? 7 : 3} style={indent} />;
-    if ("error" in listing) return <div className="files-note error" style={indent}>{listing.error}</div>;
-    if (listing.length === 0) return <div className="files-note" style={indent}>Empty</div>;
-    return listing.map((entry) => (
-      <div key={entry.path} role="treeitem" aria-selected={selected === entry.path} aria-expanded={entry.isDir ? expanded.has(entry.path) : undefined}>
-        <button
-          className={`files-row${selected === entry.path ? " files-row-selected" : ""}`}
-          style={indent}
-          title={entry.path}
-          onClick={() => { if (entry.isDir) toggle(entry.path); else { setSelected(entry.path); onOpenFile(entry.path); } }}
-        >
-          <span className="files-chevron" aria-hidden>
-            {entry.isDir && (expanded.has(entry.path) ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />)}
-          </span>
-          <span className={entry.isDir ? "files-icon dir" : "files-icon"} aria-hidden>
-            {entry.isDir ? (
-              expanded.has(entry.path) ? <FileDirectoryOpenFillIcon size={14} /> : <FileDirectoryFillIcon size={14} />
-            ) : (
-              <FileIcon size={14} />
-            )}
-          </span>
-          <span className="files-name">{entry.name}</span>
-        </button>
-        {entry.isDir && expanded.has(entry.path) && <div role="group">{renderDir(entry.path, depth + 1)}</div>}
-      </div>
-    ));
-  }
+  const trimmedQuery = query.trim();
+  const currentSearch = trimmedQuery && search?.query === trimmedQuery ? search : null;
+  const searching = Boolean(trimmedQuery) && currentSearch === null;
 
   return (
     <section className="files files-navigation" aria-label="Files">
-      <div className="files-tree" role="tree">
-        {renderDir("", 0)}
+      <div className="files-toolbar">
+        <label className="files-search">
+          <SearchIcon size={12} />
+          <input
+            type="search"
+            placeholder="Search files"
+            aria-label="Search files"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                setQuery("");
+              }
+            }}
+          />
+        </label>
+        <button
+          className="icon-btn sm"
+          aria-label="Collapse all folders"
+          title="Collapse all folders"
+          onClick={() => setCollapseToken((token) => token + 1)}
+        >
+          <FoldIcon size={14} />
+        </button>
       </div>
+      {trimmedQuery ? (
+        <div className="files-search-results" role="listbox" aria-label="File search results">
+          {searching && <p className="files-note">Searching…</p>}
+          {!searching && currentSearch?.error && <p className="files-note error" role="alert">{currentSearch.error}</p>}
+          {!searching && !currentSearch?.error && currentSearch?.results.length === 0 && <p className="files-note">No matching files.</p>}
+          {(currentSearch?.results ?? []).map((path) => (
+            <button
+              key={path}
+              role="option"
+              className={`files-row${selected === path ? " files-row-selected" : ""}`}
+              aria-selected={selected === path}
+              title={path}
+              onClick={() => setSelected(path)}
+              onDoubleClick={() => onOpenFile(path)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onOpenFile(path);
+                }
+              }}
+            >
+              <span className="files-icon" aria-hidden><FileIcon size={14} /></span>
+              <span className="files-name">{path}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="files-tree">
+          <EditorFileTree
+            projectId={projectId}
+            threadId={threadId}
+            selected={selected}
+            onOpen={(path) => setSelected(path)}
+            onKeep={onOpenFile}
+            collapseToken={collapseToken}
+            revision={revision}
+          />
+        </div>
+      )}
     </section>
   );
 }

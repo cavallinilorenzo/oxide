@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act } from "react";
-import { clearQueryCache } from "./queryCache";
+import { clearQueryCache, QUERY_STALE_MS } from "./queryCache";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { commands } from "./bindings";
+import { commands, type PullRequestDetail_Serialize } from "./bindings";
 import { PullRequestPanel, REFRESH_INTERVAL_MS } from "./PullRequestPanel";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -87,19 +87,82 @@ const pr = (number: number, title: string) => ({
   createdAt: "2026-01-01T00:00:00Z",
 });
 
-it("shows the previous list at once on remount, and the refreshed one when it lands", async () => {
+const detail = (title: string): PullRequestDetail_Serialize => ({
+  pullRequest: pr(1, title),
+  phase: "open",
+  body: "Full body from GitHub",
+  headSha: "abc123",
+  dossierOutOfDate: false,
+  checks: [],
+  comments: [],
+  mergeState: "clean",
+  reviewDecision: null,
+  reviewers: [],
+  assignees: [],
+  labels: [],
+  additions: 0,
+  deletions: 0,
+  viewer: "me",
+  mergeMethods: ["merge"],
+  defaultMergeMethod: "merge",
+  deleteBranchOnMerge: false,
+  diff: { base: "main", files: [] },
+});
+
+it("renders the previous list at once on remount without asking GitHub again while fresh", async () => {
   vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "ok", data: [pr(1, "First PR")] });
   await render();
+  const calls = listCalls();
   await act(() => root.unmount());
   root = createRoot(host);
-  let resolve!: (r: Awaited<ReturnType<typeof commands.listPullRequests>>) => void;
-  vi.mocked(commands.listPullRequests).mockImplementation(() => new Promise((r) => (resolve = r)));
   await render();
   expect(host.textContent).toContain("First PR");
   expect(host.textContent).not.toContain("Loading…");
-  await act(async () => resolve({ status: "ok", data: [pr(2, "Second PR")] }));
-  expect(host.textContent).toContain("Second PR");
-  expect(host.textContent).not.toContain("First PR");
+  expect(listCalls()).toBe(calls);
+});
+
+it("revalidates an older cached list in the background while it stays on screen", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "ok", data: [pr(1, "First PR")] });
+    await render();
+    await act(() => root.unmount());
+    await act(async () => void vi.advanceTimersByTime(QUERY_STALE_MS + 1));
+    root = createRoot(host);
+    let resolve!: (r: Awaited<ReturnType<typeof commands.listPullRequests>>) => void;
+    vi.mocked(commands.listPullRequests).mockImplementation(() => new Promise((r) => (resolve = r)));
+    await render();
+    expect(host.textContent).toContain("First PR");
+    expect(host.textContent).not.toContain("Loading…");
+    expect(listCalls()).toBe(2);
+    await act(async () => resolve({ status: "ok", data: [pr(2, "Second PR")] }));
+    expect(host.textContent).toContain("Second PR");
+    expect(host.textContent).not.toContain("First PR");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("shows a pull request's header from the list while its detail is still loading", async () => {
+  vi.mocked(commands.listPullRequests).mockResolvedValue({ status: "ok", data: [pr(1, "Instant header")] });
+  vi.spyOn(commands, "gitStatus").mockResolvedValue({
+    status: "ok",
+    data: { branch: "feat", upstream: null, ahead: 0, behind: 0, added: 0, removed: 0, changedFiles: 0,
+      protected: false, unpublished: false, pickerDisabledReason: null },
+  });
+  vi.spyOn(commands, "pullRequestReviewThreads").mockResolvedValue({ status: "ok", data: [] });
+  let resolveDetail!: (r: Awaited<ReturnType<typeof commands.pullRequestDetail>>) => void;
+  vi.spyOn(commands, "pullRequestDetail").mockReturnValue(new Promise((r) => (resolveDetail = r)));
+  await render();
+  await act(async () => (host.querySelector(".pr-row") as HTMLButtonElement).click());
+
+  // The list's summary metadata renders the hero before the detail call lands.
+  expect(host.querySelector(".pr-title")?.textContent).toContain("Instant header");
+  expect(host.querySelector(".pr-row-author")?.textContent).toContain("alice");
+  expect(host.querySelector(".skeleton")).not.toBeNull();
+
+  await act(async () => resolveDetail({ status: "ok", data: detail("From GitHub") }));
+  expect(host.querySelector(".pr-title")?.textContent).toContain("From GitHub");
 });
 
 it("keeps the list with a notice when a refresh fails", async () => {

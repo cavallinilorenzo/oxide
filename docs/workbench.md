@@ -1,9 +1,12 @@
 # Chat, Terminal and Code
 
-The header's **Chat / Terminal / Code** control changes the central work area.
-Switching modes keeps open buffers and terminal processes alive. Ordinary Threads
-share their Project's checkout; Board Threads get their own editor and terminal
-in their worktree.
+The centre shows the selected Project's Thread. Above it, the **Thread / Code**
+switch opens that Project's Code workspace in the same central area; switching
+keeps open buffers and terminal processes alive. The **Files** Surface in the right
+dock is the navigator for the selected checkout, not an editor: a single click
+selects a file, and a double click (or Enter/Space on a focused row) opens it in
+the central Code workspace. Ordinary Threads share their Project's checkout; a
+Thread with a worktree of its own gets its own editor and terminal there.
 
 ## Terminal
 
@@ -36,29 +39,31 @@ integration or Warp's AI service.
 
 ## Code
 
-The explorer opens files in tabs. Monaco provides syntax highlighting, automatic
+The Code workspace opens files in tabs. The Files Surface navigates the checkout:
+a click selects a file and a double click (or Enter/Space on a focused row) opens
+it here, in the centre. Monaco provides syntax highlighting, automatic
 indentation, bracket pairing, folding, multiple cursors, undo/redo, Find/Replace
 and its command palette. Local LSP servers add completion, hover information,
 definitions, references, rename and formatting where the server supports them.
 Problems shows errors and warnings in open files and jumps to their locations.
 
-- Ctrl+P / ⌘P: find a file by name in the Project.
-- Ctrl+N / ⌘N: create a file (existing parent folders only).
-- Ctrl+S / ⌘S: save; Ctrl+Shift+S / ⌘Shift+S: save all.
-- Ctrl+W / ⌘W: close the current file, with an unsaved-change prompt.
-- Ctrl+F / ⌘F and Ctrl+H / ⌘H: Monaco's Find and Replace.
+- Ctrl+P / âŒ˜P: find a file by name in the Project.
+- Ctrl+N / âŒ˜N: create a file (existing parent folders only).
+- Ctrl+S / âŒ˜S: save; Ctrl+Shift+S / âŒ˜Shift+S: save all.
+- Ctrl+W / âŒ˜W: close the current file, with an unsaved-change prompt.
+- Ctrl+F / âŒ˜F and Ctrl+H / âŒ˜H: Monaco's Find and Replace.
 - F12: definition; Shift+F12: references; F2: rename, when supported by LSP.
 
 The editor handles complete UTF-8 text files up to 1 MiB. Larger and binary files
-remain readable through Files. Saves replace files atomically and refuse to
-overwrite a buffer whose original content has changed on disk. Quitting asks
-about unsaved buffers and offers Save all, Discard, or Cancel.
+are not opened for editing; they remain listed in Files. Saves replace files
+atomically and refuse to overwrite a buffer whose original content has changed on
+disk. Quitting asks about unsaved buffers and offers Save all, Discard, or Cancel.
 
 ## First-use language support
 
 Opening a supported file offers **Install support** when its server is missing.
-Choosing Later dismisses that language's offer; Language tools in the editor
-toolbar remains available. The download does not start merely by opening a file.
+Choosing Later dismisses that language's offer; **Language tools** in Settings
+remains available. The download does not start merely by opening a file.
 
 | Files | Server |
 | --- | --- |

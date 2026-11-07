@@ -37,6 +37,10 @@
   --red: #f06a6a;
   --yellow: #e6b450;
   --purple: #a98bff;
+  --attention-approval-bg: #3a2f12;
+  --attention-input-bg: #1f2a3a;
+  --attention-error-bg: #3a1d1d;
+  --attention-interrupted-bg: #2a3040;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
   background: var(--bg);
@@ -342,6 +346,28 @@ html.macos .header,
 .attention-btn { position: relative; gap: 4px; }
 .attention-btn.active { color: var(--yellow); }
 .attention-count { font: 600 11px var(--mono); }
+/* Attention Center tray: pending Threads grouped by Project, each one jump away. */
+.attention-tray { display: flex; flex-direction: column; min-height: 0; }
+.attention-tray-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+.attention-tray-head h2 { margin: 0; font-size: 13px; color: var(--fg-bright); }
+.attention-tray-head span { color: var(--dim); font-size: 11.5px; text-align: right; }
+.attention-empty { margin: 0; padding: 16px 14px; color: var(--dim); }
+.attention-group { padding: 8px 8px 4px; }
+.attention-group h3 { margin: 0; padding: 2px 6px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.attention-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.attention-item { display: grid; gap: 3px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: none; text-align: left; }
+.attention-item:hover:not(:disabled), .attention-item:focus-visible { background: var(--bg3); }
+.attention-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.attention-item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.attention-item-branch { display: inline-flex; align-items: center; gap: 3px; flex: none; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--mono); color: var(--faint); }
+.attention-item-reason { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.attention-reason { flex: none; }
+.attention-reason.approval { background: var(--attention-approval-bg); color: var(--yellow); }
+.attention-reason.needs-input { background: var(--attention-input-bg); color: var(--acc2); }
+.attention-reason.error { background: var(--attention-error-bg); color: var(--red); }
+.attention-reason.interrupted { background: var(--attention-interrupted-bg); color: var(--dim); }
+.attention-item-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); color: var(--dim); }
+.attention-tray-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); }
 .project-row:is(:hover, :focus-within) .row-action, .thread-row:is(:hover, :focus-within) .row-action { opacity: 1; }
 .thread-row { display: flex; align-items: center; margin: 0 8px; border-radius: var(--radius-control); position: relative; transition: background-color var(--motion-fast) ease-out; }
 .thread-row:hover { background: var(--bg3); }
@@ -613,6 +639,13 @@ html.macos .header,
   flex-direction: column;
 }
 .composer:focus-within { border-color: var(--acc2); box-shadow: 0 8px 24px #0005, inset 0 0 0 1px var(--acc2); }
+/* New Thread asked for while this empty composer was already open: a brief ring says it landed. */
+.composer.composer-focus-cue { animation: composer-focus-cue 600ms ease-out; }
+@keyframes composer-focus-cue {
+  0% { border-color: var(--acc2); box-shadow: 0 8px 24px #0005, 0 0 0 4px color-mix(in srgb, var(--acc2) 35%, transparent); }
+  100% { border-color: var(--line-strong); box-shadow: 0 8px 24px #0005; }
+}
+@media (prefers-reduced-motion: reduce) { .composer.composer-focus-cue { animation: none; box-shadow: 0 8px 24px #0005, 0 0 0 1px var(--acc2); } }
 .composer-lost { padding: 12px; align-items: flex-start; }
 .slash-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 6px; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line-strong); background: #1d2230; border-radius: 10px; box-shadow: 0 10px 30px #0009; z-index: 5; }
 .slash-menu li { min-width: 0; display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
@@ -763,8 +796,15 @@ section.terminal.terminal-hidden { display: none; }
 
 /* Files */
 .files { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; font-size: 12.5px; }
-.files.files-navigation { display: flex; flex-direction: column; overflow: auto; }
-.files-navigation .files-tree { border: 0; }
+.files.files-navigation { display: flex; flex-direction: column; overflow: hidden; }
+.files-navigation .files-tree { border: 0; flex: 1; min-height: 0; }
+.files-toolbar { display: flex; align-items: center; gap: 4px; flex: none; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.files-search { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0 8px; color: var(--faint); background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; }
+.files-search:focus-within { border-color: var(--acc2); }
+.files-search input { flex: 1; min-width: 0; min-height: 26px; padding: 0; border: 0; background: none; font-size: 12px; }
+.files-search input:focus { box-shadow: none; }
+.files-search-results { flex: 1; min-height: 0; overflow: auto; padding: 4px 0; }
+.files-search-results .files-row { padding-left: 8px; padding-right: 8px; }
 .diff-split.diff-navigation { display: flex; flex-direction: column; }
 .diff-navigation .diff-files { flex: 1; border: 0; }
 .files-tree { overflow: auto; padding: 6px 0; border-right: 1px solid var(--line); }
@@ -1322,13 +1362,46 @@ section.terminal.terminal-hidden { display: none; }
   padding: 24px 32px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
   container-type: inline-size;
 }
 .settings h1 { font-size: 22px; margin: 0; color: var(--fg-bright); }
 .settings h2 { font-size: 15px; margin: 0; color: var(--fg-bright); }
 .settings h3 { font-size: 14px; margin: 0; }
-.settings-header p, .settings-section-header p { margin: 4px 0 0; color: var(--dim); }
+.settings-header p, .settings-section-header p, .settings-category-header p { margin: 4px 0 0; color: var(--dim); }
+.settings-header, .settings-layout, .settings > .actions, .settings > .error-summary { width: 100%; max-width: 1120px; margin-inline: auto; }
+.settings-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); align-items: start; gap: 28px; }
+.settings-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.settings-nav-item {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font-weight: 500;
+  text-align: left;
+  white-space: normal;
+}
+.settings-nav-item:hover:not(:disabled) { background: var(--bg3); color: var(--fg); }
+.settings-nav-item[aria-current="page"] { background: var(--bg3); color: var(--fg-bright); }
+.settings-nav-item[aria-current="page"] svg { color: var(--acc2); }
+.settings-categories { min-width: 0; }
+.settings-category { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.settings-category[hidden] { display: none; }
 .settings-section { display: flex; flex-direction: column; gap: 12px; }
 .settings-card {
   min-width: 0;
@@ -1363,6 +1436,11 @@ section.terminal.terminal-hidden { display: none; }
 .shortcut-error { grid-column: 1 / -1; }
 .shortcut-reset-all { display: flex; }
 .settings .error { margin: 0; }
+@container (max-width: 720px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .settings-nav-item { width: auto; }
+}
 @container (max-width: 560px) {
   .settings-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-card { padding: 16px; }

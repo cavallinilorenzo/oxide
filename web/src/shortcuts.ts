@@ -32,6 +32,9 @@ export type ShortcutAction =
 /** An accelerator such as `Mod+Shift+M`: `Mod` is ⌘ on macOS and Ctrl elsewhere. */
 export type Shortcuts = Record<ShortcutAction, string>;
 
+/** Jumps to the most urgent request without opening the Attention Center tray; built into the app. */
+export const ATTENTION_SHORTCUT = "Mod+Shift+A";
+
 /** Mirrors the defaults of the Core's Settings, for the moment before Settings have loaded. */
 export const DEFAULT_SHORTCUTS: Shortcuts = {
   dictation: "Mod+Shift+R",

@@ -19,7 +19,7 @@ it("announces bounds and supports keyboard movement, limits and reset", () => {
   function Panel() {
     const [value, setValue] = useState(240);
     return <ResizeHandle label="Resize sidebar" controls="sidebar" axis="x" edge="end"
-      value={value} min={208} max={400} onResize={setValue} onCommit={commit} onCancel={() => {}} onReset={() => setValue(240)} />;
+      value={value} min={160} max={400} onResize={setValue} onCommit={commit} onCancel={() => {}} onReset={() => setValue(240)} />;
   }
   act(() => root.render(<Panel />));
   const separator = container.querySelector("[role=separator]")!;
@@ -31,7 +31,7 @@ it("announces bounds and supports keyboard movement, limits and reset", () => {
   expect(commit).toHaveBeenLastCalledWith(216);
   press("Home");
   press("ArrowLeft");
-  expect(commit).toHaveBeenLastCalledWith(208);
+  expect(commit).toHaveBeenLastCalledWith(160);
   press("End");
   press("ArrowRight");
   expect(commit).toHaveBeenLastCalledWith(400);

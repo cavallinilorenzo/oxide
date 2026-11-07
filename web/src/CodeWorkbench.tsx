@@ -67,6 +67,8 @@ interface Props {
   rootPath: string;
   contextKey: string;
   visible: boolean;
+  /** The dock owns file navigation in the central workspace, so the editor needs no own tree. */
+  showExplorer?: boolean;
   onChanged: () => void;
   /** Opens the application Settings at the Language tools section. */
   onOpenLanguageSettings: () => void;
@@ -82,6 +84,7 @@ export function CodeWorkbench({
   rootPath,
   contextKey,
   visible,
+  showExplorer = true,
   onChanged,
   onOpenLanguageSettings,
   onOpenFilesChange,
@@ -316,6 +319,7 @@ export function CodeWorkbench({
   }, []);
   // Narrow docks show the file list as an overlay instead of a permanent split.
   useEffect(() => {
+    if (!showExplorer) return;
     const element = root.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
@@ -324,7 +328,7 @@ export function CodeWorkbench({
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [showExplorer]);
   // The active file stays visible in a scrolling bar.
   useEffect(() => {
     if (!active) return;
@@ -577,11 +581,11 @@ export function CodeWorkbench({
   return (
     <main
       ref={root}
-      className={`code-workbench${compact ? " compact" : ""}${compact && treeOpen ? " tree-open" : ""}`}
+      className={`code-workbench${showExplorer ? "" : " no-explorer"}${compact ? " compact" : ""}${compact && treeOpen ? " tree-open" : ""}`}
       aria-label="Code editor"
       hidden={!visible}
     >
-      <aside
+      {showExplorer && <aside
         className="editor-explorer"
         aria-label="File list"
         onKeyDown={(e) => {
@@ -657,7 +661,7 @@ export function CodeWorkbench({
           onKeep={(path) => void openFile(path)}
           revision={treeRevision}
         />
-      </aside>
+      </aside>}
       <div className="editor-main">
         <div className="editor-tabs-bar">
         {compact && (
@@ -916,7 +920,7 @@ export function CodeWorkbench({
             <div className="editor-welcome">
               <FileCodeIcon size={36} />
               <h1>Your Project, open for editing.</h1>
-              <p>Choose a file, or find one by name.</p>
+              <p>{showExplorer ? "Choose a file, or find one by name." : "Choose a file in the Files dock, or find one by name."}</p>
               <button className="btn" onClick={() => setQuickOpen(true)}>
                 <SearchIcon size={14} /> Find file <kbd>{shortcutLabel}P</kbd>
               </button>

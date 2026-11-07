@@ -64,7 +64,7 @@ import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { loadDraftModel, saveDraftModel } from "./draftModel";
-import { parseSlashCommand, resolveDefaultModel, resolveFavourite } from "./modelPicker";
+import { effortFor, parseSlashCommand, modelNameSuggestions, resolveDefaultModel, resolveFavourite, resolveModelQuery } from "./modelPicker";
 import { cachedCatalogs } from "./modelCatalogCache";
 import { readableModel } from "./headerLines";
 import { filterSlashCommands, pickSlashCommand, slashQuery } from "./slashMenu";
@@ -105,6 +105,19 @@ interface ThreadViewProps {
   onThreadContinued: (continued: ContinuedThread, from: number) => void;
   /** Changes when the Transcript changed outside a Turn, e.g. after a restore; the Thread is read again. */
   transcriptRevision?: number;
+  /**
+   * The Provider the selected Thread is already known to use, from the Thread entity (or the
+   * configured default for a brand-new one). Renders its brand before the Transcript arrives,
+   * instead of falling back to Claude Code branding while loading.
+   */
+  initialProvider?: string;
+  /**
+   * A one-shot New Thread request for this Thread: focus the composer and flash a short cue.
+   * Selecting the empty Thread that is already open changes nothing on screen, so without this
+   * the request would look like a dead button.
+   */
+  newThreadFocus?: { threadId: number; id: number } | null;
+  onNewThreadFocusHandled?: () => void;
 }
 
 
@@ -186,6 +199,9 @@ export function ThreadView({
   onOpenThread,
   onThreadContinued,
   transcriptRevision = 0,
+  initialProvider,
+  newThreadFocus,
+  onNewThreadFocusHandled,
 }: ThreadViewProps) {
   const [settledThreadId, setSettledThreadId] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<TranscriptState>(initialTranscriptState(null));
@@ -198,14 +214,22 @@ export function ThreadView({
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  /** The one-shot New Thread request already acted on, so a re-render cannot focus twice. */
+  const handledNewThreadFocus = useRef<number | null>(null);
+  /** A short-lived ring on the composer after New Thread reopened the empty Thread. */
+  const [composerFocusCue, setComposerFocusCue] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   /** Attachments taken out of the prompt, forgotten by Core once the prompt is sent. */
   const removedAttachments = useRef(new Set<string>());
   const permissionControlRef = useRef<HTMLButtonElement>(null);
   const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
+  /** Non-error feedback, e.g. which Model a multi-match `/model` query resolved to. */
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
-  const [draftProvider, setDraftProvider] = useState<string>("claude");
+  // Start from the known Thread Provider, not a Claude placeholder: settings only refine it later.
+  // Empty until Settings arrive: guessing a Provider would brand the draft with one the user never chose.
+  const [draftProvider, setDraftProvider] = useState<string>(() => initialProvider ?? "");
   const [draftModel, setDraftModel] = useState<string | null>(null);
   const [draftEffort, setDraftEffort] = useState<string | null>(null);
   const shortcuts = useShortcuts();
@@ -231,6 +255,7 @@ export function ThreadView({
     setPages(cached?.pages ?? new Map());
     setSettledThreadId(null);
     setCommandError(null);
+    setCommandNotice(null);
     setIsEditingTitle(false);
     setModelPickerOpen(false);
     followRef.current = cached?.following ?? true;
@@ -257,9 +282,17 @@ export function ThreadView({
   const slashGeneration = useRef({ active: true });
   const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
+  const slashMenuRef = useRef<HTMLUListElement>(null);
   const input = plainText(value);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
+
+  // Keep the highlighted command in view as the arrows walk a menu taller than the viewport.
+  useEffect(() => {
+    if (!slashOpen) return;
+    const active = slashMenuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [slashOpen, slashIndex, input, slashMatches.length]);
   const slashProvider = transcript.thread?.provider || draftProvider;
 
   // Show the cached catalog first, then refresh for the active Thread's directory.
@@ -269,6 +302,7 @@ export function ThreadView({
     const generation = { active: true };
     slashGeneration.current = generation;
     setSlashCommands([]);
+    if (!slashProvider) return;
     void (async () => {
       const cached = await commands.listSlashCommands(slashProvider, projectId, threadId, false);
       if (!active) return;
@@ -500,6 +534,11 @@ export function ThreadView({
     };
   }, [threadId, projectId, onInitialLoad]);
 
+  // A draft Thread keeps the Provider identity its parent already knows, before Settings load.
+  useEffect(() => {
+    if (threadId === null && initialProvider) setDraftProvider(initialProvider);
+  }, [threadId, initialProvider]);
+
   // Subscribe to the thread when threadId changes, and again when the Transcript
   // changed outside a Turn, e.g. after a restore.
   useEffect(() => {
@@ -576,6 +615,23 @@ export function ThreadView({
       onPrefillUsed();
     }
   }, [prefill, threadId, onPrefillUsed]);
+
+  // New Thread while this empty Thread is already open: selecting it again changes nothing,
+  // so focus the composer and flash a cue to show the request landed.
+  useEffect(() => {
+    if (!newThreadFocus || newThreadFocus.threadId !== threadId) return;
+    if (handledNewThreadFocus.current === newThreadFocus.id) return;
+    handledNewThreadFocus.current = newThreadFocus.id;
+    composerRef.current?.focus();
+    setComposerFocusCue(true);
+    onNewThreadFocusHandled?.();
+  }, [newThreadFocus, threadId, onNewThreadFocusHandled]);
+
+  useEffect(() => {
+    if (!composerFocusCue) return;
+    const timer = window.setTimeout(() => setComposerFocusCue(false), 600);
+    return () => window.clearTimeout(timer);
+  }, [composerFocusCue]);
 
   const turnCount = transcript.turnOffset + transcript.turns.length;
   // Until the real Turn arrives, the sent prompt stands in for it.
@@ -739,7 +795,12 @@ export function ThreadView({
   const handleSaveRename = () => saveRename(editTitle);
 
   const currentMode = transcript.thread?.permissionMode || draftMode;
-  const currentProvider = transcript.thread?.provider || draftProvider;
+  // Ignore a Transcript from the Thread we just left; until this Thread's own snapshot arrives,
+  // its entity's Provider is the truth, so branding never flickers through another Provider.
+  const loadedProvider = transcript.thread && transcript.thread.id === threadId
+    ? transcript.thread.provider
+    : null;
+  const currentProvider = loadedProvider || initialProvider || draftProvider;
   const providerCaps = providerCapsEntry?.provider === currentProvider ? providerCapsEntry.caps : null;
   useEffect(() => {
     if (openPermissionsWhenReady && providerCaps) {
@@ -749,6 +810,7 @@ export function ThreadView({
   }, [openPermissionsWhenReady, providerCaps]);
   const [catalog, setCatalog] = useState<{ provider: string; models: ModelInfo[] } | null>(null);
   useEffect(() => {
+    if (!currentProvider) return;
     let active = true;
     void commands.getModelCatalog(currentProvider, false).then((res) => {
       if (active && res.status === "ok") setCatalog({ provider: currentProvider, models: res.data });
@@ -767,6 +829,7 @@ export function ThreadView({
   const effortName = currentEffort ? currentEffort[0].toUpperCase() + currentEffort.slice(1) : null;
 
   useEffect(() => {
+    if (!currentProvider) return;
     let active = true;
     void commands.getProviderCapabilities(currentProvider).then((res) => {
       if (active && res.status === "ok") {
@@ -879,6 +942,7 @@ export function ThreadView({
 
   useEffect(() => {
     let active = true;
+    if (!currentProvider) return;
     if (currentProvider === "claude") {
       void commands.detectProvider("claude").then((res) => {
         if (active && res.status === "ok") {
@@ -906,17 +970,25 @@ export function ThreadView({
     e.preventDefault();
     if (!hasContent(value) || isBusy(value) || sending || turnIsRunning(transcript.status) || (threadId !== null && settledThreadId !== threadId)) return;
     setCommandError(null);
+    setCommandNotice(null);
 
     const typed = typedText(value);
     const slash = parseSlashCommand(typed);
-    if (hasAttachments(value) && (isClearCommand(typed) || (slash.type !== "none" && slash.type !== "other"))) {
+    if (
+      hasAttachments(value) &&
+      !isClearCommand(typed) &&
+      slash.type !== "none" &&
+      slash.type !== "other"
+    ) {
       setCommandError(`Attachments can't be sent with ${slash.command || typed.trim()}. Remove them or send the command alone.`);
       return;
     }
 
     if (isClearCommand(typed)) {
+      // A Thread with no Turns is already the clean slate: keep it and wipe the draft instead of
+      // asking App for another empty Thread, which would only focus this one again.
       handleInputChange("");
-      onClearThread?.();
+      if (turnCount > 0) onClearThread?.();
       return;
     }
 
@@ -957,6 +1029,7 @@ export function ThreadView({
         if (!mode) setCommandError("Choose ask, auto-edit, or full.");
         else {
           const result = providerCaps ? null : await commands.getProviderCapabilities(currentProvider);
+          if (result?.status === "ok") setProviderCaps({ provider: currentProvider, caps: result.data });
           const supported = providerCaps?.supportedPermissionModes ?? (result?.status === "ok" ? result.data.supportedPermissionModes : null);
           if (!supported) setCommandError("Could not load permission modes for this Provider.");
           else if (!supported.includes(mode)) setCommandError(`${PERMISSION_CONFIG[mode].label} is not offered by this Provider.`);
@@ -967,12 +1040,39 @@ export function ThreadView({
       return;
     }
     if (slash.type === "model") {
+      handleInputChange("");
       if (slash.arg) {
-        void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
+        // Use the catalog already loaded for the active Provider; only fetch when it has not
+        // arrived yet (once per submission, never per keystroke).
+        let models = catalogModels;
+        if (!models) {
+          const result = await commands.getModelCatalog(currentProvider, false);
+          if (result.status === "ok") {
+            setCatalog({ provider: currentProvider, models: result.data });
+            models = result.data;
+          }
+        }
+        if (!models) {
+          setCommandError("Could not load the model catalog for this Provider.");
+          return;
+        }
+        const resolution = resolveModelQuery(models, slash.arg, currentEffort);
+        if (!resolution.model) {
+          const suggestions = modelNameSuggestions(models);
+          setCommandError(
+            suggestions.length > 0
+              ? `No model matches "${slash.arg}". Try ${suggestions.join(", ")}.`
+              : `No model matches "${slash.arg}".`
+          );
+          return;
+        }
+        if (resolution.matches.length > 1) {
+          setCommandNotice(`Several models match "${slash.arg}"; using ${resolution.model.name}.`);
+        }
+        void handleSelectModelAndEffort(currentProvider, resolution.model.id, effortFor(resolution.model, currentEffort));
       } else {
         openModelPicker();
       }
-      handleInputChange("");
       return;
     }
     if (slash.type === "effort") {
@@ -1171,6 +1271,7 @@ export function ThreadView({
 
       <div className="composer-wrap">
       {commandError && <div className="provider-hint missing" role="alert">{commandError}</div>}
+      {commandNotice && <div className="provider-hint" role="status">{commandNotice}</div>}
       {thread?.sessionLost ? (
         <div className="composer composer-lost">
           <button
@@ -1185,11 +1286,11 @@ export function ThreadView({
       ) : (
       <form
         ref={composerFormRef}
-        className={dropActive ? "composer drop-target" : "composer"}
+        className={`composer${dropActive ? " drop-target" : ""}${composerFocusCue ? " composer-focus-cue" : ""}`}
         onSubmit={handleSubmit}
       >
         {slashMatches.length > 0 && (
-          <ul className="slash-menu" role="listbox" aria-label="Slash commands">
+          <ul ref={slashMenuRef} className="slash-menu" role="listbox" aria-label="Slash commands">
             {slashMatches.map((c, i) => (
               <li
                 key={c.name}

@@ -75,6 +75,26 @@ it("finds files by name and opens a result from the keyboard", async () => {
   expect(open).toHaveBeenCalledExactlyOnceWith("src/app.ts");
 });
 
+it("opens a focused file row from the keyboard with Enter or Space", async () => {
+  const open = vi.fn();
+  treeIpc();
+  await act(async () => root.render(<FilesPanel projectId={1} threadId={null} onOpenFile={open} />));
+  await settle();
+  await act(async () => buttonWith("src").click());
+  await settle();
+
+  const row = buttonWith("app.ts");
+  await act(async () => row.focus());
+  expect(open).not.toHaveBeenCalled();
+  for (const key of ["Enter", " "]) {
+    await act(async () => {
+      row.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    });
+  }
+  expect(open).toHaveBeenNthCalledWith(1, "src/app.ts");
+  expect(open).toHaveBeenNthCalledWith(2, "src/app.ts");
+});
+
 it("collapses every expanded folder with one control", async () => {
   treeIpc();
   await act(async () => root.render(<FilesPanel projectId={1} threadId={null} onOpenFile={vi.fn()} />));

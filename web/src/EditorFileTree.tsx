@@ -110,6 +110,11 @@ export function EditorFileTree({
             if (!entry.isDir) onKeep?.(entry.path);
           }}
           onKeyDown={(e) => {
+            if (!entry.isDir && (e.key === "Enter" || e.key === " ")) {
+              e.preventDefault();
+              (onKeep ?? onOpen)(entry.path);
+              return;
+            }
             if (
               entry.isDir &&
               ((e.key === "ArrowRight" && !expanded.has(entry.path)) ||

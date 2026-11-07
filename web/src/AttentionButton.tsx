@@ -2,8 +2,8 @@ import { useRef, useState } from "react";
 import { BellIcon, GitBranchIcon } from "@primer/octicons-react";
 import {
   attentionLabel,
+  attentionReasonLabel,
   type AttentionGroup,
-  type AttentionReason,
   type AttentionSummary,
   type AttentionTarget,
 } from "./attention";
@@ -55,7 +55,7 @@ export function AttentionButton({ summary, groups, failed, onActivate, onJump, o
                       {item.branch && <span className="attention-item-branch"><GitBranchIcon size={12} /> {item.branch}</span>}
                     </span>
                     <span className="attention-item-reason">
-                      <span className={`badge attention-reason ${item.reason.kind}`}>{reasonLabel(item.reason)}</span>
+                      <span className={`badge attention-reason ${item.reason.kind}`}>{attentionReasonLabel(item.reason)}</span>
                       {item.reason.kind === "approval" && <span className="attention-item-summary">{item.reason.summary}</span>}
                     </span>
                   </button>
@@ -70,13 +70,4 @@ export function AttentionButton({ summary, groups, failed, onActivate, onJump, o
       </div>
     </Popover>}
   </>;
-}
-
-function reasonLabel(reason: AttentionReason): string {
-  switch (reason.kind) {
-    case "approval": return "Pending Approval";
-    case "needs-input": return "Needs Input";
-    case "error": return "Failed Turn";
-    case "interrupted": return "Interrupted";
-  }
 }

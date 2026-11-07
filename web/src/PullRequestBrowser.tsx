@@ -32,7 +32,7 @@ import {
   type Thread,
 } from "./bindings";
 import { Avatar } from "./Avatar";
-import { getQueryData, invalidateQueries, setQueryData, updateQueries, useQuery, type QueryResult } from "./queryCache";
+import { getQueryData, invalidateQueries, QUERY_STALE_MS, setQueryData, updateQueries, useQuery, type QueryResult } from "./queryCache";
 import { RefreshNotice } from "./RefreshNotice";
 import { Checks } from "./PullRequestChecks";
 import { Markdown } from "./PullRequestMarkdown";
@@ -110,6 +110,7 @@ export function PullRequestBrowser({ projectId, projectName, threadId, threads, 
     `p${projectId}:prs:list:${mine}:${search}`,
     () => commands.listPullRequests(projectId, mine, search),
     refreshKey + manual,
+    { staleMs: QUERY_STALE_MS },
   );
   // Where branch actions land, shown beside the repository-wide list.
   const branch = useQuery(
@@ -294,6 +295,7 @@ export function PullRequestReview({
       return { status: "ok", data: { detail: detail.data, git: git?.status === "ok" ? git.data : null, gitError: git?.status === "error" ? git.error.message : null } };
     },
     refreshKey + reload,
+    { staleMs: QUERY_STALE_MS },
   );
   const loaded: Loaded = query.state === "ready" ? { state: "ready", ...query.data } : query;
   // Review threads load beside the pull request, so a GitHub failure only hides their picker.
@@ -301,6 +303,7 @@ export function PullRequestReview({
     `${reviewThreadsPrefix(projectId)}pr:${number}`,
     (): Promise<QueryResult<PullRequestReviewThread[]>> => commands.pullRequestReviewThreads(projectId, number),
     refreshKey + reload,
+    { staleMs: QUERY_STALE_MS },
   );
   const openReviewThreads = reviewThreadsQuery.state === "ready"
     ? unresolvedReviewThreads(reviewThreadsQuery.data)

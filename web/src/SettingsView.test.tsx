@@ -142,6 +142,8 @@ it("switches between categorized panels and saves appearance, dictation and each
   const saveButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Save")!;
   await act(async () => saveButton.click());
   expect(saveButton.disabled).toBe(true);
+  // The panel is only mounted while it is the active category.
+  act(() => categoryButton("Voice & Dictation").click());
   act(() => categoryPanel("dictation").querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
   expect(saveButton.disabled).toBe(true);
   await act(async () => completeSave(null));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardCard } from "./bindings";
-import { attentionGroups, attentionItem, attentionLabel, attentionTarget, summarizeAttention, type CardsByProject } from "./attention";
+import { attentionGroups, attentionItem, attentionLabel, attentionReasonLabel, attentionTarget, summarizeAttention, type CardsByProject } from "./attention";
 
 const card = (id: number, projectId: number, status: string, updatedAt = "2026-01-01T00:00:00Z", approvals = 0): BoardCard =>
   ({
@@ -60,6 +60,13 @@ describe("attention", () => {
       thread: { ...card(7, 1, "needs-input").thread, title: "Fix the bell", branch: "feat/attention" },
     } as BoardCard;
     expect(attentionItem(1, branched)).toMatchObject({ title: "Fix the bell", branch: "feat/attention" });
+  });
+
+  it("labels each reason for the tray", () => {
+    expect(attentionReasonLabel({ kind: "approval", summary: "ls", approvalId: "a" })).toBe("Pending Approval");
+    expect(attentionReasonLabel({ kind: "needs-input" })).toBe("Needs Input");
+    expect(attentionReasonLabel({ kind: "error" })).toBe("Failed Turn");
+    expect(attentionReasonLabel({ kind: "interrupted" })).toBe("Interrupted");
   });
 
   it("groups the waiting Threads by Project in sidebar order, omitting quiet Projects", () => {

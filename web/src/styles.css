@@ -37,6 +37,10 @@
   --red: #f06a6a;
   --yellow: #e6b450;
   --purple: #a98bff;
+  --attention-approval-bg: #3a2f12;
+  --attention-input-bg: #1f2a3a;
+  --attention-error-bg: #3a1d1d;
+  --attention-interrupted-bg: #2a3040;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
   background: var(--bg);
@@ -360,10 +364,10 @@ html.macos .header,
 .attention-item-branch { display: inline-flex; align-items: center; gap: 3px; flex: none; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--mono); color: var(--faint); }
 .attention-item-reason { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .attention-reason { flex: none; }
-.attention-reason.approval { background: #3a2f12; color: var(--yellow); }
-.attention-reason.needs-input { background: #1f2a3a; color: var(--acc2); }
-.attention-reason.error { background: #3a1d1d; color: var(--red); }
-.attention-reason.interrupted { background: #2a3040; color: var(--dim); }
+.attention-reason.approval { background: var(--attention-approval-bg); color: var(--yellow); }
+.attention-reason.needs-input { background: var(--attention-input-bg); color: var(--acc2); }
+.attention-reason.error { background: var(--attention-error-bg); color: var(--red); }
+.attention-reason.interrupted { background: var(--attention-interrupted-bg); color: var(--dim); }
 .attention-item-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); color: var(--dim); }
 .attention-tray-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); }
 .project-row:is(:hover, :focus-within) .row-action, .thread-row:is(:hover, :focus-within) .row-action { opacity: 1; }

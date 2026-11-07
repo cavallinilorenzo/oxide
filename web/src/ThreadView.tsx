@@ -64,7 +64,7 @@ import { ProviderMark } from "./ProviderMark";
 import { Dropdown } from "./Dropdown";
 import { ModelEffortPicker } from "./ModelEffortPicker";
 import { loadDraftModel, saveDraftModel } from "./draftModel";
-import { parseSlashCommand, resolveDefaultModel, resolveFavourite } from "./modelPicker";
+import { parseSlashCommand, modelNameSuggestions, resolveDefaultModel, resolveFavourite, resolveModelQuery } from "./modelPicker";
 import { cachedCatalogs } from "./modelCatalogCache";
 import { readableModel } from "./headerLines";
 import { filterSlashCommands, pickSlashCommand, slashQuery } from "./slashMenu";
@@ -224,6 +224,8 @@ export function ThreadView({
   const permissionControlRef = useRef<HTMLButtonElement>(null);
   const [openPermissionsWhenReady, setOpenPermissionsWhenReady] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
+  /** Non-error feedback, e.g. which Model a multi-match `/model` query resolved to. */
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [draftMode, setDraftMode] = useState<PermissionMode>("auto-edit");
   // Start from the known Thread Provider, not a Claude placeholder: settings only refine it later.
   const [draftProvider, setDraftProvider] = useState<string>(() => initialProvider ?? "claude");
@@ -252,6 +254,7 @@ export function ThreadView({
     setPages(cached?.pages ?? new Map());
     setSettledThreadId(null);
     setCommandError(null);
+    setCommandNotice(null);
     setIsEditingTitle(false);
     setModelPickerOpen(false);
     followRef.current = cached?.following ?? true;
@@ -278,9 +281,17 @@ export function ThreadView({
   const slashGeneration = useRef({ active: true });
   const [slashRevision, setSlashRevision] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
+  const slashMenuRef = useRef<HTMLUListElement>(null);
   const input = plainText(value);
   const slashOpen = slashQuery(input) !== null;
   const slashMatches = slashOpen ? filterSlashCommands(slashCommands, slashQuery(input) ?? "") : [];
+
+  // Keep the highlighted command in view as the arrows walk a menu taller than the viewport.
+  useEffect(() => {
+    if (!slashOpen) return;
+    const active = slashMenuRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [slashOpen, slashIndex, input, slashMatches.length]);
   const slashProvider = transcript.thread?.provider || draftProvider;
 
   // Show the cached catalog first, then refresh for the active Thread's directory.
@@ -954,17 +965,25 @@ export function ThreadView({
     e.preventDefault();
     if (!hasContent(value) || isBusy(value) || sending || turnIsRunning(transcript.status) || (threadId !== null && settledThreadId !== threadId)) return;
     setCommandError(null);
+    setCommandNotice(null);
 
     const typed = typedText(value);
     const slash = parseSlashCommand(typed);
-    if (hasAttachments(value) && (isClearCommand(typed) || (slash.type !== "none" && slash.type !== "other"))) {
+    if (
+      hasAttachments(value) &&
+      !isClearCommand(typed) &&
+      slash.type !== "none" &&
+      slash.type !== "other"
+    ) {
       setCommandError(`Attachments can't be sent with ${slash.command || typed.trim()}. Remove them or send the command alone.`);
       return;
     }
 
     if (isClearCommand(typed)) {
+      // A Thread with no Turns is already the clean slate: keep it and wipe the draft instead of
+      // asking App for another empty Thread, which would only focus this one again.
       handleInputChange("");
-      onClearThread?.();
+      if (turnCount > 0) onClearThread?.();
       return;
     }
 
@@ -1015,12 +1034,39 @@ export function ThreadView({
       return;
     }
     if (slash.type === "model") {
+      handleInputChange("");
       if (slash.arg) {
-        void handleSelectModelAndEffort(currentProvider, slash.arg, currentEffort);
+        // Use the catalog already loaded for the active Provider; only fetch when it has not
+        // arrived yet (once per submission, never per keystroke).
+        let models = catalogModels;
+        if (!models) {
+          const result = await commands.getModelCatalog(currentProvider, false);
+          if (result.status === "ok") {
+            setCatalog({ provider: currentProvider, models: result.data });
+            models = result.data;
+          }
+        }
+        if (!models) {
+          setCommandError("Could not load the model catalog for this Provider.");
+          return;
+        }
+        const resolution = resolveModelQuery(models, slash.arg, currentEffort);
+        if (!resolution.model) {
+          const suggestions = modelNameSuggestions(models);
+          setCommandError(
+            suggestions.length > 0
+              ? `No model matches "${slash.arg}". Try ${suggestions.join(", ")}.`
+              : `No model matches "${slash.arg}".`
+          );
+          return;
+        }
+        if (resolution.matches.length > 1) {
+          setCommandNotice(`Several models match "${slash.arg}"; using ${resolution.model.name}.`);
+        }
+        void handleSelectModelAndEffort(currentProvider, resolution.model.id, currentEffort);
       } else {
         openModelPicker();
       }
-      handleInputChange("");
       return;
     }
     if (slash.type === "effort") {
@@ -1219,6 +1265,7 @@ export function ThreadView({
 
       <div className="composer-wrap">
       {commandError && <div className="provider-hint missing" role="alert">{commandError}</div>}
+      {commandNotice && <div className="provider-hint" role="status">{commandNotice}</div>}
       {thread?.sessionLost ? (
         <div className="composer composer-lost">
           <button
@@ -1237,7 +1284,7 @@ export function ThreadView({
         onSubmit={handleSubmit}
       >
         {slashMatches.length > 0 && (
-          <ul className="slash-menu" role="listbox" aria-label="Slash commands">
+          <ul ref={slashMenuRef} className="slash-menu" role="listbox" aria-label="Slash commands">
             {slashMatches.map((c, i) => (
               <li
                 key={c.name}

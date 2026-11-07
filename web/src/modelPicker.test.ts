@@ -5,6 +5,8 @@ import {
   resolveDefaultModel,
   filterModels,
   parseSlashCommand,
+  resolveModelQuery,
+  modelNameSuggestions,
   type ModelInfo,
 } from "./modelPicker";
 
@@ -158,5 +160,67 @@ describe("resolveDefaultModel", () => {
 
   it("leaves things as they are while the catalog is unknown", () => {
     expect(resolveDefaultModel(null, null, null)).toEqual({ model: null, effort: null });
+  });
+});
+
+describe("resolveModelQuery", () => {
+  const flash: ModelInfo = {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Fast",
+    supportedEfforts: [],
+    defaultEffort: null,
+    isLegacy: false,
+  };
+  const split: ModelInfo[] = [
+    { ...sampleModels[0]!, id: "claude-sonnet-low", name: "Claude Sonnet (Low)" },
+    { ...sampleModels[0]!, id: "claude-sonnet-high", name: "Claude Sonnet (High)" },
+  ];
+
+  it("matches an exact id case-insensitively", () => {
+    expect(resolveModelQuery(sampleModels, "CLAUDE-3-7-SONNET", null).model?.id).toBe("claude-3-7-sonnet");
+  });
+
+  it("matches a name regardless of case and punctuation", () => {
+    expect(resolveModelQuery(sampleModels, "claude 3.5 haiku", null).model?.id).toBe("claude-3-5-haiku");
+  });
+
+  it("collapses effort-suffixed variants into one family and picks the matching Effort", () => {
+    const resolution = resolveModelQuery(split, "sonnet", "high");
+    expect(resolution.model?.id).toBe("claude-sonnet-high");
+    expect(resolution.matches).toHaveLength(1);
+    expect(resolveModelQuery(split, "claude-sonnet-low", null).model?.name).toBe("Claude Sonnet");
+  });
+
+  it("matches generous substrings such as flash, sonnet and gpt", () => {
+    expect(resolveModelQuery([...sampleModels, flash], "flash", null).model?.id).toBe("gemini-2.5-flash");
+    expect(resolveModelQuery(sampleModels, "sonnet", null).model?.id).toBe("claude-3-7-sonnet");
+    expect(resolveModelQuery(sampleModels, "gpt", null).model?.id).toBe("gpt-5");
+    expect(resolveModelQuery([...sampleModels, flash], "gpt5", null).model?.id).toBe("gpt-5");
+  });
+
+  it("prefers a current Model over a legacy one when several match", () => {
+    const resolution = resolveModelQuery(sampleModels, "claude", null);
+    expect(resolution.matches.length).toBeGreaterThan(1);
+    expect(resolution.matches[0]!.isLegacy).toBe(false);
+    expect(resolution.model?.isLegacy).toBe(false);
+  });
+
+  it("picks the closest match among equally ranked current Models", () => {
+    const models = [
+      { ...sampleModels[1]!, id: "claude-3-5-haiku", name: "Claude 3.5 Haiku" },
+      { ...sampleModels[1]!, id: "claude-3-haiku", name: "Claude 3 Haiku" },
+    ];
+    expect(resolveModelQuery(models, "haiku", null).model?.id).toBe("claude-3-haiku");
+  });
+
+  it("reports no match instead of inventing a Model", () => {
+    const resolution = resolveModelQuery(sampleModels, "definitely-not-a-model", null);
+    expect(resolution.model).toBeNull();
+    expect(resolution.matches).toEqual([]);
+  });
+
+  it("suggests a few current Model names for error feedback", () => {
+    expect(modelNameSuggestions(sampleModels, 2)).toEqual(["Claude 3.7 Sonnet", "Claude 3.5 Haiku"]);
   });
 });

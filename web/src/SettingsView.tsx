@@ -1,11 +1,11 @@
 import { DictationSettings } from "./DictationSettings";
 import { collapseEffortVariants, modelFamilyId, selectedModelInfo } from "./modelPicker";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GithubSetup } from "./GithubSetup";
 import { LanguageTools } from "./LanguageTools";
 import { UpdatesSettings } from "./UpdatesSettings";
-import { SETTINGS_CATEGORIES, settingsCategoryFor, type SettingsCategoryId } from "./useSettingsSection";
+import { SETTINGS_CATEGORIES, settingsCategoryFor, type SettingsCategoryId } from "./settingsCategories";
 import {
   CommandPaletteIcon,
   GearIcon,
@@ -71,6 +71,11 @@ const withSavedValue = (options: DropdownOption<string>[], value: string | null 
     ? [...options, { value, label: value }]
     : options;
 
+/** The category a settings hash like `#settings-language` names, or null for anything else. */
+function hashCategory(): SettingsCategoryId | null {
+  return settingsCategoryFor(window.location.hash.replace(/^#settings-/, ""));
+}
+
 export function SettingsView({ onClose, onRunCommand, section }: { onClose: () => void; onRunCommand: (command: string) => void; section?: string | null }) {
   const [state, setState] = useState<SettingsState | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -84,8 +89,7 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
   const [catalogs, setCatalogs] = useState<Partial<Record<Provider, ModelInfo[]>>>({});
   const scroller = useRef<HTMLElement>(null);
   const [category, setCategory] = useState<SettingsCategoryId>(() => {
-    const hash = window.location.hash.replace(/^#settings-/, "");
-    return settingsCategoryFor(section) ?? settingsCategoryFor(hash) ?? "general";
+    return settingsCategoryFor(section) ?? hashCategory() ?? "general";
   });
   // Deep links can change while Settings stays open; follow them without an
   // effect that would render twice with the old category.
@@ -126,7 +130,7 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
 
   useEffect(() => {
     const onHashChange = () => {
-      const next = settingsCategoryFor(window.location.hash.replace(/^#settings-/, ""));
+      const next = hashCategory();
       if (next) setCategory(next);
     };
     window.addEventListener("hashchange", onHashChange);
@@ -357,6 +361,31 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
     </>
   );
 
+  // One panel per category, so adding a category touches one place.
+  const panels: Record<SettingsCategoryId, ReactNode> = {
+    general: generalPanel,
+    providers: providersPanel,
+    appearance: (
+      <AppearanceSettings onDraftChange={(appearance) => {
+        appearanceDraft.current = appearance;
+        editVersion.current++;
+        setSaveStatus((status) => status === "saving" ? status : "idle");
+      }} />
+    ),
+    dictation: (
+      <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu", model: "small" }} onChange={(dictation) => set({ dictation })} />
+    ),
+    developer: developerPanel,
+    shortcuts: (
+      <ShortcutsSettings
+        shortcuts={draft.shortcuts}
+        onChange={(shortcuts) => set({ shortcuts })}
+        errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
+      />
+    ),
+    updates: <UpdatesSettings />,
+  };
+
   return (
     <main ref={scroller} className="settings" aria-label="Settings">
       <header className="settings-header">
@@ -405,27 +434,7 @@ export function SettingsView({ onClose, onRunCommand, section }: { onClose: () =
               aria-label={label}
               hidden={category !== id}
             >
-              {id === "general" && generalPanel}
-              {id === "providers" && providersPanel}
-              {id === "appearance" && (
-                <AppearanceSettings onDraftChange={(appearance) => {
-                  appearanceDraft.current = appearance;
-                  editVersion.current++;
-                  setSaveStatus((status) => status === "saving" ? status : "idle");
-                }} />
-              )}
-              {id === "dictation" && (
-                <DictationSettings value={draft.dictation ?? { enabled: false, language: "auto", device: "cpu", model: "small" }} onChange={(dictation) => set({ dictation })} />
-              )}
-              {id === "developer" && developerPanel}
-              {id === "shortcuts" && (
-                <ShortcutsSettings
-                  shortcuts={draft.shortcuts}
-                  onChange={(shortcuts) => set({ shortcuts })}
-                  errorsFor={(action) => errorsFor(`shortcuts.${action}`).map((e) => e.message)}
-                />
-              )}
-              {id === "updates" && <UpdatesSettings />}
+              {category === id && panels[id]}
             </section>
           ))}
         </div>

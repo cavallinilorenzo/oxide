@@ -23,7 +23,7 @@
   .dropdown-menu, .modal, .model-picker, .terminal-input-menu, .settings-view {
     animation: surface-reveal 150ms ease-out;
   }
-  .icon-btn, .btn, .tab, .editor-tab, .seg > button {
+  .icon-btn, .btn, .tab, .seg > button {
     transition: background-color 100ms ease-out, color 100ms ease-out, border-color 100ms ease-out, transform 100ms ease-out;
   }
   .icon-btn:active, .btn:active { transform: scale(.97); }

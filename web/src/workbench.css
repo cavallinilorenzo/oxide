@@ -13,6 +13,42 @@
 .centre-column {
   container-type: inline-size;
 }
+/* Thread and Code are two views of the same Project, switched in the centre. */
+.centre-view-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 5px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+}
+.centre-view-switch button {
+  min-height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+.centre-view-switch button:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--fg);
+}
+.centre-view-switch button[aria-selected="true"] {
+  background: var(--bg4);
+  color: var(--fg-bright);
+}
+.centre-view-switch button:disabled {
+  opacity: 0.6;
+  background: none;
+  color: var(--faint);
+}
+.centre[hidden] {
+  display: none;
+}
 .work-mode-switch button {
   gap: 6px;
 }
@@ -84,17 +120,38 @@
   border-bottom: 1px solid var(--line);
 }
 .editor-tab {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
   padding-right: 4px;
   border-right: 1px solid var(--line);
+  transition: background-color 120ms ease-out;
+}
+.editor-tab:hover {
+  background: var(--bg3);
 }
 .editor-tab.active {
-  background: #0f1117;
-  box-shadow: inset 0 -2px var(--acc2);
+  background: var(--bg);
+}
+/* A quiet bottom indicator slides no further than its own tab. */
+.editor-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: transparent;
+  transition: background-color 140ms ease-out;
+}
+.editor-tab.active::after {
+  background: var(--acc2);
 }
 .editor-tab > [role="tab"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -104,8 +161,32 @@
   font-weight: 400;
   color: var(--dim);
 }
+.editor-tab:hover > [role="tab"] {
+  color: var(--fg);
+}
 .editor-tab.active > [role="tab"] {
   color: var(--fg-bright);
+}
+.editor-tab > .icon-btn {
+  min-width: 20px;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0 4px 0 0;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--faint);
+  background: none;
+}
+.editor-tab > .icon-btn:hover:not(:disabled) {
+  background: var(--bg4);
+  color: var(--fg-bright);
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-tab,
+  .editor-tab::after {
+    transition: none;
+  }
 }
 .editor-tab > [role="tab"] > span:first-of-type {
   max-width: 180px;
@@ -776,6 +857,7 @@
 .sidebar-region[hidden], .centre-column[hidden], .surface-content[hidden] { display: none; }
 .surface-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .surface-content > section, .surface-content > .pr-views, .surface-content > .issues-surface { flex: 1; min-height: 0; }
+.surface-content > .files { flex: 1; min-height: 0; }
 .tools > .code-workbench, .tools > .terminal-workbench { flex: 1; min-height: 0; min-width: 0; }
 .thread-restore-handle { flex: none; width: 32px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--bg2); color: var(--dim); display: flex; align-items: center; justify-content: center; }
 .surface-empty { flex: 1; }
@@ -874,6 +956,9 @@
   border: 0;
   border-top: 1px solid var(--line);
   margin: 4px 0;
+}
+.code-workbench.no-explorer {
+  grid-template-columns: minmax(0, 1fr);
 }
 .code-workbench.compact {
   grid-template-columns: minmax(0, 1fr);

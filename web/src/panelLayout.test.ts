@@ -3,7 +3,7 @@ import { fileTreeLayout, workspaceLayout } from "./panelLayout";
 
 it("reserves a readable Thread with both panels visible at every supported width", () => {
   for (const width of [1064, 1280, 1920]) {
-    for (const sidebar of [null, 208, 400, 9000]) {
+    for (const sidebar of [null, 160, 208, 400, 9000]) {
       for (const tools of [null, 496, 800, 9000]) {
         const layout = workspaceLayout(width, 516, { sidebar, tools, terminal: 9000 }, true);
         expect(width - layout.sidebar.value - layout.tools.value).toBeGreaterThanOrEqual(360);
@@ -58,6 +58,32 @@ it("collapses the sidebar before the Thread shrinks below 360px at the minimum w
   expect(fit.sidebarVisible).toBe(false);
   expect(fit.toolsVisible).toBe(true);
   expect(900 - fit.tools.value).toBeGreaterThanOrEqual(360);
+});
+
+it("clamps the sidebar to its 160px minimum", () => {
+  for (const width of [1064, 1280, 1920]) {
+    const tight = workspaceLayout(width, 1000, { sidebar: 100, tools: null, terminal: null }, false);
+    expect(tight.sidebar.min).toBe(160);
+    expect(tight.sidebar.value).toBe(160);
+    const atMinimum = workspaceLayout(width, 1000, { sidebar: 160, tools: null, terminal: null }, false);
+    expect(atMinimum.sidebar.value).toBe(160);
+  }
+});
+
+it("honours the 160px minimum beside both panels at the compact boundary", () => {
+  const fit = workspaceLayout(1016, 516, { sidebar: 100, tools: 700, terminal: null }, true);
+  expect(fit.sidebarVisible).toBe(true);
+  expect(fit.toolsVisible).toBe(true);
+  expect(fit.sidebar.value).toBe(160);
+  expect(1016 - fit.sidebar.value - fit.tools.value).toBeGreaterThanOrEqual(360);
+});
+
+it("collapses the sidebar at tiny widths instead of overflowing below its 160px minimum", () => {
+  const fit = workspaceLayout(880, 516, { sidebar: 100, tools: 700, terminal: null }, true);
+  expect(fit.sidebar.min).toBe(160);
+  expect(fit.sidebarVisible).toBe(false);
+  expect(fit.toolsVisible).toBe(true);
+  expect(880 - fit.tools.value).toBeGreaterThanOrEqual(360);
 });
 
 it("gives an explicitly opened sidebar priority at compact widths without losing requested tools", () => {

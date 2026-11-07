@@ -123,7 +123,7 @@ try {
   await page.keyboard.press("Shift+ArrowRight");
   assert.equal(await value("Resize sidebar"), 320);
   await page.keyboard.press("Home");
-  assert.equal(await value("Resize sidebar"), 208);
+  assert.equal(await value("Resize sidebar"), 160);
   await page.keyboard.press("End");
   assert.equal(await value("Resize sidebar"), 320);
   await handle("Resize sidebar").dblclick();

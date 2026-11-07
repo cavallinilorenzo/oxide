@@ -84,6 +84,7 @@ it("switches between categorized panels and saves appearance, dictation and each
   act(() => categoryButton("Providers").click());
   expect(activePanels()).toEqual(["providers"]);
   expect(categoryButton("Providers").getAttribute("aria-current")).toBe("page");
+  expect(window.location.hash).toBe("#settings-providers");
 
   const modeButton = (provider: string) => categoryPanel("providers").querySelector<HTMLButtonElement>(`button[aria-label^="${provider} Permission mode:"]`)!;
   for (const provider of ["Claude Code", "Codex", "Antigravity CLI"]) {
